@@ -32,6 +32,15 @@ import Foundation
               draftScope.document.lowercased() == "job:\(jobID.lowercased())|customer:\(customerID.lowercased())|location:\(locationID?.lowercased() ?? "")" else { throw Failure.invalidState }
         guard try store.acquireCoordinatedDraft(scope: draftScope, owner: owner) else { throw Failure.unavailable }
         do {
+            let existing = try store.load(CommercialNewEstimateDraft.self, scope: draftScope)
+            if let existing {
+                guard existing.customerID.lowercased() == customerID.lowercased() else { throw Failure.unavailable }
+                if existing.uncertain || existing.created != nil || existing.atomicOperation != nil ||
+                    existing.requiresManualReview || existing.requiresLocationVerification || existing.requiresGroupDisclosure {
+                    state = .attemptPending
+                    return
+                }
+            }
             switch try journal.status(actorID: actorID, organizationID: organizationID, origin: origin, jobID: jobID) {
             case .missing: state = .editable // local absence is not proof of no prior server write
             case .legacyPending, .atomicPending: state = .attemptPending

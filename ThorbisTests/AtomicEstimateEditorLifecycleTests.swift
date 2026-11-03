@@ -59,4 +59,20 @@ import XCTest
         XCTAssertThrowsError(try editor.close(preserving: draft))
         XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Repair")
     }
+    func testLegacyUncertainDraftRemainsHeldEvenWhenMarkerIsMissing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root)
+        let unknown = CommercialNewEstimateDraft(customerID: actor, title: "Previous", lines: [], uncertain: true,
+            created: nil, requiresLocationVerification: false, requiresManualReview: false,
+            requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        try store.save(unknown, scope: scope)
+        let editor = lifecycle(store); try editor.open()
+        XCTAssertEqual(editor.state, .attemptPending)
+        XCTAssertThrowsError(try editor.save(draft))
+        XCTAssertThrowsError(try editor.stageLegacy(draft: draft, attemptID: UUID()))
+        try editor.close(preserving: draft)
+        let restored = try XCTUnwrap(store.load(CommercialNewEstimateDraft.self, scope: scope))
+        XCTAssertTrue(restored.uncertain)
+        XCTAssertEqual(restored.title, "Previous")
+    }
 }
