@@ -22,6 +22,7 @@ struct InvoiceLineEditorView: View {
     @State private var simulatedConfirmationInterruption = false
     @State private var sampleFinalReadResult = "idle"
     @State private var sampleNetworkState = "online"
+    @State private var samplePermissionState = "allowed"
     #endif
     @State private var confirmIssue = false
     @State private var confirmDiscard = false
@@ -265,6 +266,22 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-permission-interruption") {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        Text("Sample access").accessibilityIdentifier("invoice-confirm-permission-state").accessibilityValue(samplePermissionState)
+                        if samplePermissionState == "denied" {
+                            Button("Restore sample permission") {
+                                Task { @MainActor in
+                                    PaperPreviewProtocol.toggleInvoiceEditing()
+                                    await session.revalidate()
+                                    samplePermissionState = session.can("invoice.edit", feature: "invoicing") ? "allowed" : "denied"
+                                }
+                            }.accessibilityIdentifier("invoice-confirm-permission-restore")
+                        }
+                    }
+                }
+            }
             if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption") {
                 ThorbisToolbarItem(placement: .principal) {
                     HStack {
@@ -361,7 +378,8 @@ struct InvoiceLineEditorView: View {
         .onChange(of: confirmReload) { _, presented in
             let network = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption")
             let revision = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-revision-change")
-            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption, network || revision else { return }
+            let permission = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-permission-interruption")
+            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption, network || revision || permission else { return }
             simulatedConfirmationInterruption = true
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(1500))
@@ -372,6 +390,11 @@ struct InvoiceLineEditorView: View {
                 }
                 if revision { EstimateRecoveryPreview.shared.advanceInvoiceRevision() }
                 if revision { await session.revalidate() }
+                if permission {
+                    PaperPreviewProtocol.toggleInvoiceEditing()
+                    await session.revalidate()
+                    samplePermissionState = session.can("invoice.edit", feature: "invoicing") ? "allowed" : "denied"
+                }
             }
         }
         #endif
