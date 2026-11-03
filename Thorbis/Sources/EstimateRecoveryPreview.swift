@@ -13,6 +13,10 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     private var jobReads = 0
     private var denyJobAfterRefresh = false
     private var holdNextReload = false
+    private var invoiceRevisionIncrement = 1
+    private var denyInvoiceRead = false
+    private var estimateRevisionIncrement = 1
+    private var denyEstimateRead = false
     private var savedEstimate: [String: Any]?
     private var heldReply: (@Sendable () -> Void)?
     private let savedEstimateKey: String?
@@ -42,8 +46,18 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     static var invoiceNewerRevisionEnabled: Bool {
         PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-recovery-newer-revision")
     }
+    static var invoiceDeliveryKey: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--commercial-draft-test-id"),
+              arguments.indices.contains(index + 1), let id = UUID(uuidString: arguments[index + 1]) else { return nil }
+        return "invoice-recovery-delivered-\(id.uuidString)"
+    }
     var reloadHoldState: String { lock.withLock { heldReply == nil ? "idle" : "waiting" } }
     func armHeldReload() { lock.withLock { holdNextReload = true } }
+    func advanceInvoiceRevision() { lock.withLock { invoiceRevisionIncrement += 1 } }
+    func denyNextInvoiceRead() { lock.withLock { denyInvoiceRead = true } }
+    func advanceEstimateRevision() { lock.withLock { estimateRevisionIncrement += 1 } }
+    func denyNextEstimateRead() { lock.withLock { denyEstimateRead = true } }
 
     var counts: String { lock.withLock { "creates=\(creates),links=\(links),estimateReads=\(estimateReads),jobReads=\(jobReads)" } }
 
@@ -66,22 +80,28 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     func reply(for request: URLRequest) -> Reply? {
         if (Self.invoiceHeldReloadEnabled || Self.invoiceNewerRevisionEnabled), request.httpMethod == "GET",
            request.url?.path == "/v1/invoices/\(PaperPreview.invoice.id)" {
-            let shouldHold = lock.withLock { let value = holdNextReload; holdNextReload = false; return value }
+            let denied = lock.withLock { let value = denyInvoiceRead; denyInvoiceRead = false; return value }
+            if denied { return Reply(status: 403, payload: ["status": 403, "title": "Sample access denied"]) }
+            let (shouldHold, revisionIncrement) = lock.withLock {
+                let value = holdNextReload; holdNextReload = false; return (value, invoiceRevisionIncrement)
+            }
             guard let data = try? JSONEncoder().encode(PaperPreview.invoice),
                   var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-            object["linesRevision"] = PaperPreview.invoice.linesRevision + 1
+            object["linesRevision"] = PaperPreview.invoice.linesRevision + revisionIncrement
             return Reply(status: 200, payload: object, hold: Self.invoiceHeldReloadEnabled && shouldHold)
         }
         if (Self.heldReloadEnabled || Self.newerRevisionEnabled), request.httpMethod == "GET",
            request.url?.path == "/v1/estimates/\(PaperPreview.estimate.id)" {
-            let shouldHold = lock.withLock {
+            let (shouldHold, revisionIncrement, denied) = lock.withLock {
                 let value = holdNextReload
                 holdNextReload = false
-                return value
+                let denied = denyEstimateRead; denyEstimateRead = false
+                return (value, estimateRevisionIncrement, denied)
             }
+            if denied { return Reply(status: 403, payload: ["status": 403, "title": "Sample access denied"]) }
             guard let data = try? JSONEncoder().encode(PaperPreview.estimate),
                   var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-            object["currentRevisionNumber"] = (PaperPreview.estimate.currentRevisionNumber ?? 0) + 1
+            object["currentRevisionNumber"] = (PaperPreview.estimate.currentRevisionNumber ?? 0) + revisionIncrement
             return Reply(status: 200, payload: object, hold: Self.heldReloadEnabled && shouldHold)
         }
         guard Self.enabled, let path = request.url?.path else { return nil }

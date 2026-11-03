@@ -101,8 +101,10 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20))
         review.tap()
-        XCTAssertTrue(app.buttons["Reload and discard my edits"].waitForExistence(timeout: 15))
-        app.buttons["Reload and discard my edits"].tap()
+        XCTAssertTrue(app.buttons["Check latest before discarding"].waitForExistence(timeout: 15))
+        app.buttons["Check latest before discarding"].tap()
+        let finalDiscard = app.buttons["Discard draft and reload"]
+        XCTAssertTrue(finalDiscard.waitForExistence(timeout: 15)); finalDiscard.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "draft could not be cleared")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(review.exists)
         app.terminate()
@@ -166,7 +168,7 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         app.launch()
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
-        let discard = app.buttons["Reload and discard my edits"]
+        let discard = app.buttons["Check latest before discarding"]
         XCTAssertTrue(discard.waitForExistence(timeout: 15))
         let cancels = app.buttons.matching(identifier: "Cancel")
         XCTAssertGreaterThan(cancels.count, 0)
@@ -196,8 +198,10 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         app.launch()
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
-        let discard = app.buttons["Reload and discard my edits"]
+        let discard = app.buttons["Check latest before discarding"]
         XCTAssertTrue(discard.waitForExistence(timeout: 15)); discard.tap()
+        let finalDiscard = app.buttons["Discard draft and reload"]
+        XCTAssertTrue(finalDiscard.waitForExistence(timeout: 15)); finalDiscard.tap()
         XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 15))
         XCTAssertEqual(app.textFields["Estimate title"].value as? String, original)
         app.terminate()
@@ -206,6 +210,47 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         let reopened = app.textFields["Estimate title"]
         XCTAssertTrue(reopened.waitForExistence(timeout: 20))
         XCTAssertEqual(reopened.value as? String, original)
+    }
+
+    private func assertEstimateFreshReadProtectsDraft(_ flag: String) {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText("x")
+        XCTAssertEqual(title.value as? String, original + "x")
+        app.terminate()
+        app.launchArguments += ["--paper-preview-estimate-recovery-newer-revision", flag]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15)); check.tap()
+        let result = app.staticTexts["estimate-final-read-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        let expected = flag.hasSuffix("denied") ? "denied or failed" : "changed"
+        expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: result)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.buttons["Discard draft and reload"].exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-estimate-recovery-newer-revision" || $0 == flag }
+        app.launch()
+        let reopened = app.textFields["Estimate title"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 20))
+        XCTAssertEqual(reopened.value as? String, original + "x")
+    }
+
+    func testEstimateFreshReadDenialKeepsDraft() {
+        continueAfterFailure = false
+        assertEstimateFreshReadProtectsDraft("--paper-preview-estimate-final-read-denied")
+    }
+
+    func testEstimateFreshReadNewRevisionKeepsDraft() {
+        continueAfterFailure = false
+        assertEstimateFreshReadProtectsDraft("--paper-preview-estimate-final-read-changed")
     }
 
     func testFailedCleanupAfterUndoStillRequiresDiscardConfirmation() {

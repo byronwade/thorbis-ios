@@ -14,11 +14,13 @@ struct InvoiceLineEditorView: View {
     @State private var persistenceBaseline: InvoiceLineEditorState
     @State private var showPriceBook = false
     @State private var confirmReload = false
+    @State private var confirmVerifiedReload = false
     @State private var pendingReload: InvoiceRecord?
     @State private var pendingReloadScope: EstimateCreationScope?
     @State private var pendingReloadAttempt: UUID?
     #if DEBUG
     @State private var simulatedConfirmationInterruption = false
+    @State private var sampleFinalReadResult = "idle"
     #endif
     @State private var confirmIssue = false
     @State private var confirmDiscard = false
@@ -210,7 +212,11 @@ struct InvoiceLineEditorView: View {
         .thorbisConfirm("Reload the latest invoice?",
                         message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
                         isPresented: $confirmReload,
-                        actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { applyPendingReload() }])
+                        actions: [ThorbisConfirmAction("Check latest before discarding") { Task { await verifyPendingReload() } }])
+        .thorbisConfirm("Discard saved draft?",
+                        message: "The latest document was checked. Discard the saved draft and open it?",
+                        isPresented: $confirmVerifiedReload,
+                        actions: [ThorbisConfirmAction("Discard draft and reload", role: .destructive) { applyPendingReload() }])
         #if DEBUG
         .task {
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor-line" { expandedLine = editor.lines.first?.id }
@@ -258,6 +264,20 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             #if DEBUG
+            if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-denied") || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-changed")) {
+                ThorbisToolbarItem(placement: .principal) {
+                    Text("Sample final read")
+                        .accessibilityIdentifier("invoice-final-read-result")
+                        .accessibilityValue(sampleFinalReadResult)
+                }
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-check-delivery") {
+                ThorbisToolbarItem(placement: .principal) {
+                    Text("Sample delivery")
+                        .accessibilityIdentifier("invoice-reload-delivery")
+                        .accessibilityValue(EstimateRecoveryPreview.invoiceDeliveryKey.map { UserDefaults.standard.bool(forKey: $0) } == true ? "delivered" : "not delivered")
+                }
+            }
             if EstimateRecoveryPreview.invoiceHeldReloadEnabled {
                 ThorbisToolbarItem(placement: .principal) {
                     HStack {
@@ -322,14 +342,18 @@ struct InvoiceLineEditorView: View {
         }
         #if DEBUG
         .onChange(of: confirmReload) { _, presented in
-            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption,
-                  ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption") else { return }
+            let network = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption")
+            let revision = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-revision-change")
+            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption, network || revision else { return }
             simulatedConfirmationInterruption = true
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(1500))
-                PaperPreviewProtocol.simulateNoSignal = true
-                await session.revalidate()
-                PaperPreviewProtocol.simulateNoSignal = false
+                if network {
+                    PaperPreviewProtocol.simulateNoSignal = true
+                    await session.revalidate()
+                    PaperPreviewProtocol.simulateNoSignal = false
+                }
+                if revision { EstimateRecoveryPreview.shared.advanceInvoiceRevision() }
                 await session.revalidate()
             }
         }
@@ -690,6 +714,7 @@ struct InvoiceLineEditorView: View {
     }
 
     private func reloadLatest() async {
+        guard !busy else { return }
         guard scopeMatches, let expected = currentScope, ownsDraft else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
         let attempt = UUID(); accessAttempt = attempt
@@ -718,6 +743,53 @@ struct InvoiceLineEditorView: View {
         pendingReloadScope = nil
         pendingReloadAttempt = nil
         confirmReload = false
+        confirmVerifiedReload = false
+    }
+
+    private func verifyPendingReload() async {
+        guard !busy else { return }
+        guard viewVisible, scenePhase == .active, !session.isOffline, ownsDraft,
+              let expected = pendingReloadScope, currentScope == expected, verifiedScope == expected,
+              pendingReloadAttempt == accessAttempt, let prior = pendingReload else {
+            invalidatePendingReload()
+            error = "The workspace changed or the document is unavailable. Your draft is still on this phone."
+            return
+        }
+        busy = true
+        let attempt = UUID(); accessAttempt = attempt; pendingReloadAttempt = attempt
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-denied") {
+            EstimateRecoveryPreview.shared.denyNextInvoiceRead()
+        }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-changed") {
+            EstimateRecoveryPreview.shared.advanceInvoiceRevision()
+        }
+        #endif
+        defer { busy = false; if !viewVisible { releaseDraft() } }
+        do {
+            let latest = try await api.fieldInvoice(invoice.id, requireFresh: true)
+            guard !Task.isCancelled, viewVisible, scenePhase == .active, !session.isOffline,
+                  accessAttempt == attempt, currentScope == expected, verifiedScope == expected,
+                  pendingReloadAttempt == attempt, latest.id == prior.id,
+                  latest.organizationId == expected.organizationID, latest == prior else {
+                guard accessAttempt == attempt else { return }
+                #if DEBUG
+                sampleFinalReadResult = "changed"
+                #endif
+                invalidatePendingReload()
+                error = "The document or access changed. Your draft is still on this phone. Check again."
+                return
+            }
+            pendingReload = latest
+            confirmVerifiedReload = true
+        } catch {
+            guard accessAttempt == attempt else { return }
+            #if DEBUG
+            sampleFinalReadResult = "denied or failed"
+            #endif
+            invalidatePendingReload()
+            self.error = "The latest document could not be verified. Your draft is still on this phone."
+        }
     }
 
     private func applyPendingReload() {

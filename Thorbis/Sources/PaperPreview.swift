@@ -706,7 +706,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if let body = try? JSONSerialization.data(withJSONObject: preview.payload) { self.client?.urlProtocol(self, didLoad: body) }
                 self.client?.urlProtocolDidFinishLoading(self)
             }
-            if preview.hold { EstimateRecoveryPreview.shared.hold(deliver) } else { deliver() }
+            if preview.hold {
+                EstimateRecoveryPreview.shared.hold {
+                    deliver()
+                    if EstimateRecoveryPreview.invoiceHeldReloadEnabled, let key = EstimateRecoveryPreview.invoiceDeliveryKey {
+                        UserDefaults.standard.set(true, forKey: key)
+                    }
+                }
+            } else { deliver() }
             return
         }
         if PaperPreview.isJobEstimateHandoff, let response = JobEstimateHandoffPreview.shared.response(request) {

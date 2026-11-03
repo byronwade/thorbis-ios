@@ -29,6 +29,10 @@ struct EstimateRevisionEditorView: View {
     @State private var descriptionProblem: String?
     @State private var staleRevision = false
     @State private var confirmReload = false
+    @State private var confirmVerifiedReload = false
+    #if DEBUG
+    @State private var sampleFinalReadResult = "idle"
+    #endif
     @State private var pendingReload: EstimateRecord?
     @State private var pendingReloadScope: EstimateCreationScope?
     @State private var pendingReloadAttempt: UUID?
@@ -254,6 +258,13 @@ struct EstimateRevisionEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 #if DEBUG
+                if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-denied") || ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-changed")) {
+                    ThorbisToolbarItem(placement: .principal) {
+                        Text("Sample final read")
+                            .accessibilityIdentifier("estimate-final-read-result")
+                            .accessibilityValue(sampleFinalReadResult)
+                    }
+                }
                 if EstimateRecoveryPreview.heldReloadEnabled {
                     ThorbisToolbarItem(placement: .principal) {
                         HStack {
@@ -385,7 +396,11 @@ struct EstimateRevisionEditorView: View {
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
                             isPresented: $confirmReload,
-                            actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { applyPendingReload() }])
+                            actions: [ThorbisConfirmAction("Check latest before discarding") { Task { await verifyPendingReload() } }])
+            .thorbisConfirm("Discard saved draft?",
+                            message: "The latest document was checked. Discard the saved draft and open it?",
+                            isPresented: $confirmVerifiedReload,
+                            actions: [ThorbisConfirmAction("Discard draft and reload", role: .destructive) { applyPendingReload() }])
             #if DEBUG
             .task {
                 guard PaperPreview.enabled else { return }
@@ -770,6 +785,7 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func reloadLatest() async {
+        guard !busy else { return }
         #if DEBUG
         CommercialDraftStore.trace("reload start")
         #endif
@@ -807,6 +823,53 @@ struct EstimateRevisionEditorView: View {
         pendingReloadScope = nil
         pendingReloadAttempt = nil
         confirmReload = false
+        confirmVerifiedReload = false
+    }
+
+    private func verifyPendingReload() async {
+        guard !busy else { return }
+        guard viewVisible, scenePhase == .active, !session.isOffline, ownsDraft,
+              let expected = pendingReloadScope, currentScope == expected, verifiedScope == expected,
+              pendingReloadAttempt == accessAttempt, let prior = pendingReload else {
+            invalidatePendingReload()
+            error = "The workspace changed or the document is unavailable. Your draft is still on this phone."
+            return
+        }
+        busy = true
+        let attempt = UUID(); accessAttempt = attempt; pendingReloadAttempt = attempt
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-denied") {
+            EstimateRecoveryPreview.shared.denyNextEstimateRead()
+        }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-changed") {
+            EstimateRecoveryPreview.shared.advanceEstimateRevision()
+        }
+        #endif
+        defer { busy = false; if !viewVisible { releaseDraft() } }
+        do {
+            let latest = try await api.fieldEstimate(estimate.id, requireFresh: true)
+            guard !Task.isCancelled, viewVisible, scenePhase == .active, !session.isOffline,
+                  accessAttempt == attempt, currentScope == expected, verifiedScope == expected,
+                  pendingReloadAttempt == attempt, latest.id == prior.id,
+                  latest.organizationId == expected.organizationID, latest == prior else {
+                guard accessAttempt == attempt else { return }
+                #if DEBUG
+                sampleFinalReadResult = "changed"
+                #endif
+                invalidatePendingReload()
+                error = "The document or access changed. Your draft is still on this phone. Check again."
+                return
+            }
+            pendingReload = latest
+            confirmVerifiedReload = true
+        } catch {
+            guard accessAttempt == attempt else { return }
+            #if DEBUG
+            sampleFinalReadResult = "denied or failed"
+            #endif
+            invalidatePendingReload()
+            self.error = "The latest document could not be verified. Your draft is still on this phone."
+        }
     }
 
     private func applyPendingReload() {

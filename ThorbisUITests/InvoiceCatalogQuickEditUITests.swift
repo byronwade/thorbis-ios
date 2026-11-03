@@ -128,7 +128,11 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         delivered.isInverted = true; wait(for: [delivered], timeout: 2)
         app.terminate()
         app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-held-reload" }
+        app.launchArguments.append("--paper-preview-invoice-check-delivery")
         app.launch(); assertSampleInvoiceQuantity(app, "2")
+        let delivery = app.staticTexts["invoice-reload-delivery"]
+        XCTAssertTrue(delivery.waitForExistence(timeout: 10))
+        XCTAssertEqual(delivery.value as? String, "delivered")
     }
 
     func testInvoiceConfirmedReloadDiscardsDraft() {
@@ -141,8 +145,10 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launch()
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
-        let discard = app.buttons["Reload and discard my edits"]
+        let discard = app.buttons["Check latest before discarding"]
         XCTAssertTrue(discard.waitForExistence(timeout: 15)); discard.tap()
+        let finalDiscard = app.buttons["Discard draft and reload"]
+        XCTAssertTrue(finalDiscard.waitForExistence(timeout: 15)); finalDiscard.tap()
         XCTAssertTrue(app.buttons["Save draft"].waitForExistence(timeout: 15))
         app.terminate()
         app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" }
@@ -159,8 +165,10 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launch()
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
-        let discard = app.buttons["Reload and discard my edits"]
+        let discard = app.buttons["Check latest before discarding"]
         XCTAssertTrue(discard.waitForExistence(timeout: 15)); discard.tap()
+        let finalDiscard = app.buttons["Discard draft and reload"]
+        XCTAssertTrue(finalDiscard.waitForExistence(timeout: 15)); finalDiscard.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "draft could not be cleared")).firstMatch.waitForExistence(timeout: 10))
         app.terminate()
         app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--commercial-draft-test-cleanup-fails" }
@@ -177,12 +185,64 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launch()
         let review = app.buttons["Review latest and discard draft"]
         XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
-        let discard = app.buttons["Reload and discard my edits"]
+        let discard = app.buttons["Check latest before discarding"]
         XCTAssertTrue(discard.waitForExistence(timeout: 15))
         XCTAssertTrue(discard.waitForNonExistence(timeout: 20), "The stale confirmation must close when connectivity changes")
         app.terminate()
         app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-network-interruption" }
         app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceConfirmationIsRetiredAfterNewerRevision() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-confirm-revision-change"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let discard = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15))
+        XCTAssertTrue(discard.waitForNonExistence(timeout: 20), "A later authority refresh must retire the old confirmation")
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-revision-change" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    private func assertInvoiceFreshReadProtectsDraft(_ flag: String) {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", flag]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15)); check.tap()
+        XCTAssertTrue(check.waitForNonExistence(timeout: 10))
+        let result = app.staticTexts["invoice-final-read-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        let expected = flag.hasSuffix("denied") ? "denied or failed" : "changed"
+        expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: result)
+        waitForExpectations(timeout: 15)
+        XCTAssertTrue(review.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Discard draft and reload"].exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == flag }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceFreshReadDenialKeepsDraft() {
+        continueAfterFailure = false
+        assertInvoiceFreshReadProtectsDraft("--paper-preview-invoice-final-read-denied")
+    }
+
+    func testInvoiceFreshReadNewRevisionKeepsDraft() {
+        continueAfterFailure = false
+        assertInvoiceFreshReadProtectsDraft("--paper-preview-invoice-final-read-changed")
     }
 
     func testNumericFormattingOnlyEditRequiresDiscardConfirmation() {
