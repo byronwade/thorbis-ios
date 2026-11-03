@@ -208,6 +208,30 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
     }
 
+    func testFreshDocumentReadNeverFallsBackToSavedCopyWhenOffline() async throws {
+        let estimateID = "00000000-0000-4000-8000-000000000008"
+        let path = "/v1/estimates/\(estimateID)"
+        let reply = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"draft","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let scope = "test-\(UUID().uuidString)"
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        SavedCopyStore.shared.write(Data(reply.utf8), scope: scope, key: key)
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key), "The test must have a real saved copy")
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline, URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = scope
+        let saved = try await client.fieldEstimate(estimateID)
+        XCTAssertEqual(saved.title, "Quote", "Ordinary offline reads can use the saved copy")
+        do {
+            _ = try await client.fieldEstimate(estimateID, requireFresh: true)
+            XCTFail("A fresh authorization read must fail when the network is offline")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Network error")
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+    }
+
     func testCreatingEstimateUsesMinorUnitsAndCanonicalRoute() async throws {
         let reply = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"draft","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(201, reply)]), baseURL: "https://app.thorbis.com")

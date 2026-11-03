@@ -156,8 +156,10 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(recoveredCounts.waitForExistence(timeout: 15))
         let warning = hasSavedID ? "job link could not be confirmed" : "previous save could not be confirmed"
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", warning)).firstMatch.waitForExistence(timeout: 10))
-        XCTAssertEqual(recoveredCounts.value as? String, "creates=0,links=0,estimateReads=0,jobReads=0")
-        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "creates=0,links=0,estimateReads=0,jobReads=0"), object: recoveredCounts)
+        let verifiedReads = hasSavedID ? "creates=0,links=0,estimateReads=1,jobReads=1" : "creates=0,links=0,estimateReads=0,jobReads=1"
+        expectation(for: NSPredicate(format: "value == %@", verifiedReads), evaluatedWith: recoveredCounts)
+        waitForExpectations(timeout: 10)
+        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "NOT (value BEGINSWITH %@)", "creates=0,links=0,"), object: recoveredCounts)
         unexpectedRequest.isInverted = true
         wait(for: [unexpectedRequest], timeout: 2)
         if !hasSavedID {
@@ -168,7 +170,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
             XCTAssertTrue(retry.waitForExistence(timeout: 10))
             XCTAssertTrue(retry.isEnabled)
             retry.tap()
-            assertOpenedSavedEstimate(in: app, counts: "creates=0,links=1,estimateReads=1,jobReads=1")
+            assertOpenedSavedEstimate(in: app, counts: "creates=0,links=1,estimateReads=2,jobReads=2")
         }
     }
 
@@ -219,16 +221,17 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         revalidate.tap()
         let retry = app.buttons["Retry adding to job"]
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
-        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=0,jobReads=0", "The old authority must not issue a link")
+        expectation(for: NSPredicate(format: "value == %@", "creates=1,links=0,estimateReads=1,jobReads=1"), evaluatedWith: counts)
+        waitForExpectations(timeout: 10)
         XCTAssertFalse(app.textFields["Estimate title"].isEnabled, "The known saved estimate stays locked")
         retry.tap()
-        let firstLink = NSPredicate(format: "value == %@", "creates=1,links=1,estimateReads=1,jobReads=1")
+        let firstLink = NSPredicate(format: "value == %@", "creates=1,links=1,estimateReads=2,jobReads=2")
         expectation(for: firstLink, evaluatedWith: counts)
         waitForExpectations(timeout: 10)
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: retry)
         waitForExpectations(timeout: 10)
         retry.tap()
-        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=2,jobReads=2")
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=3,jobReads=3")
     }
 
     func testAuthorityRefreshRejectsChangedEstimateBeforeLink() {
