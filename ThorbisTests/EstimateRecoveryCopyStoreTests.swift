@@ -107,4 +107,84 @@ import XCTest
         XCTAssertEqual(try store.read(scope: scope, id: XCTUnwrap(copied)), draft)
     }
 
+    func testDiscardRequiresExactContentAndPreventsRetryResurrection() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory)
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let other = Scope(actor: "a", organization: "two", origin: scope.origin, job: scope.job)
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        try store.install(draft, scope: scope, id: id)
+        XCTAssertThrowsError(try store.discard(.init(title: "Different", lines: []), scope: scope, id: id))
+        XCTAssertThrowsError(try store.discard(draft, scope: other, id: id))
+        XCTAssertEqual(try store.read(scope: scope, id: id), draft)
+        try store.discard(draft, scope: scope, id: id)
+        XCTAssertEqual(try store.list(scope: scope), [])
+        XCTAssertThrowsError(try store.install(draft, scope: scope, id: id))
+        try store.discard(draft, scope: scope, id: id)
+    }
+    func testUnconfirmedRemovalStaysHeldAndCanRetry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        var fail = true
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory, removeItem: { url in
+            if fail { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        try store.install(draft, scope: scope, id: id)
+        XCTAssertThrowsError(try store.discard(draft, scope: scope, id: id))
+        XCTAssertThrowsError(try store.install(draft, scope: scope, id: id))
+        fail = false
+        try store.discard(draft, scope: scope, id: id)
+        XCTAssertEqual(try store.list(scope: scope), [])
+    }
+
+    func testInterruptedRemovalCanBeDiscoveredOnlyInOriginalScopeAndRetried() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let other = Scope(actor: "a", organization: "two", origin: scope.origin, job: scope.job)
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        let failing = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory, removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        try failing.install(draft, scope: scope, id: id)
+        XCTAssertThrowsError(try failing.discard(draft, scope: scope, id: id))
+        let reopened = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory)
+        let pending = try reopened.pendingDiscards(scope: scope)
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending.first?.id, id)
+        XCTAssertEqual(pending.first?.draft, draft)
+        XCTAssertTrue(try reopened.pendingDiscards(scope: other).isEmpty)
+        try reopened.discard(draft, scope: scope, id: id)
+        XCTAssertTrue(try reopened.pendingDiscards(scope: scope).isEmpty)
+        XCTAssertThrowsError(try reopened.install(draft, scope: scope, id: id))
+    }
+
+    func testDiscardCoordinatorRetainsIntentAndProtectsUnsavedEdits() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let draft = Draft(title: "Unfinished", lines: ["Details"])
+        var fail = true, id: UUID?
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory, removeItem: { url in
+            if fail { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        let saves = EstimateRecoveryCopyAttempts<Scope, Draft>(), discards = EstimateRecoveryCopyDiscardAttempts<Scope, Draft>()
+        try saves.perform(draft, scope: scope) { savedID, value in id = savedID; try store.install(value, scope: scope, id: savedID) }
+        let selected = try XCTUnwrap(id)
+        XCTAssertThrowsError(try discards.perform(draft, scope: scope, id: selected, hasUnsavedEdits: true, saves: saves) { _, _ in XCTFail("Must protect edits") })
+        XCTAssertThrowsError(try discards.perform(draft, scope: scope, id: selected, hasUnsavedEdits: false, saves: saves) { id, value in try store.discard(value, scope: scope, id: id) })
+        XCTAssertNotNil(discards.pending(for: scope))
+        XCTAssertThrowsError(try saves.perform(draft, scope: scope) { _, _ in XCTFail("Save must wait for the pending discard") })
+        XCTAssertThrowsError(try discards.perform(.init(title: "Changed", lines: []), scope: scope, id: selected, hasUnsavedEdits: false, saves: saves) { _, _ in XCTFail("Must reject changed intent") })
+        fail = false
+        try discards.perform(draft, scope: scope, id: selected, hasUnsavedEdits: false, saves: saves) { id, value in try store.discard(value, scope: scope, id: id) }
+        XCTAssertNil(discards.pending(for: scope))
+        var replacement: UUID?
+        try saves.perform(draft, scope: scope) { id, value in replacement = id; try store.install(value, scope: scope, id: id) }
+        XCTAssertNotEqual(replacement, selected)
+    }
+
 }
