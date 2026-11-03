@@ -71,7 +71,12 @@ struct InvoiceLineEditorView: View {
         }
         .keyboardDoneButton()
         .task(id: catalogContext) { await refreshCatalog() }
-        .onChange(of: catalogContext) { _, _ in addedLineSelection = nil; showPriceBook = false }
+        .onChange(of: catalogContext) { previous, current in
+            if !previous.preservesInvoicePickerState(comparedTo: current) {
+                addedLineSelection = nil
+                showPriceBook = false
+            }
+        }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
         .safeAreaInset(edge: .bottom) { invoiceCommitActions }
         .thorbisConfirm("Issue invoice?",
@@ -481,8 +486,21 @@ struct InvoiceCatalogLineSelection: Equatable {
     let context: PriceBookCatalogContext
 
     func resolvedLineID(in lines: [InvoiceLineDraft], context current: PriceBookCatalogContext) -> UUID? {
-        guard context == current, current.organizationID?.isEmpty == false,
+        guard context.preservesInvoicePickerState(comparedTo: current), current.organizationID?.isEmpty == false,
               lines.filter({ $0.id == lineID }).count == 1 else { return nil }
         return lineID
+    }
+}
+
+private extension PriceBookCatalogContext {
+    /// Local revalidation revisions retire requests but do not change a verified invoice draft's identity.
+    func preservesInvoicePickerState(comparedTo other: PriceBookCatalogContext) -> Bool {
+        guard organizationID == other.organizationID, sessionGeneration == other.sessionGeneration else { return false }
+        switch (authority, other.authority) {
+        case (nil, nil): return true
+        case let (old?, new?):
+            return old.actorID == new.actorID && old.policyVersion == new.policyVersion && old.generation == new.generation
+        default: return false
+        }
     }
 }
