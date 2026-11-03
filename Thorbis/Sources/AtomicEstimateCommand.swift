@@ -49,6 +49,24 @@ struct AtomicEstimateCommand: Codable, Equatable {
     struct DraftTarget: Codable, Equatable {
         let customerID: String
         let locationID: String?
+        private enum CodingKeys: String, CodingKey { case customerID, locationID }
+        init(customerID: String, locationID: String?) {
+            self.customerID = customerID; self.locationID = locationID
+        }
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            customerID = try values.decode(String.self, forKey: .customerID)
+            guard values.contains(.locationID) else {
+                throw DecodingError.keyNotFound(CodingKeys.locationID, .init(codingPath: decoder.codingPath, debugDescription: "Draft location must be explicit"))
+            }
+            locationID = try values.decodeIfPresent(String.self, forKey: .locationID)
+        }
+        func encode(to encoder: Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(customerID, forKey: .customerID)
+            if let locationID { try values.encode(locationID, forKey: .locationID) }
+            else { try values.encodeNil(forKey: .locationID) }
+        }
         var valid: Bool {
             UUID(uuidString: customerID) != nil && customerID == customerID.lowercased() &&
             (locationID.map { UUID(uuidString: $0) != nil && $0 == $0.lowercased() } ?? true)

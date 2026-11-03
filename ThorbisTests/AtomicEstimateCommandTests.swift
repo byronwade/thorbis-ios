@@ -93,13 +93,17 @@ final class AtomicEstimateCommandTests: XCTestCase {
         let encoded = try JSONEncoder().encode(original)
         var saved = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         XCTAssertNotNil(saved["draftTarget"])
+        let target = try XCTUnwrap(saved["draftTarget"] as? [String: Any])
+        XCTAssertTrue(target["locationID"] is NSNull, "No location must be explicit in the persisted target")
         let before = try JSONEncoder().encode(original.batch)
         saved.removeValue(forKey: "draftTarget")
         let legacy = try JSONDecoder().decode(AtomicEstimateCommand.self, from: JSONSerialization.data(withJSONObject: saved))
         XCTAssertFalse(legacy.maySend(actorID: actor, organizationID: org, jobID: job, origin: "https://example.test", authorized: true))
         XCTAssertEqual(try JSONSerialization.jsonObject(with: before) as? NSDictionary,
                        try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy.batch)) as? NSDictionary)
-        saved["draftTarget"] = ["customerID": "invalid"]
+        saved["draftTarget"] = ["customerID": actor]
+        XCTAssertThrowsError(try JSONDecoder().decode(AtomicEstimateCommand.self, from: JSONSerialization.data(withJSONObject: saved)))
+        saved["draftTarget"] = ["customerID": "invalid", "locationID": NSNull()]
         let malformed = try JSONDecoder().decode(AtomicEstimateCommand.self, from: JSONSerialization.data(withJSONObject: saved))
         XCTAssertFalse(malformed.maySend(actorID: actor, organizationID: org, jobID: job, origin: "https://example.test", authorized: true))
         XCTAssertFalse(malformed.matchesDraftJob(try jobRecord(), customerID: actor, locationID: nil))
