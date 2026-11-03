@@ -10,6 +10,14 @@ enum PriceBookPresentation {
         return String(description[..<range.lowerBound])
     }
 
+    static func supportingDetails(_ description: String) -> String? {
+        let readable = readableDescription(description).trimmingCharacters(in: .whitespacesAndNewlines)
+        let heading = title(description)
+        guard readable.hasPrefix(heading) else { return nil }
+        let remainder = readable.dropFirst(heading.count).trimmingCharacters(in: .whitespacesAndNewlines)
+        return remainder.isEmpty ? nil : remainder
+    }
+
     static func title(_ description: String) -> String {
         let readable = readableDescription(description)
         let text = readable.trimmingCharacters(in: .whitespacesAndNewlines)

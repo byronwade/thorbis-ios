@@ -609,7 +609,12 @@ struct WorkspacePriceBookView: View {
                 }
                 .padding(.horizontal, ListRoom.gutter).padding(.vertical, 12)
             } else {
-                PaperListRow(title: PriceBookPresentation.title(item.description), subtitle: unit) {
+                let details = PriceBookPresentation.supportingDetails(item.description)
+                PaperListRow(title: PriceBookPresentation.title(item.description),
+                             subtitle: details ?? unit,
+                             meta: details == nil ? nil : unit,
+                             subtitleLines: 2,
+                             limitsSubtitleAtAccessibility: true) {
                     itemPrice(item).fixedSize(horizontal: true, vertical: false)
                 }
             }
