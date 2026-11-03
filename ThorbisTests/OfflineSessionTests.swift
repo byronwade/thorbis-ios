@@ -10,8 +10,9 @@ final class OfflineSessionTests: XCTestCase {
     private let catalog = #"{"authority":{"actorId":"019f0000-0000-7000-8000-000000000011","organizationId":"019f0000-0000-7000-8000-000000000001","policyVersion":3,"generation":"g"},"capabilities":["job.view","job.edit"],"resources":[],"views":[]}"#
     private let features = #"{"organizationId":"019f0000-0000-7000-8000-000000000001","evaluatedAt":"2026-10-26T12:00:00.000Z","features":{"jobs":{"enabled":true,"released":true,"entitled":true}}}"#
 
-    private func make(_ replies: [URLProtocolFixture.Reply], snapshots: MemorySessionSnapshotStore = .init()) -> SessionController {
-        let api = APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
+    private func make(_ replies: [URLProtocolFixture.Reply], snapshots: MemorySessionSnapshotStore = .init(),
+                      origin: String = "https://app.thorbis.com") -> SessionController {
+        let api = APIClient(session: URLProtocolFixture.session(replies), baseURL: origin)
         return SessionController(api: api, defaults: UserDefaults(suiteName: "thorbis.offline.\(UUID().uuidString)")!, snapshots: snapshots)
     }
 
@@ -43,6 +44,22 @@ final class OfflineSessionTests: XCTestCase {
         XCTAssertEqual(controller.policyVersion, 3)
     }
 
+    func testForegroundAuthorityRefreshChangesPriceBookScopeWithoutChangingSession() async {
+        let priceCatalog = catalog.replacingOccurrences(of: "\"job.view\",\"job.edit\"", with: "\"pricebook.view\"")
+        let priceFeatures = features.replacingOccurrences(of: "\"jobs\"", with: "\"price_book\"")
+        let changedCatalog = priceCatalog.replacingOccurrences(of: "\"generation\":\"g\"", with: "\"generation\":\"g2\"")
+        let controller = make([.init(200, session), .init(200, orgs), .init(200, priceCatalog), .init(200, priceFeatures),
+                               .init(200, session), .init(200, changedCatalog), .init(200, priceFeatures)])
+        await controller.restore()
+        let oldScope = controller.priceBookAuthority
+        let sessionGeneration = controller.generation
+        XCTAssertEqual(oldScope?.generation, "g")
+        await controller.revalidate()
+        XCTAssertEqual(controller.generation, sessionGeneration)
+        XCTAssertEqual(controller.priceBookAuthority?.generation, "g2")
+        XCTAssertNotEqual(controller.priceBookAuthority, oldScope)
+    }
+
     func testForegroundCheckWithAnotherIdentityFallsBackToFullRestore() async {
         let otherUser = session.replacingOccurrences(of: "000000000011", with: "000000000099")
         let controller = make(signIn + [.init(200, otherUser), .init(200, "null")])
@@ -60,16 +77,39 @@ final class OfflineSessionTests: XCTestCase {
         let snapshots = MemorySessionSnapshotStore()
         let online = make(signIn, snapshots: snapshots)
         await online.restore()
-        XCTAssertNotNil(snapshots.snapshot)
+        XCTAssertEqual(snapshots.snapshot?.authorityGeneration, "g")
+        XCTAssertEqual(snapshots.snapshot?.authorityOrigin, "https://app.thorbis.com")
 
         let offline = make([URLProtocolFixture.offline], snapshots: snapshots)
         await offline.restore()
 
         XCTAssertEqual(offline.phase, .ready)
         XCTAssertTrue(offline.isOffline)
+        XCTAssertEqual(offline.authorityGeneration, "g")
         XCTAssertEqual(offline.user?.id, actor)
         XCTAssertEqual(offline.activeOrganization?.id, org)
         XCTAssertTrue(offline.can("job.edit", feature: "jobs"))
+    }
+
+    func testOfflineSnapshotDoesNotAuthorizePriceBookAcrossOrigins() async {
+        let snapshots = MemorySessionSnapshotStore()
+        let online = make(signIn, snapshots: snapshots)
+        await online.restore()
+        let offline = make([URLProtocolFixture.offline], snapshots: snapshots, origin: "http://localhost:4321")
+        await offline.restore()
+        XCTAssertNil(offline.authorityGeneration)
+        XCTAssertNil(offline.priceBookAuthority)
+    }
+
+    func testLegacyOfflineSnapshotCannotAuthorizeScopedPriceBookCache() async {
+        let legacy = SessionSnapshot(user: .init(id: actor, name: "T", email: nil), organization: .init(id: org, name: "W"),
+                                     organizations: [.init(id: org, name: "W")], capabilities: ["pricebook.view"],
+                                     features: ["price_book": .init(enabled: true, released: true, entitled: true, stage: nil, reason: nil)],
+                                     policyVersion: 1, sessionDeadline: Date().addingTimeInterval(3600), authorityDeadline: nil)
+        let offline = make([URLProtocolFixture.offline], snapshots: .init(legacy))
+        await offline.restore()
+        XCTAssertTrue(offline.can("pricebook.view", feature: "price_book"))
+        XCTAssertNil(offline.priceBookAuthority)
     }
 
     func testColdLaunchWithoutSignalAndAnExpiredSnapshotStillAsksToSignIn() async {

@@ -308,6 +308,7 @@ extension View {
 /// favourites and recent items when nothing is typed, then the ranked catalog in pages.
 struct PriceBookResultsList: View {
     @ObservedObject var catalog: PriceBookCatalog
+    @EnvironmentObject private var api: APIClient
     let context: PriceBookCatalogContext
     let query: String
     let kind: PriceBookKindFilter
@@ -320,13 +321,14 @@ struct PriceBookResultsList: View {
     var showFavorites = true
 
     @State private var pageOffset = 0
+    @State private var partialPageAnchorID: String?
     @State private var usageSnapshot: [String: PriceBookUsage] = [:]
     @State private var rankingTime = Date()
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        let current = catalog.context == context
+        let current = catalog.isCurrent(context, api: api)
         let browsing = canUsePriceBook && current && trimmedQuery.isEmpty
         let favorites = browsing && showFavorites ? catalog.index.favorites(kind: kind, ids: catalog.favorites) : []
         let favoriteIDs = Set(favorites.map(\.id))
@@ -363,17 +365,40 @@ struct PriceBookResultsList: View {
                     .accessibilityIdentifier("price-book-add-custom")
                 }
             }
-            if canUsePriceBook, !current || catalog.items.isEmpty {
+            if canUsePriceBook, catalog.context == context, catalog.denialPersistenceFailure, !catalog.accessDenied {
+                ErrorBanner(message: "The saved price book could not be secured. Connect and finish refreshing it.") { retry() }
+            }
+            if canUsePriceBook, catalog.context == context, catalog.accessDenied {
+                ErrorBanner(message: catalog.denialPersistenceFailure
+                    ? "Price book access could not be verified, and its saved copy could not be secured. Connect and try again."
+                    : "Price book access could not be verified. \(catalog.error ?? "Try again when you have access.")") { retry() }
+            } else if canUsePriceBook, context.authority == nil {
+                Text("Connect once to verify your price book access on this device.")
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            } else if canUsePriceBook, !current || catalog.items.isEmpty {
                 if !current || catalog.loading {
                     PaperCard { ForEach(0..<6, id: \.self) { _ in skeletonRow } }
-                } else if let error = catalog.error {
+                } else if let error = catalog.error, !catalog.isPartial {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("The price book didn't load. \(error)").font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        Text(catalog.needsScopedRefresh
+                             ? "The saved price book needs one online refresh after this update. \(error)"
+                             : "The price book didn't load. \(error)")
+                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
                         Button("Try again", action: retry).font(Theme.font(15, weight: .medium)).frame(minHeight: 44)
                     }
                 }
             }
-            if canUsePriceBook, current, !catalog.items.isEmpty, let error = catalog.error {
+            if canUsePriceBook, current, catalog.isPartial {
+                if let error = catalog.error {
+                    ErrorBanner(message: "Only some price book items loaded. Search covers loaded items only. \(error)") { retry() }
+                } else if catalog.loading {
+                    Text("Loading more price book items. Search covers loaded items only.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("price-book-partial")
+                } else {
+                    ErrorBanner(message: "Only some price book items loaded. Search covers loaded items only. Refresh to load more.") { retry() }
+                }
+            } else if canUsePriceBook, current, !catalog.items.isEmpty, let error = catalog.error {
                 ErrorBanner(message: "Couldn't refresh the price book. Showing saved items. \(error)") { retry() }
             }
             if !favorites.isEmpty {
@@ -385,21 +410,21 @@ struct PriceBookResultsList: View {
             if !page.results.isEmpty {
                 section(trimmedQuery.isEmpty ? (favorites.isEmpty && recent.isEmpty ? nil : "Price book") : "Matches",
                         trailing: page.total > PriceBookSearchIndex.resultLimit
-                            ? "\(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)" : nil) {
+                            ? "\(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)\(catalog.isPartial ? " loaded" : "")" : nil) {
                     if page.offset > 0 {
                         pageButton("Previous items", detail: nil, identifier: "price-book-previous") {
-                            pageOffset = max(0, page.offset - PriceBookSearchIndex.resultLimit)
+                            goToPage(max(0, page.offset - PriceBookSearchIndex.resultLimit), excluding: favoriteIDs.union(recent.map(\.id)))
                         }
                     }
                     ForEach(page.results, content: row)
                     if remaining > 0 {
-                        pageButton("Next items", detail: "\(remaining) remaining", identifier: "price-book-show-more") {
-                            pageOffset = page.offset + PriceBookSearchIndex.resultLimit
+                        pageButton("Next items", detail: "\(remaining)\(catalog.isPartial ? " loaded" : " remaining")", identifier: "price-book-show-more") {
+                            goToPage(page.offset + PriceBookSearchIndex.resultLimit, excluding: favoriteIDs.union(recent.map(\.id)))
                         }
                     }
                 }
             }
-            if canUsePriceBook, current, !catalog.loading, catalog.error == nil,
+            if canUsePriceBook, current, !catalog.loading, !catalog.isPartial, catalog.error == nil,
                page.results.isEmpty, recent.isEmpty, favorites.isEmpty {
                 if addCustomLine == nil {
                     ContentUnavailableView(
@@ -422,9 +447,30 @@ struct PriceBookResultsList: View {
         .onAppear { resetPage() }
         .onChange(of: query) { _, _ in resetPage() }
         .onChange(of: kind) { _, _ in resetPage() }
-        .onChange(of: context) { _, _ in resetPage() }
-        .onChange(of: catalog.context) { _, newContext in
-            if newContext == context { resetPage() }
+        .onChange(of: context) { previous, current in
+            if !previous.hasSameVerifiedScope(as: current) ||
+                !(catalog.isCurrent(previous, api: api) || catalog.isCurrent(current, api: api)) || catalog.isPartial || catalog.loading {
+                resetPage()
+            }
+        }
+        .onChange(of: api.requestGeneration) { _, _ in resetPage() }
+        .onChange(of: catalog.context) { previous, current in
+            guard let current, current == context else { return }
+            if previous?.hasSameVerifiedScope(as: current) != true || !catalog.isCurrent(current, api: api) || catalog.isPartial || catalog.loading {
+                resetPage()
+            }
+        }
+        .onChange(of: catalog.isPartial) { wasPartial, isPartial in
+            if isPartial {
+                partialPageAnchorID = page.results.first?.id
+            } else if wasPartial, let anchor = partialPageAnchorID {
+                // Keep the item at the start of the prior page visible after the full
+                // ranked catalog arrives; never alter the query or draft selection.
+                pageOffset = catalog.index.pageOffset(containing: anchor, query: query, kind: kind,
+                    usage: usageSnapshot, now: rankingTime,
+                    excludingIDs: favoriteIDs.union(recent.map(\.id))) ?? pageOffset
+                partialPageAnchorID = nil
+            }
         }
     }
 
@@ -432,6 +478,25 @@ struct PriceBookResultsList: View {
         pageOffset = 0
         usageSnapshot = catalog.usage
         rankingTime = Date()
+        partialPageAnchorID = nil
+        if catalog.isPartial, catalog.isCurrent(context, api: api) {
+            let browsing = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let favorites = browsing && showFavorites ? catalog.index.favorites(kind: kind, ids: catalog.favorites) : []
+            let favoriteIDs = Set(favorites.map(\.id))
+            let recent = browsing ? catalog.index.recent(kind: kind, usage: usageSnapshot, now: rankingTime)
+                .filter { !favoriteIDs.contains($0.id) } : []
+            partialPageAnchorID = catalog.index.page(query, kind: kind, usage: usageSnapshot, now: rankingTime,
+                excludingIDs: favoriteIDs.union(recent.map(\.id)), limit: PriceBookSearchIndex.resultLimit).results.first?.id
+        }
+    }
+
+    private func goToPage(_ offset: Int, excluding: Set<String>) {
+        pageOffset = offset
+        if catalog.isPartial {
+            partialPageAnchorID = catalog.index.page(query, kind: kind, usage: usageSnapshot,
+                now: rankingTime, excludingIDs: excluding, limit: PriceBookSearchIndex.resultLimit,
+                offset: offset).results.first?.id
+        }
     }
 
     private func section<Content: View>(_ title: String?, trailing: String? = nil, @ViewBuilder content: () -> Content) -> some View {

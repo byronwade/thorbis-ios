@@ -9,6 +9,35 @@ final class PriceBookPickerUITests: XCTestCase {
     private let sentinelID = "00000000-0000-4000-8000-000000009999"
     private let sentinel = "Camera sewer inspection"
 
+    func testPartialCatalogCanAddLoadedItemAndDoesNotClaimAnUnloadedSearchIsEmpty() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-partial"]
+        app.launch()
+        openPicker(in: app, addItem: "invoice-add-item")
+        let notice = app.staticTexts["price-book-partial"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 20))
+        XCTAssertTrue(notice.label.contains("Search covers loaded items only"))
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009701"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        let loadingShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        loadingShot.name = "Loaded items with partial catalog notice"
+        loadingShot.lifetime = .keepAlways
+        add(loadingShot)
+        for _ in 0..<8 where !item.isHittable { app.swipeUp() }
+        item.tap()
+        XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
+        let search = app.textFields["invoice-catalog-search"]
+        search.tap()
+        search.typeText("camera sewer")
+        XCTAssertTrue(notice.exists)
+        XCTAssertFalse(app.staticTexts["No price book items match. Add it as a custom item above, or try another word."].exists)
+        let searchShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        searchShot.name = "Search while later catalog pages are pending"
+        searchShot.lifetime = .keepAlways
+        add(searchShot)
+    }
+
     func testInvoicePickerSearchesLaterPageAndStaysOpenForMultipleAdds() {
         let app = launchInvoiceEditor()
         let before = lineCount(app)
@@ -44,6 +73,64 @@ final class PriceBookPickerUITests: XCTestCase {
         proof.name = "Two separately priced catalog lines"
         proof.lifetime = .keepAlways
         add(proof)
+    }
+
+    func testInvoicePickerKeepsSearchAndAddedLineDuringAuthorityRevalidation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
+                               "--paper-preview-catalog-pages", "--paper-preview-picker-revalidation"]
+        app.launch()
+        let before = lineCount(app)
+        openPicker(in: app, addItem: "invoice-add-item")
+        let search = app.textFields["invoice-catalog-search"]
+        search.tap()
+        search.typeText(sentinel)
+        let item = app.buttons["price-book-item-\(sentinelID)"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        item.tap()
+        XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
+        let revalidate = app.buttons["price-book-preview-revalidate"]
+        XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
+        revalidate.tap()
+        XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        XCTAssertEqual(search.value as? String, sentinel)
+        XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "Catalog items must return after authority refresh")
+        item.tap()
+        XCTAssertTrue(app.buttons["price-book-done"].label.contains("2 items"))
+        app.buttons["price-book-done"].tap()
+        XCTAssertEqual(lineCount(app), before + 2)
+        let editor = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 5))
+        XCTAssertEqual(editor.value as? String, sentinel)
+    }
+
+    func testInvoicePickerKeepsCurrentPageDuringSameAuthorityRevalidation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor",
+                               "--paper-preview-catalog-many", "--paper-preview-picker-revalidation"]
+        app.launch()
+        openPicker(in: app, addItem: "invoice-add-item")
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("plumbing\n")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        let more = app.buttons["price-book-show-more"]
+        expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", "23 remaining"), evaluatedWith: more)
+        waitForExpectations(timeout: 15)
+        showMore(in: app)
+        let range = app.staticTexts["price-book-page-range"]
+        expectation(for: NSPredicate(format: "label == %@", "51–73 of 73"), evaluatedWith: range)
+        waitForExpectations(timeout: 5)
+        let revalidate = app.buttons["price-book-preview-revalidate"]
+        XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
+        revalidate.tap()
+        XCTAssertTrue(app.staticTexts["price-book-preview-revalidated"].waitForExistence(timeout: 10))
+        XCTAssertEqual(range.label, "51–73 of 73", "A harmless authority refresh should preserve the current page")
+        XCTAssertTrue(app.buttons["price-book-item-00000000-0000-4000-8000-000000009773"].exists)
     }
 
     func testInvoicePickerKeepsFirstPageSelectionOpen() {
@@ -190,8 +277,13 @@ final class PriceBookPickerUITests: XCTestCase {
     private func showMore(in app: XCUIApplication) {
         let more = app.buttons["price-book-show-more"]
         XCTAssertTrue(more.waitForExistence(timeout: 10))
-        for _ in 0..<20 where !more.isHittable { catalog(in: app).swipeUp() }
+        let done = app.buttons["price-book-done"]
+        for _ in 0..<20 {
+            if more.isHittable, more.frame.maxY < done.frame.minY { break }
+            catalog(in: app).swipeUp()
+        }
         XCTAssertTrue(more.isHittable)
+        XCTAssertLessThan(more.frame.maxY, done.frame.minY, "Next items must be visibly above the footer")
         more.tap()
     }
 

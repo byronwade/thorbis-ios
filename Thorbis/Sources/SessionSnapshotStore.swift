@@ -14,6 +14,9 @@ struct SessionSnapshot: Codable, Equatable {
     let policyVersion: Int
     let sessionDeadline: Date
     let authorityDeadline: Date?
+    // Optional for legacy snapshots; missing fields cannot authorize scoped caches.
+    var authorityGeneration: String? = nil
+    var authorityOrigin: String? = nil
 }
 
 protocol SessionSnapshotStoring: AnyObject {

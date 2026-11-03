@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Security
 
 /// EB-01..EB-05: the estimate builder's price book search. It runs on the device over the whole
 /// cached catalog on every keystroke, so it never waits on the network and works offline.
@@ -111,20 +113,34 @@ struct PriceBookSearchIndex {
               usage: [String: PriceBookUsage] = [:], now: Date = Date(),
               excludingIDs: Set<String> = [], limit: Int? = nil, offset: Int = 0) -> PriceBookSearchPage {
         let queryWords = Self.words(query)
-        let key = CacheKey(query: query, kind: kind, usage: usage, now: now, excluded: excludingIDs)
-        let ordered: [Entry]
-        if let cached = cache.get(key) {
-            ordered = cached
-        } else {
-            ordered = orderedEntries(queryWords: queryWords, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
-            cache.put(key, entries: ordered)
-        }
+        let ordered = rankedEntries(query, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
         let pageSize = max(1, limit ?? max(1, ordered.count))
         let start = min(max(0, offset), ordered.isEmpty ? 0 : ((ordered.count - 1) / pageSize) * pageSize)
         let results = ordered.dropFirst(start).prefix(pageSize).map {
             PriceBookSearchResult(item: $0.item, highlights: Self.highlights(in: $0.item.description, words: queryWords))
         }
         return PriceBookSearchPage(results: results, total: ordered.count, offset: start)
+    }
+
+    /// Finds the page containing an existing item without formatting the entire catalog.
+    func pageOffset(containing id: String, query: String, kind: PriceBookKindFilter,
+                    usage: [String: PriceBookUsage], now: Date, excludingIDs: Set<String>,
+                    limit: Int = resultLimit) -> Int? {
+        let ordered = rankedEntries(query, kind: kind, usage: usage, now: now, excludingIDs: excludingIDs)
+        guard let position = ordered.firstIndex(where: { $0.item.id == id }) else { return nil }
+        let pageSize = max(1, limit)
+        return (position / pageSize) * pageSize
+    }
+
+    private func rankedEntries(_ query: String, kind: PriceBookKindFilter,
+                               usage: [String: PriceBookUsage], now: Date,
+                               excludingIDs: Set<String>) -> [Entry] {
+        let key = CacheKey(query: query, kind: kind, usage: usage, now: now, excluded: excludingIDs)
+        if let cached = cache.get(key) { return cached }
+        let ordered = orderedEntries(queryWords: Self.words(query), kind: kind, usage: usage,
+                                     now: now, excludingIDs: excludingIDs)
+        cache.put(key, entries: ordered)
+        return ordered
     }
 
     private func orderedEntries(queryWords: [String], kind: PriceBookKindFilter,
@@ -360,9 +376,79 @@ struct PriceBookFavoritesStore {
 /// The whole active price book for the signed-in organization, kept on the device so search is
 /// instant and works offline (EB-01). Opening a builder shows the cached copy at once and
 /// refreshes it in the background.
+struct PriceBookAuthority: Hashable {
+    let actorID: String
+    let policyVersion: Int
+    let generation: String
+    let revision: UUID
+}
+
 struct PriceBookCatalogContext: Hashable {
     let organizationID: String?
     let sessionGeneration: UUID
+    let authority: PriceBookAuthority?
+
+    init(organizationID: String?, sessionGeneration: UUID, authority: PriceBookAuthority? = nil) {
+        self.organizationID = organizationID
+        self.sessionGeneration = sessionGeneration
+        self.authority = authority
+    }
+
+    func hasSameVerifiedScope(as other: PriceBookCatalogContext) -> Bool {
+        guard organizationID == other.organizationID, sessionGeneration == other.sessionGeneration,
+              let old = authority, let new = other.authority else { return false }
+        return old.actorID == new.actorID && old.policyVersion == new.policyVersion && old.generation == new.generation
+    }
+}
+
+private struct PriceBookDenialScope: Hashable {
+    let organizationID: String
+    let origin: String
+    let actorID: String
+    let policyVersion: Int
+    let generation: String
+
+    init(organizationID: String, origin: String, authority: PriceBookAuthority) {
+        self.organizationID = organizationID.lowercased()
+        self.origin = origin
+        self.actorID = authority.actorID
+        self.policyVersion = authority.policyVersion
+        self.generation = authority.generation
+    }
+}
+
+/// A denial must outlive an undeletable cache file. Keychain read errors fail closed.
+private enum PriceBookDenialMarker {
+    private static let service = "com.thorbis.field.price-book-denials.v1"
+
+    private static func query(organizationID: String, origin: String, authority: PriceBookAuthority) -> [String: Any] {
+        let parts = [organizationID.lowercased(), origin, authority.actorID, String(authority.policyVersion), authority.generation]
+        let canonical = parts.map { "\($0.utf8.count):\($0)" }.joined()
+        let account = SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                kSecAttrAccount as String: account]
+    }
+
+    static func isDenied(organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        var lookup = query(organizationID: organizationID, origin: origin, authority: authority)
+        lookup[kSecReturnData as String] = true
+        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+        var value: CFTypeRef?
+        return SecItemCopyMatching(lookup as CFDictionary, &value) != errSecItemNotFound
+    }
+
+    @discardableResult
+    static func mark(organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        var attributes = query(organizationID: organizationID, origin: origin, authority: authority)
+        attributes[kSecValueData as String] = Data([1])
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        return status == errSecSuccess || status == errSecDuplicateItem
+    }
+
+    static func clear(organizationID: String, origin: String, authority: PriceBookAuthority) {
+        SecItemDelete(query(organizationID: organizationID, origin: origin, authority: authority) as CFDictionary)
+    }
 }
 
 @MainActor
@@ -374,30 +460,85 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var items: [PriceBookListItem] = []
     @Published private(set) var index = PriceBookSearchIndex(items: [])
     @Published private(set) var loading = false
+    /// True when the visible snapshot has more server pages that have not loaded.
+    @Published private(set) var isPartial = false
+    @Published private(set) var origin: String?
+    @Published private(set) var needsScopedRefresh = false
+    @Published private(set) var accessDenied = false
+    @Published private(set) var denialPersistenceFailure = false
     @Published private(set) var error: String?
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
     /// Local stars (this device only).
     @Published private(set) var favorites: Set<String> = []
     private(set) var organizationID: String?
     private var lastRefresh: Date?
-    private(set) var context: PriceBookCatalogContext?
+    private var hasCompleteSnapshot = false
+    private var lastAPIGeneration: UUID?
+    private var partialAPIGeneration: UUID?
+    private var nonDurableDenials: Set<PriceBookDenialScope> = []
+    @Published private(set) var context: PriceBookCatalogContext?
     private var loadingRequest: (context: PriceBookCatalogContext, apiGeneration: UUID, id: UUID, task: Task<Void, Never>)?
+    private let removeCacheFile: (URL) -> Bool
+    private let markDenialOverride: ((String, String, PriceBookAuthority) -> Bool)?
+
+    init(removeCacheFile: @escaping (URL) -> Bool = { url in
+        do { try FileManager.default.removeItem(at: url); return true }
+        catch { return false }
+    }, markDenialOverride: ((String, String, PriceBookAuthority) -> Bool)? = nil) {
+        self.removeCacheFile = removeCacheFile
+        self.markDenialOverride = markDenialOverride
+    }
 
     /// Shows the cached catalog for `organizationID` right away, then reloads every page.
-    func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID, force: Bool = false) async {
+    func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID,
+                 authority: PriceBookAuthority? = nil, force: Bool = false) async {
         guard !Task.isCancelled else { return }
         let apiGeneration = api.requestGeneration
-        let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration)
-        if context != requested {
+        let requestedOrigin = api.normalizedOrigin
+        let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration, authority: authority)
+        if let previous = context, previous != requested, origin == requestedOrigin,
+           previous.hasSameVerifiedScope(as: requested),
+           hasCompleteSnapshot, !isPartial, !accessDenied, !denialPersistenceFailure,
+           loadingRequest == nil, !loading, lastAPIGeneration == apiGeneration {
+            // The server reverified the same scope. Adopt its local revision without
+            // discarding an idle complete catalog or its existing freshness window.
             context = requested
+        } else if context != requested || origin != requestedOrigin {
+            context = requested
+            origin = requestedOrigin
             self.organizationID = organizationID
-            apply(organizationID.flatMap(Self.readCache) ?? [])
+            let denialScope = organizationID.flatMap { org in requestedOrigin.flatMap { origin in
+                authority.map { PriceBookDenialScope(organizationID: org, origin: origin, authority: $0) }
+            } }
+            let nonDurableDenial = denialScope.map { nonDurableDenials.contains($0) } ?? false
+            let denied = nonDurableDenial || (organizationID.flatMap { org in requestedOrigin.flatMap { origin in
+                authority.map { PriceBookDenialMarker.isDenied(organizationID: org, origin: origin, authority: $0) }
+            } } ?? false)
+            let cached = denied ? nil : organizationID.flatMap { org in requestedOrigin.flatMap { origin in
+                authority.flatMap { Self.readCache(org, origin: origin, authority: $0) }
+            } }
+            needsScopedRefresh = cached == nil && (organizationID.map(Self.hasLegacyCache) ?? false)
+            hasCompleteSnapshot = cached != nil
+            isPartial = false
+            partialAPIGeneration = nil
+            apply(cached ?? [])
             usage = organizationID.map { PriceBookUsageStore(organizationID: $0).load() } ?? [:]
             favorites = organizationID.map { PriceBookFavoritesStore(organizationID: $0).load() } ?? []
             lastRefresh = nil
             error = nil
+            lastAPIGeneration = nil
+            accessDenied = denied
+            denialPersistenceFailure = nonDurableDenial
+        } else if lastAPIGeneration != nil, lastAPIGeneration != apiGeneration {
+            // The generation may reflect changed credentials or revoked authority.
+            // Hide even a complete snapshot until a fresh request succeeds.
+            lastRefresh = nil
+            hasCompleteSnapshot = false
+            isPartial = false
+            partialAPIGeneration = nil
+            apply([])
         }
-        guard let organizationID else {
+        guard let organizationID, let requestedOrigin, authority != nil else {
             loadingRequest?.task.cancel()
             loadingRequest = nil
             loading = false
@@ -410,20 +551,21 @@ final class PriceBookCatalog: ObservableObject {
         }
         loadingRequest?.task.cancel()
         let request = UUID()
+        lastAPIGeneration = apiGeneration
         loading = true
         // The catalog owns this work so closing its initiating view cannot strand other callers.
         let task = Task {
-            await self.load(api: api, organizationID: organizationID, context: requested,
+            await self.load(api: api, organizationID: organizationID, origin: requestedOrigin, context: requested,
                             apiGeneration: apiGeneration, request: request)
         }
         loadingRequest = (requested, apiGeneration, request, task)
         await task.value
     }
 
-    private func load(api: APIClient, organizationID: String, context requested: PriceBookCatalogContext,
+    private func load(api: APIClient, organizationID: String, origin requestedOrigin: String, context requested: PriceBookCatalogContext,
                       apiGeneration: UUID, request: UUID) async {
         let current: @MainActor () -> Bool = {
-            self.context == requested && self.loadingRequest?.id == request &&
+            self.context == requested && self.origin == requestedOrigin && self.loadingRequest?.id == request &&
                 api.requestGeneration == apiGeneration && !Task.isCancelled
         }
         defer {
@@ -437,13 +579,23 @@ final class PriceBookCatalog: ObservableObject {
             var seen = Set<String>()
             var cursor: String?
             var pages = 0
+            // Never replace a useful complete offline snapshot with a partial refresh.
+            let exposePages = !hasCompleteSnapshot || items.isEmpty
             repeat {
                 guard current() else { return }
                 let page = try await api.priceBookItems(limit: 200, cursor: cursor)
                 guard current() else { return }
+                accessDenied = false
                 for item in page.items where seen.insert(item.id).inserted { all.append(item) }
                 cursor = page.nextCursor
                 pages += 1
+                // Build the index once for the first page and once for the final
+                // snapshot, rather than reindexing an ever-growing catalog per page.
+                if exposePages, pages == 1, cursor != nil {
+                    partialAPIGeneration = apiGeneration
+                    apply(all)
+                    isPartial = true
+                }
             } while cursor != nil && pages < Self.maximumPages
             guard current() else { return }
             guard cursor == nil else {
@@ -451,12 +603,38 @@ final class PriceBookCatalog: ObservableObject {
                               detail: "Refresh the catalog before using items that are missing.")
             }
             apply(all)
+            isPartial = false
+            partialAPIGeneration = nil
+            hasCompleteSnapshot = true
             lastRefresh = Date()
             error = nil
-            Self.writeCache(all, organizationID: organizationID)
+            if let authority = requested.authority,
+               Self.writeCache(all, organizationID: organizationID, origin: requestedOrigin, authority: authority) {
+                PriceBookDenialMarker.clear(organizationID: organizationID, origin: requestedOrigin, authority: authority)
+                nonDurableDenials.remove(PriceBookDenialScope(organizationID: organizationID, origin: requestedOrigin, authority: authority))
+                denialPersistenceFailure = false
+            }
+            needsScopedRefresh = false
         } catch is CancellationError {
         } catch {
             guard current() else { return }
+            if let status = (error as? Problem)?.status, (400...499).contains(status), status != 408, status != 429 {
+                // A definitive server rejection cannot fall back to previously authorized data.
+                accessDenied = true
+                hasCompleteSnapshot = false
+                isPartial = false
+                partialAPIGeneration = nil
+                apply([])
+                if let authority = requested.authority {
+                    let marked = markDenialOverride?(organizationID, requestedOrigin, authority) ??
+                        PriceBookDenialMarker.mark(organizationID: organizationID, origin: requestedOrigin, authority: authority)
+                    let removed = removeCache(organizationID, origin: requestedOrigin, authority: authority)
+                    denialPersistenceFailure = !marked && !removed
+                    if denialPersistenceFailure {
+                        nonDurableDenials.insert(PriceBookDenialScope(organizationID: organizationID, origin: requestedOrigin, authority: authority))
+                    }
+                }
+            }
             self.error = PriceBookLoadError.message(for: error)
         }
     }
@@ -475,6 +653,13 @@ final class PriceBookCatalog: ObservableObject {
         items.first { $0.id == id }
     }
 
+    /// A partial page belongs to the precise API generation that returned it.
+    func isCurrent(_ requested: PriceBookCatalogContext, api: APIClient) -> Bool {
+        context == requested && requested.authority != nil && !accessDenied && origin != nil && origin == api.normalizedOrigin &&
+        lastAPIGeneration == api.requestGeneration &&
+        (!isPartial || partialAPIGeneration == api.requestGeneration)
+    }
+
     private func apply(_ items: [PriceBookListItem]) {
         self.items = items
         index = PriceBookSearchIndex(items: items)
@@ -488,6 +673,15 @@ final class PriceBookCatalog: ObservableObject {
         let revision: Int
     }
 
+    private struct CachedCatalog: Codable {
+        let version: Int
+        let origin: String
+        let actorID: String
+        let policyVersion: Int
+        let generation: String
+        let items: [CachedItem]
+    }
+
     private static var directory: URL? {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("PriceBook", isDirectory: true)
@@ -498,25 +692,47 @@ final class PriceBookCatalog: ObservableObject {
         return directory?.appendingPathComponent("\(organizationID.lowercased()).json")
     }
 
-    private static func readCache(_ organizationID: String) -> [PriceBookListItem]? {
+    private static func readCache(_ organizationID: String, origin: String, authority: PriceBookAuthority) -> [PriceBookListItem]? {
         guard let url = cacheURL(organizationID), let data = try? Data(contentsOf: url),
-              let cached = try? JSONDecoder().decode([CachedItem].self, from: data) else { return nil }
-        return cached.map {
+              let cached = try? JSONDecoder().decode(CachedCatalog.self, from: data),
+              cached.version == 2, cached.origin == origin, cached.actorID == authority.actorID,
+              cached.policyVersion == authority.policyVersion, cached.generation == authority.generation else { return nil }
+        return cached.items.map {
             PriceBookListItem(id: $0.id, description: $0.description, unit: $0.unit, kind: $0.kind,
                               taxClassification: $0.taxClassification, sellPrice: $0.sellPrice,
                               revision: $0.revision, archivedAt: nil)
         }
     }
 
-    private static func writeCache(_ items: [PriceBookListItem], organizationID: String) {
-        guard let url = cacheURL(organizationID), let directory else { return }
+    private static func hasLegacyCache(_ organizationID: String) -> Bool {
+        guard let url = cacheURL(organizationID), let data = try? Data(contentsOf: url) else { return false }
+        return (try? JSONDecoder().decode([CachedItem].self, from: data)) != nil ||
+            (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["version"] as? Int == 1
+    }
+
+    private func removeCache(_ organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        guard let url = Self.cacheURL(organizationID) else { return false }
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
+        // If the file cannot be verified, do not assume the denial persisted.
+        guard Self.readCache(organizationID, origin: origin, authority: authority) != nil else { return false }
+        return removeCacheFile(url)
+    }
+
+    private static func writeCache(_ items: [PriceBookListItem], organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        guard let url = cacheURL(organizationID), let directory else { return false }
         let active = items.filter { $0.archivedAt == nil }.map {
             CachedItem(id: $0.id, description: $0.description, unit: $0.unit, kind: $0.kind,
                        taxClassification: $0.taxClassification, sellPrice: $0.sellPrice, revision: $0.revision)
         }
-        guard let data = try? JSONEncoder().encode(active) else { return }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: url, options: [.atomic, .completeFileProtection])
+        guard let data = try? JSONEncoder().encode(CachedCatalog(version: 2, origin: origin, actorID: authority.actorID,
+                                                                     policyVersion: authority.policyVersion, generation: authority.generation, items: active)) else { return false }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Sign-out forgets every organization's cached price book and this session's copy.
@@ -524,10 +740,18 @@ final class PriceBookCatalog: ObservableObject {
         organizationID = nil
         lastRefresh = nil
         context = nil
+        origin = nil
+        needsScopedRefresh = false
+        accessDenied = false
+        denialPersistenceFailure = false
+        lastAPIGeneration = nil
+        partialAPIGeneration = nil
         loadingRequest?.task.cancel()
         loadingRequest = nil
         error = nil
         loading = false
+        isPartial = false
+        hasCompleteSnapshot = false
         usage = [:]
         favorites = []
         apply([])
