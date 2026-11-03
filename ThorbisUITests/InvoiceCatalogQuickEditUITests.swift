@@ -296,6 +296,34 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launch(); assertSampleInvoiceQuantity(app, "2")
     }
 
+    func testInvoiceConfirmationIsRetiredAfterWorkspaceChange() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-confirm-workspace-interruption"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15))
+        XCTAssertTrue(check.waitForNonExistence(timeout: 20))
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-quantity-")).firstMatch.exists)
+        let switchState = app.staticTexts["invoice-workspace-switch-result"]
+        XCTAssertTrue(switchState.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "switched"), evaluatedWith: switchState)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-quantity-")).firstMatch.exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-workspace-interruption" }
+        app.launchArguments.append("--paper-preview-invoice-check-workspace")
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+        let switched = app.staticTexts["invoice-workspace-switch-result"]
+        XCTAssertTrue(switched.waitForExistence(timeout: 10))
+        XCTAssertEqual(switched.value as? String, "switched")
+    }
+
     private func assertInvoiceFreshReadProtectsDraft(_ flag: String) {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",

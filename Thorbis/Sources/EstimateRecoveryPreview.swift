@@ -55,6 +55,7 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
               arguments.indices.contains(index + 1), let id = UUID(uuidString: arguments[index + 1]) else { return nil }
         return "invoice-recovery-delivered-\(id.uuidString)"
     }
+    static var invoiceWorkspaceKey: String? { invoiceDeliveryKey.map { $0 + "-workspace" } }
     var reloadHoldState: String { lock.withLock { heldReply == nil ? "idle" : "waiting" } }
     func armHeldReload() { lock.withLock { holdNextReload = true } }
     func advanceInvoiceRevision() { lock.withLock { invoiceRevisionIncrement += 1 } }

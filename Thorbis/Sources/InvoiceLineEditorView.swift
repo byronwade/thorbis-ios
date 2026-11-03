@@ -266,6 +266,15 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             #if DEBUG
+            if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-check-workspace") || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-workspace-interruption")) {
+                ThorbisToolbarItem(placement: .principal) {
+                    TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                        Text("Sample workspace switch")
+                            .accessibilityIdentifier("invoice-workspace-switch-result")
+                            .accessibilityValue(EstimateRecoveryPreview.invoiceWorkspaceKey.map { UserDefaults.standard.bool(forKey: $0) } == true ? "switched" : "not switched")
+                    }
+                }
+            }
             if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-permission-interruption") {
                 ThorbisToolbarItem(placement: .principal) {
                     HStack {
@@ -379,7 +388,8 @@ struct InvoiceLineEditorView: View {
             let network = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption")
             let revision = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-revision-change")
             let permission = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-permission-interruption")
-            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption, network || revision || permission else { return }
+            let workspace = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-workspace-interruption")
+            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption, network || revision || permission || workspace else { return }
             simulatedConfirmationInterruption = true
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(1500))
@@ -394,6 +404,13 @@ struct InvoiceLineEditorView: View {
                     PaperPreviewProtocol.toggleInvoiceEditing()
                     await session.revalidate()
                     samplePermissionState = session.can("invoice.edit", feature: "invoicing") ? "allowed" : "denied"
+                }
+                if workspace {
+                    PaperPreviewProtocol.switchSavedWorkWorkspace()
+                    await session.revalidate()
+                    if session.activeOrganization?.id == "00000000-0000-4000-8000-000000000003", let key = EstimateRecoveryPreview.invoiceWorkspaceKey {
+                        UserDefaults.standard.set(true, forKey: key)
+                    }
                 }
             }
         }

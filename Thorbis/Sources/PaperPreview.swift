@@ -840,7 +840,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
 
     private static func fixture(path: String, queryItems: [URLQueryItem] = [], isFresh: Bool = false) -> Any? {
         let actor = PaperPreview.actorID
-        let changedWorkspace = (PaperPreview.isSavedWorkPreview || PaperPreview.screen == "price-book") && scenario.lock.withLock { scenario.savedWorkWorkspaceChanged }
+        let changedWorkspace = (PaperPreview.isSavedWorkPreview || PaperPreview.screen == "price-book" || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-workspace-interruption")) && scenario.lock.withLock { scenario.savedWorkWorkspaceChanged }
         let org = changedWorkspace ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID
         let expiry = ISO8601DateFormatter().string(from: PaperPreview.isSavedWorkPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-saved-work-expiry") ? PaperPreview.savedWorkDeadline : Date().addingTimeInterval(86_400))
         let now = ISO8601DateFormatter().string(from: Date())
