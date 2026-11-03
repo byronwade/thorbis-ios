@@ -49,6 +49,83 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(element.isHittable, app.debugDescription)
     }
 
+    func testFailedInvoiceUndoCleanupStillRequiresDiscardConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--commercial-draft-test-cleanup-fails"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        app.buttons["One more"].firstMatch.tap(); XCTAssertEqual(quantity.value as? String, "2")
+        app.buttons["One fewer"].firstMatch.tap(); XCTAssertEqual(quantity.value as? String, "1")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "undone draft could not be removed")).firstMatch.waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved draft could not be removed")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(quantity.exists)
+    }
+
+    func testSameSessionInvoiceRevalidationHidesAndRestoresEdits() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--paper-preview-invoice-toggle-access", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        app.buttons["One more"].firstMatch.tap()
+        XCTAssertEqual(quantity.value as? String, "2")
+        let toggle = app.buttons["invoice-toggle-sample-access"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10)); toggle.tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 15))
+        XCTAssertFalse(quantity.exists)
+        toggle.tap()
+        XCTAssertTrue(quantity.waitForExistence(timeout: 15))
+        XCTAssertEqual(quantity.value as? String, "2")
+    }
+
+    func testNumericFormattingOnlyEditRequiresDiscardConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        quantity.tap(); replaceQuantity(quantity, with: "01", in: app)
+        XCTAssertEqual(quantity.value as? String, "01")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+    }
+
+    func testUndoToOriginalQuantityDoesNotResurrectAnOldLocalDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        XCTAssertEqual(quantity.value as? String, "1")
+        quantity.tap()
+        replaceQuantity(quantity, with: "2", in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
+        replaceQuantity(quantity, with: "1", in: app)
+        XCTAssertEqual(quantity.value as? String, "1")
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        let reopenedID = openLineIdentity(app)
+        XCTAssertEqual(app.textFields["invoice-line-quantity-" + reopenedID].value as? String, "1")
+    }
+
     func testCatalogAddsDistinctLinesAndOpensTheLastForEditing() {
         let app = launch()
         let before = lineCount(app)

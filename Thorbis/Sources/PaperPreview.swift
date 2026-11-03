@@ -632,6 +632,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let lock = NSLock()
         var setupPaymentReads = 0
         var invoiceReads = 0
+        var invoiceAccessDenied = false
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
@@ -650,7 +651,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.invoiceAccessDenied = false; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+    }
+    static func toggleInvoiceAccess() {
+        scenario.lock.withLock { scenario.invoiceAccessDenied.toggle() }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -688,6 +692,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if EstimateRecoveryPreview.enabled,
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-offline-job"),
+           request.httpMethod == "GET", request.url?.path == "/v1/jobs/\(PaperPreview.jobID)" {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
         if let preview = EstimateRecoveryPreview.shared.reply(for: request), let url = request.url,
            let response = HTTPURLResponse(url: url, statusCode: preview.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
             let deliver: @Sendable () -> Void = { [weak self] in
@@ -748,7 +758,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if request.httpMethod != nil && request.httpMethod != "GET" {
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-toggle-access"),
+           request.httpMethod == "GET", url.path == "/v1/invoices/\(PaperPreview.invoice.id)" {
+            if Self.scenario.lock.withLock({ Self.scenario.invoiceAccessDenied }) {
+                status = 403
+                payload = ["status": 403, "title": "Sample invoice access denied"]
+            } else {
+                status = 200
+                payload = Self.jsonObject(PaperPreview.invoice) ?? [:]
+            }
+        } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),

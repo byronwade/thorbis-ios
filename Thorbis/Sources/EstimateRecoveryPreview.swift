@@ -11,6 +11,8 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     private var links = 0
     private var estimateReads = 0
     private var jobReads = 0
+    private var denyJobAfterRefresh = false
+    private var holdNextReload = false
     private var savedEstimate: [String: Any]?
     private var heldReply: (@Sendable () -> Void)?
     private let savedEstimateKey: String?
@@ -28,8 +30,20 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     static var enabled: Bool {
         PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-recovery")
     }
+    static var heldReloadEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-held-reload")
+    }
+    static var newerRevisionEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-newer-revision")
+    }
+    var reloadHoldState: String { lock.withLock { heldReply == nil ? "idle" : "waiting" } }
+    func armHeldReload() { lock.withLock { holdNextReload = true } }
 
     var counts: String { lock.withLock { "creates=\(creates),links=\(links),estimateReads=\(estimateReads),jobReads=\(jobReads)" } }
+
+    func toggleJobAccess() {
+        lock.withLock { denyJobAfterRefresh.toggle() }
+    }
 
     func hold(_ action: @escaping @Sendable () -> Void) { lock.withLock { heldReply = action } }
     func release() {
@@ -44,6 +58,18 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     }
 
     func reply(for request: URLRequest) -> Reply? {
+        if (Self.heldReloadEnabled || Self.newerRevisionEnabled), request.httpMethod == "GET",
+           request.url?.path == "/v1/estimates/\(PaperPreview.estimate.id)" {
+            let shouldHold = lock.withLock {
+                let value = holdNextReload
+                holdNextReload = false
+                return value
+            }
+            guard let data = try? JSONEncoder().encode(PaperPreview.estimate),
+                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            object["currentRevisionNumber"] = (PaperPreview.estimate.currentRevisionNumber ?? 0) + 1
+            return Reply(status: 200, payload: object, hold: Self.heldReloadEnabled && shouldHold)
+        }
         guard Self.enabled, let path = request.url?.path else { return nil }
         if request.httpMethod == "GET", path == "/v1/estimates/\(Self.estimateID)" {
             return lock.withLock {
@@ -62,6 +88,10 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
         }
         if request.httpMethod == "GET", path == "/v1/jobs/\(PaperPreview.jobID)" {
             if request.cachePolicy == .reloadIgnoringLocalCacheData { lock.withLock { jobReads += 1 } }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-deny-job") ||
+                lock.withLock({ denyJobAfterRefresh }) {
+                return Reply(status: 403, payload: ["title": "Sample job access denied", "status": 403])
+            }
             var job: [String: Any] = ["id": PaperPreview.jobID, "organizationId": PaperPreview.organizationID,
                 "customerId": PaperPreview.customerID, "title": "Sample job", "status": "in_progress",
                 "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]

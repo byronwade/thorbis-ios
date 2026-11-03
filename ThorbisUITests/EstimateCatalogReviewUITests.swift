@@ -84,6 +84,126 @@ final class EstimateCatalogReviewUITests: XCTestCase {
         XCTAssertEqual(description.value as? String, fullDescription)
     }
 
+    func testFailedConflictCleanupKeepsRecoveredDraftAndReportsFailure() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" retained")
+        XCTAssertEqual(title.value as? String, original + " retained")
+        app.terminate()
+        app.launchArguments += ["--paper-preview-estimate-recovery-newer-revision", "--commercial-draft-test-cleanup-fails"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20))
+        review.tap(); app.buttons["Reload and discard my edits"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "draft could not be cleared")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(review.exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-estimate-recovery-newer-revision" || $0 == "--commercial-draft-test-cleanup-fails" }
+        app.launch()
+        let reopened = app.textFields["Estimate title"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 20))
+        XCTAssertEqual(reopened.value as? String, original + " retained")
+    }
+
+    func testLateReloadAfterDismissalKeepsRecoveredDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" retained")
+        XCTAssertEqual(title.value as? String, original + " retained")
+        app.terminate()
+        app.launchArguments.append("--paper-preview-estimate-recovery-held-reload")
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20))
+        review.tap()
+        app.buttons["Reload and discard my edits"].tap()
+        let count = app.staticTexts["estimate-held-reload-count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "waiting"), evaluatedWith: count)
+        waitForExpectations(timeout: 10)
+        app.buttons["estimate-held-reload-dismiss"].tap()
+        XCTAssertTrue(count.waitForNonExistence(timeout: 10))
+        // Let the deliberately delayed server reply arrive after the view is gone.
+        let delivered = XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)
+        delivered.isInverted = true
+        wait(for: [delivered], timeout: 2)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-estimate-recovery-held-reload" }
+        app.launch()
+        let reopened = app.textFields["Estimate title"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 20))
+        XCTAssertEqual(reopened.value as? String, original + " retained")
+    }
+
+    func testFailedCleanupAfterUndoStillRequiresDiscardConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString, "--commercial-draft-test-cleanup-fails"]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText("x")
+        title.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertEqual(title.value as? String, original)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "undone draft could not be removed")).firstMatch.waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved draft could not be removed")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(title.exists, "The editor must remain available while cleanup is unresolved")
+    }
+
+    func testWhitespaceOnlyTitleEditRequiresDiscardConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap()
+        title.typeText(" ")
+        XCTAssertEqual(title.value as? String, original + " ")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+    }
+
+    func testUndoToOriginalTitleDoesNotResurrectAnOldLocalDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        XCTAssertFalse(original.isEmpty)
+        title.tap(); title.typeText("x")
+        XCTAssertNotEqual(title.value as? String, original)
+        title.typeText(XCUIKeyboardKey.delete.rawValue)
+        XCTAssertEqual(title.value as? String, original)
+        app.terminate()
+        app.launch()
+        let reopened = app.textFields["Estimate title"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 30))
+        XCTAssertEqual(reopened.value as? String, original)
+    }
+
     func testRevisionShowsLengthWarningWhenSavingWithNumberKeyboardOpen() {
         continueAfterFailure = false
         let app = XCUIApplication()

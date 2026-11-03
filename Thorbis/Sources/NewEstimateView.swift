@@ -22,6 +22,12 @@ struct NewEstimateView: View {
     @State private var ownsDraft = false
     @State private var viewVisible = false
     @State private var didRestoreDraft = false
+    @State private var didRecoverDraft = false
+    @State private var wroteFreshDraft = false
+    @State private var verifiedScope: EstimateCreationScope?
+    @State private var accessAttempt = UUID()
+    @State private var verifiedCustomerID: String?
+    @State private var verifiedCreatedID: String?
     @State private var intentionallyDiscarded = false
     @State private var cleanupFailedAfterSave = false
     @State private var picker: EstimateBuilderTarget?
@@ -48,6 +54,8 @@ struct NewEstimateView: View {
     @State private var descriptionProblem: String?
     private let jobID: String?
     private let jobLocationID: String?
+    private let initialCustomerID: String
+    private let initialTitle: String
     private let draftDocumentKey: String
     private let onCreated: (EstimateRecord) -> Void
 
@@ -56,6 +64,8 @@ struct NewEstimateView: View {
         _title = State(initialValue: title)
         self.jobID = jobID
         self.jobLocationID = jobID == nil ? nil : locationID
+        self.initialCustomerID = customerID
+        self.initialTitle = title
         self.draftDocumentKey = "job:\(jobID ?? "")|customer:\(customerID)|location:\(locationID ?? "")"
         self.onCreated = onCreated
     }
@@ -80,6 +90,45 @@ struct NewEstimateView: View {
         guard let originalScope, let creationScope else { return false }
         return originalScope.sameIdentityAndTransport(as: creationScope)
     }
+    private struct DraftCheckKey: Equatable {
+        let scope: EstimateCreationScope?
+        let customer: String
+        let created: String?
+        let offline: Bool
+        let ownsDraft: Bool
+    }
+    private var draftCheckKey: DraftCheckKey { .init(scope: creationScope, customer: customerID, created: created?.id, offline: session.isOffline, ownsDraft: ownsDraft) }
+    private var canOpenDraft: Bool {
+        session.can("estimate.create", feature: "estimates") ||
+            (session.can("estimate.view", feature: "estimates") &&
+             (jobID == nil || (session.can("job.view", feature: "jobs") && session.can("job.edit", feature: "jobs"))))
+    }
+    private func openDraft() {
+        viewVisible = true
+        if !scopeCaptured { scopeCaptured = true; originalScope = creationScope }
+        guard scopeMatches, canOpenDraft, let draftScope else { return }
+        guard CommercialDraftStore.shared.acquire(scope: draftScope, owner: draftOwner) else {
+            draftRecoveryBlocked = true; error = "This draft is already open in another window."; return
+        }
+        ownsDraft = true
+        if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
+        if !didRecoverDraft && !draftRecoveryBlocked {
+            verifiedScope = creationScope; verifiedCustomerID = customerID; verifiedCreatedID = created?.id
+        }
+    }
+    private var recoveryPermission: Bool {
+        if created != nil {
+            return session.can("estimate.view", feature: "estimates") &&
+                (jobID == nil || (session.can("job.view", feature: "jobs") && session.can("job.edit", feature: "jobs")))
+        }
+        return session.can("estimate.create", feature: "estimates")
+    }
+    private var resourceAuthorized: Bool {
+        guard let creationScope else { return false }
+        return (!didRecoverDraft || !session.isOffline) && scopeMatches && verifiedScope == creationScope &&
+            (!didRecoverDraft || (verifiedCustomerID == customerID && verifiedCreatedID == created?.id)) &&
+            recoveryPermission && !draftRecoveryBlocked
+    }
     private var draftScope: CommercialDraftScope? {
         guard let originalScope else { return nil }
         return .init(actor: originalScope.actorID, organization: originalScope.organizationID,
@@ -93,15 +142,30 @@ struct NewEstimateView: View {
             requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss)
         try CommercialDraftStore.shared.save(draft, scope: draftScope)
     }
+    private var hasDraftChanges: Bool {
+        title != initialTitle || customerID != initialCustomerID || !lines.isEmpty
+    }
+    private var needsDiscardConfirmation: Bool {
+        hasDraftChanges || didRecoverDraft || wroteFreshDraft || draftRecoveryBlocked
+    }
     private func persistDraft(leavingOriginalScope: Bool = false) {
-        guard !intentionallyDiscarded, ownsDraft, (scopeMatches || leavingOriginalScope), !draftRecoveryBlocked else { return }
-        do { try saveDraft(leavingOriginalScope: leavingOriginalScope) }
-        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
+        guard !intentionallyDiscarded, ownsDraft, didRestoreDraft, (scopeMatches || leavingOriginalScope), !draftRecoveryBlocked else { return }
+        if !didRecoverDraft && !hasDraftChanges && created == nil && !createInFlight && !createOutcomeUncertain {
+            guard wroteFreshDraft, let draftScope else { return }
+            do { try CommercialDraftStore.shared.remove(scope: draftScope); wroteFreshDraft = false }
+            catch { self.error = "The undone draft could not be removed from this phone. Try again before closing." }
+            return
+        }
+        do {
+            try saveDraft(leavingOriginalScope: leavingOriginalScope)
+            if !didRecoverDraft { wroteFreshDraft = true }
+        } catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
     }
     private func restoreDraft() {
-        guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
+        guard scopeMatches, let draftScope else { return }
         do {
             guard let draft = try CommercialDraftStore.shared.load(CommercialNewEstimateDraft.self, scope: draftScope) else { return }
+            didRecoverDraft = true
             let recoveredLines = try draft.lines()
             customerID = draft.customerID; title = draft.title; lines = recoveredLines
             created = draft.created; createdScope = draft.created == nil ? nil : originalScope
@@ -115,6 +179,50 @@ struct NewEstimateView: View {
             }
         } catch { draftRecoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
     }
+    private func verifyDraftAccess() async {
+        guard viewVisible, ownsDraft, scopeMatches, let expected = creationScope, recoveryPermission else { return }
+        if !didRecoverDraft && verifiedScope == expected { return }
+        guard !session.isOffline else { return }
+        let attempt = UUID(); accessAttempt = attempt
+        let expectedCustomer = customerID
+        let expectedCreated = created
+        let expectedID = expectedCreated?.id
+        let allowed = await CommercialDraftAccess.verify(expectedScope: expected, currentScope: {
+            guard !session.isOffline, customerID == expectedCustomer, created?.id == expectedID, recoveryPermission else { return nil }
+            return creationScope
+        }, read: {
+            let job: JobRecord?
+            if let jobID { job = try await api.fieldJob(jobID, requireFresh: true) } else { job = nil }
+            let customer = expectedCustomer.isEmpty ? nil : try await api.fieldCustomer(expectedCustomer, requireFresh: true)
+            let estimate: EstimateRecord?
+            if let expectedCreated { estimate = try await api.fieldEstimate(expectedCreated.id, requireFresh: true) } else { estimate = nil }
+            return (job, customer, estimate)
+        }, matches: { result in
+            let (job, customer, estimate) = result
+            if let jobID {
+                guard let job, job.id == jobID, job.organizationId == expected.organizationID,
+                      (expectedCustomer.isEmpty || job.customerId == expectedCustomer),
+                      (jobLocationID == nil || job.locationId == jobLocationID) else { return false }
+            }
+            if !expectedCustomer.isEmpty {
+                guard let customer, customer.id == expectedCustomer, customer.organizationId == expected.organizationID else { return false }
+            }
+            if let saved = expectedCreated {
+                guard let estimate, estimate.organizationId == expected.organizationID,
+                      EstimateCreationRecovery.matchesSavedEstimate(saved, latest: estimate) else { return false }
+            }
+            return true
+        })
+        guard !Task.isCancelled, viewVisible, accessAttempt == attempt, !session.isOffline, creationScope == expected,
+              customerID == expectedCustomer, created?.id == expectedID else { return }
+        guard allowed else {
+            verifiedScope = nil
+            error = "Could not verify access to this job, customer or estimate. Your draft stays on this phone."
+            return
+        }
+        if error == "Could not verify access to this job, customer or estimate. Your draft stays on this phone." { error = nil }
+        verifiedCustomerID = expectedCustomer; verifiedCreatedID = expectedID; verifiedScope = expected
+    }
     private func discardDraft() {
         guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
         if createOutcomeUncertain || createInFlight { dismiss(); return }
@@ -122,7 +230,7 @@ struct NewEstimateView: View {
         catch { self.error = "The saved draft could not be removed. Try again." }
     }
     private var canCommit: Bool {
-        if !scopeMatches || !ownsDraft || draftRecoveryBlocked || cleanupFailedAfterSave { return false }
+        if !resourceAuthorized || !ownsDraft || cleanupFailedAfterSave { return false }
         if (createOutcomeUncertain && created == nil) || requiresManualReview { return false }
         if created != nil {
             let canView = session.can("estimate.view", feature: "estimates")
@@ -146,12 +254,20 @@ struct NewEstimateView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack { editorContainer }
+    }
+
+    private var editorBase: some View {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        if !scopeMatches || !session.can("estimate.create", feature: "estimates") {
-                            ContentUnavailableView("Workspace changed", systemImage: "lock", description: Text("Return to the original account and workspace to see your saved draft."))
+                        if !resourceAuthorized {
+                            VStack {
+                                ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text("Connect to verify access. Your draft stays on this phone."))
+                                if scopeMatches && ownsDraft && !draftRecoveryBlocked {
+                                    Button("Try again") { Task { await verifyDraftAccess() } }.buttonStyle(.bordered)
+                                }
+                            }
                         } else { builder }
                     }
                     .scrollDismissesKeyboard(.interactively)
@@ -169,20 +285,13 @@ struct NewEstimateView: View {
                         withAnimation { proxy.scrollTo(id, anchor: .center) }
                     }
                 }
-                if scopeMatches && session.can("estimate.create", feature: "estimates") { builderFooter }
+                if resourceAuthorized { builderFooter }
             }
             .keyboardDoneButton()
-            .onAppear {
-                viewVisible = true
-                if !scopeCaptured { scopeCaptured = true; originalScope = creationScope }
-                guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
-                guard CommercialDraftStore.shared.acquire(scope: draftScope, owner: draftOwner) else {
-                    draftRecoveryBlocked = true; error = "This draft is already open in another window."; return
-                }
-                ownsDraft = true
-                if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
-            }
-            .onDisappear { viewVisible = false; if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
+            .onAppear { openDraft() }
+            .task(id: draftCheckKey) { await verifyDraftAccess() }
+            .onChange(of: session.isOffline) { _, offline in if offline { accessAttempt = UUID(); if didRecoverDraft { verifiedScope = nil } } }
+            .onDisappear { viewVisible = false; accessAttempt = UUID(); if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
             .trackKeyboard($keyboardUp)
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
@@ -197,6 +306,21 @@ struct NewEstimateView: View {
                                     .accessibilityIdentifier("estimate-recovery-request-counts")
                                     .accessibilityValue(EstimateRecoveryPreview.shared.counts)
                             }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-toggle-offline") {
+                                Text(session.isOffline ? "Sample offline" : "Sample online")
+                                    .accessibilityIdentifier("estimate-recovery-network-state")
+                                Button("Toggle sample network") {
+                                    PaperPreviewProtocol.simulateNoSignal.toggle()
+                                    Task { await session.revalidate() }
+                                }.accessibilityIdentifier("estimate-recovery-toggle-network")
+                            }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-toggle-job") {
+                                Button("Toggle sample job access") {
+                                    EstimateRecoveryPreview.shared.toggleJobAccess()
+                                    Task { await session.revalidate() }
+                                }
+                                .accessibilityIdentifier("estimate-recovery-toggle-job")
+                            }
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
                                     Task {
@@ -210,10 +334,15 @@ struct NewEstimateView: View {
                 }
                 #endif
                 ThorbisToolbarItem(placement: .cancellationAction) {
-                    Button(created == nil ? "Cancel" : "Close") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
+                    Button(created == nil ? "Cancel" : "Close") { if created != nil { dismiss() } else if needsDiscardConfirmation { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
             }
-            .discardChangesGuard(hasChanges: (!lines.isEmpty && created == nil) || draftRecoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
+
+    }
+
+    private var editorContainer: some View {
+        editorBase
+            .discardChangesGuard(hasChanges: (created == nil && needsDiscardConfirmation) || draftRecoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
             .onChange(of: title) { _, _ in persistDraft() }
             .onChange(of: customerID) { _, _ in persistDraft() }
             .onChange(of: lines) { _, _ in persistDraft() }
@@ -237,6 +366,10 @@ struct NewEstimateView: View {
                     refresh: { await refreshCatalog(force: $0) }
                 )
                 .environmentObject(session).environmentObject(api)
+                .opacity(resourceAuthorized ? 1 : 0)
+                .accessibilityHidden(!resourceAuthorized)
+                .allowsHitTesting(resourceAuthorized)
+                .overlay { if !resourceAuthorized { ContentUnavailableView("Checking access", systemImage: "lock") } }
             } }
             .thorbisConfirm("Continue without item groups?",
                             message: "The saved estimate did not keep the Work and Materials groups. Item descriptions, prices and visibility are unchanged. Continue without those groups, or ask your office for help.",
@@ -263,7 +396,6 @@ struct NewEstimateView: View {
                 guard !Task.isCancelled, customerID == expected else { return }
                 memberPricing = pricing
             }
-        }
     }
 
     private var builderFooter: some View {
@@ -449,7 +581,7 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
-        guard scopeMatches, ownsDraft, !draftRecoveryBlocked, !cleanupFailedAfterSave else { error = "Your workspace changed. Your draft is still on this phone."; return }
+        guard resourceAuthorized, ownsDraft, !cleanupFailedAfterSave else { error = "Your access changed. Your draft is still on this phone."; return }
         guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss) else { return }
         guard recovery.mayProceed(validDraft: valid) else {
             if created == nil && !valid { _ = showProblems() }
@@ -557,7 +689,7 @@ struct NewEstimateView: View {
                     return false
                 }
                 requiresGroupDisclosure = groupResult == .missing && groupsMatter
-                try saveDraft()
+                try saveDraft(leavingOriginalScope: true)
                 guard creationScope == scope else { return }
                 if requiresManualReview {
                     error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but its details differ from your submission. Ask your office to review it."
