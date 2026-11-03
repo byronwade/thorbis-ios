@@ -681,6 +681,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if let preview = EstimateRecoveryPreview.shared.reply(for: request), let url = request.url,
+           let response = HTTPURLResponse(url: url, statusCode: preview.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+            let deliver: @Sendable () -> Void = { [weak self] in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                if let body = try? JSONSerialization.data(withJSONObject: preview.payload) { self.client?.urlProtocol(self, didLoad: body) }
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if preview.hold { EstimateRecoveryPreview.shared.hold(deliver) } else { deliver() }
+            return
+        }
         if PaperPreview.isJobEstimateHandoff, let response = JobEstimateHandoffPreview.shared.response(request) {
             if let error = response.error { client?.urlProtocol(self, didFailWithError: error); return }
             guard let url = request.url, let http = HTTPURLResponse(url: url, statusCode: response.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type":"application/json"]) else { return }
@@ -1066,6 +1077,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "months": months.map { ["month": $0.0, "revenue": $0.1, "collected": $0.2] },
                     "receivable": ["openInvoices": 9, "balance": 733_000, "overdueInvoices": 2, "overdueBalance": 620_000]] as [String: Any]
         }
+        if PaperPreview.screen == "customer-money",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-money-partial") {
+            var invoice = (jsonObject(PaperPreview.issuedInvoice) as? [String: Any]) ?? [:]
+            invoice["amountPaid"] = 10_000
+            if path == "/v1/invoices" { return ["items": matchingCustomer([invoice], queryItems: queryItems)] }
+            if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return ["items": [invoice]] }
+            if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" { return invoice }
+            if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/payments" {
+                var payment = (jsonObject(PaperPreview.refundPayment) as? [String: Any]) ?? [:]
+                payment["id"] = "00000000-0000-4000-8000-000000002260"
+                payment["invoiceId"] = PaperPreview.issuedInvoice.id
+                payment["amount"] = ["amount": 10_000, "currency": "USD"]
+                payment["netAmount"] = ["amount": 10_000, "currency": "USD"]
+                payment["idempotencyKey"] = "paper-preview-customer-partial-payment"
+                return ["items": [payment]]
+            }
+        }
         if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
             if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
@@ -1148,6 +1176,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-group-feature") { enabledFeatures.append("estimate_line_groups") }
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }

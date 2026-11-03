@@ -338,7 +338,7 @@ struct JobDetailView: View {
             if let id = createdEstimateID { createdEstimateID = nil; openEstimate = OpenedEstimate(id: id, present: false) }
         }) { SheetSurface {
             if let job {
-                NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { estimate in
+                NewEstimateView(customerID: job.customerId, jobID: job.id, locationID: job.locationId, title: job.title) { estimate in
                     createdEstimateID = estimate.id
                     Task { await loadJobEstimates(job) }
                 }

@@ -21,6 +21,31 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-11-02-estimate-text",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "text.alignleft", title: "Keep your estimate wording",
+                      detail: "Long item text stays in the editor, with guidance when it needs to be shortened to save."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-job-estimate-location",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Create estimates at the job site",
+                      detail: "New job estimates use the job’s location, so they can be added to that job."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-customer-money-rows",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "doc.text", title: "Find a customer's documents faster",
+                      detail: "See each estimate and invoice's reference, status, and available total on the customer page."),
+            ],
+            fixes: 0
+        ),
+        ReleaseNote(
             id: "2026-11-02-clear-note-box",
             date: "2026-11-02",
             highlights: [

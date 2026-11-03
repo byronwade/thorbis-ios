@@ -16,24 +16,35 @@ struct NewEstimateView: View {
     @State private var error: String?
     @State private var picker: EstimateBuilderTarget?
     @State private var expandedLine: UUID?
+    @State private var revealProblem = 0
     @State private var keyboardUp = false
     @State private var removed: RemovedLine?
     @State private var confirmDiscard = false
     @FocusState private var focus: EstimateBuilderFocus?
     /// Set once the server created the estimate, so a retry only links it and never creates a duplicate.
     @State private var created: EstimateRecord?
+    @State private var createdScope: EstimateCreationScope?
+    @State private var requiresLocationVerification = false
+    @State private var requiresManualReview = false
+    @State private var requiresGroupDisclosure = false
+    @State private var acceptedGroupLoss = false
+    @State private var confirmGroupLoss = false
+    @State private var createOutcomeUncertain = false
     @State private var memberPricing: MemberPricing?
     /// Shown after Save is pressed (validate on commit): what is missing, under its place.
     @State private var titleProblem: String?
     @State private var customerProblem: String?
     @State private var linesProblem: String?
+    @State private var descriptionProblem: String?
     private let jobID: String?
+    private let jobLocationID: String?
     private let onCreated: (EstimateRecord) -> Void
 
-    init(customerID: String = "", jobID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
+    init(customerID: String = "", jobID: String? = nil, locationID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
         _customerID = State(initialValue: customerID)
         _title = State(initialValue: title)
         self.jobID = jobID
+        self.jobLocationID = jobID == nil ? nil : locationID
         self.onCreated = onCreated
     }
 
@@ -41,11 +52,34 @@ struct NewEstimateView: View {
     /// EB-13: the workspace stores line groups and the materials switch.
     private var storesLineGroups: Bool { session.isFeatureOn("estimate_line_groups") }
     private var total: Int? { lines.isEmpty ? nil : lines.subtotal() }
+    private var editableLines: Binding<[EstimateRevisionLineDraft]> {
+        Binding(get: { lines }, set: { proposed in
+            guard recovery.canEdit else { return }
+            lines = proposed
+        })
+    }
+    private var creationScope: EstimateCreationScope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let origin = api.normalizedOrigin else { return nil }
+        return .init(actorID: actor, organizationID: organization, sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                     requestGeneration: api.requestGeneration, origin: origin)
+    }
+    private var canCommit: Bool {
+        if createOutcomeUncertain || requiresManualReview { return false }
+        if created != nil {
+            let canView = session.can("estimate.view", feature: "estimates")
+            return jobID == nil ? canView : canView && session.can("job.edit", feature: "jobs")
+        }
+        return session.can("estimate.create", feature: "estimates")
+    }
+    private var recovery: EstimateCreationRecovery {
+        .init(isSaving: busy, savedEstimateID: created?.id, createOutcomeUncertain: createOutcomeUncertain)
+    }
 
     var valid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
         lines.allSatisfy { line in
-            !line.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            line.estimateDescriptionProblem == nil &&
             (Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...100_000).contains($0) } ?? false) &&
             MoneyInput.cents(line.unitPrice) != nil
         }
@@ -53,8 +87,9 @@ struct NewEstimateView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                ScrollView { builder }
+            VStack(spacing: 0) {
+                ScrollViewReader { proxy in
+                    ScrollView { builder }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: focus) { _, value in
                         guard let id = value?.lineID else { return }
@@ -65,6 +100,12 @@ struct NewEstimateView: View {
                         guard let id else { return }
                         withAnimation { proxy.scrollTo(id, anchor: .center) }
                     }
+                    .onChange(of: revealProblem) { _, _ in
+                        guard let id = expandedLine else { return }
+                        withAnimation { proxy.scrollTo(id, anchor: .center) }
+                    }
+                }
+                builderFooter
             }
             .keyboardDoneButton()
             .trackKeyboard($keyboardUp)
@@ -72,28 +113,32 @@ struct NewEstimateView: View {
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if DEBUG
+                if EstimateRecoveryPreview.enabled {
+                    ThorbisToolbarItem(placement: .principal) {
+                        HStack {
+                            TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                                Text("Sample requests")
+                                    .accessibilityIdentifier("estimate-recovery-request-counts")
+                                    .accessibilityValue(EstimateRecoveryPreview.shared.counts)
+                            }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
+                                Button("Revalidate sample") {
+                                    Task {
+                                        await session.revalidate()
+                                        EstimateRecoveryPreview.shared.release()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                #endif
                 ThorbisToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
+                    Button(created == nil ? "Cancel" : "Close") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
                 }
             }
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    if let removed {
-                        LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
-                    }
-                    // While typing, only the commit stays: the total would sit on the field being edited.
-                    if !keyboardUp {
-                        EstimateBuilderTotal(total: total, detail: memberLine)
-                    }
-                    // Not pre-disabled: pressed with something missing, it says what under that place.
-                    PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
-                                   disabled: !session.can("estimate.create", feature: "estimates"),
-                                   disabledReason: session.can("estimate.create", feature: "estimates") ? nil : "Your role can't create estimates. Ask your office.") {
-                        if showProblems() { Task { await save() } }
-                    }
-                }
-            }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "this estimate" : title,
@@ -106,10 +151,23 @@ struct NewEstimateView: View {
                 )
                 .environmentObject(session).environmentObject(api)
             } }
+            .thorbisConfirm("Continue without item groups?",
+                            message: "The saved estimate did not keep the Work and Materials groups. Item descriptions, prices and visibility are unchanged. Continue without those groups, or ask your office for help.",
+                            isPresented: $confirmGroupLoss,
+                            actions: [ThorbisConfirmAction("Continue without groups") {
+                                acceptedGroupLoss = true
+                                Task { await save() }
+                            }])
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation)) { await refreshCatalog() }
             .onChange(of: customerID) { _, _ in customerProblem = nil }
-            .onChange(of: lines.count) { _, _ in linesProblem = nil }
+            .onChange(of: lines.count) { _, _ in
+                linesProblem = nil
+                if descriptionProblem != nil { refreshDescriptionProblem() }
+            }
+            .onChange(of: lines.map(\.description)) { _, _ in
+                if descriptionProblem != nil { refreshDescriptionProblem() }
+            }
             .task(id: customerID) {
                 memberPricing = nil
                 guard !customerID.isEmpty else { return }
@@ -121,6 +179,29 @@ struct NewEstimateView: View {
         }
     }
 
+    private var builderFooter: some View {
+        VStack(spacing: 0) {
+            if let removed {
+                LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
+            }
+            if !keyboardUp { EstimateBuilderTotal(total: total, detail: memberLine) }
+            if let descriptionProblem {
+                FieldProblem(message: descriptionProblem)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.gutter)
+            }
+            PaperActionBar(title: commitTitle, symbol: "doc.badge.plus", busy: busy,
+                           disabled: !canCommit,
+                           disabledReason: canCommit ? nil : (requiresManualReview ? "Ask your office to review the saved estimate." : createOutcomeUncertain ? "Check Estimates or ask your office before starting another." : created == nil ? "Your role can't create estimates. Ask your office." : jobID == nil ? "Your role can't view this estimate. Ask your office." : "Your role can't add this estimate to the job. Ask your office.")) {
+                if requiresGroupDisclosure && !acceptedGroupLoss { confirmGroupLoss = true }
+                else if showProblems() { Task { await save() } }
+            }
+        }
+        // The floating keyboard accessory is 44pt high and otherwise sits over Save.
+        .padding(.bottom, keyboardUp ? 48 : 0)
+        .background(Theme.canvas)
+    }
+
     /// MF-05: what a member would pay, under the total. The saved prices stay the price book's.
     private var memberLine: String? {
         guard let memberPricing, let sum = lines.memberTotal(memberPricing) else { return nil }
@@ -128,7 +209,10 @@ struct NewEstimateView: View {
     }
 
     private var commitTitle: String {
-        if created != nil { return "Retry adding to job" }
+        if created != nil {
+            if requiresGroupDisclosure && !acceptedGroupLoss { return "Continue without groups" }
+            return jobID == nil ? "Open saved estimate" : "Retry adding to job"
+        }
         guard let total else { return "Save estimate" }
         return "Save estimate · \(money(total, currency: "USD"))"
     }
@@ -143,6 +227,7 @@ struct NewEstimateView: View {
                 TextField("", text: $title, prompt: .placeholder("Furnace replacement"), axis: .vertical)
                     .font(Theme.font(24, weight: .medium)).tracking(-0.3)
                     .accessibilityLabel("Estimate title")
+                    .disabled(!recovery.canEdit)
                     .onChange(of: title) { _, _ in titleProblem = nil }
                 if let titleProblem { FieldProblem(message: titleProblem) }
                 HStack(spacing: 10) {
@@ -154,14 +239,14 @@ struct NewEstimateView: View {
                              tint: customerID.isEmpty ? Theme.brandText : Theme.muted)
                             .padding(.vertical, 10).contentShape(Rectangle())
                     }
-                    .disabled(jobID != nil && !customerID.isEmpty)
+                    .disabled(!recovery.canEdit || (jobID != nil && !customerID.isEmpty))
                 }
                 if let customerProblem { FieldProblem(message: customerProblem) }
             }
 
             EstimateBuilderSection(
                 label: lines.isEmpty ? "Items" : "Items · \(lines.count)",
-                lines: $lines, disabled: busy, focus: $focus, expandedLine: $expandedLine,
+                lines: editableLines, disabled: !recovery.canEdit, focus: $focus, expandedLine: $expandedLine,
                 showTotal: false, materialsSwitch: storesLineGroups,
                 addItem: { picker = EstimateBuilderTarget() },
                 removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
@@ -190,7 +275,7 @@ struct NewEstimateView: View {
 
     /// One more of a price book item; returns why it couldn't be added, or nil.
     private func add(_ item: PriceBookListItem, group: EstimateLineGroup?) -> String? {
-        guard !busy else { return "Saving. Try again in a moment." }
+        guard recovery.canEdit else { return "This estimate is being saved or has already been saved." }
         var addedLine = false
         withAnimation(EstimateLineGroupsEditor.spring) { addedLine = lines.addPriceBookItem(item, to: group) != nil }
         guard addedLine else { return "An estimate can contain up to 500 line items." }
@@ -198,7 +283,7 @@ struct NewEstimateView: View {
     }
 
     private func addCustom(_ text: String, group: EstimateLineGroup?) {
-        guard !busy else { return }
+        guard recovery.canEdit else { return }
         guard let id = lines.addCustomLine(text, to: group ?? .work) else {
             error = "An estimate can contain up to 500 line items."
             return
@@ -211,7 +296,7 @@ struct NewEstimateView: View {
     }
 
     private func undoRemove() {
-        guard let removed else { return }
+        guard recovery.canEdit, let removed else { return }
         withAnimation(EstimateLineGroupsEditor.spring) {
             lines.restoreLine(removed.line, at: removed.index)
             self.removed = nil
@@ -219,51 +304,206 @@ struct NewEstimateView: View {
     }
 
     /// Fills each problem slot; true when the estimate can be saved.
+    private func refreshDescriptionProblem() {
+        if lines.contains(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
+            descriptionProblem = "A price book item's original description is too long for an estimate. Ask your office to update it, then add it again."
+        } else if lines.contains(where: { $0.estimateDescriptionProblem == .tooLong }) {
+            descriptionProblem = "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+        } else {
+            descriptionProblem = nil
+        }
+    }
+
     private func showProblems() -> Bool {
         guard created == nil else { return true }
         titleProblem = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Name the work, like \u{201C}Furnace replacement.\u{201D}" : nil
         customerProblem = customerID.isEmpty ? "Choose the customer this estimate is for." : nil
-        linesProblem = lines.isEmpty ? "Add at least one item."
-            : valid || titleProblem != nil || customerProblem != nil ? nil
-            : "Each item needs a description, a quantity from 1 to 100,000 and a price like 145.00."
+        descriptionProblem = nil
+        if lines.isEmpty {
+            linesProblem = "Add at least one item."
+        } else if let longLine = lines.first(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
+            linesProblem = nil
+            refreshDescriptionProblem()
+            expandedLine = longLine.id
+            revealProblem += 1
+        } else if let longLine = lines.first(where: { $0.estimateDescriptionProblem == .tooLong }) {
+            linesProblem = nil
+            refreshDescriptionProblem()
+            expandedLine = longLine.id
+            revealProblem += 1
+        } else {
+            linesProblem = valid || titleProblem != nil || customerProblem != nil ? nil
+                : "Each item needs a description, a quantity from 1 to 100,000 and a price like 145.00."
+        }
         return valid
     }
 
+    /// Carry the job location into the estimate so the server can link matching records.
+    /// The link command remains authoritative if the job has changed since this form opened.
+    func creationRequest() -> FieldEstimateCreate {
+        FieldEstimateCreate(
+            customerId: customerID,
+            title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            lines: lines.map { line in
+                let presentation = lines.storedPresentation(of: line, storesGroups: storesLineGroups)
+                return .init(description: line.description.trimmingCharacters(in: .whitespacesAndNewlines),
+                             quantity: Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
+                             unitPrice: .init(amount: MoneyInput.cents(line.unitPrice) ?? 0, currency: "USD"),
+                             source: line.source ?? .manual,
+                             group: presentation.group, showToCustomer: presentation.showToCustomer)
+            },
+            locationId: jobLocationID)
+    }
+
     private func save() async {
-        guard valid else { return }
+        guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss),
+              recovery.mayProceed(validDraft: valid) else { return }
+        guard let scope = creationScope else {
+            error = "Your session changed. Check your workspace before continuing."
+            return
+        }
+        if let savedScope = createdScope, !savedScope.sameIdentityAndTransport(as: scope) {
+            error = "Your session or workspace changed. Check the saved estimate in its original workspace before continuing."
+            return
+        }
+        focus = nil
+        removed = nil
         busy = true
         defer { busy = false }
+        var createStarted = false
         do {
             let estimate: EstimateRecord
             if let created {
+                do {
+                    // A retry or consent may follow another actor changing this saved estimate.
+                    // Recheck the authorized record and job before every link attempt.
+                    guard session.can("estimate.view", feature: "estimates"),
+                          jobID == nil || (session.can("job.view", feature: "jobs") && session.can("job.edit", feature: "jobs")) else {
+                        error = "Your access changed. Ask your office to check the saved estimate."
+                        return
+                    }
+                    let latest = try await api.fieldEstimate(created.id, requireFresh: true)
+                    guard creationScope == scope else { return }
+                    guard EstimateCreationRecovery.matchesSavedEstimate(created, latest: latest),
+                          latest.organizationId == scope.organizationID else {
+                        error = "The saved estimate or your access changed. Check it before continuing."
+                        return
+                    }
+                    if let jobID {
+                        let job = try await api.fieldJob(jobID, requireFresh: true)
+                        guard creationScope == scope else { return }
+                        guard job.id == jobID, job.organizationId == scope.organizationID,
+                              job.customerId == latest.customerId, job.locationId == latest.locationId,
+                              session.can("job.view", feature: "jobs"), session.can("job.edit", feature: "jobs"),
+                              session.can("estimate.view", feature: "estimates") else {
+                            error = "The job or your access changed. Check the saved estimate before continuing."
+                            return
+                        }
+                    }
+                    guard creationScope == scope, session.can("estimate.view", feature: "estimates") else { return }
+                    createdScope = scope
+                    requiresLocationVerification = false
+                }
                 estimate = created
             } else {
-                estimate = try await api.createFieldEstimate(.init(
-                    customerId: customerID,
-                    title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-                    lines: lines.map { line in
-                        let presentation = lines.storedPresentation(of: line, storesGroups: storesLineGroups)
-                        return .init(description: line.description.trimmingCharacters(in: .whitespacesAndNewlines),
-                                     quantity: Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1,
-                                     unitPrice: .init(amount: MoneyInput.cents(line.unitPrice) ?? 0, currency: "USD"),
-                                     source: line.source ?? .manual,
-                                     group: presentation.group, showToCustomer: presentation.showToCustomer)
-                    }))
+                guard session.can("estimate.create", feature: "estimates") else {
+                    error = "Your role can't create estimates. Ask your office."
+                    return
+                }
+                let submitted = creationRequest()
+                createStarted = true
+                estimate = try await api.createFieldEstimate(submitted)
+                createStarted = false
+                guard UUID(uuidString: estimate.id) != nil, estimate.organizationId == scope.organizationID,
+                      estimate.customerId == customerID,
+                      estimate.createdByUserId.lowercased() == scope.actorID.lowercased() else {
+                    // The response cannot safely identify the submitted work; do not create again.
+                    createOutcomeUncertain = true
+                    if creationScope == scope {
+                        error = "The saved estimate could not be verified. Ask your office to check before starting another."
+                    }
+                    return
+                }
+                // Retain the server identity and its original scope even if the session changes
+                // while the response is in flight; never attach it under another identity.
                 created = estimate
-                // On a job, the estimate opens only once it's attached; an unattached one in job
-                // context would never count as the job's estimate.
-                if jobID == nil { onCreated(estimate) }
+                createdScope = scope
+                requiresLocationVerification = estimate.locationId != jobLocationID
+                let groupResult = EstimateCreationRecovery.groupResult(submitted, created: estimate)
+                requiresManualReview = !EstimateCreationRecovery.matchesSubmittedTerms(submitted, created: estimate) ||
+                    groupResult == .conflicting || (jobID == nil && requiresLocationVerification)
+                // Missing groups are irrelevant for an all-Work estimate unless a person moved
+                // a line or a price-book material may be reclassified after reopening.
+                let groupsMatter = lines.contains { line in
+                    if line.group == .material { return true }
+                    if case let .priceBookSelection(id, _) = line.source {
+                        guard let kind = catalog.items.first(where: { $0.id == id })?.kind else { return true }
+                        return kind == "material"
+                    }
+                    return false
+                }
+                requiresGroupDisclosure = groupResult == .missing && groupsMatter
+                guard creationScope == scope else { return }
+                if requiresManualReview {
+                    error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but its details differ from your submission. Ask your office to review it."
+                    return
+                }
+                if requiresGroupDisclosure {
+                    error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved without its item groups. Review this before continuing."
+                    return
+                }
+                if requiresLocationVerification {
+                    error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved with a different location. Retry to verify the job, or ask your office for help."
+                    return
+                }
             }
             if let jobID {
-                do { _ = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id) }
-                catch is CancellationError { return }
-                catch {
-                    self.error = "The estimate was saved but could not be added to the job. \(error.localizedDescription)"
+                guard creationScope == scope else { return }
+                guard session.can("job.edit", feature: "jobs"),
+                      session.can("estimate.view", feature: "estimates") else {
+                    error = "Your session or access changed. Ask your office to check the saved estimate in its original workspace."
+                    return
+                }
+                do {
+                    let link = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id)
+                    guard creationScope == scope else { return }
+                    guard EstimateCreationRecovery.isExpectedLink(link, jobID: jobID, estimateID: estimate.id) else {
+                        self.error = "The job link could not be confirmed. Ask your office to check the saved estimate."
+                        return
+                    }
+                } catch {
+                    guard creationScope == scope else { return }
+                    self.error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but adding it to this job could not be confirmed. Retry or ask your office for help. Edit it after it is linked."
+                    return
+                }
+                guard creationScope == scope else { return }
+                guard session.can("job.edit", feature: "jobs"),
+                      session.can("estimate.view", feature: "estimates") else {
+                    error = "Your session or access changed. Ask your office to check the saved estimate in its original workspace."
+                    return
+                }
+                onCreated(estimate)
+            } else {
+                guard creationScope == scope else { return }
+                guard session.can("estimate.view", feature: "estimates") else {
+                    error = "Your session or access changed. Ask your office to check the saved estimate in its original workspace."
                     return
                 }
                 onCreated(estimate)
             }
+            guard creationScope == scope else { return }
             dismiss()
-        } catch is CancellationError {} catch { self.error = error.localizedDescription }
+        } catch {
+            // A timeout, cancellation or malformed success may follow a committed create.
+            // Hold this editor from submitting another create; its draft remains in memory.
+            let uncertain = createStarted && !EstimateCreationRecovery.isDefinitiveRejection(error)
+            if uncertain { createOutcomeUncertain = true }
+            guard creationScope == scope else { return }
+            if uncertain {
+                self.error = "The save could not be confirmed. Check Estimates or ask your office before starting another. Your text is still here."
+            } else if !(error is CancellationError) {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }

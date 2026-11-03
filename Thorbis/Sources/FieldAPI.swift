@@ -1112,7 +1112,9 @@ extension APIClient {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await allFieldPages("/v1/estimates", queryItems: [URLQueryItem(name: "customerId", value: customerID)])
     }
-    func fieldEstimate(_ id: String) async throws -> EstimateRecord { try await send("GET", fieldPath("/v1/estimates", id: id)) }
+    func fieldEstimate(_ id: String, requireFresh: Bool = false) async throws -> EstimateRecord {
+        try await send("GET", fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
+    }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
     }

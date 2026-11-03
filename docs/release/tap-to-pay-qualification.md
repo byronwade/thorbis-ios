@@ -21,7 +21,7 @@ Sources:
 
 | Evidence in current iOS source / pinned SDK5.8.1 | Required source work |
 | --- | --- |
-| Connection builder defaults tosAcceptancePermitted=true; checkout has invoice-collection authority, not merchant-terms authority | Explicitly disallow terms acceptance during technician checkout; provide an administrator recovery message |
+| Technician checkout sets `tosAcceptancePermitted=false`; the SDK configuration test verifies the flag | Provide and qualify an administrator-owned terms-acceptance flow on a physical device |
 | ReaderEvents ignores SDK configuration progress | Publish real progress and clear stale state |
 | No native education/replay entry | Integrate ProximityReaderDiscovery and an accessible replay path |
 | Preparation begins after invoice-scoped intent creation | Verify merchant-scoped token contract before designing launch/foreground warmup |
