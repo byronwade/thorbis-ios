@@ -67,4 +67,18 @@ import XCTest
         XCTAssertEqual(try store.read(scope: scope, id: ids[0]), draft)
     }
 
+    func testUnexpectedNameFailsClosedWithoutLosingAReadableCopy() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory)
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        try store.install(draft, scope: scope, id: id)
+        let folders = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey])
+        let folder = try XCTUnwrap(folders.first { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true })
+        try Data("unexpected".utf8).write(to: folder.appendingPathComponent("extra.txt"))
+        XCTAssertThrowsError(try store.list(scope: scope))
+        XCTAssertEqual(try store.read(scope: scope, id: id), draft)
+    }
+
 }

@@ -193,7 +193,7 @@ struct NewEstimateView: View {
         do {
             let pending = CommercialDraftStore.unpersistedEstimates.read(for: draftScope)
             let saved = try CommercialDraftStore.shared.load(CommercialNewEstimateDraft.self, scope: draftScope)
-            let copies = jobID == nil ? [] : try CommercialDraftStore.estimateRecoveryCopies.list(scope: draftScope)
+            let copies = jobID == nil ? [] : (try? CommercialDraftStore.estimateRecoveryCopies.list(scope: draftScope)) ?? []
             if !copies.isEmpty || (pending != nil && saved != nil) {
                 recoverySavedDraft = saved; recoveryMemoryDraft = pending; recoveryCopyIDs = copies
                 recoveryChoicePending = true; didRecoverDraft = true
@@ -312,6 +312,9 @@ struct NewEstimateView: View {
                         if !resourceAuthorized {
                             VStack {
                                 ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text("Connect to verify access. Your draft stays on this phone."))
+                                if recoveryPreview != nil {
+                                    Button("Back to drafts") { leaveRecoveryPreview() }.buttonStyle(.bordered)
+                                }
                                 if scopeMatches && ownsDraft && !draftRecoveryBlocked {
                                     Button("Try again") { Task { await verifyDraftAccess() } }.buttonStyle(.bordered)
                                 }
@@ -624,17 +627,18 @@ struct NewEstimateView: View {
             if let scope = draftScope, let pending = CommercialDraftStore.estimateRecoveryCopyAttempts.pendingDraft(for: scope) {
                 Button("Retry previous recovery copy") { saveRecoveryCopy(pending) }.buttonStyle(.bordered)
             }
-            Button("Back to drafts") {
-                recoveryPreview = nil; customerID = initialCustomerID; created = nil; verifiedScope = nil
-                Task { await verifyDraftAccess() }
-            }.buttonStyle(.bordered)
+            Button("Back to drafts") { leaveRecoveryPreview() }.buttonStyle(.bordered)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.gutter)
+    }
+    private func leaveRecoveryPreview() {
+        recoveryPreview = nil; customerID = initialCustomerID; created = nil; verifiedScope = nil
+        Task { await verifyDraftAccess() }
     }
     private func saveRecoveryCopy(_ draft: CommercialNewEstimateDraft) {
         guard (memoryRecoveryPending || recoveryChoicePending), scopeMatches, resourceAuthorized, ownsDraft,
               draft.customerID.lowercased() == initialCustomerID.lowercased(),
               verifiedCustomerID?.lowercased() == draft.customerID.lowercased(),
-              verifiedCreatedID == draft.created?.id, (try? draft.lines()) != nil,
+              created == nil || verifiedCreatedID == draft.created?.id, (try? draft.lines()) != nil,
               let draftScope else { error = "Review this draft and verify access before saving a recovery copy."; return }
         do {
             var discovered: [UUID]?
