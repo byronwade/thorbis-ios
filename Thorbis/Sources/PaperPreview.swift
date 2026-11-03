@@ -681,6 +681,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if let preview = EstimateRecoveryPreview.shared.reply(for: request), let url = request.url,
+           let response = HTTPURLResponse(url: url, statusCode: preview.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+            let deliver: @Sendable () -> Void = { [weak self] in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                if let body = try? JSONSerialization.data(withJSONObject: preview.payload) { self.client?.urlProtocol(self, didLoad: body) }
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if preview.hold { EstimateRecoveryPreview.shared.hold(deliver) } else { deliver() }
+            return
+        }
         if PaperPreview.isJobEstimateHandoff, let response = JobEstimateHandoffPreview.shared.response(request) {
             if let error = response.error { client?.urlProtocol(self, didFailWithError: error); return }
             guard let url = request.url, let http = HTTPURLResponse(url: url, statusCode: response.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type":"application/json"]) else { return }
@@ -1148,6 +1159,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-group-feature") { enabledFeatures.append("estimate_line_groups") }
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }

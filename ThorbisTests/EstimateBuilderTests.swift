@@ -77,6 +77,43 @@ final class EstimateBuilderTests: XCTestCase {
         XCTAssertNil(lines.subtotal(), "a line without a price has no total yet")
     }
 
+    func testCustomDescriptionIsNotSilentlyShortened() throws {
+        var lines: [EstimateRevisionLineDraft] = []
+        let fullDescription = String(repeating: "scope ", count: 40) + "last words"
+        let id = try XCTUnwrap(lines.addCustomLine(fullDescription, to: .work))
+        XCTAssertEqual(lines.first(where: { $0.id == id })?.description, fullDescription)
+    }
+
+    func testCatalogDescriptionAndOriginalStayIntactWhenUTF16LimitIsExceeded() throws {
+        var lines: [EstimateRevisionLineDraft] = []
+        let fullDescription = String(repeating: "🚰", count: 101)
+        let id = try XCTUnwrap(lines.addPriceBookItem(item(1, fullDescription, kind: "material", cents: 1200)))
+        let line = try XCTUnwrap(lines.first { $0.id == id })
+        XCTAssertEqual(line.description, fullDescription)
+        XCTAssertEqual(line.priceBookOriginal?.description, fullDescription)
+        XCTAssertEqual(line.estimateDescriptionProblem, .priceBookOriginalTooLong)
+        lines[0].description = "Shortened for the customer"
+        XCTAssertEqual(lines[0].estimateDescriptionProblem, .priceBookOriginalTooLong,
+                       "Editing the line cannot change the server-owned catalog revision")
+    }
+
+    func testManualDescriptionLimitCountsUTF16AndRetainsText() throws {
+        var lines: [EstimateRevisionLineDraft] = []
+        let fullDescription = String(repeating: "🚰", count: 101)
+        _ = try XCTUnwrap(lines.addCustomLine(fullDescription, to: .work))
+        XCTAssertEqual(lines[0].description, fullDescription)
+        XCTAssertEqual(lines[0].estimateDescriptionProblem, .tooLong)
+        lines[0].description = String(repeating: "🚰", count: 100)
+        XCTAssertNil(lines[0].estimateDescriptionProblem)
+    }
+
+    func testCreditDescriptionIsNotSilentlyShortened() throws {
+        var lines: [EstimateRevisionLineDraft] = []
+        let fullDescription = "Discount · " + String(repeating: "0", count: 201) + "%"
+        let id = try XCTUnwrap(lines.addCreditLine(fullDescription, cents: 100))
+        XCTAssertEqual(lines.first(where: { $0.id == id })?.description, fullDescription)
+    }
+
     func testDragMovesWithinAndAcrossGroups() {
         var lines: [EstimateRevisionLineDraft] = []
         let a = lines.addCustomLine("A", to: .work)!
