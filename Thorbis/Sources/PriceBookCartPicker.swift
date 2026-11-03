@@ -28,6 +28,7 @@ struct PriceBookCartPicker: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var query = ""
     @State private var kind = PriceBookKindFilter.all
@@ -44,9 +45,16 @@ struct PriceBookCartPicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            if typeSize.isAccessibilitySize {
+                searchHeader
+            } else {
+                header
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    if typeSize.isAccessibilitySize {
+                        titleHeader.padding(.horizontal, Theme.gutter)
+                    }
                     if let notice { ErrorBanner(message: notice).padding(.horizontal, Theme.gutter) }
                     if let error { ErrorBanner(message: error).padding(.horizontal, Theme.gutter) }
                     if !canUsePriceBook, addCustomLine == nil {
@@ -88,15 +96,33 @@ struct PriceBookCartPicker: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Add items").font(Theme.font(20, weight: .medium)).foregroundStyle(Theme.foreground)
-                    Text("To \(destination)").font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
+            titleHeader
+            searchControls
+        }
+        .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 10)
+    }
+
+    private var titleHeader: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add items").font(Theme.font(20, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text("To \(destination)").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            if !typeSize.isAccessibilitySize {
                 PaperCircleButton(symbol: "xmark", label: "Close", size: 36, action: { dismiss() })
             }
+        }
+    }
+
+    private var searchHeader: some View {
+        searchControls
+            .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 10)
+    }
+
+    private var searchControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
@@ -121,6 +147,9 @@ struct PriceBookCartPicker: View {
                 .frame(minHeight: 50)
                 .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
+                if typeSize.isAccessibilitySize {
+                    PaperCircleButton(symbol: "xmark", label: "Close", size: 44, action: { dismiss() })
+                }
                 if canUsePriceBook {
                     ThorbisMenu(items: PriceBookKindFilter.allCases.map { filter in
                         ThorbisMenuItem(filter.title, isSelected: filter == kind) { kind = filter }
@@ -146,7 +175,6 @@ struct PriceBookCartPicker: View {
                 Text("Showing \(kind.title.lowercased())").font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 18).padding(.bottom, 10)
     }
 
     private func add(_ item: PriceBookListItem) {
