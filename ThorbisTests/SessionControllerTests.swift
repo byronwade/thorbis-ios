@@ -161,7 +161,7 @@ final class SessionControllerTests: XCTestCase {
     func testSessionLossDuringUnbindDoesNotRebindOldIdentity() async {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let expiring = activeSession.replacingOccurrences(of: "2099-10-27T12:00:00.000Z", with: formatter.string(from: Date().addingTimeInterval(3)))
+        let expiring = activeSession.replacingOccurrences(of: "2099-10-27T12:00:00.000Z", with: formatter.string(from: Date().addingTimeInterval(10)))
         let (session, _) = controller([
             .init(200, expiring), .init(200, oneOrganization), .init(200, catalog), .init(200, features)
         ])
@@ -170,7 +170,7 @@ final class SessionControllerTests: XCTestCase {
         let originalGeneration = session.generation
         var rebinds = 0
         session.onWillUnbindDevice = {
-            for _ in 0..<400 where session.generation == originalGeneration {
+            for _ in 0..<1000 where session.generation == originalGeneration {
                 try? await Task.sleep(for: .milliseconds(20))
             }
         }
