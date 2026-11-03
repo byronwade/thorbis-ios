@@ -57,3 +57,9 @@ operation. The selected run did not include UI automation, live server requests,
 or session-switch/authority-race qualification. The API send and editor
 integration remain disabled; a verified result still requires the post-response
 checks above.
+
+## Held exact job binding
+
+Before a held command could be sent, require the freshly re-read job to match the command's tenant and job ID and the draft's exact customer and optional location, and reject a canceled job. Add mismatch tests and retain the production-off gate. This is only a necessary local check; a caller must separately prove current authority and freshness across every await, and unknown outcomes may not fall back to another creation.
+
+The held transport now requires a job snapshot whose job, tenant, draft customer and exact optional location match, and only accepts recognized non-canceled job statuses. Standalone Swift compiled the actual command model against a minimal JobRecord stub and passed job/tenant/customer/location/status cases (`/tmp/thorbis-atomic-job-binding-green.log`); XCTest source was parsed but not run. The input snapshot and draft bindings are supplied by the caller, and are not themselves proof of fresh authorization or immutable draft identity. Before enabling, persist and bind the draft customer/location to the operation, freshly validate job access immediately before send, guard session and authority across awaits, and revalidate a confirmed server result. A mismatch or unknown result must remain pending for review, never start another create.

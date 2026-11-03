@@ -117,6 +117,19 @@ struct AtomicEstimateCommand: Codable, Equatable {
                                organizationId: organizationID, policyVersion: policyVersion,
                                command: Self.command, clientCreatedAt: createdAt, payload: payload)])
     }
+    /// The server derives customer and location from the job, not this draft.
+    /// A caller must obtain `job` freshly under the same current authority lease.
+    /// A mismatch keeps the operation pending for review, never a new create.
+    func matchesDraftJob(_ job: JobRecord, customerID: String, locationID: String?) -> Bool {
+        guard UUID(uuidString: customerID) != nil,
+              locationID.map({ UUID(uuidString: $0) != nil }) ?? true,
+              job.id.lowercased() == payload.jobId,
+              job.organizationId.lowercased() == organizationID,
+              job.customerId.lowercased() == customerID.lowercased(),
+              job.locationId?.lowercased() == locationID?.lowercased(),
+              ["scheduled", "dispatched", "en_route", "arrived", "in_progress", "paused", "completed"].contains(job.status) else { return false }
+        return true
+    }
     /// Caller must freshly verify both job and estimate authority before use.
     func maySend(actorID: String, organizationID: String, jobID: String,
                  origin: String, authorized: Bool) -> Bool {

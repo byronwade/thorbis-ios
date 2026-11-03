@@ -1023,11 +1023,13 @@ extension APIClient {
     /// Held until a deployed server advertises this exact contract and the caller
     /// persists the operation before first send. No REST fallback is safe here.
     func sendAtomicEstimate(_ operation: AtomicEstimateCommand, actorID: String,
-                            organizationID: String, jobID: String, authorized: Bool) async throws -> AtomicEstimateCommand.Decision {
+                            organizationID: String, job: JobRecord, draftCustomerID: String,
+                            draftLocationID: String?, authorized: Bool) async throws -> AtomicEstimateCommand.Decision {
         guard AtomicEstimateCommand.productionEnabled,
               let origin = normalizedOrigin,
-              operation.maySend(actorID: actorID, organizationID: organizationID, jobID: jobID,
-                                origin: origin, authorized: authorized) else {
+              operation.maySend(actorID: actorID, organizationID: organizationID, jobID: job.id,
+                                origin: origin, authorized: authorized),
+              operation.matchesDraftJob(job, customerID: draftCustomerID, locationID: draftLocationID) else {
             throw AtomicEstimateCommand.Invalid.scope
         }
         let generation = requestGeneration

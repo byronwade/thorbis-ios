@@ -17,6 +17,28 @@ final class AtomicEstimateCommandTests: XCTestCase {
             deviceID: actor, policyVersion: 1, origin: "https://example.test",
             createdAt: "2026-11-03T00:00:00Z", commandID: command)
     }
+    private func jobRecord(id: String? = nil, organization: String? = nil, customer: String? = nil,
+                           location: String? = nil, status: String = "scheduled") throws -> JobRecord {
+        var data: [String: Any] = ["id": id ?? job, "organizationId": organization ?? org,
+                                   "customerId": customer ?? actor, "title": "Repair", "status": status,
+                                   "createdAt": "2026-11-03T00:00:00Z", "updatedAt": "2026-11-03T00:00:00Z"]
+        if let location { data["locationId"] = location }
+        return try JSONDecoder().decode(JobRecord.self, from: JSONSerialization.data(withJSONObject: data))
+    }
+
+    func testExactJobCustomerLocationAndStatusRequired() throws {
+        let operation = try operation()
+        XCTAssertTrue(operation.matchesDraftJob(try jobRecord(location: estimate), customerID: actor, locationID: estimate))
+        XCTAssertTrue(operation.matchesDraftJob(try jobRecord(), customerID: actor, locationID: nil))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(id: link), customerID: actor, locationID: nil))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(organization: link), customerID: actor, locationID: nil))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(customer: link), customerID: actor, locationID: nil))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(location: estimate), customerID: actor, locationID: nil))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(), customerID: actor, locationID: estimate))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(status: "canceled"), customerID: actor, locationID: nil))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(status: "unknown"), customerID: actor, locationID: nil))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(), customerID: "invalid", locationID: nil))
+    }
 
     func testDurableCommandAndWirePreserveExactIntent() throws {
         let operation = try operation()
@@ -88,7 +110,8 @@ final class AtomicEstimateCommandTests: XCTestCase {
     func testTransportCannotSendWhileCapabilityIsHeld() async throws {
         let api = APIClient(baseURL: "https://app.thorbis.com")
         do {
-            _ = try await api.sendAtomicEstimate(operation(), actorID: actor, organizationID: org, jobID: job, authorized: true)
+            _ = try await api.sendAtomicEstimate(operation(), actorID: actor, organizationID: org,
+                                                 job: jobRecord(), draftCustomerID: actor, draftLocationID: nil, authorized: true)
             XCTFail("The held command must not be sent")
         } catch AtomicEstimateCommand.Invalid.scope {
             // Capability is intentionally unavailable before server qualification.
