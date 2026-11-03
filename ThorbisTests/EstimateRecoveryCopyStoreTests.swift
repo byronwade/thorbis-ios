@@ -19,4 +19,19 @@ import XCTest
         XCTAssertThrowsError(try store.install(.init(title: "Different", lines: []), scope: first, id: id))
         XCTAssertEqual(try store.read(scope: first, id: id), draft)
     }
+    func testReadbackFailureKeepsCopyForExactRetry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        var fail = true
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory, inspectRead: { data in
+            if fail { throw CocoaError(.fileReadUnknown) }; return data
+        })
+        XCTAssertThrowsError(try store.install(draft, scope: scope, id: id))
+        fail = false
+        XCTAssertEqual(try store.read(scope: scope, id: id), draft)
+        try store.install(draft, scope: scope, id: id)
+    }
+
 }

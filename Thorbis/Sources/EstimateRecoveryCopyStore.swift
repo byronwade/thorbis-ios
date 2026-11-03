@@ -7,7 +7,13 @@ import Foundation
     enum Failure: Error { case unavailable, conflict }
     private struct Envelope: Codable { let version: Int; let id: UUID; let scope: Scope; let draft: Draft }
     private let directory: URL
-    init(directory: URL) { self.directory = directory }
+    private let writeItem: (Data, URL) throws -> Void
+    private let inspectRead: (Data) throws -> Data
+    init(directory: URL, writeItem: ((Data, URL) throws -> Void)? = nil, inspectRead: ((Data) throws -> Data)? = nil) {
+        self.directory = directory
+        self.writeItem = writeItem ?? { data, url in try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
+        self.inspectRead = inspectRead ?? { $0 }
+    }
     private func url(_ id: UUID) -> URL { directory.appendingPathComponent(id.uuidString.lowercased() + ".json") }
     private func bytes(id: UUID, scope: Scope, draft: Draft) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
@@ -22,7 +28,7 @@ import Foundation
         try folder.setResourceValues(properties)
         let temporary = directory.appendingPathComponent(".recovery-\(UUID().uuidString).tmp")
         defer { try? FileManager.default.removeItem(at: temporary) }
-        try expected.write(to: temporary, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try writeItem(expected, temporary)
         if link(temporary.path, url(id).path) != 0 {
             let code = errno
             guard code == EEXIST else { throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO) }
@@ -44,6 +50,6 @@ import Foundation
         var details = stat()
         guard fstat(fd, &details) == 0, details.st_mode & S_IFMT == S_IFREG else { throw Failure.unavailable }
         guard let content = try handle.readToEnd() else { throw Failure.unavailable }
-        return content
+        return try inspectRead(content)
     }
 }
