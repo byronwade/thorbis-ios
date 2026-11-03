@@ -59,6 +59,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
     private var verifiedHistoryGeneration: UUID?
+    private var waitingLoadRequests: [UUID] = []
 
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
@@ -158,13 +159,34 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     }
 
     func load() async {
-        guard !isLoading else { return }
+        // A newer view task may begin before its canceled predecessor unwinds.
+        // Keep the newest waiting read, but retain earlier waiters until it
+        // finishes: cancellation of the newest must not drop a valid refresh.
+        guard !Task.isCancelled else { return }
+        let request = UUID()
         let generation = api.requestGeneration
+        waitingLoadRequests.append(request)
+        defer { waitingLoadRequests.removeAll { $0 == request } }
+        while isLoading || waitingLoadRequests.last != request {
+            do { try await Task.sleep(for: .milliseconds(50)) }
+            catch { return }
+            guard waitingLoadRequests.contains(request), generation == api.requestGeneration else { return }
+        }
+        guard !Task.isCancelled, generation == api.requestGeneration else { return }
+        let superseded = Set(waitingLoadRequests.filter { $0 != request })
+        waitingLoadRequests.removeAll { $0 == request }
         isLoading = true
+        var coalesceWaiters = false
+        var definitiveDenial = false
         historyComplete = false
         verifiedHistoryGeneration = nil
         payments = []
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            if definitiveDenial || (coalesceWaiters && !Task.isCancelled) {
+                waitingLoadRequests.removeAll { superseded.contains($0) }
+            }
+        }
         do {
             try Task.checkCancellation()
             let loadedInvoice = try await api.fieldInvoice(invoiceID)
@@ -179,6 +201,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                     return
                 }
                 useOfflineCopy(loadedInvoice)
+                coalesceWaiters = true
                 return
             }
             offlineCopy = false
@@ -200,6 +223,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             verifiedHistoryGeneration = generation
             historyComplete = true
             loadError = nil
+            coalesceWaiters = true
             if acceptedPaymentID == nil, let request = pendingRequest,
                let recovered = payments.first(where: { $0.idempotencyKey == request.idempotencyKey }) {
                 acceptedPaymentID = recovered.id
@@ -215,7 +239,12 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                let cached = invoice ?? JobDetailCache.invoice(invoiceID), acceptInvoiceMutationResponse(cached) {
                 // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
                 useOfflineCopy(cached)
+                coalesceWaiters = true
                 return
+            }
+            // A definitive denial must not be followed by an older queued retry.
+            if let status = (error as? Problem)?.status, [401, 403, 404].contains(status) {
+                definitiveDenial = true
             }
             loadError = error.localizedDescription
         }

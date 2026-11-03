@@ -326,7 +326,8 @@ private struct CustomerInvoiceBookPage: View {
     private var invoice: InvoiceRecord { model.invoice ?? original }
     private var readingAccess: DocumentDescriptionAccess {
         .init(identity: .invoice(scope: scope, record: invoice), organizationID: scope.organizationID,
-              capability: "invoice.view", feature: "invoicing", sourceGeneration: sourceGeneration, fresh: fresh, active: active, scopeValid: scope.contains(invoice))
+              capability: "invoice.view", feature: "invoicing", sourceGeneration: sourceGeneration,
+              fresh: fresh && invoice == original, active: active, scopeValid: scope.contains(invoice))
     }
     private var amounts: CustomerDocumentAmounts? { CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) }
     private var signed: Bool { invoice.customerAuthorization?.linesRevision == invoice.linesRevision }
@@ -342,6 +343,14 @@ private struct CustomerInvoiceBookPage: View {
                     if signed, let authorization = invoice.customerAuthorization {
                         Label("Signed by \(authorization.signerName)", systemImage: "signature")
                             .font(Theme.customerFont(type.body))
+                    }
+                    if fresh && invoice != original {
+                        CustomerProblemBanner(message: "This invoice changed. Refresh documents to see the latest details.",
+                                              symbol: "arrow.clockwise", actionTitle: "Refresh documents") {
+                            await refresh()
+                            guard !Task.isCancelled else { return }
+                            await model.load()
+                        }
                     }
                     if let amounts {
                         let balance = CustomerInvoiceBalanceSummary(status: invoice.status, fresh: fresh, amounts: amounts,
@@ -375,7 +384,7 @@ private struct CustomerInvoiceBookPage: View {
                 }
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
-            if fresh, model.invoice != nil, amounts != nil, ["issued", "paid"].contains(invoice.status) {
+            if fresh, invoice == original, model.invoice != nil, amounts != nil, ["issued", "paid"].contains(invoice.status) {
                 if !signed && canSign {
                     CustomerPresentationCommit(title: "Sign for the work", enabled: !model.isLoading, busy: false, type: type, action: sign)
                         .padding(Theme.gutter)
@@ -387,7 +396,23 @@ private struct CustomerInvoiceBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
-        .task(id: original) { await model.load() }
+        .task(id: original) {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-reader-replacement") { return }
+            #endif
+            await model.load()
+        }
+        #if DEBUG
+        .task(id: active) {
+            guard active, PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-reader-replacement") else { return }
+            try? await Task.sleep(for: .seconds(10))
+            if !Task.isCancelled {
+                PaperPreviewProtocol.replaceInvoiceReaderRecord()
+                _ = model.acceptInvoiceMutationResponse(PaperPreview.replacementInvoiceForDescriptionTest(original))
+            }
+        }
+        #endif
     }
 
     private var paymentHistory: some View {

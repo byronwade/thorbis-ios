@@ -104,6 +104,113 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         XCTAssertTrue(model.canRecordPayment)
     }
 
+    func testReplacementLoadWaitsForCanceledPredecessorAndFetchesCurrentInvoice() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice(), gate: gate), .init(200, invoice(amountPaid: 2500)), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let older = Task { await model.load() }
+        await waitForRequests(1)
+        let newer = Task { await model.load() }
+        await Task.yield()
+        older.cancel(); gate.release()
+        await older.value; await newer.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "The newer load must not be dropped while the older load finishes")
+        XCTAssertEqual(model.invoice?.amountPaid, 2500)
+    }
+
+    func testMultipleWaitingRefreshesCoalesceIntoOneNewLoad() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice(), gate: gate), .init(200, invoice(amountPaid: 2500)), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let older = Task { await model.load() }
+        await waitForRequests(1)
+        let first = Task { await model.load() }
+        await Task.yield()
+        let latest = Task { await model.load() }
+        await Task.yield()
+        older.cancel(); gate.release()
+        await older.value; await first.value; await latest.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertEqual(model.invoice?.amountPaid, 2500)
+    }
+
+    func testCancelingNewestWaitingLoadKeepsEarlierRefresh() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice(), gate: gate), .init(200, invoice(amountPaid: 2500)), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let older = Task { await model.load() }
+        await waitForRequests(1)
+        let earlierRefresh = Task { await model.load() }
+        await Task.yield()
+        let newestRefresh = Task { await model.load() }
+        await Task.yield(); newestRefresh.cancel()
+        await newestRefresh.value
+        older.cancel(); gate.release()
+        await older.value; await earlierRefresh.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertEqual(model.invoice?.amountPaid, 2500)
+    }
+
+    func testWaitingLoadDoesNotCrossAPIContextChange() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice(), gate: gate), .init(200, invoice(amountPaid: 2500)), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let older = Task { await model.load() }
+        await waitForRequests(1)
+        let waiting = Task { await model.load() }
+        await Task.yield()
+        client.invalidateRequests(); older.cancel(); gate.release()
+        await older.value; await waiting.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "An old caller must not start a read in the new API context")
+        XCTAssertNil(model.invoice)
+    }
+
+    func testDeniedNewestLoadDoesNotReplayOlderQueuedRequest() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice(), gate: gate), .init(403, #"{"title":"Denied","status":403}"#),
+            .init(200, invoice()), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let older = Task { await model.load() }
+        await waitForRequests(1)
+        let earlier = Task { await model.load() }; await Task.yield()
+        let newest = Task { await model.load() }; await Task.yield()
+        older.cancel(); gate.release()
+        await older.value; await newest.value; await earlier.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "A denial must not trigger an older queued read")
+        XCTAssertFalse(model.canRecordPayment)
+    }
+
+    func testCanceledWaitingLoadDoesNotStartAnotherRequest() async {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice(), gate: gate), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let older = Task { await model.load() }
+        await waitForRequests(1)
+        let waiting = Task { await model.load() }
+        await Task.yield(); waiting.cancel(); gate.release()
+        await waiting.value; await older.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(model.invoice?.amountPaid, 0)
+    }
+
     func testCancellationDoesNotLeaveAnActionableInvoiceOrHistory() async {
         let gate = URLProtocolFixture.Gate()
         defer { gate.release() }

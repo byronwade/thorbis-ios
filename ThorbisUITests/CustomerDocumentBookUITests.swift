@@ -21,6 +21,45 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
     }
 
+    func testInvoiceDescriptionDoesNotReuseFreshnessAfterReplacement() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description", "--paper-preview-invoice-reader-replacement"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15)); app.buttons["Job actions"].tap()
+        thorbisCustomerViewMenuItem(app).tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        app.swipeUp()
+        XCTAssertTrue(invoice.isHittable); invoice.tap()
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForExistence(timeout: 10))
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 20), .completed)
+        XCTAssertFalse(more.exists, "A changed invoice cannot inherit the old page's fresh reader authority")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Replacement invoice detail")).firstMatch.exists,
+                      "The replacement description remains readable inline")
+        let refresh = app.buttons["Refresh documents"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 5)); refresh.tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 10), "The reader returns once the job collection confirms the displayed invoice")
+    }
+
+    func testInvalidReplacementStillOffersDocumentRefresh() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description", "--paper-preview-invoice-reader-replacement", "--paper-preview-invoice-reader-invalid-amount"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15)); app.buttons["Job actions"].tap()
+        thorbisCustomerViewMenuItem(app).tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10)); app.swipeUp(); XCTAssertTrue(invoice.isHittable); invoice.tap()
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "amounts couldn't be verified")).firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["Refresh documents"].exists)
+    }
+
     func testDescriptionClosesOnSameOrganizationSessionReplacement() {
         assertDescriptionClosesOnAuthorityChange("--paper-preview-description-replace-session")
     }

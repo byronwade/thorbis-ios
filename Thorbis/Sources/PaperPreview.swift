@@ -70,6 +70,14 @@ enum PaperPreview {
     /// A data seed (the job's estimates and invoices), not a screen: it still opens the plain job.
     /// To capture the documents themselves use `--paper-preview-screen customer-view`.
     static var isJobDocumentsPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-documents") }
+    static func replacementInvoiceForDescriptionTest(_ invoice: InvoiceRecord) -> InvoiceRecord {
+        guard let first = invoice.lines.first else { return invoice }
+        let replacement = FieldLine(id: first.id, description: "Replacement invoice detail: " + first.description,
+                                    quantity: ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-reader-invalid-amount") ? 0 : first.quantity,
+                                    unitPrice: first.unitPrice, source: first.source)
+        return changed(invoice, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([replacement] + Array(invoice.lines.dropFirst()))),
+                                 "linesRevision": invoice.linesRevision + 1])
+    }
     static func replacedDescriptionEstimate(_ estimate: EstimateRecord) -> EstimateRecord {
         changed(estimate, ["currentRevisionNumber": (estimate.currentRevisionNumber ?? 0) + 1])
     }
@@ -650,6 +658,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var ownerAuthenticated = false
         var estimateUnavailable = false
         var documentStatusesChanged = false
+        var invoiceReaderReplacement = false
         var savedWorkOffline = false
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
@@ -673,6 +682,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
+    static func replaceInvoiceReaderRecord() { scenario.lock.withLock { scenario.invoiceReaderReplacement = true } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
@@ -924,7 +934,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         if PaperPreview.isJobDocumentsPreview {
             let estimates = PaperPreview.jobDocumentEstimates
-            let invoices = PaperPreview.jobDocumentInvoices
+            let originalInvoices = PaperPreview.jobDocumentInvoices
+            let invoices = scenario.lock.withLock { scenario.invoiceReaderReplacement }
+                ? originalInvoices.enumerated().map { $0.offset == 0 ? PaperPreview.replacementInvoiceForDescriptionTest($0.element) : $0.element }
+                : originalInvoices
             if path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
                 return ["items": estimates.prefix(2).enumerated().map { index, estimate in
                     ["id": "00000000-0000-4000-8000-0000000093\(String(format: "%02d", index))",
