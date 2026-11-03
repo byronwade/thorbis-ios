@@ -14,6 +14,16 @@ struct NewEstimateView: View {
     @State private var lines: [EstimateRevisionLineDraft] = []
     @State private var busy = false
     @State private var error: String?
+    @State private var originalScope: EstimateCreationScope?
+    @State private var scopeCaptured = false
+    @State private var draftRecoveryBlocked = false
+    @State private var createInFlight = false
+    @State private var draftOwner = UUID()
+    @State private var ownsDraft = false
+    @State private var viewVisible = false
+    @State private var didRestoreDraft = false
+    @State private var intentionallyDiscarded = false
+    @State private var cleanupFailedAfterSave = false
     @State private var picker: EstimateBuilderTarget?
     @State private var expandedLine: UUID?
     @State private var revealProblem = 0
@@ -38,6 +48,7 @@ struct NewEstimateView: View {
     @State private var descriptionProblem: String?
     private let jobID: String?
     private let jobLocationID: String?
+    private let draftDocumentKey: String
     private let onCreated: (EstimateRecord) -> Void
 
     init(customerID: String = "", jobID: String? = nil, locationID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
@@ -45,6 +56,7 @@ struct NewEstimateView: View {
         _title = State(initialValue: title)
         self.jobID = jobID
         self.jobLocationID = jobID == nil ? nil : locationID
+        self.draftDocumentKey = "job:\(jobID ?? "")|customer:\(customerID)|location:\(locationID ?? "")"
         self.onCreated = onCreated
     }
 
@@ -64,8 +76,54 @@ struct NewEstimateView: View {
         return .init(actorID: actor, organizationID: organization, sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
                      requestGeneration: api.requestGeneration, origin: origin)
     }
+    private var scopeMatches: Bool {
+        guard let originalScope, let creationScope else { return false }
+        return originalScope.sameIdentityAndTransport(as: creationScope)
+    }
+    private var draftScope: CommercialDraftScope? {
+        guard let originalScope else { return nil }
+        return .init(actor: originalScope.actorID, organization: originalScope.organizationID,
+                     origin: originalScope.origin, kind: "new-estimate", document: draftDocumentKey)
+    }
+    private func saveDraft(uncertain: Bool? = nil, leavingOriginalScope: Bool = false) throws {
+        guard ownsDraft, (scopeMatches || leavingOriginalScope), let draftScope else { throw CancellationError() }
+        let draft = CommercialNewEstimateDraft(customerID: customerID, title: title, lines: lines,
+            uncertain: uncertain ?? (createInFlight || createOutcomeUncertain), created: created,
+            requiresLocationVerification: requiresLocationVerification, requiresManualReview: requiresManualReview,
+            requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss)
+        try CommercialDraftStore.shared.save(draft, scope: draftScope)
+    }
+    private func persistDraft(leavingOriginalScope: Bool = false) {
+        guard !intentionallyDiscarded, ownsDraft, (scopeMatches || leavingOriginalScope), !draftRecoveryBlocked else { return }
+        do { try saveDraft(leavingOriginalScope: leavingOriginalScope) }
+        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
+    }
+    private func restoreDraft() {
+        guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
+        do {
+            guard let draft = try CommercialDraftStore.shared.load(CommercialNewEstimateDraft.self, scope: draftScope) else { return }
+            let recoveredLines = try draft.lines()
+            customerID = draft.customerID; title = draft.title; lines = recoveredLines
+            created = draft.created; createdScope = draft.created == nil ? nil : originalScope
+            createOutcomeUncertain = draft.uncertain
+            requiresLocationVerification = draft.requiresLocationVerification; requiresManualReview = draft.requiresManualReview
+            requiresGroupDisclosure = draft.requiresGroupDisclosure; acceptedGroupLoss = draft.acceptedGroupLoss
+            if draft.uncertain {
+                error = draft.created == nil
+                    ? "The previous save could not be confirmed. Check Estimates or ask your office before starting another. Your draft is still here."
+                    : "The job link could not be confirmed. Retry to check the saved estimate and job."
+            }
+        } catch { draftRecoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
+    }
+    private func discardDraft() {
+        guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
+        if createOutcomeUncertain || createInFlight { dismiss(); return }
+        do { try CommercialDraftStore.shared.remove(scope: draftScope); intentionallyDiscarded = true; dismiss() }
+        catch { self.error = "The saved draft could not be removed. Try again." }
+    }
     private var canCommit: Bool {
-        if createOutcomeUncertain || requiresManualReview { return false }
+        if !scopeMatches || !ownsDraft || draftRecoveryBlocked || cleanupFailedAfterSave { return false }
+        if (createOutcomeUncertain && created == nil) || requiresManualReview { return false }
         if created != nil {
             let canView = session.can("estimate.view", feature: "estimates")
             return jobID == nil ? canView : canView && session.can("job.edit", feature: "jobs")
@@ -91,7 +149,11 @@ struct NewEstimateView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView { builder }
+                    ScrollView {
+                        if !scopeMatches || !session.can("estimate.create", feature: "estimates") {
+                            ContentUnavailableView("Workspace changed", systemImage: "lock", description: Text("Return to the original account and workspace to see your saved draft."))
+                        } else { builder }
+                    }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: focus) { _, value in
                         guard let id = value?.lineID else { return }
@@ -107,9 +169,20 @@ struct NewEstimateView: View {
                         withAnimation { proxy.scrollTo(id, anchor: .center) }
                     }
                 }
-                builderFooter
+                if scopeMatches && session.can("estimate.create", feature: "estimates") { builderFooter }
             }
             .keyboardDoneButton()
+            .onAppear {
+                viewVisible = true
+                if !scopeCaptured { scopeCaptured = true; originalScope = creationScope }
+                guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
+                guard CommercialDraftStore.shared.acquire(scope: draftScope, owner: draftOwner) else {
+                    draftRecoveryBlocked = true; error = "This draft is already open in another window."; return
+                }
+                ownsDraft = true
+                if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
+            }
+            .onDisappear { viewVisible = false; if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
             .trackKeyboard($keyboardUp)
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
@@ -140,7 +213,19 @@ struct NewEstimateView: View {
                     Button(created == nil ? "Cancel" : "Close") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
                 }
             }
-            .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .discardChangesGuard(hasChanges: (!lines.isEmpty && created == nil) || draftRecoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
+            .onChange(of: title) { _, _ in persistDraft() }
+            .onChange(of: customerID) { _, _ in persistDraft() }
+            .onChange(of: lines) { _, _ in persistDraft() }
+            .onChange(of: scopeMatches) { wasMatching, matches in
+                if !matches {
+                    if wasMatching { persistDraft(leavingOriginalScope: true) }
+                    picker = nil; focus = nil
+                }
+            }
+            .onChange(of: session.can("estimate.create", feature: "estimates")) { _, allowed in
+                if !allowed { picker = nil; focus = nil }
+            }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "this estimate" : title,
@@ -364,6 +449,7 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
+        guard scopeMatches, ownsDraft, !draftRecoveryBlocked, !cleanupFailedAfterSave else { error = "Your workspace changed. Your draft is still on this phone."; return }
         guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss) else { return }
         guard recovery.mayProceed(validDraft: valid) else {
             if created == nil && !valid { _ = showProblems() }
@@ -380,7 +466,7 @@ struct NewEstimateView: View {
         focus = nil
         removed = nil
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         var createStarted = false
         do {
             let estimate: EstimateRecord
@@ -436,9 +522,12 @@ struct NewEstimateView: View {
                     }
                 }
                 let submitted = creationRequest()
+                try saveDraft(uncertain: true)
+                createInFlight = true
                 createStarted = true
                 estimate = try await api.createFieldEstimate(submitted)
                 createStarted = false
+                createInFlight = false
                 guard UUID(uuidString: estimate.id) != nil, estimate.organizationId == scope.organizationID,
                       estimate.customerId == customerID,
                       estimate.createdByUserId.lowercased() == scope.actorID.lowercased() else {
@@ -468,6 +557,7 @@ struct NewEstimateView: View {
                     return false
                 }
                 requiresGroupDisclosure = groupResult == .missing && groupsMatter
+                try saveDraft()
                 guard creationScope == scope else { return }
                 if requiresManualReview {
                     error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but its details differ from your submission. Ask your office to review it."
@@ -490,6 +580,10 @@ struct NewEstimateView: View {
                     return
                 }
                 do {
+                    // A lost response can follow a committed link. Keep a durable hold until
+                    // success and cleanup are confirmed, so a relaunch cannot blindly retry.
+                    try saveDraft(uncertain: true)
+                    createOutcomeUncertain = true
                     let link = try await api.linkFieldEstimate(jobID: jobID, estimateID: estimate.id)
                     guard creationScope == scope else { return }
                     guard EstimateCreationRecovery.isExpectedLink(link, jobID: jobID, estimateID: estimate.id) else {
@@ -498,7 +592,7 @@ struct NewEstimateView: View {
                     }
                 } catch {
                     guard creationScope == scope else { return }
-                    self.error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but adding it to this job could not be confirmed. Retry or ask your office for help. Edit it after it is linked."
+                    self.error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but adding it to this job could not be confirmed. Retry to check the saved estimate and job, or ask your office for help."
                     return
                 }
                 guard creationScope == scope else { return }
@@ -517,12 +611,21 @@ struct NewEstimateView: View {
                 onCreated(estimate)
             }
             guard creationScope == scope else { return }
+            intentionallyDiscarded = true
+            do { if ownsDraft, let draftScope { try CommercialDraftStore.shared.remove(scope: draftScope) } }
+            catch {
+                cleanupFailedAfterSave = true
+                self.error = "The estimate was saved, but its local draft could not be removed. Close this screen and check the saved estimate before continuing."
+                return
+            }
             dismiss()
         } catch {
             // A timeout, cancellation or malformed success may follow a committed create.
             // Hold this editor from submitting another create; its draft remains in memory.
             let uncertain = createStarted && !EstimateCreationRecovery.isDefinitiveRejection(error)
+            createInFlight = false
             if uncertain { createOutcomeUncertain = true }
+            if scopeMatches { try? saveDraft() }
             guard creationScope == scope else { return }
             if uncertain {
                 self.error = "The save could not be confirmed. Check Estimates or ask your office before starting another. Your text is still here."
@@ -530,5 +633,9 @@ struct NewEstimateView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+    private func releaseDraft() {
+        if ownsDraft, let draftScope { CommercialDraftStore.shared.release(scope: draftScope, owner: draftOwner) }
+        ownsDraft = false
     }
 }

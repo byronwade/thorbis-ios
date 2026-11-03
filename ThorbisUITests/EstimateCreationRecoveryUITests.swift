@@ -2,6 +2,81 @@ import XCTest
 
 @MainActor
 final class EstimateCreationRecoveryUITests: XCTestCase {
+    func testRelaunchAfterInterruptedCreateKeepsUncertainDraftAndDoesNotCreateAgain() {
+        checkInterruptedRequest(extra: "--paper-preview-estimate-create-hold", expected: "creates=1,links=0,estimateReads=0,jobReads=0", hasSavedID: false)
+    }
+
+    func testRelaunchAfterInterruptedLinkKeepsKnownEstimateWithoutAutomaticRetry() {
+        checkInterruptedRequest(extra: "--paper-preview-estimate-link-hold", expected: "creates=1,links=1,estimateReads=0,jobReads=0", hasSavedID: true)
+    }
+
+    private func checkInterruptedRequest(extra: String, expected: String, hasSavedID: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-id", UUID().uuidString, extra]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: counts)
+        waitForExpectations(timeout: 10)
+        app.terminate()
+        if hasSavedID {
+            app.launchArguments.removeAll { $0 == "--paper-preview-estimate-link-hold" }
+            app.launchArguments.append("--paper-preview-estimate-recovery-link-success")
+        }
+        app.launch()
+        let recoveredCounts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(recoveredCounts.waitForExistence(timeout: 15))
+        let warning = hasSavedID ? "job link could not be confirmed" : "previous save could not be confirmed"
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", warning)).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(recoveredCounts.value as? String, "creates=0,links=0,estimateReads=0,jobReads=0")
+        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "creates=0,links=0,estimateReads=0,jobReads=0"), object: recoveredCounts)
+        unexpectedRequest.isInverted = true
+        wait(for: [unexpectedRequest], timeout: 2)
+        if !hasSavedID {
+            let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+            XCTAssertFalse(action.isEnabled)
+        } else {
+            let retry = app.buttons["Retry adding to job"]
+            XCTAssertTrue(retry.waitForExistence(timeout: 10))
+            XCTAssertTrue(retry.isEnabled)
+            retry.tap()
+            assertOpenedSavedEstimate(in: app, counts: "creates=0,links=1,estimateReads=1,jobReads=1")
+        }
+    }
+
+    func testSuccessfulLinkWithFailedDraftCleanupReportsSavedAndRelaunchDoesNotWrite() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--paper-preview-estimate-recovery-link-success", "--commercial-draft-test-cleanup-fails",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "estimate was saved, but its local draft could not be removed")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertEqual(counts.value as? String, "creates=1,links=1,estimateReads=0,jobReads=0")
+        app.terminate()
+        app.launch()
+        let recoveredCounts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(recoveredCounts.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "job link could not be confirmed")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(recoveredCounts.value as? String, "creates=0,links=0,estimateReads=0,jobReads=0")
+        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "creates=0,links=0,estimateReads=0,jobReads=0"), object: recoveredCounts)
+        unexpectedRequest.isInverted = true
+        wait(for: [unexpectedRequest], timeout: 2)
+    }
     func testAuthorityChangeDuringCreateDoesNotLinkBeforeFreshVerification() {
         continueAfterFailure = false
         let app = XCUIApplication()

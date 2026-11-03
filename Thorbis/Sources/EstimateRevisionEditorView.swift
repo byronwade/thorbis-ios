@@ -13,6 +13,13 @@ struct EstimateRevisionEditorView: View {
     @State private var error: String?
     @State private var originalScope: EstimateCreationScope?
     @State private var scopeCaptured = false
+    @State private var recoveryBlocked = false
+    @State private var draftOwner = UUID()
+    @State private var ownsDraft = false
+    @State private var viewVisible = false
+    @State private var didRestoreDraft = false
+    @State private var intentionallyDiscarded = false
+    @State private var cleanupFailedAfterSave = false
     @State private var descriptionProblem: String?
     @State private var staleRevision = false
     @State private var confirmReload = false
@@ -35,7 +42,7 @@ struct EstimateRevisionEditorView: View {
     }
 
     private var canRevise: Bool {
-        scopeMatches && editor.canRevise && session.can("estimate.create", feature: "estimates")
+        scopeMatches && ownsDraft && !recoveryBlocked && !cleanupFailedAfterSave && editor.canRevise && session.can("estimate.create", feature: "estimates")
     }
 
     private var currentScope: EstimateCreationScope? {
@@ -48,6 +55,33 @@ struct EstimateRevisionEditorView: View {
     private var scopeMatches: Bool {
         guard let originalScope, let currentScope else { return false }
         return originalScope.sameIdentityAndTransport(as: currentScope)
+    }
+    private var draftScope: CommercialDraftScope? {
+        guard let originalScope else { return nil }
+        return .init(actor: originalScope.actorID, organization: originalScope.organizationID,
+                     origin: originalScope.origin, kind: "estimate-revision", document: estimate.id)
+    }
+    private func restoreDraft() {
+        guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
+        do {
+            guard let draft = try CommercialDraftStore.shared.load(CommercialEstimateDraft.self, scope: draftScope) else { return }
+            do { try draft.apply(to: &editor) }
+            catch CommercialDraftRecoveryError.differentRevision {
+                recoveryBlocked = true
+                try draft.apply(to: &editor, requireMatchingRevision: false)
+                error = CommercialDraftRecoveryError.differentRevision.localizedDescription
+            }
+        } catch { recoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
+    }
+    private func persistDraft(leavingOriginalScope: Bool = false) {
+        guard !intentionallyDiscarded, ownsDraft, (scopeMatches || leavingOriginalScope), !recoveryBlocked, let draftScope else { return }
+        do { try CommercialDraftStore.shared.save(CommercialEstimateDraft(state: editor), scope: draftScope) }
+        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
+    }
+    private func discardDraft() {
+        guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
+        do { try CommercialDraftStore.shared.remove(scope: draftScope); intentionallyDiscarded = true; dismiss() }
+        catch { self.error = "The saved draft could not be removed. Try again." }
     }
 
     /// Good / better / best stays behind its flag (`estimate_option_signing`).
@@ -94,7 +128,11 @@ struct EstimateRevisionEditorView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView { content }
+                    ScrollView {
+                        if !scopeMatches || !session.can("estimate.create", feature: "estimates") {
+                            ContentUnavailableView("Workspace changed", systemImage: "lock", description: Text("Return to the original account and workspace to see your saved draft."))
+                        } else { content }
+                    }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: focus) { _, value in
                         guard let id = value?.lineID else { return }
@@ -115,7 +153,7 @@ struct EstimateRevisionEditorView: View {
                         scrollTarget = nil
                     }
                 }
-                revisionFooter
+                if scopeMatches && session.can("estimate.create", feature: "estimates") { revisionFooter }
             }
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
@@ -123,17 +161,33 @@ struct EstimateRevisionEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                    Button(cleanupFailedAfterSave ? "Close" : "Cancel") { if cleanupFailedAfterSave { dismiss() } else if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
             }
             .keyboardDoneButton()
             .onAppear {
-                guard !scopeCaptured else { return }
-                scopeCaptured = true
-                originalScope = currentScope
+                viewVisible = true
+                if !scopeCaptured { scopeCaptured = true; originalScope = currentScope }
+                guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
+                guard CommercialDraftStore.shared.acquire(scope: draftScope, owner: draftOwner) else {
+                    recoveryBlocked = true; error = "This draft is already open in another window."; return
+                }
+                ownsDraft = true
+                if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
             }
+            .onDisappear { viewVisible = false; if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
             .trackKeyboard($keyboardUp)
-            .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+            .discardChangesGuard(hasChanges: editor.hasChanges || recoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
+            .onChange(of: editor) { _, _ in persistDraft() }
+            .onChange(of: scopeMatches) { wasMatching, matches in
+                if !matches {
+                    if wasMatching { persistDraft(leavingOriginalScope: true) }
+                    picker = nil; discountTarget = nil; focus = nil
+                }
+            }
+            .onChange(of: session.can("estimate.create", feature: "estimates")) { _, allowed in
+                if !allowed { picker = nil; discountTarget = nil; focus = nil }
+            }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: optionName(target.optionID),
@@ -519,7 +573,7 @@ struct EstimateRevisionEditorView: View {
         let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, kind: .estimate)
         descriptionProblem = nil
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
             if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
@@ -530,7 +584,14 @@ struct EstimateRevisionEditorView: View {
                 request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount, extendedTextVerified: verified)
             )
             guard scopeMatches, canEdit else { error = "The workspace or access changed. Your edits are still here. Check the original workspace before retrying."; return }
+            intentionallyDiscarded = true
             onSaved(revised)
+            do { if ownsDraft, let draftScope { try CommercialDraftStore.shared.remove(scope: draftScope) } }
+            catch {
+                cleanupFailedAfterSave = true
+                self.error = "The estimate was saved, but its local draft could not be removed. Close this screen and check the saved estimate before making another change."
+                return
+            }
             dismiss()
         } catch is CancellationError {
         } catch {
@@ -542,7 +603,7 @@ struct EstimateRevisionEditorView: View {
     private func reloadLatest() async {
         guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             let latest = try await api.liveFieldEstimate(estimate.id)
             guard scopeMatches else { error = "The workspace changed. Your edits are still here."; return }
@@ -555,5 +616,10 @@ struct EstimateRevisionEditorView: View {
         } catch {
             self.error = error.localizedDescription
         }
+    }
+
+    private func releaseDraft() {
+        if ownsDraft, let draftScope { CommercialDraftStore.shared.release(scope: draftScope, owner: draftOwner) }
+        ownsDraft = false
     }
 }
