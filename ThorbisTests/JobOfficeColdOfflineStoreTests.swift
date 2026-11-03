@@ -95,13 +95,20 @@ import Security
     }
     func testActualKeychainAdapterCanReadAndUpdate() throws {
         let service = "com.thorbis.test.office-\(UUID().uuidString)"
+        let otherService = "com.thorbis.test.office-\(UUID().uuidString)"
         let marker = JobOfficeColdKeychain(service: service)
+        let other = JobOfficeColdKeychain(service: otherService)
         defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service] as CFDictionary) }
+        defer { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: otherService] as CFDictionary) }
         XCTAssertNil(try marker.read("key"))
         try marker.write(Data("pending".utf8), key: "key")
         XCTAssertEqual(try marker.read("key"), Data("pending".utf8))
         try marker.write(Data("denied".utf8), key: "key")
         XCTAssertEqual(try marker.read("key"), Data("denied".utf8))
+        try other.write(Data("other".utf8), key: "key")
+        try marker.removeAll()
+        XCTAssertNil(try marker.read("key"))
+        XCTAssertEqual(try other.read("key"), Data("other".utf8))
     }
     func testChangedSnapshotAndExpiredAuthorityAreNeverServed() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
