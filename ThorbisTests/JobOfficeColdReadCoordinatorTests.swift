@@ -1,4 +1,6 @@
 import XCTest
+import CryptoKit
+import Darwin
 @testable import Thorbis
 
 @MainActor final class JobOfficeColdReadCoordinatorTests: XCTestCase {
@@ -41,8 +43,8 @@ import XCTest
         let short = scope(start.addingTimeInterval(10))
         let result = await coordinator.read(scope: short, isCurrent: { now < short.deadline }) { now = start.addingTimeInterval(11); return .denied }
         guard case .denied = result else { return XCTFail("The observed denial must be persisted") }
-        let renewed = scope(start.addingTimeInterval(120)); let attempt = try store.beginLive(scope: renewed)
-        XCTAssertNil(try store.restoreAfterConnectivityFailure(scope: renewed, ticket: attempt, stillAuthorized: true))
+        let renewed = scope(start.addingTimeInterval(120))
+        XCTAssertThrowsError(try store.beginLive(scope: renewed))
     }
     func testCanceledReadDoesNotRestorePriorGrantOnNextOfflineAttempt() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
@@ -62,8 +64,7 @@ import XCTest
         var current = true
         let result = await coordinator.read(scope: scope, isCurrent: { current }) { current = false; return .denied }
         guard case .denied = result else { return XCTFail("Late denial must retire the captured identity") }
-        let next = try store.beginLive(scope: scope)
-        XCTAssertNil(try store.restoreAfterConnectivityFailure(scope: scope, ticket: next, stillAuthorized: true))
+        XCTAssertThrowsError(try store.beginLive(scope: scope))
     }
     func testTaskCancellationAfterFetchAbandonsGrant() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
@@ -83,13 +84,31 @@ import XCTest
     func testDenialStorageFailureDoesNotExposeOldGrant() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let now = Date(timeIntervalSince1970: 1_800_000_000), markers = Markers()
-        let store = JobOfficeColdOfflineStore(directory: root, markers: markers, clock: { now })
+        let store = JobOfficeColdOfflineStore(directory: root, markers: markers, clock: { now }, writeDenial: { _, _ in throw CocoaError(.fileWriteNoPermission) })
         let coordinator = JobOfficeColdReadCoordinator(store: store), scope = scope(now.addingTimeInterval(60)); let first = try store.beginLive(scope: scope)
         _ = try store.completeLive(scope: scope, ticket: first, job: record(), stillAuthorized: true)
-        let result = await coordinator.read(scope: scope, isCurrent: { true }) { markers.failWrites = true; return .denied }
+        let result = await coordinator.read(scope: scope, isCurrent: { true }) { .denied }
         guard case .unavailable = result else { return XCTFail("Failed denial persistence must fail closed") }
-        markers.failWrites = false
         XCTAssertNil(store.offline(scope: scope, authorized: true))
         XCTAssertThrowsError(try store.beginLive(scope: scope), "A failed marker write must keep this identity unavailable")
+    }
+    func testDenialSurvivesContendedScopeLock() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000); let store = JobOfficeColdOfflineStore(directory: root, markers: Markers(), clock: { now })
+        let coordinator = JobOfficeColdReadCoordinator(store: store), scope = scope(now.addingTimeInterval(60)); let first = try store.beginLive(scope: scope)
+        _ = try store.completeLive(scope: scope, ticket: first, job: record(), stillAuthorized: true)
+        let fields = [scope.actor, scope.organization, scope.origin, scope.job, scope.sessionDigest]
+        let key = SHA256.hash(data: Data(fields.map { "\($0.utf8.count):\($0)" }.joined().utf8)).map { String(format: "%02x", $0) }.joined()
+        var descriptor: Int32 = -1
+        let result = await coordinator.read(scope: scope, isCurrent: { true }) {
+            descriptor = open(root.appendingPathComponent("\(key).lock").path, O_RDWR)
+            guard descriptor >= 0, flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { return .failed }
+            return .denied
+        }
+        guard descriptor >= 0 else { return XCTFail("Could not acquire contention lock") }
+        _ = flock(descriptor, LOCK_UN); close(descriptor)
+        guard case .denied = result else { return XCTFail("Denial must survive lock contention") }
+        XCTAssertNil(store.offline(scope: scope, authorized: true))
+        XCTAssertThrowsError(try store.beginLive(scope: scope))
     }
 }

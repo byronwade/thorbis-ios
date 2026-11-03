@@ -78,8 +78,7 @@ import Security
         now = start.addingTimeInterval(11)
         try store.deny(scope: short)
         let renewed = scope(deadline: start.addingTimeInterval(120))
-        let later = try store.beginLive(scope: renewed)
-        XCTAssertNil(try store.restoreAfterConnectivityFailure(scope: renewed, ticket: later, stillAuthorized: true))
+        XCTAssertThrowsError(try store.beginLive(scope: renewed))
         XCTAssertNil(store.offline(scope: renewed, authorized: true))
     }
     func testDenialAcrossPolicyAndAuthorityChangesRetiresOlderGrant() throws {
@@ -105,7 +104,7 @@ import Security
         let pending = try store.beginLive(scope: scope)
         XCTAssertNil(JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now }).offline(scope: scope, authorized: true))
         try store.deny(scope: scope)
-        XCTAssertNil(try store.completeLive(scope: scope, ticket: pending, job: record(), stillAuthorized: true))
+        XCTAssertThrowsError(try store.completeLive(scope: scope, ticket: pending, job: record(), stillAuthorized: true))
         XCTAssertNil(JobOfficeColdOfflineStore(directory: directory, markers: markers, clock: { now }).offline(scope: scope, authorized: true))
     }
     func testKeychainFailureCannotStartAReadOrReturnACopy() throws {
@@ -209,7 +208,7 @@ import Security
         XCTAssertEqual(try store.restoreAfterConnectivityFailure(scope: scope, ticket: current, stillAuthorized: true)?.epoch, saved.epoch)
         let pending = try store.beginLive(scope: scope)
         try store.deny(scope: scope)
-        XCTAssertNil(try store.restoreAfterConnectivityFailure(scope: scope, ticket: pending, stillAuthorized: true))
+        XCTAssertThrowsError(try store.restoreAfterConnectivityFailure(scope: scope, ticket: pending, stillAuthorized: true))
         XCTAssertNil(store.offline(scope: scope, authorized: true))
     }
     func testAbandonedAttemptCannotRestoreOldGrantOnLaterOfflineRead() throws {

@@ -92,14 +92,16 @@ struct JobOfficeColdScope: Codable, Hashable {
     private let clock: () -> Date
     private let writeSnapshot: (Data, URL) throws -> Void
     private let removeSnapshot: (URL) throws -> Void
+    private let writeDenial: (Data, URL) throws -> Void
 
     init(directory: URL? = nil, markers: (any JobOfficeColdMarkerStorage)? = nil,
          clock: @escaping () -> Date = Date.init, writeSnapshot: ((Data, URL) throws -> Void)? = nil,
-         removeSnapshot: ((URL) throws -> Void)? = nil) {
+         removeSnapshot: ((URL) throws -> Void)? = nil, writeDenial: ((Data, URL) throws -> Void)? = nil) {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("JobOfficeColdOffline", isDirectory: true)
         self.markers = markers ?? JobOfficeColdKeychain(); self.clock = clock
         self.writeSnapshot = writeSnapshot ?? { data, path in try data.write(to: path, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
         self.removeSnapshot = removeSnapshot ?? { try FileManager.default.removeItem(at: $0) }
+        self.writeDenial = writeDenial ?? { data, path in try data.write(to: path, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
     }
     private func key(_ scope: JobOfficeColdScope, requireUnexpired: Bool) throws -> String {
         guard scope.identityIsValid, APIClient.normalizedOrigin(scope.origin) == scope.origin,
@@ -131,7 +133,12 @@ struct JobOfficeColdScope: Codable, Hashable {
         defer { close(descriptor) }
         guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { throw Failure.contended }
         defer { _ = flock(descriptor, LOCK_UN) }
-        return try action(key)
+        guard try !pathExists(denialIntent(key)) else { throw Failure.unavailable }
+        let result = try action(key)
+        // A denial can arrive from another process while this lock is held.
+        // Never return a grant if its independent fence appeared meanwhile.
+        guard try !pathExists(denialIntent(key)) else { throw Failure.unavailable }
+        return result
         }
     }
     private func marker(_ key: String) throws -> Marker? {
@@ -143,6 +150,7 @@ struct JobOfficeColdScope: Codable, Hashable {
         catch { Self.unsafe.insert(key); throw error }
     }
     private func barrier(_ key: String) -> URL { directory.appendingPathComponent("\(key).barrier") }
+    private func denialIntent(_ key: String) -> URL { directory.appendingPathComponent("\(key).denied") }
     private func pathExists(_ path: URL) throws -> Bool {
         var info = stat()
         if lstat(path.path, &info) == 0 { return true }
@@ -221,14 +229,15 @@ struct JobOfficeColdScope: Codable, Hashable {
         }
     }
     func deny(scope: JobOfficeColdScope) throws {
-        // A denial may arrive after this request's deadline. Expiry must never
-        // prevent retiring older grants for the same stable identity.
-        try locked(scope, requireUnexpired: false) { key in
+        // The fence is independent of the scope lock: a denial must be
+        // recorded even when another process currently holds that lock. It is
+        // deliberately permanent for this session identity until retirement.
+        let key = try key(scope, requireUnexpired: false)
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try writeDenial(Data("denied".utf8), denialIntent(key))
             Self.activeAttempts.removeValue(forKey: key)
-            try establishBarrier(key)
-            try saveMarker(.init(state: .denied, ticket: nil, digest: nil), key: key)
-            try clearBarrier(key)
-        }
+        } catch { Self.unsafe.insert(key); throw error }
     }
     /// Call when an in-flight task is canceled or retired without a result.
     /// The pending marker remains, but its previous grant cannot be restored.
@@ -257,7 +266,7 @@ struct JobOfficeColdScope: Codable, Hashable {
                 Self.activeAttempts.removeAll()
                 try markers.removeAll()
                 let paths = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-                for path in paths where path != retired && (path.pathExtension == "json" || path.pathExtension == "barrier") {
+                for path in paths where path != retired && (path.pathExtension == "json" || path.pathExtension == "barrier" || path.pathExtension == "denied") {
                     try FileManager.default.removeItem(at: path)
                 }
                 try FileManager.default.removeItem(at: retired)
