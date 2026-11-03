@@ -608,7 +608,7 @@ struct CustomerDetailView: View {
 
     private func contactMenuItems(_ contact: CustomerContactRecord) -> [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
-        if let phone = contact.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 {
+        if let phone = contactDialable(contact) {
             if let call = URL(string: "tel:\(phone)") { items.append(ThorbisMenuItem("Call", icon: "phone") { openURL(call) }) }
             if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { openURL(text) }) }
         }
@@ -629,6 +629,11 @@ struct CustomerDetailView: View {
             contactToRemove = contact
         })
         return items
+    }
+
+    private func contactDialable(_ contact: CustomerContactRecord) -> String? {
+        guard let phone = contact.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 else { return nil }
+        return phone
     }
 
     private func locationMenuItems(_ location: ServiceLocationRecord) -> [ThorbisMenuItem] {
@@ -731,8 +736,7 @@ struct CustomerDetailView: View {
             .accessibilityIdentifier(id)
     }
 
-    /// Contacts on one panel: name, role and number, "Primary" as a word; Call, Text, Email and
-    /// the edits are in the row's ••• menu.
+    /// Contacts show the person first, with direct phone actions and the complete actions menu.
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             PaperSection(title: "Contacts", count: contacts.isEmpty ? nil : contacts.count) {
@@ -742,22 +746,7 @@ struct CustomerDetailView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(contacts.enumerated()), id: \.element.id) { index, contact in
                             if index > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? PaperCardMetrics.inset : PaperCardMetrics.inset + 28 + 12) }
-                            HStack(spacing: 0) {
-                                PaperListRow(title: contact.name,
-                                             subtitle: [contact.role, contact.phone ?? contact.email].compactMap { $0 }.joined(separator: " · ")) {
-                                    if contact.primary { StatusWord(text: "Primary") }
-                                }
-                                .environment(\.paperRowInset, PaperCardMetrics.inset)
-                                // Name, "Primary", role and number as one VoiceOver stop; ••• stays its own.
-                                .accessibilityElement(children: .combine)
-                                ThorbisMenu(items: contactMenuItems(contact),
-                                            accessibilityLabel: "Contact actions for \(contact.name)") {
-                                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                                }
-                                .disabled(isMutatingContact)
-                                .padding(.trailing, 4)
-                            }
+                            contactRow(contact)
                         }
                     }
                     .padding(.vertical, PaperCardMetrics.edge)
@@ -767,6 +756,43 @@ struct CustomerDetailView: View {
             }
             if let contactMutationError { mutationError(contactMutationError, id: "contact-mutation-error") }
         }
+    }
+
+    private func contactRow(_ contact: CustomerContactRecord) -> some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 4))
+        return layout {
+            HStack(alignment: .top, spacing: 10) {
+                InitialsAvatar(name: contact.name, size: 32).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(contact.name).font(Theme.font(16, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    let subtitle = [contact.role, contact.primary ? "Primary" : nil, contact.phone ?? contact.email]
+                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                    if !subtitle.isEmpty {
+                        Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 0) {
+                if let phone = contactDialable(contact), let call = URL(string: "tel:\(phone)"), let text = URL(string: "sms:\(phone)") {
+                    PaperCircleButton(symbol: "phone", label: "Call \(contact.name)", size: 32) { openURL(call) }
+                    PaperCircleButton(symbol: "message", label: "Text \(contact.name)", size: 32) { openURL(text) }
+                }
+                ThorbisMenu(items: contactMenuItems(contact), accessibilityLabel: "Contact actions for \(contact.name)") {
+                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+            }
+            .disabled(isMutatingContact)
+        }
+        .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 4)
+        .padding(.vertical, 8)
     }
 
     /// Service and billing places: label, address (opens Maps), then the site notes.
