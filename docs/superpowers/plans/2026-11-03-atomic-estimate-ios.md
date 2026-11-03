@@ -42,3 +42,18 @@ build or an end-to-end request. The command model's standalone scope, durable
 serialization and response tests are in `/tmp/thorbis-atomic-ios-model-final5.log`.
 Focused XCTest sources include gated transport and draft cleanup failure, but
 have not yet run on an iOS simulator.
+
+## Focused iOS verification
+
+On iPhone 17 Pro simulator iOS 26.3.1, Xcode built the app and passed all 23
+selected `AtomicEstimateCommandTests`, `EstimateCreationRecoveryTests`, and
+`CommercialDraftStoreTests` cases (`/tmp/thorbis-atomic-ios-xcode-tests.log`;
+result summary `/tmp/thorbis-atomic-ios-tests-summary.json`). This includes
+stored command round-trip and backward compatibility, unsupported builder source,
+provenance and presentation mapping, same-scope checks, malformed restored
+origin/time refusal, held transport, ambiguous response handling, pending atomic
+operation blocking the old recovery action, and failed cleanup retaining an
+operation. The selected run did not include UI automation, live server requests,
+or session-switch/authority-race qualification. The API send and editor
+integration remain disabled; a verified result still requires the post-response
+checks above.
