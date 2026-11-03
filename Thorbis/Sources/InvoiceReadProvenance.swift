@@ -24,13 +24,17 @@ struct InvoiceReadTicket { let id: UUID; let scope: InvoiceReadScope }
 /// In-memory only, unwired. Does not replace resource authorization or durable
 /// denial handling and cannot prove anything about changes while offline.
 struct InvoiceReadProvenance {
-    private var pending: [UUID: InvoiceReadScope] = [:]
+    private struct Pending {
+        let scope: InvoiceReadScope
+        var canceled: Bool
+    }
+    private var pending: [UUID: Pending] = [:]
     private var latest: UUID?
     private var grant: (scope: InvoiceReadScope, invoices: [UUID: String])?
 
     mutating func begin(scope: InvoiceReadScope) -> InvoiceReadTicket {
         let ticket = InvoiceReadTicket(id: UUID(), scope: scope)
-        pending[ticket.id] = scope
+        pending[ticket.id] = Pending(scope: scope, canceled: false)
         latest = ticket.id
         grant = nil
         return ticket
@@ -40,8 +44,8 @@ struct InvoiceReadProvenance {
     /// response for each; a saved page makes the whole membership read stale.
     mutating func publish(_ ticket: InvoiceReadTicket, current: InvoiceReadScope?,
                           pages: [InvoiceReadPage], invoices: [UUID: String]) -> Bool {
-        guard pending.removeValue(forKey: ticket.id) == ticket.scope,
-              latest == ticket.id, current == ticket.scope else { return false }
+        guard let request = pending.removeValue(forKey: ticket.id), request.scope == ticket.scope,
+              !request.canceled, latest == ticket.id, current == ticket.scope else { return false }
         latest = nil
         guard !pages.isEmpty else { return false }
         var expected: String?
@@ -62,16 +66,28 @@ struct InvoiceReadProvenance {
     /// A denial from an older outstanding read still retires a later grant for
     /// the same actor, tenant, origin and job, including after authority changes.
     mutating func deny(_ ticket: InvoiceReadTicket, current: InvoiceReadScope?) {
-        guard pending.removeValue(forKey: ticket.id) == ticket.scope else { return }
+        guard let request = pending.removeValue(forKey: ticket.id), request.scope == ticket.scope else { return }
         guard let current else { grant = nil; latest = nil; return }
         guard ticket.scope.sameResource(as: current) else { return }
         grant = nil
         latest = nil
     }
 
+    /// Cancellation stops publication, but does not prove the transport is done.
+    /// Keep the ticket until its terminal result is observed so a late denial
+    /// can still invalidate a subsequent grant.
     mutating func cancel(_ ticket: InvoiceReadTicket) {
-        guard pending.removeValue(forKey: ticket.id) == ticket.scope else { return }
+        guard var request = pending[ticket.id], request.scope == ticket.scope else { return }
+        request.canceled = true
+        pending[ticket.id] = request
         if latest == ticket.id { latest = nil; grant = nil }
+    }
+
+    /// Call only after the canceled transport has definitively terminated and
+    /// any denial was passed to `deny`. Merely requesting cancellation is not enough.
+    mutating func finishCanceled(_ ticket: InvoiceReadTicket) {
+        guard let request = pending[ticket.id], request.scope == ticket.scope, request.canceled else { return }
+        pending.removeValue(forKey: ticket.id)
     }
 
     func permits(scope: InvoiceReadScope, invoice: UUID, digest: String) -> Bool {
