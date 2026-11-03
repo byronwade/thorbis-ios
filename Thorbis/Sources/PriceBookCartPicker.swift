@@ -93,6 +93,13 @@ struct PriceBookCartPicker: View {
         #if DEBUG
         .modifier(EstimatePickerTapProbe(marker: "picker-root-tap"))
         #endif
+        #if DEBUG
+        .background {
+            if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-window-tap-probe") {
+                PickerWindowTapObserver().allowsHitTesting(false)
+            }
+        }
+        #endif
         .background(Theme.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             PaperActionBar(title: added == 0 ? "Done" : "Done · \(added) \(added == 1 ? "item" : "items")",
@@ -235,3 +242,32 @@ struct PriceBookCartPicker: View {
     }
     #endif
 }
+
+#if DEBUG
+/// Passive fixture-only window observer; it does not cancel or exclusively recognize touches.
+private struct PickerWindowTapObserver: UIViewRepresentable {
+    func makeUIView(context: Context) -> ProbeView { ProbeView() }
+    func updateUIView(_ view: ProbeView, context: Context) {}
+    final class ProbeView: UIView, UIGestureRecognizerDelegate {
+        private var tap: UITapGestureRecognizer?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let tap { tap.view?.removeGestureRecognizer(tap); self.tap = nil }
+            guard let window else { return }
+            let observer = UITapGestureRecognizer(target: self, action: #selector(recordTap(_:)))
+            observer.cancelsTouchesInView = false
+            observer.delegate = self
+            window.addGestureRecognizer(observer)
+            tap = observer
+        }
+        @objc private func recordTap(_ gesture: UITapGestureRecognizer) {
+            guard let window = gesture.view as? UIWindow else { return }
+            let point = gesture.location(in: window)
+            guard point.y >= 250, point.y <= 500 else { return }
+            let hit = window.hitTest(point, with: nil).map { String(describing: type(of: $0)) } ?? "none"
+            EstimateRecoveryPreview.shared.record("window-tap-\(Int(point.x))-\(Int(point.y))-\(hit)")
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+    }
+}
+#endif

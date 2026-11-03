@@ -239,7 +239,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
             "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages", "--paper-preview-estimate-recovery-trace",
-            "--paper-preview-estimate-wait-presentation", "--paper-preview-estimate-trace-taps"]
+            "--paper-preview-estimate-wait-presentation", "--paper-preview-estimate-window-tap-probe"]
         app.launch()
         XCTAssertTrue(app.staticTexts["estimate-presentation-ready"].waitForExistence(timeout: 30), "The editor presentation must finish before tapping")
         let add = app.buttons["estimate-add-item"]
