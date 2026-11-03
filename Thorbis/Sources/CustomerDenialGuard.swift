@@ -120,7 +120,7 @@ struct CustomerQuarantineTicket {
         return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 }
-enum CustomerQuarantineOutcome: Equatable { case liveCompilation, denied, uncertain, liveActivity, cached }
+enum CustomerQuarantineOutcome: Equatable { case liveCompilation, denied, uncertain, liveActivity, cached, retired }
 enum CustomerQuarantineError: Error { case invalidScope, invalidTicket, cachedResultForbidden, storage, leaseUnavailable, authorityUnavailable }
 
 final class CustomerQuarantineLease {
@@ -290,13 +290,13 @@ final class CustomerQuarantineLease {
                 active[ticket.scope]?.remove(ticket.id)
                 throw CustomerQuarantineError.cachedResultForbidden
             }
-        case .liveActivity:
+        case .liveActivity, .retired:
             break
         }
         state.pending.remove(ticket.id)
         try write(state, for: ticket.scope)
         storageFailures.remove(ticket.scope)
         active[ticket.scope]?.remove(ticket.id)
-        return outcome != .denied && outcome != .uncertain && unchangedAuthority && state.pending.isEmpty
+        return outcome != .denied && outcome != .uncertain && outcome != .retired && unchangedAuthority && state.pending.isEmpty
     }
 }

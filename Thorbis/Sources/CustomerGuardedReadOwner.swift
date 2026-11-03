@@ -93,12 +93,14 @@ struct CustomerGuardedSnapshot<Value> {
                 self.snapshot = nil
             }
         } catch {
-            if generation == attempt || snapshot?.ticket.scope == scope {
+            if generation == attempt {
                 snapshot = nil
             }
             if !finished {
                 let outcome: CustomerQuarantineOutcome
-                if case CustomerGuardedReadError.denied = error { outcome = .denied } else { outcome = .uncertain }
+                if case CustomerGuardedReadError.denied = error { outcome = .denied }
+                else if case CustomerGuardedReadError.stale = error { outcome = .retired }
+                else { outcome = .uncertain }
                 _ = try? quarantine.finish(ticket, outcome: outcome)
             }
             throw error

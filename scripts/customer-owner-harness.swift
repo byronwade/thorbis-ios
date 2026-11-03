@@ -77,6 +77,7 @@ import Combine
         resumeFirst?.resume()
         _ = try? await first.value
         guard owner.visibleValue(scope: scope, authority: authority, sessionID: sessionID) != "Old" else { print("FAIL: superseded request published old data"); exit(1) }
+        guard store.records[scope]?.denied != true else { print("FAIL: stale refresh persisted a denial"); exit(1) }
         do {
             try await owner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { true }) {
                 throw CustomerGuardedReadError.denied
@@ -176,6 +177,52 @@ import Combine
         }
         try await Task.sleep(for: .milliseconds(350))
         guard expiryOwner.snapshot == nil else { print("FAIL: expired snapshot stayed published"); exit(1) }
+        let overlapStore = OwnerTestStore()
+        let overlapOwner = CustomerGuardedReadOwner<String>(quarantine: CustomerQuarantine(store: overlapStore))
+        resumeFirst = nil
+        let overlapping = Task { @MainActor in
+            try await overlapOwner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { true }) {
+                await withCheckedContinuation { resumeFirst = $0 }
+                return CustomerGuardedValue(value: "Old", evidence: .limitedLive)
+            }
+        }
+        while resumeFirst == nil { await Task.yield() }
+        do {
+            try await overlapOwner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { true }) {
+                CustomerGuardedValue(value: "New", evidence: .limitedLive)
+            }
+        } catch { }
+        resumeFirst?.resume()
+        _ = try? await overlapping.value
+        guard overlapOwner.visibleValue(scope: scope, authority: authority, sessionID: sessionID) != "Old" else {
+            print("FAIL: superseded limited read published old data"); exit(1)
+        }
+        guard overlapStore.records[scope]?.denied != true else {
+            print("FAIL: stale refresh persisted a denial"); exit(1)
+        }
+        do {
+            try await overlapOwner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { true }) {
+                CustomerGuardedValue(value: "Recovered", evidence: .limitedLive)
+            }
+        } catch {
+            print("FAIL: live activity after stale overlap was rejected"); exit(1)
+        }
+        guard overlapOwner.visibleValue(scope: scope, authority: authority, sessionID: sessionID) == "Recovered" else {
+            print("FAIL: stale overlap left the owner unpublished"); exit(1)
+        }
+        let leaveStore = OwnerTestStore()
+        let leaveOwner = CustomerGuardedReadOwner<String>(quarantine: CustomerQuarantine(store: leaveStore))
+        var current = true
+        do {
+            try await leaveOwner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { current }) {
+                current = false
+                return CustomerGuardedValue(value: "Left", evidence: .limitedLive)
+            }
+            print("FAIL: left-scope refresh succeeded"); exit(1)
+        } catch { }
+        guard leaveStore.records[scope]?.denied != true else {
+            print("FAIL: leaving mid-read persisted a denial"); exit(1)
+        }
         print("PASS: guarded owner publishes a current, fully verified read")
     }
 }
