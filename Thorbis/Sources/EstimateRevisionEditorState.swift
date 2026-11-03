@@ -359,7 +359,7 @@ struct EstimateRevisionEditorState: Equatable {
         EstimateRevisionLineDraft(description: "", quantity: "1", unitPrice: "", source: .manual)
     }
 
-    private static func makeLines(_ drafts: [EstimateRevisionLineDraft], storesGroups: Bool, extendedTextVerified: Bool) throws -> [FieldEstimateLineInput] {
+    static func makeLines(_ drafts: [EstimateRevisionLineDraft], storesGroups: Bool, extendedTextVerified: Bool) throws -> [FieldEstimateLineInput] {
         guard !drafts.isEmpty else { throw EstimateRevisionEditorError.noLines }
         guard drafts.count <= 500 else { throw EstimateRevisionEditorError.tooManyLines }
         return try drafts.map { draft in

@@ -9,12 +9,12 @@ import XCTest
     private var sourceScope: CommercialDraftScope { .init(actor: actor, organization: org, origin: origin, kind: "new-estimate", document: "job:\(job)|customer:\(actor)|location:") }
     private func operation(_ id: String = "018f0000-0000-7000-8000-000000000004") throws -> AtomicEstimateCommand {
         try .make(jobID: job, draftCustomerID: actor, draftLocationID: nil, title: "Repair",
-                  lines: [.init(description: "Valve", quantity: 1, unitPrice: .init(amount: 100, currency: "USD"), source: nil, group: nil, showToCustomer: nil)],
+                  lines: [.init(description: "Valve", quantity: 1, unitPrice: .init(amount: 100, currency: "USD"), source: .manual, group: nil, showToCustomer: nil)],
                   actorID: actor, organizationID: org, deviceID: actor, policyVersion: 1, origin: origin,
                   createdAt: "2026-11-03T00:00:00Z", commandID: id)
     }
     private func draft(title: String = "Repair", uncertain: Bool = false) -> CommercialNewEstimateDraft {
-        .init(customerID: actor, title: title, lines: [], uncertain: uncertain, created: nil,
+        .init(customerID: actor, title: title, lines: [.init(description: "Valve", quantity: "1", unitPrice: "1.00", source: .manual)], uncertain: uncertain, created: nil,
               requiresLocationVerification: false, requiresManualReview: false, requiresGroupDisclosure: false, acceptedGroupLoss: false)
     }
     func testPrepareAndReopenPreserveExactOperationAndDraft() throws {
@@ -22,35 +22,35 @@ import XCTest
         let op = try operation(), store = CommercialDraftStore(directory: root), owner = UUID()
         XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner)); try store.save(draft(), scope: sourceScope)
         let journal = AtomicEstimateAttemptJournal(store: store)
-        let saved = try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job)
+        let saved = try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false)
         let reopened = AtomicEstimateAttemptJournal(store: CommercialDraftStore(directory: root))
         XCTAssertEqual(try reopened.recover(actorID: actor, organizationID: org, origin: origin, jobID: job), saved)
-        XCTAssertEqual(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job), saved)
-        XCTAssertThrowsError(try journal.prepare(operation: operation("018f0000-0000-7000-8000-000000000005"), draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertEqual(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false), saved)
+        XCTAssertThrowsError(try journal.prepare(operation: operation("018f0000-0000-7000-8000-000000000005"), draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
         XCTAssertNil(try reopened.recover(actorID: actor, organizationID: org, origin: "https://other.test", jobID: job))
         XCTAssertEqual(try reopened.recover(actorID: actor, organizationID: org, origin: origin, jobID: job), saved)
         try store.save(draft(uncertain: true), scope: sourceScope)
-        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
     }
     func testMissingOwnerOrStoredDraftCannotPrepare() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let store = CommercialDraftStore(directory: root), journal = AtomicEstimateAttemptJournal(store: store), op = try operation(), owner = UUID()
-        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
         XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner))
-        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
         try store.save(draft(title: "Different"), scope: sourceScope)
-        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
         XCTAssertNil(try journal.recover(actorID: actor, organizationID: org, origin: origin, jobID: job))
     }
     func testCorruptSavedAttemptNeverBecomesAbsence() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let op = try operation(), store = CommercialDraftStore(directory: root), journal = AtomicEstimateAttemptJournal(store: store), owner = UUID()
         XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner)); try store.save(draft(), scope: sourceScope)
-        _ = try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job)
+        _ = try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false)
         let key = CommercialDraftScope(actor: actor, organization: org, origin: origin, kind: "atomic-estimate-attempt", document: job)
         try store.save("wrong record", scope: key)
         XCTAssertThrowsError(try journal.recover(actorID: actor, organizationID: org, origin: origin, jobID: job))
-        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
     }
     func testFailedAttemptWritePreservesTheSourceDraft() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
@@ -62,8 +62,62 @@ import XCTest
         let journal = AtomicEstimateAttemptJournal(store: store), owner = UUID(), op = try operation()
         XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner)); try store.save(draft(), scope: sourceScope)
         failWrites = true
-        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner, actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
         XCTAssertNil(try journal.recover(actorID: actor, organizationID: org, origin: origin, jobID: job))
         XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: sourceScope)?.title, "Repair")
+    }
+    func testRejectsChangedLineTermsAndCatalogProvenanceWithoutWritingAttempt() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root), journal = AtomicEstimateAttemptJournal(store: store), owner = UUID()
+        let item = "018f0000-0000-7000-8000-000000000007", otherItem = "018f0000-0000-7000-8000-000000000008"
+        let line = EstimateRevisionLineDraft(description: "Valve", quantity: "2", unitPrice: "12.50",
+            source: .priceBookSelection(itemID: item, revision: 3), group: .material, showToCustomer: false)
+        let savedDraft = CommercialNewEstimateDraft(customerID: actor, title: "Repair", lines: [line], uncertain: false, created: nil,
+            requiresLocationVerification: false, requiresManualReview: false, requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner)); try store.save(savedDraft, scope: sourceScope)
+        func make(_ line: AtomicEstimateCommand.Line) throws -> AtomicEstimateCommand {
+            try .make(jobID: job, draftCustomerID: actor, draftLocationID: nil, title: "Repair", lines: [line], actorID: actor,
+                      organizationID: org, deviceID: actor, policyVersion: 1, origin: origin,
+                      createdAt: "2026-11-03T00:00:00Z", commandID: "018f0000-0000-7000-8000-000000000004")
+        }
+        func itemLine(_ description: String = "Valve", _ quantity: Int = 2, _ cents: Int = 1250,
+                      _ source: AtomicEstimateCommand.Source = .priceBook(itemID: item, revision: 3),
+                      _ group: String? = "material", _ visible: Bool? = false) -> AtomicEstimateCommand.Line {
+            .init(description: description, quantity: quantity, unitPrice: .init(amount: cents, currency: "USD"), source: source, group: group, showToCustomer: visible)
+        }
+        let mismatches = [itemLine("Other"), itemLine("Valve", 3), itemLine("Valve", 2, 1251),
+                          itemLine("Valve", 2, 1250, .manual), itemLine("Valve", 2, 1250, .priceBook(itemID: otherItem, revision: 3)),
+                          itemLine("Valve", 2, 1250, .priceBook(itemID: item, revision: 4)),
+                          itemLine("Valve", 2, 1250, .priceBook(itemID: item, revision: 3), "work"),
+                          itemLine("Valve", 2, 1250, .priceBook(itemID: item, revision: 3), "material", nil)]
+        for line in mismatches {
+            XCTAssertThrowsError(try journal.prepare(operation: make(line), draftScope: sourceScope, draftOwner: owner,
+                actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: true))
+            XCTAssertNil(try journal.recover(actorID: actor, organizationID: org, origin: origin, jobID: job))
+        }
+        XCTAssertThrowsError(try journal.prepare(operation: make(itemLine()), draftScope: sourceScope, draftOwner: owner,
+            actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
+        let good = try journal.prepare(operation: make(itemLine()), draftScope: sourceScope, draftOwner: owner,
+            actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: true)
+        XCTAssertEqual(good.operation.payload.lines, [itemLine()])
+    }
+    func testInvalidOrUnsupportedSavedLineCannotPrepare() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root), journal = AtomicEstimateAttemptJournal(store: store), owner = UUID(), op = try operation()
+        XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner))
+        let invalid = [
+            EstimateRevisionLineDraft(description: "Valve", quantity: "0", unitPrice: "1.00", source: .manual),
+            EstimateRevisionLineDraft(description: "Valve", quantity: "1", unitPrice: "bad", source: .manual),
+            EstimateRevisionLineDraft(description: "Valve", quantity: "1", unitPrice: "-1.00", source: .manual),
+            EstimateRevisionLineDraft(description: "Valve", quantity: "1", unitPrice: "1.00", source: .unsupported("future")),
+        ]
+        for line in invalid {
+            try store.save(CommercialNewEstimateDraft(customerID: actor, title: "Repair", lines: [line], uncertain: false,
+                created: nil, requiresLocationVerification: false, requiresManualReview: false,
+                requiresGroupDisclosure: false, acceptedGroupLoss: false), scope: sourceScope)
+            XCTAssertThrowsError(try journal.prepare(operation: op, draftScope: sourceScope, draftOwner: owner,
+                actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
+            XCTAssertNil(try journal.recover(actorID: actor, organizationID: org, origin: origin, jobID: job))
+        }
     }
 }
