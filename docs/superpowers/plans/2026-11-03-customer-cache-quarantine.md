@@ -1,0 +1,27 @@
+# Customer cache quarantine — held prototype
+
+This branch is not wired into the app and must not be released as a completed security fix. It explores a durable, actor/organization/origin/customer-scoped write-ahead quarantine and a separate customer cache generation. Denied, canceled or interrupted work retains a marker; a new generation prevents a guarded read from reusing prior customer or child pages. It does not delete another customer's data. Keychain errors prevent guarded reads, and a shared app-group lock is intended to serialize ownership across participating processes.
+
+## Upgrade and offline behavior
+
+Old unnamespaced copies have no durable evidence that an earlier denial did not occur. Do not automatically migrate them or fall back to them after a guarded read starts. On an offline first launch after upgrade, show “Connect to verify customer records” and keep other app functionality available. Once the necessary authority has been verified online, new scoped copies may support offline use. A guarded copy older than 14 days, or dated in the future, is unavailable and needs another live read. Ordinary, unguarded saved-copy behavior is not changed by this prototype.
+
+The app must retain the quarantine if its Keychain marker cannot be read or written, a read is canceled, a required child read fails, a verification returns partial, or the user only verifies a subset of previously denied resources. Never clear it merely because the customer's Overview history endpoint succeeds. A complete live response must be bound to the exact actor, organization, origin, customer, authorization and cache generation. A current compilation cannot yet prove that all server history or previously denied resource types have been covered.
+
+## Qualification still required
+
+- Integrate marker acquisition, current-scope checks, cache namespace propagation and `finish` publication gating for every relevant customer and child read, including retries and relaunch. Do not claim a failed or uncommitted read is verified.
+- Establish what set of denied child resources and older cursor pages a successful recovery must reauthorize. The current server history endpoint caps constituent collections and cannot prove completeness.
+- Bind any offline cache reuse to a trustworthy persisted authorization and assignment snapshot. Actor, organization, origin and customer identity alone do not establish that the same role or job scope still applies after restart; a narrowed job scope can otherwise leave older history visible. If the snapshot cannot prove equivalence, require online revalidation rather than inventing a stable version.
+- Test denial, offline retry, failure to persist marker, crash at each write boundary, overlapping reads, role changes, app background/relaunch, and explicit reauthorization using real iOS sessions and protected storage. Test the actual signed app and widget app-group inode and Keychain access groups; the macOS same-path harness does not prove this.
+- Review the local cache migration, 14-day expiry, stale/future timestamp behavior and error copy in the product. Verify ordinary offline workflows and unrelated customers remain available.
+
+The standalone harness uses fake storage for fault injection, a real macOS Keychain write/read, and separate processes for a pending marker and a same-path lock. These are not forced-crash, iOS, or app-extension tests. Tests of strict loader behavior and scoped disk keys do not authorize enabling this design.
+
+## Evidence at this checkpoint
+
+- A targeted simulator regression reproduced that live-only customer compilation swallowed media 403 and 404 (`/private/tmp/thorbis-denial-child-red.log`). A separate opt-in verification path now requires live-only transport, rejects failed/partial selected reads, and requires a caller-supplied current-scope check. It remains insufficient to establish server history completeness or all previously denied authorities; the ordinary partial path remains available.
+- The first expiry test showed a guarded 15-day-old disk copy being returned; the legacy-upgrade test did not reuse an unnamespaced copy (`/private/tmp/thorbis-customer-cache-expiry-red.log`). The prototype now checks the existing 14-day limit when serving a guarded copy.
+- The selected customer compilation/concurrency and session tests passed 43/43 on simulator (`/private/tmp/thorbis-customer-quarantine-green.log`), including strict 403/404, ordinary partial behavior, scoped offline cache isolation, expiry and first-adoption tests. The seven tested source files match `/private/tmp/thorbis-customer-quarantine-green-manifest.txt`.
+- The standalone macOS harness and two-process Keychain pending-marker check passed (`/private/tmp/customer-quarantine-final2.log`, hashes `/private/tmp/customer-quarantine-final2-manifest.txt`). The model partitions by verified policy, server generation, capability and effective-feature facts and keeps a denied or interrupted scope live-only for relationships. This is bounded staleness, not a guarantee of instantaneous revocation: the server generation does not encode all job/customer relationships.
+- Independent source review found no further definite issue in the latest model binding, but identified the caller obligations and iOS/app-extension, completeness and publication-order limitations above. No simulator test in this checkpoint exercises actual guard-to-screen integration.

@@ -3,6 +3,155 @@ import XCTest
 
 @MainActor
 final class CustomerCompilationConcurrencyTests: XCTestCase {
+    func testScopedCacheGenerationRetiresOldPagesWithoutAffectingAnotherCustomer() {
+        let path = "/v1/customers/\(CustomerCompilationRoutingProtocol.customer)/history"
+        let query = [URLQueryItem(name: "limit", value: "50"), URLQueryItem(name: "cursor", value: "older")]
+        let old = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: query, namespace: "customer-a-epoch-1")
+        let new = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: query, namespace: "customer-a-epoch-2")
+        let other = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: query, namespace: "customer-b-epoch-1")
+        XCTAssertNotEqual(old, new)
+        XCTAssertNotEqual(other, old)
+        XCTAssertNotEqual(other, new)
+        XCTAssertEqual(other, SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: query, namespace: "customer-b-epoch-1"))
+        XCTAssertNotEqual(old, SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: query))
+    }
+
+    func testRotatedCustomerNamespaceCannotReadOldOfflinePageButOtherCustomerCan() async throws {
+        let a = #"{"items":[{"occurredAt":"2026-07-01T00:00:00Z","kind":"job","subjectId":"a","summary":"Old A"}]}"#
+        let b = #"{"items":[{"occurredAt":"2026-07-01T00:00:00Z","kind":"job","subjectId":"b","summary":"Stable B"}]}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, a), .init(200, b), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        api.savedCopyScope = "customer-cache-generation-\(UUID().uuidString)"
+        let customer = CustomerCompilationRoutingProtocol.customer
+        _ = try await SavedCopies.$customerNamespace.withValue("customer-a-old") { try await api.fieldCustomerHistory(customer) }
+        _ = try await SavedCopies.$customerNamespace.withValue("customer-b") { try await api.fieldCustomerHistory(customer) }
+        let scope = try XCTUnwrap(api.savedCopyScope)
+        let path = "/v1/customers/\(customer)/history"
+        let query = [URLQueryItem(name: "limit", value: "50")]
+        let aKey = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: query, namespace: "customer-a-old")
+        let bKey = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: query, namespace: "customer-b")
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: aKey) || !SavedCopyStore.shared.exists(scope: scope, key: bKey) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: aKey))
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: bKey))
+        api.invalidateRequests()
+        api.knownOffline = true
+        do {
+            _ = try await SavedCopies.$customerNamespace.withValue("customer-a-new") { try await api.fieldCustomerHistory(customer) }
+            XCTFail("A rotated generation cannot recover its old offline page")
+        } catch let problem as Problem { XCTAssertNil(problem.status) }
+        let retained = try await SavedCopies.$customerNamespace.withValue("customer-b") { try await api.fieldCustomerHistory(customer) }
+        XCTAssertEqual(retained.items.map(\.summary), ["Stable B"])
+    }
+
+    func testGuardedCustomerCacheDoesNotUseAnExpiredOfflinePage() async throws {
+        let response = #"{"items":[{"occurredAt":"2026-07-01T00:00:00Z","kind":"job","subjectId":"a","summary":"Old"}]}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, response), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        api.savedCopyScope = "customer-cache-expiry-\(UUID().uuidString)"
+        let customer = CustomerCompilationRoutingProtocol.customer
+        let namespace = "expiry-generation"
+        _ = try await SavedCopies.$customerNamespace.withValue(namespace) { try await api.fieldCustomerHistory(customer) }
+        let scope = try XCTUnwrap(api.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/customers/\(customer)/history",
+                                  query: [URLQueryItem(name: "limit", value: "50")], namespace: namespace)
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        let base = try XCTUnwrap(FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first)
+        let file = base.appendingPathComponent("SavedCopies").appendingPathComponent(scope).appendingPathComponent("\(key).json")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-15 * 86_400)], ofItemAtPath: file.path)
+        api.invalidateRequests()
+        api.knownOffline = true
+        do {
+            _ = try await SavedCopies.$customerNamespace.withValue(namespace) { try await api.fieldCustomerHistory(customer) }
+            XCTFail("An expired guarded copy must require a live refresh")
+        } catch let problem as Problem { XCTAssertNil(problem.status) }
+    }
+
+    func testGuardedUpgradeDoesNotReuseUnverifiedLegacyCustomerCopyOffline() async throws {
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        api.savedCopyScope = "customer-cache-upgrade-\(UUID().uuidString)"
+        let customer = CustomerCompilationRoutingProtocol.customer
+        _ = try await api.fieldCustomerHistory(customer)
+        let scope = try XCTUnwrap(api.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/customers/\(customer)/history", query: [URLQueryItem(name: "limit", value: "50")])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        api.invalidateRequests()
+        api.knownOffline = true
+        do {
+            _ = try await SavedCopies.$customerNamespace.withValue("first-guarded-generation") { try await api.fieldCustomerHistory(customer) }
+            XCTFail("An unverified legacy copy cannot become an authorized guarded copy")
+        } catch let problem as Problem { XCTAssertNil(problem.status) }
+    }
+
+    func testGuardedCacheAgeBoundariesRejectExpiredAndFutureCopies() {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        XCTAssertTrue(SavedCopies.guardedCopyIsFresh(savedAt: now.addingTimeInterval(-14 * 86_400), now: now))
+        XCTAssertFalse(SavedCopies.guardedCopyIsFresh(savedAt: now.addingTimeInterval(-14 * 86_400 - 1), now: now))
+        XCTAssertFalse(SavedCopies.guardedCopyIsFresh(savedAt: now.addingTimeInterval(1), now: now))
+    }
+    func testLiveVerificationDoesNotTreatDeniedMediaAsAnAuthorizedCompilation() async throws {
+        for status in [403, 404] {
+            CustomerCompilationRoutingProtocol.reset(mediaStatus: status)
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [CustomerCompilationRoutingProtocol.self]
+            let api = APIClient(session: URLSession(configuration: config), baseURL: "https://app.thorbis.com")
+            do {
+                _ = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await CustomerJobCompilationLoader.verifyAvailableReads(customerID: CustomerCompilationRoutingProtocol.customer,
+                        organizationID: CustomerCompilationRoutingProtocol.org, api: api,
+                        access: CustomerRecordAccess(estimates: false, invoices: false), isCurrent: { true })
+                }
+                XCTFail("A \(status) child denial cannot prove an authorized live compilation")
+            } catch let problem as Problem {
+                XCTAssertEqual(problem.status, status)
+            }
+        }
+    }
+
+    func testOrdinaryCustomerReadsKeepPartialMediaOnDeniedOrMissingJobMedia() async throws {
+        for status in [403, 404] {
+            CustomerCompilationRoutingProtocol.reset(mediaStatus: status)
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [CustomerCompilationRoutingProtocol.self]
+            let api = APIClient(session: URLSession(configuration: config), baseURL: "https://app.thorbis.com")
+            let result = try await CustomerJobCompilationLoader.load(customerID: CustomerCompilationRoutingProtocol.customer,
+                organizationID: CustomerCompilationRoutingProtocol.org, api: api,
+                access: CustomerRecordAccess(estimates: false, invoices: false))
+            XCTAssertTrue(result.mediaIncompleteJobIDs.contains(CustomerCompilationRoutingProtocol.jobs[0]))
+        }
+    }
+
+    func testStrictCompilationRequiresFreshReadsBeforeAnyRequest() async throws {
+        CustomerCompilationRoutingProtocol.reset()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CustomerCompilationRoutingProtocol.self]
+        let api = APIClient(session: URLSession(configuration: config), baseURL: "https://app.thorbis.com")
+        do {
+            _ = try await CustomerJobCompilationLoader.verifyAvailableReads(customerID: CustomerCompilationRoutingProtocol.customer,
+                organizationID: CustomerCompilationRoutingProtocol.org, api: api,
+                access: CustomerRecordAccess(estimates: false, invoices: false), isCurrent: { true })
+            XCTFail("Strict verification must require the live-only transport")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Live verification required")
+        }
+        XCTAssertTrue(CustomerCompilationRoutingProtocol.paths.isEmpty)
+    }
+
+    func testStrictCompilationRefusesRetiredSessionBeforeAnyRequest() async throws {
+        CustomerCompilationRoutingProtocol.reset()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CustomerCompilationRoutingProtocol.self]
+        let api = APIClient(session: URLSession(configuration: config), baseURL: "https://app.thorbis.com")
+        do {
+            _ = try await SavedCopies.$liveOnly.withValue(true) {
+                try await CustomerJobCompilationLoader.verifyAvailableReads(customerID: CustomerCompilationRoutingProtocol.customer,
+                    organizationID: CustomerCompilationRoutingProtocol.org, api: api,
+                    access: CustomerRecordAccess(estimates: false, invoices: false), isCurrent: { false })
+            }
+            XCTFail("A retired session cannot verify records")
+        } catch is CancellationError { }
+        XCTAssertTrue(CustomerCompilationRoutingProtocol.paths.isEmpty)
+    }
     func testJobReadsOverlapWithinBoundAndKeepGroupsInJobOrder() async throws {
         CustomerCompilationRoutingProtocol.reset()
         let config = URLSessionConfiguration.ephemeral

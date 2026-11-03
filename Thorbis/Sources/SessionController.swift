@@ -91,6 +91,21 @@ final class SessionController: ObservableObject {
                                   generation: authorityGeneration, revision: authorityRevision)
     }
 
+    /// Stable verified facts for partitioning a customer cache. This does not
+    /// prove that any individual job relationship remains authorized.
+    var customerQuarantineAuthority: CustomerQuarantineAuthority? {
+        guard can("customer.view", feature: "core_crm"), let actor = user?.id,
+              let organization = activeOrganization?.id, let policyVersion, policyVersion > 0,
+              let authorityGeneration, !authorityGeneration.isEmpty,
+              let authorityOrigin, authorityOrigin == api.normalizedOrigin,
+              let sessionDeadline else { return nil }
+        return CustomerQuarantineAuthority(actorID: actor, organizationID: organization, origin: authorityOrigin,
+            policyVersion: policyVersion, serverGeneration: authorityGeneration,
+            capabilities: Array(capabilities),
+            features: features.mapValues { $0.enabled && $0.released && $0.entitled },
+            deadline: min(sessionDeadline, authorityDeadline ?? sessionDeadline))
+    }
+
     /// Changes before publishing new authority, even when the server policy version is unchanged.
     /// Visible media must reauthorize when this value changes.
     @Published private(set) var authorityRevision = UUID()
