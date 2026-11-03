@@ -53,6 +53,20 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertEqual(retirementCount, 1, "Regrant must not retire newly authorized activity")
     }
 
+    func testCustomerQuarantineAuthorityUsesVerifiedSnapshotAndStableFacts() async throws {
+        let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
+        let (session, api) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabledFeatures)
+        ])
+        await session.restore()
+        let before = try XCTUnwrap(session.customerQuarantineAuthority)
+        let scope = try CustomerQuarantineScope(actorID: actor, organizationID: first, origin: "https://app.thorbis.com", customerID: second)
+        let fingerprint = try before.fingerprint(for: scope)
+        api.invalidateRequests()
+        let after = try XCTUnwrap(session.customerQuarantineAuthority)
+        XCTAssertEqual(try after.fingerprint(for: scope), fingerprint, "Request invalidation must not masquerade as a changed server authority")
+    }
+
     func testMediaAuthorityRevisionChangesBeforeSameVersionRevokeAndRegrant() async {
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["customer.view"]"#)
         let (session, _) = controller([

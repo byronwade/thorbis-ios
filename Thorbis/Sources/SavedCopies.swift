@@ -13,6 +13,14 @@ import SwiftUI
 enum SavedCopies {
     /// Set around a pull to refresh: always ask the server, never reuse a read from moments ago.
     @TaskLocal static var liveOnly = false
+    /// A guarded customer compilation uses a durable, customer-specific
+    /// generation so old pages cannot reappear after that scope is retired.
+    @TaskLocal static var customerNamespace: String? = nil
+
+    static func guardedCopyIsFresh(savedAt: Date, now: Date = Date()) -> Bool {
+        let age = now.timeIntervalSince(savedAt)
+        return age >= 0 && age <= 14 * 86_400
+    }
 
     /// Reads worth keeping: a job's, customer's, estimate's or invoice's own record and lists.
     static func isKept(_ path: String, query: [URLQueryItem] = []) -> Bool {
@@ -27,8 +35,9 @@ enum SavedCopies {
     }
 
     /// The disk file for one read. The name is a digest, so no customer data is in a filename.
-    static func key(origin: String, path: String, query: [URLQueryItem]) -> String {
-        let canonical = origin + path + "?" + query.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
+    static func key(origin: String, path: String, query: [URLQueryItem], namespace: String? = nil) -> String {
+        let prefix = namespace.map { "customer-namespace:\($0.utf8.count):\($0):" } ?? ""
+        let canonical = prefix + origin + path + "?" + query.map { "\($0.name)=\($0.value ?? "")" }.joined(separator: "&")
         return SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
