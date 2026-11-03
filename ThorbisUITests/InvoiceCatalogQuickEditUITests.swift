@@ -354,6 +354,42 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launch(); assertSampleInvoiceQuantity(app, "2")
     }
 
+    func testCanceledInvoiceVerificationCannotRevealDeniedReplacement() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments.append("--paper-preview-invoice-verification-held")
+        app.launch()
+        let state = app.staticTexts["invoice-verification-requests"]
+        XCTAssertTrue(state.waitForExistence(timeout: 20))
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":waiting"), evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        let initialCount = Int((state.value as? String ?? "").components(separatedBy: ":").first ?? "") ?? 0
+        let access = app.buttons["invoice-verification-toggle-resource"]
+        XCTAssertTrue(access.waitForExistence(timeout: 10)); access.tap()
+        expectation(for: NSPredicate { object, _ in
+            guard let element = object as? XCUIElement, let value = element.value as? String,
+                  value.hasSuffix(":waiting"), let count = Int(value.components(separatedBy: ":").first ?? "") else { return false }
+            return count > initialCount
+        }, evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        let result = app.staticTexts["invoice-verification-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "denied"), evaluatedWith: result)
+        waitForExpectations(timeout: 15)
+        XCTAssertTrue(app.staticTexts["Document unavailable"].exists)
+        app.buttons["invoice-verification-release"].tap()
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":idle"), evaluatedWith: state)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-quantity-")).firstMatch.exists)
+        access.tap()
+        expectation(for: NSPredicate(format: "value == %@", "allowed"), evaluatedWith: result)
+        waitForExpectations(timeout: 15)
+        assertSampleInvoiceQuantity(app, "2")
+    }
+
     private func assertInvoiceFreshReadProtectsDraft(_ flag: String) {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",

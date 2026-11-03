@@ -23,6 +23,7 @@ struct InvoiceLineEditorView: View {
     @State private var sampleFinalReadResult = "idle"
     @State private var sampleNetworkState = "online"
     @State private var samplePermissionState = "allowed"
+    @State private var sampleVerificationResult = "idle"
     #endif
     @State private var confirmIssue = false
     @State private var confirmDiscard = false
@@ -109,12 +110,18 @@ struct InvoiceLineEditorView: View {
             })
         guard !Task.isCancelled, viewVisible, accessAttempt == attempt, !session.isOffline, currentScope == expected else { return }
         guard allowed else {
+            #if DEBUG
+            if EstimateRecoveryPreview.invoiceVerificationHeldEnabled { sampleVerificationResult = "denied" }
+            #endif
             verifiedScope = nil
             error = "Could not verify access or the document changed. Your draft is still on this phone."
             return
         }
         if error == "Could not verify access or the document changed. Your draft is still on this phone." { error = nil }
         verifiedScope = expected
+        #if DEBUG
+        if EstimateRecoveryPreview.invoiceVerificationHeldEnabled { sampleVerificationResult = "allowed" }
+        #endif
         guard let latest = latestRecord, latest.linesRevision == editor.invoice.linesRevision && latest.status == editor.invoice.status else {
             recoveryBlocked = true
             staleRevision = true
@@ -277,6 +284,7 @@ struct InvoiceLineEditorView: View {
                                 .accessibilityIdentifier("invoice-verification-requests")
                                 .accessibilityValue("\(EstimateRecoveryPreview.shared.invoiceVerificationReadCount):\(EstimateRecoveryPreview.shared.reloadHoldState)")
                         }
+                        Text("Result").accessibilityIdentifier("invoice-verification-result").accessibilityValue(sampleVerificationResult)
                         Button("Refresh") { Task { await session.revalidate() } }
                             .accessibilityIdentifier("invoice-verification-refresh")
                         Button("Access") {
