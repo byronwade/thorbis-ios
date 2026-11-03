@@ -61,3 +61,13 @@ confirmed using a properly signed simulator or device build. The actual
 Keychain adapter must not be described as qualified. A caller must supply the
 verified session-ID digest, never a raw token; the cold scope rejects missing or
 malformed digests and isolates a changed digest.
+
+A subsequent simulator run explicitly enabled bundle ad-hoc code signing and
+passed all 13 cold-store tests, including the actual Keychain read/add/update
+case (`/tmp/thorbis-job-office-cold-signed-xcode.log`). The simulator app had
+identifier `com.thorbis.field` and an empty entitlements dictionary; unlike the
+unsigned linker-signed run, Keychain calls succeeded. This qualifies only that
+simulator signing context, not a physical device or distribution-signed build.
+The session-digest isolation case is included in the passing run. Process tests
+with an injected marker are not power-loss evidence, and the cold store remains
+disconnected from the job reader and sign-out.
