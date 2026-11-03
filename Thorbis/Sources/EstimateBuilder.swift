@@ -447,10 +447,18 @@ struct PriceBookResultsList: View {
         .onAppear { resetPage() }
         .onChange(of: query) { _, _ in resetPage() }
         .onChange(of: kind) { _, _ in resetPage() }
-        .onChange(of: context) { _, _ in resetPage() }
+        .onChange(of: context) { previous, current in
+            if !previous.hasSameVerifiedScope(as: current) ||
+                !(catalog.isCurrent(previous, api: api) || catalog.isCurrent(current, api: api)) || catalog.isPartial || catalog.loading {
+                resetPage()
+            }
+        }
         .onChange(of: api.requestGeneration) { _, _ in resetPage() }
-        .onChange(of: catalog.context) { _, newContext in
-            if newContext == context { resetPage() }
+        .onChange(of: catalog.context) { previous, current in
+            guard let current, current == context else { return }
+            if previous?.hasSameVerifiedScope(as: current) != true || !catalog.isCurrent(current, api: api) || catalog.isPartial || catalog.loading {
+                resetPage()
+            }
         }
         .onChange(of: catalog.isPartial) { wasPartial, isPartial in
             if isPartial {

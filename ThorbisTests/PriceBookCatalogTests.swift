@@ -127,6 +127,78 @@ final class PriceBookCatalogTests: XCTestCase {
         await refresh.value
     }
 
+    func testVerifiedScopeComparisonRejectsIdentityAndAuthorityChanges() {
+        let org = UUID().uuidString.lowercased(), session = UUID()
+        let original = PriceBookCatalogContext(organizationID: org, sessionGeneration: session, authority: testAuthority)
+        let same = PriceBookAuthority(actorID: testAuthority.actorID, policyVersion: testAuthority.policyVersion,
+                                      generation: testAuthority.generation, revision: UUID())
+        XCTAssertTrue(original.hasSameVerifiedScope(as: .init(organizationID: org, sessionGeneration: session, authority: same)))
+        let changed = [
+            PriceBookAuthority(actorID: "other", policyVersion: testAuthority.policyVersion, generation: testAuthority.generation, revision: UUID()),
+            PriceBookAuthority(actorID: testAuthority.actorID, policyVersion: testAuthority.policyVersion + 1, generation: testAuthority.generation, revision: UUID()),
+            PriceBookAuthority(actorID: testAuthority.actorID, policyVersion: testAuthority.policyVersion, generation: "different", revision: UUID()),
+        ]
+        for authority in changed {
+            XCTAssertFalse(original.hasSameVerifiedScope(as: .init(organizationID: org, sessionGeneration: session, authority: authority)))
+        }
+        XCTAssertFalse(original.hasSameVerifiedScope(as: .init(organizationID: org, sessionGeneration: session, authority: nil)))
+        XCTAssertFalse(original.hasSameVerifiedScope(as: .init(organizationID: org, sessionGeneration: UUID(), authority: same)))
+        XCTAssertFalse(original.hasSameVerifiedScope(as: .init(organizationID: UUID().uuidString, sessionGeneration: session, authority: same)))
+    }
+
+    func testUnchangedVerifiedScopeReusesCompleteRecentCatalogAfterAuthorityRevision() async throws {
+        let org = UUID().uuidString.lowercased(), session = UUID()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "Existing catalog")]))])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: testAuthority, force: true)
+        let refreshed = PriceBookAuthority(actorID: testAuthority.actorID, policyVersion: testAuthority.policyVersion,
+                                           generation: testAuthority.generation, revision: UUID())
+        let next = PriceBookCatalogContext(organizationID: org, sessionGeneration: session, authority: refreshed)
+        XCTAssertFalse(catalog.isCurrent(next, api: api), "Do not accept the new revision before revalidation is adopted")
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: refreshed)
+        XCTAssertTrue(catalog.isCurrent(next, api: api))
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertNil(catalog.error)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "A harmless authority revision should not redownload a fresh complete catalog")
+    }
+
+    func testAdoptingAnUnchangedAuthorityRevisionNotifiesCatalogObservers() async throws {
+        let org = UUID().uuidString.lowercased(), session = UUID()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "Existing catalog")]))])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: testAuthority, force: true)
+        var notifications = 0
+        let observation = catalog.objectWillChange.sink { notifications += 1 }
+        let refreshed = PriceBookAuthority(actorID: testAuthority.actorID, policyVersion: testAuthority.policyVersion,
+                                           generation: testAuthority.generation, revision: UUID())
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: refreshed)
+        withExtendedLifetime(observation) {}
+        XCTAssertGreaterThan(notifications, 0, "Views need to learn that the strict current context was adopted")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
+    func testAuthorityRevisionRetiresAnInFlightPartialCatalog() async throws {
+        let org = UUID().uuidString.lowercased(), session = UUID()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(1, "Old partial")], cursor: id(9000))),
+                          .init(200, try page([(2, "Old later")]), gate: gate),
+                          .init(200, try page([(3, "New scope read")]))])
+        let catalog = PriceBookCatalog()
+        let first = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: testAuthority, force: true) }
+        try await waitForRequests(2)
+        let refreshed = PriceBookAuthority(actorID: testAuthority.actorID, policyVersion: testAuthority.policyVersion,
+                                           generation: testAuthority.generation, revision: UUID())
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: session, authority: refreshed, force: true)
+        gate.release()
+        await first.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(3)])
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+    }
+
     func testChangedAPIGenerationDoesNotLeavePartialItemsVisibleDuringNewRead() async throws {
         let org = UUID().uuidString.lowercased(), generation = UUID()
         defer { removeOwnCache(org) }

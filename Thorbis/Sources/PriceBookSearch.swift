@@ -393,6 +393,12 @@ struct PriceBookCatalogContext: Hashable {
         self.sessionGeneration = sessionGeneration
         self.authority = authority
     }
+
+    func hasSameVerifiedScope(as other: PriceBookCatalogContext) -> Bool {
+        guard organizationID == other.organizationID, sessionGeneration == other.sessionGeneration,
+              let old = authority, let new = other.authority else { return false }
+        return old.actorID == new.actorID && old.policyVersion == new.policyVersion && old.generation == new.generation
+    }
 }
 
 private struct PriceBookDenialScope: Hashable {
@@ -470,7 +476,7 @@ final class PriceBookCatalog: ObservableObject {
     private var lastAPIGeneration: UUID?
     private var partialAPIGeneration: UUID?
     private var nonDurableDenials: Set<PriceBookDenialScope> = []
-    private(set) var context: PriceBookCatalogContext?
+    @Published private(set) var context: PriceBookCatalogContext?
     private var loadingRequest: (context: PriceBookCatalogContext, apiGeneration: UUID, id: UUID, task: Task<Void, Never>)?
     private let removeCacheFile: (URL) -> Bool
     private let markDenialOverride: ((String, String, PriceBookAuthority) -> Bool)?
@@ -490,7 +496,14 @@ final class PriceBookCatalog: ObservableObject {
         let apiGeneration = api.requestGeneration
         let requestedOrigin = api.normalizedOrigin
         let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration, authority: authority)
-        if context != requested || origin != requestedOrigin {
+        if let previous = context, previous != requested, origin == requestedOrigin,
+           previous.hasSameVerifiedScope(as: requested),
+           hasCompleteSnapshot, !isPartial, !accessDenied, !denialPersistenceFailure,
+           loadingRequest == nil, !loading, lastAPIGeneration == apiGeneration {
+            // The server reverified the same scope. Adopt its local revision without
+            // discarding an idle complete catalog or its existing freshness window.
+            context = requested
+        } else if context != requested || origin != requestedOrigin {
             context = requested
             origin = requestedOrigin
             self.organizationID = organizationID
