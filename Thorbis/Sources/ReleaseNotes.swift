@@ -18,7 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "book", title: "Start with loaded items",
                       detail: "See the first price book items while the rest load, with a clear note when search is incomplete."),
-            ]
+            ],
+            fixes: 1
         ),
         ReleaseNote(
             id: "2026-11-02-estimate-text",
