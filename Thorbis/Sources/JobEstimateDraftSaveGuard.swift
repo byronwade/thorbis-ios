@@ -5,8 +5,15 @@ import Foundation
 struct JobEstimateDraftSaveGuard {
     private(set) var requiresRetry = false
 
+    mutating func markFailed() { requiresRetry = true }
+
+    mutating func perform(_ operation: () throws -> Void) throws {
+        do { try operation(); requiresRetry = false }
+        catch { requiresRetry = true; throw error }
+    }
+
     @discardableResult mutating func attempt(_ operation: () throws -> Void) -> Bool {
-        do { try operation(); requiresRetry = false; return true }
-        catch { requiresRetry = true; return false }
+        do { try perform(operation); return true }
+        catch { return false }
     }
 }

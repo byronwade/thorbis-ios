@@ -24,4 +24,12 @@ import XCTest
         XCTAssertFalse(gate.requiresRetry)
         XCTAssertEqual(try CommercialDraftStore(directory: root).load(String.self, scope: scope), "current edits")
     }
+    func testThrowingDirectWriteMarksFailureUntilSuccessfulRetry() throws {
+        var gate = JobEstimateDraftSaveGuard()
+        XCTAssertThrowsError(try gate.perform { throw CocoaError(.fileWriteNoPermission) })
+        XCTAssertTrue(gate.requiresRetry)
+        try gate.perform { }
+        XCTAssertFalse(gate.requiresRetry)
+    }
+
 }

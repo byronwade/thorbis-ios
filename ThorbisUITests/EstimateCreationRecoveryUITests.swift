@@ -2,6 +2,29 @@ import XCTest
 
 @MainActor
 final class EstimateCreationRecoveryUITests: XCTestCase {
+    func testFailedPostCreateDraftWriteKeepsSheetOpenOnSwipeAndClose() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-created-write-fails", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        let retry = app.buttons["Try saving draft again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 15))
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.exists)
+        let top = app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let bottom = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        top.press(forDuration: 0.1, thenDragTo: bottom)
+        XCTAssertTrue(title.exists, "The editor must stay open after the known write failure")
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(title.exists, "Close must not discard the in-memory created estimate")
+        XCTAssertTrue(retry.exists)
+    }
+
     func testCancelCustomerOnlyEditRequiresConfirmationAndDoesNotRestoreCanceledCustomer() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -137,13 +137,18 @@ struct NewEstimateView: View {
                      origin: originalScope.origin, kind: "new-estimate", document: draftDocumentKey)
     }
     private func saveDraft(uncertain: Bool? = nil, leavingOriginalScope: Bool = false) throws {
-        guard ownsDraft, (scopeMatches || leavingOriginalScope), let draftScope else { throw CancellationError() }
+        guard ownsDraft, (scopeMatches || leavingOriginalScope), let draftScope else {
+            if jobID != nil { jobDraftSaveGuard.markFailed() }
+            throw CancellationError()
+        }
         let draft = CommercialNewEstimateDraft(customerID: customerID, title: title, lines: lines,
             uncertain: uncertain ?? (createInFlight || createOutcomeUncertain), created: created,
             requiresLocationVerification: requiresLocationVerification, requiresManualReview: requiresManualReview,
             requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss,
             atomicOperation: heldAtomicOperation)
-        try CommercialDraftStore.shared.save(draft, scope: draftScope)
+        let draftStore = CommercialDraftStore.shared
+        if jobID != nil { try jobDraftSaveGuard.perform { try draftStore.save(draft, scope: draftScope) } }
+        else { try draftStore.save(draft, scope: draftScope) }
     }
     private var hasDraftChanges: Bool {
         title != initialTitle || customerID != initialCustomerID || !lines.isEmpty
@@ -164,15 +169,8 @@ struct NewEstimateView: View {
             }
             wroteFreshDraft = false; return true
         }
-        if jobID != nil {
-            guard jobDraftSaveGuard.attempt({ try saveDraft(leavingOriginalScope: leavingOriginalScope) }) else {
-                error = "This draft could not be saved on this phone. Keep this screen open and try again."
-                return false
-            }
-        } else {
-            do { try saveDraft(leavingOriginalScope: leavingOriginalScope) }
-            catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again."; return false }
-        }
+        do { try saveDraft(leavingOriginalScope: leavingOriginalScope) }
+        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again."; return false }
         if !didRecoverDraft { wroteFreshDraft = true }
         return true
     }
@@ -242,6 +240,12 @@ struct NewEstimateView: View {
         verifiedCustomerID = expectedCustomer; verifiedCreatedID = expectedID; verifiedScope = expected
     }
     private func discardDraft() {
+        if jobID != nil && jobDraftSaveGuard.requiresRetry {
+            guard ownsDraft, persistDraft(leavingOriginalScope: true) else {
+                error = "This draft could not be saved on this phone. Keep this screen open and try again."
+                return
+            }
+        }
         guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
         if createOutcomeUncertain || createInFlight || heldAtomicOperation != nil {
             if jobID == nil || !jobDraftSaveGuard.requiresRetry || persistDraft(leavingOriginalScope: true) { dismiss() }
@@ -289,6 +293,11 @@ struct NewEstimateView: View {
                                 ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text("Connect to verify access. Your draft stays on this phone."))
                                 if scopeMatches && ownsDraft && !draftRecoveryBlocked {
                                     Button("Try again") { Task { await verifyDraftAccess() } }.buttonStyle(.bordered)
+                                }
+                                if jobID != nil && jobDraftSaveGuard.requiresRetry && ownsDraft {
+                                    Button("Try saving draft again") {
+                                        _ = persistDraft(leavingOriginalScope: true)
+                                    }.buttonStyle(.bordered)
                                 }
                             }
                         } else { builder }

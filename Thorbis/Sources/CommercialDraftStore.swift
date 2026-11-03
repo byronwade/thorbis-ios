@@ -35,6 +35,14 @@ struct CommercialDraftScope: Codable, Hashable {
             arguments.indices.contains(index + 1) ? UUID(uuidString: arguments[index + 1]) : nil
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CommercialDraftPreview-\((requested ?? UUID()).uuidString)")
+        if arguments.contains("--commercial-draft-test-created-write-fails") {
+            return CommercialDraftStore(directory: directory, writeItem: { data, url in
+                let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                let value = object?["value"] as? [String: Any]
+                if value?["created"] is [String: Any] { throw CocoaError(.fileWriteNoPermission) }
+                try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            })
+        }
         if arguments.contains("--commercial-draft-test-cleanup-fails") {
             return CommercialDraftStore(directory: directory, removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
         }
