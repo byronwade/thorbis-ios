@@ -103,7 +103,10 @@ final class JobDocumentsUITests: XCTestCase {
         for _ in 0..<10 {
             let frame = element.frame
             if element.isHittable && frame.minY >= topBoundary && frame.maxY <= bottomBoundary { break }
-            if frame.minY < topBoundary { list.swipeDown() } else { list.swipeUp() }
+            let down = frame.minY < topBoundary
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.4 : 0.6))
+            let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.6 : 0.4))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
         XCTAssertTrue(element.isHittable)
         XCTAssertGreaterThanOrEqual(element.frame.minY, topBoundary)
