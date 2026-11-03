@@ -18,6 +18,10 @@ struct InvoiceResponseTransport {
               parts.user == nil, parts.password == nil,
               (request.httpMethod ?? "GET").uppercased() == "GET", request.httpBody == nil,
               request.httpBodyStream == nil else { throw InvoiceResponseFailure.invalidRequest }
+        let incompleteHeaders = ["Range", "If-Range", "If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since"]
+        guard incompleteHeaders.allSatisfy({ request.value(forHTTPHeaderField: $0) == nil }) else {
+            throw InvoiceResponseFailure.invalidRequest
+        }
         try Task.checkCancellation()
         if knownOffline, let data = try await saved() {
             try Task.checkCancellation()
@@ -49,7 +53,8 @@ struct InvoiceResponseTransport {
         // The caller must retain its read barrier until definitive termination.
         try Task.checkCancellation()
         guard let http = response as? HTTPURLResponse, http.url == url else { throw InvoiceResponseFailure.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else { throw InvoiceResponseFailure.httpStatus(http.statusCode) }
+        guard http.statusCode == 200 else { throw InvoiceResponseFailure.httpStatus(http.statusCode) }
+        guard http.value(forHTTPHeaderField: "Content-Range") == nil else { throw InvoiceResponseFailure.invalidResponse }
         return InvoiceResponse(data: data, source: .network)
     }
 }

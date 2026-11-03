@@ -12,9 +12,10 @@ final class InvoiceFixtureProtocol: URLProtocol, @unchecked Sendable {
         Self.storage.lock.withLock { Self.storage.requests.append(request) }
         let path = request.url!.path
         if path == "/lost" { client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return }
-        let status = path == "/denied" ? 403 : 200
+        let status = path == "/denied" ? 403 : (path == "/partial" ? 206 : 200)
         let responseURL = path == "/redirected" ? URL(string: "https://other.invalid/redirected")! : request.url!
-        let response = HTTPURLResponse(url: responseURL, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+        let headers = path == "/range-response" ? ["Content-Range": "bytes 0-3/20"] : nil
+        let response = HTTPURLResponse(url: responseURL, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data("live".utf8))
         client?.urlProtocolDidFinishLoading(self)
@@ -63,6 +64,22 @@ actor Gate {
             _ = try await InvoiceResponseTransport.load(request: request("/redirected"), knownOffline: false, network: fetch, saved: saved)
             print("FAIL: unexpected response URL must not be marked network"); failures += 1
         } catch InvoiceResponseFailure.invalidResponse {} catch { print("FAIL: wrong redirect failure \(error)"); failures += 1 }
+        do {
+            _ = try await InvoiceResponseTransport.load(request: request("/partial"), knownOffline: false, network: fetch, saved: saved)
+            print("FAIL: a partial HTTP response must not qualify"); failures += 1
+        } catch InvoiceResponseFailure.httpStatus(206) {} catch { print("FAIL: wrong partial failure \(error)"); failures += 1 }
+        do {
+            _ = try await InvoiceResponseTransport.load(request: request("/range-response"), knownOffline: false, network: fetch, saved: saved)
+            print("FAIL: Content-Range must not qualify as a complete response"); failures += 1
+        } catch InvoiceResponseFailure.invalidResponse {} catch { print("FAIL: wrong content-range failure \(error)"); failures += 1 }
+        for header in ["Range", "If-Range", "If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since"] {
+            var conditional = request("/live")
+            conditional.setValue("fixture", forHTTPHeaderField: header)
+            do {
+                _ = try await InvoiceResponseTransport.load(request: conditional, knownOffline: false, network: fetch, saved: saved)
+                print("FAIL: \(header) must not qualify as a full invoice read"); failures += 1
+            } catch InvoiceResponseFailure.invalidRequest {} catch { print("FAIL: wrong \(header) failure \(error)"); failures += 1 }
+        }
         let gate = Gate()
         let delayed: @Sendable (URLRequest) async throws -> (Data, URLResponse) = { request in
             await gate.wait()
