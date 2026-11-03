@@ -95,16 +95,19 @@ final class JobDocumentsUITests: XCTestCase {
     private func revealJobItem(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
         let chooser = app.buttons["job-section-chooser"]
+        let moneyTab = app.buttons["job-section-money"]
+        let footer = app.buttons["Collect payment"]
         let list = app.scrollViews.firstMatch
-        let topBoundary = chooser.exists ? chooser.frame.maxY : app.frame.minY
+        let topBoundary = chooser.exists ? chooser.frame.maxY : (moneyTab.exists ? moneyTab.frame.maxY : app.frame.minY)
+        let bottomBoundary = !chooser.exists && footer.exists ? footer.frame.minY : app.frame.maxY
         for _ in 0..<10 {
             let frame = element.frame
-            if element.isHittable && frame.midY > topBoundary && frame.midY < app.frame.maxY { break }
-            list.swipeUp()
+            if element.isHittable && frame.minY >= topBoundary && frame.maxY <= bottomBoundary { break }
+            if frame.minY < topBoundary { list.swipeDown() } else { list.swipeUp() }
         }
         XCTAssertTrue(element.isHittable)
-        XCTAssertGreaterThan(element.frame.midY, topBoundary)
-        XCTAssertLessThan(element.frame.midY, app.frame.maxY)
+        XCTAssertGreaterThanOrEqual(element.frame.minY, topBoundary)
+        XCTAssertLessThanOrEqual(element.frame.maxY, bottomBoundary)
     }
 
     func testNarrowJobSectionsCanReachEverySectionWithoutScrollingTabs() {
@@ -170,7 +173,6 @@ final class JobDocumentsUITests: XCTestCase {
         revealJobItem(second, in: app)
         second.tap()
         XCTAssertTrue(secondLine.waitForExistence(timeout: 5))
-        for _ in 0..<10 where !first.isHittable { app.scrollViews.firstMatch.swipeDown() }
         revealJobItem(first, in: app)
         first.tap()
         XCTAssertFalse(firstLine.exists)
