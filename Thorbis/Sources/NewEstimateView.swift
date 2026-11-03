@@ -122,6 +122,17 @@ struct NewEstimateView: View {
         }
         ownsDraft = true
         if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
+        if jobID != nil {
+            EstimateEditorLifecycle.shared.register(owner: draftOwner, busy: { busy }, preserve: {
+                guard !recoveryChoicePending, recoveryPreview == nil else { return false }
+                if persistDraft(leavingOriginalScope: true) { return true }
+                preserveUnpersistedDraft()
+                return false
+            }, forced: {
+                guard !recoveryChoicePending, recoveryPreview == nil else { return }
+                if busy || !persistDraft(leavingOriginalScope: true) { preserveUnpersistedDraft() }
+            })
+        }
         if !didRecoverDraft && !draftRecoveryBlocked {
             verifiedScope = creationScope; verifiedCustomerID = customerID; verifiedCreatedID = created?.id
         }
@@ -448,7 +459,9 @@ struct NewEstimateView: View {
             .onChange(of: lines) { _, _ in persistDraft() }
             .onChange(of: scopeMatches) { wasMatching, matches in
                 if !matches {
-                    if wasMatching { persistDraft(leavingOriginalScope: true) }
+                    if wasMatching && !busy && !persistDraft(leavingOriginalScope: true) {
+                        preserveUnpersistedDraft()
+                    }
                     picker = nil; focus = nil
                 }
             }
@@ -804,7 +817,7 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
-        guard resourceAuthorized, ownsDraft, !cleanupFailedAfterSave, !memoryRecoveryPending else { error = "Your access changed. Your draft is still on this phone."; return }
+        guard !EstimateEditorLifecycle.shared.transitioning, resourceAuthorized, ownsDraft, !cleanupFailedAfterSave, !memoryRecoveryPending else { error = "Your access changed. Your draft is still on this phone."; return }
         guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss) else { return }
         guard recovery.mayProceed(validDraft: valid) else {
             if created == nil && !valid { _ = showProblems() }
@@ -1013,6 +1026,7 @@ struct NewEstimateView: View {
             createInFlight = false
             if uncertain { createOutcomeUncertain = true }
             if scopeMatches { try? saveDraft() }
+            if jobID != nil && jobDraftSaveGuard.requiresRetry { preserveUnpersistedDraft() }
             guard creationScope == scope else { return }
             if uncertain {
                 self.error = "The save could not be confirmed. Check Estimates or ask your office before starting another. Your text is still here."
@@ -1022,6 +1036,7 @@ struct NewEstimateView: View {
         }
     }
     private func releaseDraft() {
+        EstimateEditorLifecycle.shared.unregister(owner: draftOwner)
         if ownsDraft, let draftScope { CommercialDraftStore.shared.release(scope: draftScope, owner: draftOwner) }
         ownsDraft = false
     }

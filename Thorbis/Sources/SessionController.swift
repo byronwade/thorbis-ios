@@ -335,15 +335,26 @@ final class SessionController: ObservableObject {
         await selectOrganization(id: created.id)
     }
 
-    func selectOrganization(id: String) async {
-        guard !signingOut else { return }
+    @discardableResult func selectOrganization(id: String) async -> Bool {
+        guard !signingOut else { return false }
         guard organizations.contains(where: { $0.id == id }), user != nil else {
             error = "That workspace is unavailable."
-            return
+            return false
+        }
+        let lifecycle = EstimateEditorLifecycle.shared
+        guard lifecycle.beginTransition() else { error = "Wait for the current account change to finish."; return false }
+        defer { lifecycle.endTransition() }
+        guard lifecycle.prepareTransition() else {
+            error = "Finish saving the open estimate before changing workspaces."
+            return false
         }
         let knownOrganizations = organizations
         // Notifications for the old workspace stop before the switch.
         await onWillUnbindDevice?()
+        guard lifecycle.prepareTransition() else {
+            error = "Finish saving the open estimate before changing workspaces."
+            return false
+        }
         snapshots.clear()
         let requestGeneration = invalidate(next: .restoring)
         do {
@@ -352,19 +363,32 @@ final class SessionController: ObservableObject {
                 "POST", "/api/auth/organization/set-active",
                 body: Selection(organizationId: id), authed: false
             )
-            guard generation == requestGeneration else { return }
+            guard generation == requestGeneration else { return false }
             await loadSession(generation: requestGeneration, expectedOrganization: id,
                               knownOrganizations: knownOrganizations)
+            return generation == requestGeneration && phase == .ready && activeOrganization?.id == id
         } catch {
             fail(error, generation: requestGeneration)
+            return false
         }
     }
 
-    func signOut() async {
-        guard !signingOut else { return }
+    @discardableResult func signOut() async -> Bool {
+        guard !signingOut else { return false }
+        let lifecycle = EstimateEditorLifecycle.shared
+        guard lifecycle.beginTransition() else { error = "Wait for the current account change to finish."; return false }
+        defer { lifecycle.endTransition() }
         signingOut = true
         defer { signingOut = false }
+        guard lifecycle.prepareTransition() else {
+            error = "Finish saving the open estimate before signing out."
+            return false
+        }
         await onWillUnbindDevice?()
+        guard lifecycle.prepareTransition() else {
+            error = "Finish saving the open estimate before signing out."
+            return false
+        }
         defaults.set(true, forKey: Self.explicitSignOutKey)
         snapshots.clear()
         PriceBookCatalog.shared.clear()
@@ -378,9 +402,10 @@ final class SessionController: ObservableObject {
         } catch {
             // Local access stays revoked even if the server is unavailable.
         }
-        guard generation == requestGeneration else { return }
+        guard generation == requestGeneration else { return false }
         api.clearSessionCookies()
         phase = .signedOut
+        return true
     }
 
     private func invalidateUnauthorizedSession() {
@@ -394,6 +419,7 @@ final class SessionController: ObservableObject {
 
     @discardableResult
     private func invalidate(next: Phase) -> UUID {
+        EstimateEditorLifecycle.shared.preserveForInvalidation()
         authorityRevision = UUID()
         generation = UUID()
         revalidation = nil

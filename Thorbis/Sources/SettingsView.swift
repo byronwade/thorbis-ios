@@ -11,6 +11,7 @@ struct SettingsView: View {
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var pendingMedia: PendingMediaStore
     @State private var confirmSignOut = false
+    @State private var signOutFailed = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var showWorkspaces = false
@@ -174,7 +175,14 @@ struct SettingsView: View {
             .thorbisConfirm("Sign out of Thorbis?",
                             message: signOutWarning,
                             isPresented: $confirmSignOut,
-                            actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
+                            actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task {
+                                if await session.signOut() { dismiss() } else { signOutFailed = true }
+                            } }])
+            .alert("Couldn't sign out", isPresented: $signOutFailed) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(session.error ?? "Try again after the current account change finishes.")
+            }
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
         }
     }

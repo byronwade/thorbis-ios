@@ -249,7 +249,11 @@ struct WorkspaceGateView: View {
                                 let current = organization.id == session.activeOrganization?.id
                                 Button {
                                     opening = organization.id
-                                    Task { await session.selectOrganization(id: organization.id); opening = nil; dismiss() }
+                                    Task {
+                                        let changed = await session.selectOrganization(id: organization.id)
+                                        opening = nil
+                                        if changed { dismiss() }
+                                    }
                                 } label: {
                                     PaperListRow(leading: .icon("building.2"), title: organization.name) {
                                         if opening == organization.id {
