@@ -330,10 +330,10 @@ final class SessionController: ObservableObject {
         let originalGeneration = generation
         let originalActor = user?.id
         let originalOrigin = api.normalizedOrigin
-        struct NewCompany: Encodable { let name: String; let slug: String }
+        struct NewCompany: Encodable { let name: String; let slug: String; let keepCurrentActiveOrganization: Bool }
         let created: SessionOrganization = try await api.send(
             "POST", "/api/auth/organization/create",
-            body: NewCompany(name: name, slug: CompanySlug.make(from: name)), authed: false
+            body: NewCompany(name: name, slug: CompanySlug.make(from: name), keepCurrentActiveOrganization: true), authed: false
         )
         guard !created.id.isEmpty else { throw Problem(title: nil, status: nil, detail: "The company was not created. Try again.") }
         guard generation == originalGeneration, user?.id == originalActor, api.normalizedOrigin == originalOrigin else {
@@ -368,7 +368,7 @@ final class SessionController: ObservableObject {
         } catch {
             guard generation == originalGeneration, phase == .ready, user?.id == actor,
                   api.normalizedOrigin == origin else { return false }
-            error = "The company was created, but its membership could not be checked. Try again."
+            self.error = "The company was created, but its membership could not be checked. Try again."
             return false
         }
     }

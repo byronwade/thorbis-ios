@@ -94,6 +94,11 @@ final class SessionControllerTests: XCTestCase {
         let result = try await session.createCompany(name: "New company")
         XCTAssertEqual(result.id, second)
         XCTAssertFalse(result.opened)
+        let createRequest = try XCTUnwrap(URLProtocolFixture.recorded.first { $0.url?.path == "/api/auth/organization/create" })
+        let body = try XCTUnwrap(createRequest.body)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(object["keepCurrentActiveOrganization"] as? Bool, true)
+        XCTAssertEqual(session.activeOrganization?.id, first)
         safe = true
         let changed = await session.openCreatedCompany(id: result.id, actor: actor, origin: "https://app.thorbis.com")
         XCTAssertTrue(changed)
