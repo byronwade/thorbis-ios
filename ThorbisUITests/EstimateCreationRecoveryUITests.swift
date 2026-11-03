@@ -2,6 +2,320 @@ import XCTest
 
 @MainActor
 final class EstimateCreationRecoveryUITests: XCTestCase {
+    func testFailedPostCreateDraftWriteKeepsSheetOpenOnSwipeAndClose() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-created-write-fails", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        let retry = app.buttons["Try saving draft again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 15))
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.exists)
+        let top = app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let bottom = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+        top.press(forDuration: 0.1, thenDragTo: bottom)
+        XCTAssertTrue(title.exists, "The editor must stay open after the known write failure")
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(title.exists, "Close must not discard the in-memory created estimate")
+        XCTAssertTrue(retry.exists)
+    }
+
+    func testActualJobEstimateSheetStaysOpenAfterPostCreateSaveFailure() {
+        let app = openActualJobEstimateWithFailedPostCreateSave()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.exists)
+        let top = app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        top.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(title.exists)
+        XCTAssertTrue(app.buttons["Try saving draft again"].exists)
+    }
+
+    func testActualJobSheetScopeChangeKeepsFailedPostCreateDraftOpen() {
+        let app = openActualJobEstimateWithFailedPostCreateSave(extra: ["--paper-preview-estimate-test-switch-scope"])
+        let change = app.buttons["estimate-recovery-change-scope"]
+        XCTAssertTrue(change.waitForExistence(timeout: 10)); change.tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Try saving draft again"].waitForExistence(timeout: 5))
+        app.buttons["Try saving draft again"].tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].exists)
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].exists)
+        let allow = app.buttons["estimate-recovery-allow-saves"]
+        XCTAssertTrue(allow.waitForExistence(timeout: 5)); allow.tap()
+        app.buttons["Try saving draft again"].tap()
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForNonExistence(timeout: 10))
+        let reopen = app.buttons["job-add-estimate"]
+        XCTAssertTrue(reopen.waitForExistence(timeout: 15)); if !reopen.isHittable { app.swipeUp() }; reopen.tap()
+        XCTAssertTrue(app.buttons["Retry adding to job"].waitForExistence(timeout: 15), "The saved estimate should recover from the original job scope")
+    }
+
+    private func openActualJobEstimateWithFailedPostCreateSave(extra: [String] = []) -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-created-write-fails", "--commercial-draft-test-id", UUID().uuidString] + extra
+        app.launch()
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 30))
+        if !add.isHittable { app.swipeUp() }
+        XCTAssertTrue(add.isHittable); add.tap()
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 15))
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        XCTAssertTrue(app.buttons["Try saving draft again"].waitForExistence(timeout: 15))
+        return app
+    }
+
+    func testChangedEstimateBeforeFirstLinkDoesNotLink() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--paper-preview-estimate-recovery-changed", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch(); addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 10))
+        let outcome = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ OR label CONTAINS %@", "saved estimate or your access changed", "adding it to this job could not be confirmed")).firstMatch
+        XCTAssertTrue(outcome.waitForExistence(timeout: 15))
+        XCTAssertEqual(counts.value as? String, "creates=1,links=0,estimateReads=1,jobReads=0")
+        XCTAssertTrue(outcome.label.contains("saved estimate or your access changed"))
+    }
+
+    func testChangedJobBeforeFirstLinkDoesNotLink() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--paper-preview-estimate-recovery-matching-location", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch(); addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        let outcome = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "job or your access changed")).firstMatch
+        XCTAssertTrue(outcome.waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["estimate-recovery-request-counts"].value as? String,
+                       "creates=1,links=0,estimateReads=1,jobReads=1")
+    }
+
+    func testUnchangedInitialEstimateAndJobCanStillLink() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--paper-preview-estimate-recovery-link-success", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch(); addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=1,estimateReads=1,jobReads=1")
+    }
+
+    func testCancelCustomerOnlyEditRequiresConfirmationAndDoesNotRestoreCanceledCustomer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-estimate-recovery-standalone",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let original = app.buttons.matching(NSPredicate(format: "label == %@", "Danielle Marlowe")).firstMatch
+        XCTAssertTrue(original.waitForExistence(timeout: 30)); original.tap()
+        let alternate = app.buttons["Alex Petrov"]
+        XCTAssertTrue(alternate.waitForExistence(timeout: 10)); alternate.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Alex Petrov")).firstMatch.waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Danielle Marlowe")).firstMatch.waitForExistence(timeout: 20))
+    }
+
+    func testCancelTitleOnlyEditRequiresConfirmationAndDoesNotRestoreCanceledText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" canceled")
+        XCTAssertEqual(title.value as? String, original + " canceled")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        app.terminate(); app.launch()
+        let reopened = app.textFields["Estimate title"]
+        XCTAssertTrue(reopened.waitForExistence(timeout: 20))
+        XCTAssertEqual(reopened.value as? String, original)
+    }
+
+    func testExistingEditorRetainsEditsThroughOfflineAndReconnect() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--paper-preview-estimate-recovery-toggle-offline", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let original = title.value as? String ?? ""
+        let toggle = app.buttons["estimate-recovery-toggle-network"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10)); toggle.tap()
+        XCTAssertTrue(app.staticTexts["Sample offline"].waitForExistence(timeout: 15))
+        XCTAssertTrue(title.exists); XCTAssertTrue(title.isEnabled)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" offline")
+        XCTAssertEqual(title.value as? String, original + " offline")
+        toggle.tap()
+        XCTAssertTrue(app.staticTexts["Sample online"].waitForExistence(timeout: 15))
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertEqual(title.value as? String, original + " offline")
+    }
+
+    func testSameSessionRevalidationHidesDraftUntilJobAccessReturns() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--paper-preview-estimate-recovery-toggle-job", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        addSampleItem(in: app)
+        let toggle = app.buttons["estimate-recovery-toggle-job"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.textFields["Estimate title"].exists)
+        toggle.tap()
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Replace capacitor")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testSavedDraftRemainsAvailableAfterOfflineResourceCheckAndReconnect() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        addSampleItem(in: app)
+        app.terminate()
+        app.launchArguments.append("--paper-preview-estimate-recovery-offline-job")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.textFields["Estimate title"].exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-estimate-recovery-offline-job" }
+        app.launch()
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Replace capacitor")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testSavedDraftIsHiddenWhenJobAccessIsRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        addSampleItem(in: app)
+        app.terminate()
+        app.launchArguments.append("--paper-preview-estimate-recovery-deny-job")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.textFields["Estimate title"].exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch.exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-estimate-recovery-deny-job" }
+        app.launch()
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 15), "The preserved draft should reopen after access returns")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Replace capacitor")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testRelaunchAfterInterruptedCreateKeepsUncertainDraftAndDoesNotCreateAgain() {
+        checkInterruptedRequest(extra: "--paper-preview-estimate-create-hold", expected: "creates=1,links=0,estimateReads=0,jobReads=0", hasSavedID: false)
+    }
+
+    func testRelaunchAfterInterruptedLinkKeepsKnownEstimateWithoutAutomaticRetry() {
+        checkInterruptedRequest(extra: "--paper-preview-estimate-link-hold", expected: "creates=1,links=1,estimateReads=1,jobReads=1", hasSavedID: true)
+    }
+
+    private func checkInterruptedRequest(extra: String, expected: String, hasSavedID: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-id", UUID().uuidString, extra]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(counts.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: counts)
+        waitForExpectations(timeout: 10)
+        app.terminate()
+        if hasSavedID {
+            app.launchArguments.removeAll { $0 == "--paper-preview-estimate-link-hold" }
+            app.launchArguments.append("--paper-preview-estimate-recovery-link-success")
+        }
+        app.launch()
+        let recoveredCounts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(recoveredCounts.waitForExistence(timeout: 15))
+        let warning = hasSavedID ? "job link could not be confirmed" : "previous save could not be confirmed"
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", warning)).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(recoveredCounts.value as? String, "creates=0,links=0,estimateReads=0,jobReads=0")
+        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "creates=0,links=0,estimateReads=0,jobReads=0"), object: recoveredCounts)
+        unexpectedRequest.isInverted = true
+        wait(for: [unexpectedRequest], timeout: 2)
+        if !hasSavedID {
+            let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+            XCTAssertFalse(action.isEnabled)
+        } else {
+            let retry = app.buttons["Retry adding to job"]
+            XCTAssertTrue(retry.waitForExistence(timeout: 10))
+            XCTAssertTrue(retry.isEnabled)
+            retry.tap()
+            assertOpenedSavedEstimate(in: app, counts: "creates=0,links=1,estimateReads=1,jobReads=1")
+        }
+    }
+
+    func testSuccessfulLinkWithFailedDraftCleanupReportsSavedAndRelaunchDoesNotWrite() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--paper-preview-estimate-recovery-link-success", "--commercial-draft-test-cleanup-fails",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        save.tap()
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "estimate was saved, but its local draft could not be removed")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 10))
+        let counts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertEqual(counts.value as? String, "creates=1,links=1,estimateReads=1,jobReads=1")
+        app.terminate()
+        app.launch()
+        let recoveredCounts = app.staticTexts["estimate-recovery-request-counts"]
+        XCTAssertTrue(recoveredCounts.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "job link could not be confirmed")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(recoveredCounts.value as? String, "creates=0,links=0,estimateReads=1,jobReads=1")
+        let unexpectedRequest = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", "creates=0,links=0,estimateReads=1,jobReads=1"), object: recoveredCounts)
+        unexpectedRequest.isInverted = true
+        wait(for: [unexpectedRequest], timeout: 2)
+    }
     func testAuthorityChangeDuringCreateDoesNotLinkBeforeFreshVerification() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -118,7 +432,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         waitForExpectations(timeout: 10)
         retry.tap()
         let counts = app.staticTexts["estimate-recovery-request-counts"]
-        expectation(for: NSPredicate(format: "value == %@", "creates=1,links=1,estimateReads=1,jobReads=0"), evaluatedWith: counts)
+        expectation(for: NSPredicate(format: "value == %@", "creates=1,links=1,estimateReads=2,jobReads=1"), evaluatedWith: counts)
         waitForExpectations(timeout: 10)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved estimate or your access changed")).firstMatch.waitForExistence(timeout: 5))
     }
@@ -259,9 +573,9 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertFalse(price.isEnabled)
         let counts = app.staticTexts["estimate-recovery-request-counts"]
         XCTAssertTrue(counts.waitForExistence(timeout: 5))
-        XCTAssertEqual(counts.value as? String, "creates=1,links=1,estimateReads=0,jobReads=0")
+        XCTAssertEqual(counts.value as? String, "creates=1,links=1,estimateReads=1,jobReads=1")
         retry.tap()
-        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=1,jobReads=1")
+        assertOpenedSavedEstimate(in: app, counts: "creates=1,links=2,estimateReads=2,jobReads=2")
     }
 
     private func assertOpenedSavedEstimate(in app: XCUIApplication, counts expected: String) {

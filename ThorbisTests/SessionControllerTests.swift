@@ -37,6 +37,43 @@ final class SessionControllerTests: XCTestCase {
         return (SessionController(api: api, defaults: isolatedDefaults()), api)
     }
 
+    func testExtendedTextNeedsFreshEnabledResponseFromSameWorkspace() async {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let ready = """
+        {"organizationId":"\(first)","evaluatedAt":"\(timestamp)","features":{"commercial_extended_descriptions":{"enabled":true,"released":true,"entitled":true,"stage":"internal"}}}
+        """
+        let held = ready.replacingOccurrences(of: "\"enabled\":true", with: "\"enabled\":false")
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, ready),
+            .init(200, ready), .init(200, held)
+        ])
+        await session.restore()
+        let firstCheck = await session.verifyExtendedCommercialText()
+        let secondCheck = await session.verifyExtendedCommercialText()
+        XCTAssertTrue(firstCheck)
+        XCTAssertFalse(secondCheck)
+    }
+
+    func testExtendedTextRejectsWrongWorkspaceStaleOrUnavailableResponse() async {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let ready = """
+        {"organizationId":"\(first)","evaluatedAt":"\(timestamp)","features":{"commercial_extended_descriptions":{"enabled":true,"released":true,"entitled":true,"stage":"internal"}}}
+        """
+        let wrongWorkspace = ready.replacingOccurrences(of: first, with: second)
+        let stale = ready.replacingOccurrences(of: timestamp, with: "2026-01-01T00:00:00Z")
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, ready),
+            .init(200, wrongWorkspace), .init(200, stale), .init(503, "{}")
+        ])
+        await session.restore()
+        let wrong = await session.verifyExtendedCommercialText()
+        let old = await session.verifyExtendedCommercialText()
+        let unavailable = await session.verifyExtendedCommercialText()
+        XCTAssertFalse(wrong)
+        XCTAssertFalse(old)
+        XCTAssertFalse(unavailable)
+    }
+
     func testActivityRetirementNotifiedOnRevalidationRevocation() async {
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["customer.view"]"#)
         let (session, _) = controller([

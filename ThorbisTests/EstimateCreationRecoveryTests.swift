@@ -2,6 +2,10 @@ import XCTest
 @testable import Thorbis
 
 final class EstimateCreationRecoveryTests: XCTestCase {
+    func testUnknownLinkOutcomeCanRetrySameKnownEstimateAfterVerification() {
+        let recovered = EstimateCreationRecovery(isSaving: false, savedEstimateID: "saved", createOutcomeUncertain: true)
+        XCTAssertTrue(recovered.mayProceed(validDraft: true))
+    }
     func testSubmittingLocksEditingUntilTheResultIsKnown() {
         let pending = EstimateCreationRecovery(isSaving: true, savedEstimateID: nil)
         XCTAssertFalse(pending.canEdit)
@@ -126,6 +130,10 @@ extension EstimateCreationRecoveryTests {
         XCTAssertTrue(original.sameIdentityAndTransport(as: refreshed))
         let otherOrganization = EstimateCreationScope(actorID: "actor", organizationID: "other", sessionGeneration: session, authorityRevision: authority, requestGeneration: request, origin: original.origin)
         XCTAssertFalse(original.sameIdentityAndTransport(as: otherOrganization))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(actorID: "other", organizationID: "org", sessionGeneration: session, authorityRevision: authority, requestGeneration: request, origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(actorID: "actor", organizationID: "org", sessionGeneration: UUID(), authorityRevision: authority, requestGeneration: request, origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(actorID: "actor", organizationID: "org", sessionGeneration: session, authorityRevision: authority, requestGeneration: UUID(), origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(actorID: "actor", organizationID: "org", sessionGeneration: session, authorityRevision: authority, requestGeneration: request, origin: "https://other.example")))
         XCTAssertNotEqual(original, .init(actorID: "actor", organizationID: "org", sessionGeneration: session, authorityRevision: authority, requestGeneration: UUID(), origin: original.origin))
         XCTAssertNotEqual(original, .init(actorID: "actor", organizationID: "org", sessionGeneration: session, authorityRevision: authority, requestGeneration: request, origin: "https://other.example"))
     }
