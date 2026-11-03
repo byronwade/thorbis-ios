@@ -12,6 +12,9 @@ struct NewEstimateView: View {
     @State private var title: String
     @State private var customerID: String
     @State private var lines: [EstimateRevisionLineDraft] = []
+    #if DEBUG
+    @State private var previewPresentationReady = false
+    #endif
     @State private var busy = false
     @State private var error: String?
     @State private var originalScope: EstimateCreationScope?
@@ -315,6 +318,13 @@ struct NewEstimateView: View {
             }
             .keyboardDoneButton()
             .onAppear { openDraft() }
+            #if DEBUG
+            .background {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-wait-presentation") {
+                    EstimatePresentationObserver { previewPresentationReady = true }
+                }
+            }
+            #endif
             .task(id: draftCheckKey) { await verifyDraftAccess() }
             .onChange(of: session.isOffline) { _, offline in
                 if offline {
@@ -345,6 +355,9 @@ struct NewEstimateView: View {
                         HStack {
                             TimelineView(.periodic(from: .now, by: 0.2)) { _ in
                                 VStack {
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-wait-presentation"), previewPresentationReady {
+                                        Text("Presentation ready").accessibilityIdentifier("estimate-presentation-ready")
+                                    }
                                     Text("Sample requests")
                                         .accessibilityIdentifier("estimate-recovery-request-counts")
                                         .accessibilityValue(EstimateRecoveryPreview.shared.counts)
@@ -1068,3 +1081,18 @@ struct NewEstimateView: View {
         ownsDraft = false
     }
 }
+
+#if DEBUG
+/// Test-only signal from UIKit after the editor's presenting transition completes.
+private struct EstimatePresentationObserver: UIViewControllerRepresentable {
+    var onPresented: () -> Void
+    func makeUIViewController(context: Context) -> Controller { Controller(onPresented: onPresented) }
+    func updateUIViewController(_ controller: Controller, context: Context) { controller.onPresented = onPresented }
+    final class Controller: UIViewController {
+        var onPresented: () -> Void
+        init(onPresented: @escaping () -> Void) { self.onPresented = onPresented; super.init(nibName: nil, bundle: nil) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+        override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); onPresented() }
+    }
+}
+#endif
