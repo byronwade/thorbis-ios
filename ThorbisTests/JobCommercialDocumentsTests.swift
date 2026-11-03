@@ -144,8 +144,8 @@ final class JobCommercialDocumentsTests: XCTestCase {
 
     func testInvoiceEvidenceLabelsEachMixedPageIndependently() async throws {
         let cursor = id(990)
-        let client = api([.init(200, page([invoice(50)], cursor: cursor)), URLProtocolFixture.offline,
-                          .init(200, page([invoice(52)]))])
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, page([invoice(50)], cursor: cursor)), URLProtocolFixture.offline,
+                          .init(200, page([invoice(52)]))], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "invoice-provenance-\(UUID().uuidString)"
         let _: Items<InvoiceRecord> = try await client.send("GET", "/v1/invoices")
         try await waitForSavedInvoice(client, path: "/v1/invoices")

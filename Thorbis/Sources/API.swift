@@ -62,6 +62,12 @@ final class APIClient: ObservableObject {
         }
     }
 
+    /// The same redirect-denying session is used by the app and by controlled
+    /// tests. An injected session without this delegate cannot prove evidence.
+    static func makeNoRedirectSession(configuration: URLSessionConfiguration) -> URLSession {
+        URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
+    }
+
     enum Auth: Equatable {
         case none
         /// Better Auth session cookie held by URLSession's shared cookie storage.
@@ -134,7 +140,7 @@ final class APIClient: ObservableObject {
 
     init(session: URLSession? = nil, baseURL: String? = nil) {
         let env = ProcessInfo.processInfo.environment
-        self.session = session ?? URLSession(configuration: .default, delegate: NoRedirects(), delegateQueue: nil)
+        self.session = session ?? Self.makeNoRedirectSession(configuration: .default)
         if let baseURL {
             self.baseURL = baseURL
         } else {
@@ -249,6 +255,9 @@ final class APIClient: ObservableObject {
     /// display but cannot establish fresh response provenance. This method does
     /// not establish authorization, safe redirects or document membership.
     func invoiceEvidenceGET<T: Decodable>(_ path: String, cursor: String? = nil) async throws -> (value: T, source: InvoiceResponseSource) {
+        guard session.delegate is NoRedirects else {
+            throw Problem(title: "Invoice evidence unavailable", status: nil, detail: "A redirect-safe session is required.")
+        }
         // Only collection, exact invoice, or exact job-invoice paths belong
         // to this held experiment. It must not become a general GET bypass.
         let segments = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)

@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class APIClientTests: XCTestCase {
     func testInvoiceEvidenceReadBypassesLocalCacheAndLabelsNetwork() async throws {
-        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
         let response: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
         XCTAssertEqual(response.source, .network)
         let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
@@ -13,7 +13,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testInvoiceEvidenceLabelsSavedCopyOnNetworkFailure() async throws {
-        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), URLProtocolFixture.offline], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
         let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
         let scope = try XCTUnwrap(client.savedCopyScope)
@@ -27,7 +27,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testCanceledKnownOfflineInvoiceEvidenceDoesNotReturnSavedCopy() async throws {
-        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
         let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
         let scope = try XCTUnwrap(client.savedCopyScope)
@@ -49,7 +49,7 @@ final class APIClientTests: XCTestCase {
     func testCanceledInvoiceEvidenceNetworkFailureDoesNotReturnSavedCopy() async throws {
         let gate = URLProtocolFixture.Gate()
         defer { gate.release() }
-        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), .init(0, gate: gate)]), baseURL: "https://app.thorbis.com")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), .init(0, gate: gate)], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
         let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
         let scope = try XCTUnwrap(client.savedCopyScope)
@@ -69,11 +69,24 @@ final class APIClientTests: XCTestCase {
     }
 
     func testInvoiceEvidenceRejectsPartialHTTPResponse() async throws {
-        let client = APIClient(session: URLProtocolFixture.session([.init(206, "{}")]), baseURL: "https://app.thorbis.com")
+        let client = APIClient(session: URLProtocolFixture.session([.init(206, "{}")], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
         do {
             let _: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
             XCTFail("Partial data cannot establish full response provenance")
         } catch let problem as Problem { XCTAssertEqual(problem.status, 206) }
+    }
+
+    func testInvoiceEvidenceRejectsAnInjectedSessionWithoutRedirectGuard() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        do {
+            let _: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+            XCTFail("An unverified session must not produce invoice evidence")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Invoice evidence unavailable")
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "Existing non-evidence reads remain available")
     }
 
     func testCookieBackedMutationsSendCanonicalOrigin() async throws {
