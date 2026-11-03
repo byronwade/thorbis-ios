@@ -547,7 +547,7 @@ struct InvoiceLineEditorView: View {
             commitPrices()
             var current = editor.invoice
             let descriptions = editor.lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
-            let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions, kind: .invoice)
+            let requiresExtended = editor.hasChanges && CommercialDescriptionPolicy.isExtended(descriptions, kind: .invoice)
             let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
             if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
             guard canEdit, canIssue else { throw CommercialDescriptionPolicy.Problem.unavailable }

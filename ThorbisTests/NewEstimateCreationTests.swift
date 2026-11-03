@@ -19,6 +19,14 @@ final class NewEstimateCreationTests: XCTestCase {
         XCTAssertNil(json["locationId"])
     }
 
+    func testJobDraftKeyIgnoresCustomerAndLocation() {
+        XCTAssertEqual(
+            NewEstimateView(customerID: "customer-1", jobID: "job-1", locationID: "location-1").draftDocumentKey,
+            NewEstimateView(customerID: "customer-2", jobID: "job-1", locationID: "location-2").draftDocumentKey
+        )
+        XCTAssertEqual(NewEstimateView(customerID: "customer-1", jobID: "job-1").draftDocumentKey, "job:job-1")
+    }
+
     func testStandaloneEstimateDoesNotInheritAJobLocation() throws {
         let request = NewEstimateView(customerID: "customer-1", locationID: "location-1", title: "Repair").creationRequest()
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any])

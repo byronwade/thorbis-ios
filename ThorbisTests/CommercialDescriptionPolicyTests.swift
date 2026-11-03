@@ -6,6 +6,12 @@ final class CommercialDescriptionPolicyTests: XCTestCase {
         XCTAssertNil(CommercialDescriptionPolicy.problem([String(repeating: "🔧", count: 100)], kind: .estimate, capabilityVerified: false))
         XCTAssertNil(CommercialDescriptionPolicy.problem([String(repeating: "🔧", count: 211)], kind: .invoice, capabilityVerified: false))
     }
+    func testUnavailableCopyNamesTheLegacyLimit() {
+        XCTAssertEqual(
+            CommercialDescriptionPolicy.Problem.unavailable.localizedDescription,
+            "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+        )
+    }
     func testExtendedTextRequiresFreshCapabilityAndKeepsInput() {
         let text = String(repeating: "Scope ", count: 80) + "\n\nFinish"
         XCTAssertEqual(CommercialDescriptionPolicy.problem([text], kind: .estimate, capabilityVerified: false), .unavailable)

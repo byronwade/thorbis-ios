@@ -8,7 +8,7 @@ enum CommercialDescriptionPolicy {
         case unavailable, lineTooLong, totalTooLong, tooManyBreaks, tooManyRows, unsupportedCharacters
         var errorDescription: String? {
             switch self {
-            case .unavailable: "Connect to a workspace that supports long descriptions before saving. Your text is still here."
+            case .unavailable: "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
             case .lineTooLong: "An item description can contain up to 4,000 characters. Your text is still here."
             case .totalTooLong: "These descriptions are too long to save together. Your text is still here."
             case .tooManyBreaks: "These descriptions have too many line breaks to save together. Your text is still here."

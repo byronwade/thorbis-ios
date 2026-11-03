@@ -48,7 +48,7 @@ struct NewEstimateView: View {
     @State private var descriptionProblem: String?
     private let jobID: String?
     private let jobLocationID: String?
-    private let draftDocumentKey: String
+    let draftDocumentKey: String
     private let onCreated: (EstimateRecord) -> Void
 
     init(customerID: String = "", jobID: String? = nil, locationID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
@@ -56,7 +56,7 @@ struct NewEstimateView: View {
         _title = State(initialValue: title)
         self.jobID = jobID
         self.jobLocationID = jobID == nil ? nil : locationID
-        self.draftDocumentKey = "job:\(jobID ?? "")|customer:\(customerID)|location:\(locationID ?? "")"
+        self.draftDocumentKey = "job:\(jobID ?? "")"
         self.onCreated = onCreated
     }
 
