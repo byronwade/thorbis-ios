@@ -7,6 +7,7 @@ import Foundation
 /// must use this protocol; older or noncooperating writers remain a blocker.
 @MainActor final class EstimateRecoveryCopyStore<Scope: Codable & Equatable, Draft: Codable> {
     enum Failure: Error { case unavailable, conflict, discarded }
+    struct PendingDiscard { let id: UUID; let draft: Draft }
     private struct Envelope: Codable { let version: Int; let id: UUID; let scope: Scope; let draft: Draft }
     private struct Tombstone: Codable { let version: Int; let id: UUID; let scope: Scope; let digest: String }
     private let directory: URL
@@ -71,6 +72,38 @@ import Foundation
                 ids.append(id)
             }
             return ids.sorted { $0.uuidString < $1.uuidString }
+        }
+    }
+    /// Discovers interrupted removals only within the supplied scope. The
+    /// caller must separately prove current authorization before displaying or
+    /// retrying a draft; a scope value alone is not an access grant.
+    func pendingDiscards(scope: Scope) throws -> [PendingDiscard] {
+        try withScopeLock(scope) { folder in
+            guard try exists(folder) else { return [] }
+            var info = stat()
+            guard lstat(folder.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR else { throw Failure.unavailable }
+            let names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+            guard names.count <= 512 else { throw Failure.unavailable }
+            var result: [PendingDiscard] = []
+            for name in names {
+                if name.hasPrefix(".recovery-") && name.hasSuffix(".tmp") { continue }
+                if name.hasSuffix(".json") {
+                    guard let id = UUID(uuidString: String(name.dropLast(5))),
+                          name == id.uuidString.lowercased() + ".json" else { throw Failure.unavailable }
+                    continue
+                }
+                guard name.hasSuffix(".discarded"), let id = UUID(uuidString: String(name.dropLast(10))),
+                      name == id.uuidString.lowercased() + ".discarded" else { throw Failure.unavailable }
+                let marker = try decodeTombstone(scope: scope, id: id, folder: folder)
+                let copy = url(id, folder: folder)
+                guard try exists(copy) else { continue }
+                let raw = try readBytes(copy)
+                guard marker.digest == digest(raw) else { throw Failure.conflict }
+                let envelope = try JSONDecoder().decode(Envelope.self, from: raw)
+                guard envelope.version == 1, envelope.id == id, envelope.scope == scope else { throw Failure.unavailable }
+                result.append(PendingDiscard(id: id, draft: envelope.draft))
+            }
+            return result.sorted { $0.id.uuidString < $1.id.uuidString }
         }
     }
     private func encode<T: Encodable>(_ value: T) throws -> Data { let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys; return try encoder.encode(value) }

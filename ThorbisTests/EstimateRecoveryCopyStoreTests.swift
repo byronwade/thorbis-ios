@@ -101,4 +101,24 @@ import XCTest
         XCTAssertEqual(try store.list(scope: scope), [])
     }
 
+    func testInterruptedRemovalCanBeDiscoveredOnlyInOriginalScopeAndRetried() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let other = Scope(actor: "a", organization: "two", origin: scope.origin, job: scope.job)
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        let failing = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory, removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        try failing.install(draft, scope: scope, id: id)
+        XCTAssertThrowsError(try failing.discard(draft, scope: scope, id: id))
+        let reopened = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory)
+        let pending = try reopened.pendingDiscards(scope: scope)
+        XCTAssertEqual(pending.count, 1)
+        XCTAssertEqual(pending.first?.id, id)
+        XCTAssertEqual(pending.first?.draft, draft)
+        XCTAssertTrue(try reopened.pendingDiscards(scope: other).isEmpty)
+        try reopened.discard(draft, scope: scope, id: id)
+        XCTAssertTrue(try reopened.pendingDiscards(scope: scope).isEmpty)
+        XCTAssertThrowsError(try reopened.install(draft, scope: scope, id: id))
+    }
+
 }
