@@ -43,6 +43,42 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Contact actions for \(name)"].isHittable)
         capture("Customer contact and quick actions, largest text")
     }
+    func testLongLocationNameAndActionsRemainReadableAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-label", "--paper-preview-scroll", "center", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let name = "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
+        let label = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
+        XCTAssertTrue(label.waitForExistence(timeout: 30))
+        for _ in 0..<12 where !label.isHittable { app.swipeUp() }
+        XCTAssertTrue(label.isHittable)
+        XCTAssertGreaterThan(label.frame.height, 220, "The entire long location name must wrap rather than truncate.")
+        let options = app.buttons["Options for \(name)"]
+        for _ in 0..<12 where !options.isHittable { app.swipeDown() }
+        XCTAssertTrue(options.isHittable)
+        capture("Customer long location, largest text")
+        options.tap()
+        XCTAssertTrue(app.buttons["Edit location"].waitForExistence(timeout: 5))
+    }
+
+    func testLongLocationNameKeepsEditActionAtNormalText() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-label", "--paper-preview-scroll", "center", "-thorbis.appearance", "dark"]
+        app.launch()
+        let name = "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
+        let label = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
+        XCTAssertTrue(label.waitForExistence(timeout: 30))
+        for _ in 0..<12 where !label.isHittable { app.swipeUp() }
+        XCTAssertTrue(label.isHittable)
+        XCTAssertGreaterThan(label.frame.height, 40)
+        capture("Customer long location, dark")
+        let options = app.buttons["Options for \(name)"]
+        XCTAssertTrue(options.isHittable)
+        options.tap()
+        XCTAssertTrue(app.buttons["Edit location"].waitForExistence(timeout: 5))
+    }
+
     func testNextVisitStaysReadableAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()
