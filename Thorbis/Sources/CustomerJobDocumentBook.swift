@@ -256,7 +256,7 @@ private struct CustomerEstimateBookPage: View {
                             }
                             ForEach(options) { option in
                                 Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
-                                if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess) }
+                                if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess, customerFacing: true) }
                                 estimateLines(option.lines, currency: option.currency)
                             }
                         }
