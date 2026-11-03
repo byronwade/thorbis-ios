@@ -9,6 +9,14 @@ final class PriceBookPresentationTests: XCTestCase {
         XCTAssertTrue(raw.hasSuffix("[thorbis-plumbing-demo-v1:material-049]"))
     }
 
+    func testSupportingDetailsUseOnlyReliableTitleBoundaries() {
+        let demo = "PEX rings. Ten rings per pack. [thorbis-plumbing-demo-v1:material-049]"
+        XCTAssertEqual(PriceBookPresentation.supportingDetails(demo), "Ten rings per pack.")
+        XCTAssertEqual(PriceBookPresentation.supportingDetails("Replace valve\nKeep the original shutoff."), "Keep the original shutoff.")
+        XCTAssertNil(PriceBookPresentation.supportingDetails("Dr. Smith's preferred valve"))
+        XCTAssertNil(PriceBookPresentation.supportingDetails("Coil cleaning"))
+    }
+
     func testArbitraryBracketedTextIsNotRemoved() {
         let raw = "Replace valve. [Customer requested brass fittings]"
         XCTAssertEqual(PriceBookPresentation.readableDescription(raw), raw)

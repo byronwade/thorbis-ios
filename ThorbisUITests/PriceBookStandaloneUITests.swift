@@ -16,6 +16,24 @@ final class PriceBookStandaloneUITests: XCTestCase {
         capture("Price book narrow long title and high price")
     }
 
+    func testLargestTextBoundsLongSummaryAndOpensFullDetails() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-extreme", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let title = app.staticTexts["Commercial plumbing system inspection and complete replacement."]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        let summary = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Assess the existing supply and drainage equipment")).firstMatch
+        XCTAssertTrue(summary.exists)
+        let price = app.staticTexts["$1,234,567.89"]
+        XCTAssertTrue(price.exists)
+        XCTAssertLessThan(summary.frame.height, price.frame.height * 3.2, "A long description should not dominate the catalog at large text sizes.")
+        capture("Price book largest text bounded summary")
+        title.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final paragraph of the complete description.")).firstMatch.waitForExistence(timeout: 10))
+        capture("Price book largest text full details")
+    }
+
     func testStaleLongDescriptionRemainsReadableAtLargestText() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -104,6 +122,8 @@ final class PriceBookStandaloneUITests: XCTestCase {
         let title = app.staticTexts["PEX copper crimp ring pack: 1-in."]
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["$15.13"].exists)
+        XCTAssertTrue(app.staticTexts["Ten rings for matching-size PEX; tool calibration remains required."].exists)
+        XCTAssertTrue(app.staticTexts["10-pack"].exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "thorbis-plumbing-demo-v1")).firstMatch.exists)
         capture("Price book with compact item")
         title.tap()

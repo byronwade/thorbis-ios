@@ -1374,6 +1374,8 @@ struct PaperListRow<Trailing: View>: View {
     /// A quieter third line (tech · photos · paid).
     var meta: String? = nil
     var subtitleLines = 1
+    /// Compact previews can stay bounded when the complete text opens separately.
+    var limitsSubtitleAtAccessibility = false
     /// A note-like supporting line (a past job's notes): folds at `subtitleLines` with "More"
     /// instead of cutting the rest off.
     var expandsSubtitle = false
@@ -1405,7 +1407,7 @@ struct PaperListRow<Trailing: View>: View {
                         ExpandableNoteText(text: subtitle, lines: subtitleLines, size: 14)
                     } else {
                         PaperHighlight.text(subtitle, words: highlight).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                            .lineLimit(stacked ? nil : subtitleLines)
+                            .lineLimit(stacked && !limitsSubtitleAtAccessibility ? nil : subtitleLines)
                     }
                 }
                 if let meta, !meta.isEmpty {
