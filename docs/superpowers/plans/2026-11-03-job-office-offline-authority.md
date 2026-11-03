@@ -56,3 +56,12 @@ binding between the restored session and that receipt. The existing cached
 session snapshot alone does not establish a job-specific offline authorization
 or a durable negative decision. Do not weaken the generation keys or claim
 cross-relaunch offline access without those guarantees.
+
+The iOS app compiled and eight focused `JobOfficeOfflineStoreTests` passed on
+iPhone 17 Pro simulator (`/tmp/thorbis-job-office-store-xcode.log`, result
+bundle `/private/tmp/thorbis-job-office-store-derived/Logs/Test/Test-Thorbis-2026.11.03_12-09-39--0500.xcresult`).
+These unit checks cover same-generation recreation, session/policy/API isolation,
+preflight write failure, stale and overlapping attempts, connectivity,
+wrong job, and denial followed by a new live verification. They do not prove
+reader integration, real network revocation, UI behavior, or cross-relaunch
+offline grants; the store remains held and disconnected.
