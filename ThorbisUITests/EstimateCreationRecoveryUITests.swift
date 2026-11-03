@@ -258,6 +258,8 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Replace capacitor")).firstMatch.waitForExistence(timeout: 10))
     }
 
+    func testPickerCenterTapWithKeyboard() { checkPickerTap(position: 0.5, hideKeyboard: false) }
+    func testPickerCenterTapWithoutKeyboard() { checkPickerTap(position: 0.5, hideKeyboard: true) }
     func testPickerTextTapWithKeyboard() { checkPickerTap(position: 0.25, hideKeyboard: false) }
     func testPickerPlusTapWithKeyboard() { checkPickerTap(position: 0.9, hideKeyboard: false) }
     func testPickerTextTapWithoutKeyboard() { checkPickerTap(position: 0.25, hideKeyboard: true) }
