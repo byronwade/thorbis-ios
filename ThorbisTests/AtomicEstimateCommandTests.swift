@@ -11,7 +11,7 @@ final class AtomicEstimateCommandTests: XCTestCase {
     private let link = "018f0000-0000-7000-8000-000000000006"
 
     private func operation() throws -> AtomicEstimateCommand {
-        try .make(jobID: job, title: "Repair", lines: [.init(description: "Valve", quantity: 1,
+        try .make(jobID: job, draftCustomerID: actor, draftLocationID: nil, title: "Repair", lines: [.init(description: "Valve", quantity: 1,
             unitPrice: .init(amount: 1200, currency: "USD"), source: .manual,
             group: "material", showToCustomer: false)], actorID: actor, organizationID: org,
             deviceID: actor, policyVersion: 1, origin: "https://example.test",
@@ -28,7 +28,13 @@ final class AtomicEstimateCommandTests: XCTestCase {
 
     func testExactJobCustomerLocationAndStatusRequired() throws {
         let operation = try operation()
-        XCTAssertTrue(operation.matchesDraftJob(try jobRecord(location: estimate), customerID: actor, locationID: estimate))
+        XCTAssertFalse(operation.matchesDraftJob(try jobRecord(location: estimate), customerID: actor, locationID: estimate))
+        let located = try AtomicEstimateCommand.make(jobID: job, draftCustomerID: actor, draftLocationID: estimate,
+            title: "Repair", lines: operation.payload.lines, actorID: actor, organizationID: org,
+            deviceID: actor, policyVersion: 1, origin: "https://example.test",
+            createdAt: "2026-11-03T00:00:00Z", commandID: command)
+        XCTAssertTrue(located.matchesDraftJob(try jobRecord(location: estimate), customerID: actor, locationID: estimate))
+        XCTAssertFalse(located.matchesDraftJob(try jobRecord(location: estimate), customerID: actor, locationID: nil))
         XCTAssertTrue(operation.matchesDraftJob(try jobRecord(), customerID: actor, locationID: nil))
         XCTAssertFalse(operation.matchesDraftJob(try jobRecord(id: link), customerID: actor, locationID: nil))
         XCTAssertFalse(operation.matchesDraftJob(try jobRecord(organization: link), customerID: actor, locationID: nil))
@@ -80,6 +86,23 @@ final class AtomicEstimateCommandTests: XCTestCase {
         XCTAssertTrue(operation.maySend(actorID: actor, organizationID: org, jobID: job, origin: "https://example.test", authorized: true))
         XCTAssertFalse(operation.maySend(actorID: actor, organizationID: org, jobID: job, origin: "https://other.test", authorized: true))
         XCTAssertFalse(operation.maySend(actorID: actor, organizationID: org, jobID: job, origin: "https://example.test", authorized: false))
+    }
+
+    func testLegacyOrMalformedTargetCannotBeSentAndNeverChangesWireIntent() throws {
+        let original = try operation()
+        let encoded = try JSONEncoder().encode(original)
+        var saved = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertNotNil(saved["draftTarget"])
+        let before = try JSONEncoder().encode(original.batch)
+        saved.removeValue(forKey: "draftTarget")
+        let legacy = try JSONDecoder().decode(AtomicEstimateCommand.self, from: JSONSerialization.data(withJSONObject: saved))
+        XCTAssertFalse(legacy.maySend(actorID: actor, organizationID: org, jobID: job, origin: "https://example.test", authorized: true))
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: before) as? NSDictionary,
+                       try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy.batch)) as? NSDictionary)
+        saved["draftTarget"] = ["customerID": "invalid"]
+        let malformed = try JSONDecoder().decode(AtomicEstimateCommand.self, from: JSONSerialization.data(withJSONObject: saved))
+        XCTAssertFalse(malformed.maySend(actorID: actor, organizationID: org, jobID: job, origin: "https://example.test", authorized: true))
+        XCTAssertFalse(malformed.matchesDraftJob(try jobRecord(), customerID: actor, locationID: nil))
     }
 
     func testMalformedRestoredOriginAndTimestampCannotBeSent() throws {

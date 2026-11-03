@@ -853,7 +853,8 @@ extension AtomicEstimateCommand {
                          unitPrice: .init(amount: line.unitPrice.amount, currency: line.unitPrice.currency),
                          source: source, group: line.group, showToCustomer: line.showToCustomer)
         }
-        return try make(jobID: jobID, title: request.title, lines: lines, actorID: actorID,
+        return try make(jobID: jobID, draftCustomerID: request.customerId, draftLocationID: request.locationId,
+                        title: request.title, lines: lines, actorID: actorID,
                         organizationID: organizationID, deviceID: deviceID, policyVersion: policyVersion,
                         origin: origin, createdAt: createdAt, commandID: commandID)
     }

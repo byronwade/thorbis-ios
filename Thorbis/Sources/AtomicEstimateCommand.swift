@@ -45,6 +45,15 @@ struct AtomicEstimateCommand: Codable, Equatable {
         let title: String
         let lines: [Line]
     }
+    /// Local-only binding. The server still derives these fields from the job.
+    struct DraftTarget: Codable, Equatable {
+        let customerID: String
+        let locationID: String?
+        var valid: Bool {
+            UUID(uuidString: customerID) != nil && customerID == customerID.lowercased() &&
+            (locationID.map { UUID(uuidString: $0) != nil && $0 == $0.lowercased() } ?? true)
+        }
+    }
     struct Envelope: Encodable {
         let commandId, deviceId, actorId, organizationId: String
         let policyVersion: Int
@@ -98,11 +107,15 @@ struct AtomicEstimateCommand: Codable, Equatable {
     let origin: String
     let createdAt: String
     let payload: Payload
+    /// Missing on older saved operations; those remain pending for review.
+    let draftTarget: DraftTarget?
 
-    static func make(jobID: String, title: String, lines: [Line], actorID: String,
+    static func make(jobID: String, draftCustomerID: String, draftLocationID: String?, title: String, lines: [Line], actorID: String,
                      organizationID: String, deviceID: String, policyVersion: Int,
                      origin: String, createdAt: String, commandID: String) throws -> Self {
         guard [jobID, actorID, organizationID, deviceID, commandID].allSatisfy({ UUID(uuidString: $0) != nil }),
+              UUID(uuidString: draftCustomerID) != nil,
+              draftLocationID.map({ UUID(uuidString: $0) != nil }) ?? true,
               policyVersion > 0, validOrigin(origin), validTimestamp(createdAt) else { throw Invalid.scope }
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedTitle.isEmpty, normalizedTitle.utf16.count <= 200,
@@ -110,7 +123,8 @@ struct AtomicEstimateCommand: Codable, Equatable {
         return .init(commandID: commandID.lowercased(), deviceID: deviceID.lowercased(),
                      actorID: actorID.lowercased(), organizationID: organizationID.lowercased(),
                      policyVersion: policyVersion, origin: origin, createdAt: createdAt,
-                     payload: .init(jobId: jobID.lowercased(), title: normalizedTitle, lines: lines))
+                     payload: .init(jobId: jobID.lowercased(), title: normalizedTitle, lines: lines),
+                     draftTarget: .init(customerID: draftCustomerID.lowercased(), locationID: draftLocationID?.lowercased()))
     }
     var batch: Batch {
         .init(commands: [.init(commandId: commandID, deviceId: deviceID, actorId: actorID,
@@ -121,8 +135,10 @@ struct AtomicEstimateCommand: Codable, Equatable {
     /// A caller must obtain `job` freshly under the same current authority lease.
     /// A mismatch keeps the operation pending for review, never a new create.
     func matchesDraftJob(_ job: JobRecord, customerID: String, locationID: String?) -> Bool {
-        guard UUID(uuidString: customerID) != nil,
+        guard let draftTarget, draftTarget.valid, UUID(uuidString: customerID) != nil,
               locationID.map({ UUID(uuidString: $0) != nil }) ?? true,
+              draftTarget.customerID == customerID.lowercased(),
+              draftTarget.locationID == locationID?.lowercased(),
               job.id.lowercased() == payload.jobId,
               job.organizationId.lowercased() == organizationID,
               job.customerId.lowercased() == customerID.lowercased(),
@@ -138,7 +154,7 @@ struct AtomicEstimateCommand: Codable, Equatable {
     }
     private var isValid: Bool {
         [commandID, deviceID, actorID, organizationID, payload.jobId].allSatisfy { UUID(uuidString: $0) != nil && $0 == $0.lowercased() } &&
-        policyVersion > 0 && Self.validOrigin(origin) && Self.validTimestamp(createdAt) &&
+        policyVersion > 0 && Self.validOrigin(origin) && Self.validTimestamp(createdAt) && (draftTarget?.valid ?? false) &&
         !payload.title.isEmpty && payload.title == payload.title.trimmingCharacters(in: .whitespacesAndNewlines) && payload.title.utf16.count <= 200 &&
         (1...500).contains(payload.lines.count) && payload.lines.allSatisfy(\.valid)
     }
