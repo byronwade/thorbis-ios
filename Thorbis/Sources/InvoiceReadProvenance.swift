@@ -43,6 +43,8 @@ struct InvoiceReadProvenance {
 
     /// Publication requires every cursor in the chain and a validated network
     /// response for each; a saved page makes the whole membership read stale.
+    /// `allRequestsTerminal` means every child is terminal and all denial
+    /// callbacks have been delivered, not merely that cancellation was requested.
     mutating func publish(_ ticket: InvoiceReadTicket, current: InvoiceReadScope?,
                           pages: [InvoiceReadPage], invoices: [UUID: String],
                           allRequestsTerminal: Bool) -> Bool {
@@ -90,15 +92,15 @@ struct InvoiceReadProvenance {
         if latest == ticket.id { latest = nil; grant = nil }
     }
 
-    /// Call only after the canceled transport has definitively terminated and
-    /// any denial was passed to `deny`. Merely requesting cancellation is not enough.
+    /// Call only after every child transport has definitively terminated and
+    /// every denial callback was passed to `deny`. Requesting cancellation is not enough.
     mutating func finishCanceled(_ ticket: InvoiceReadTicket) {
         guard let request = pending[ticket.id], request.scope == ticket.scope, request.canceled else { return }
         pending.removeValue(forKey: ticket.id)
     }
 
     /// Retire a non-published read only after every child request is terminal
-    /// and every observed denial has been reported. Do not call on mere failure
+    /// and every denial callback has been delivered and reported. Do not call on mere failure
     /// to publish, because other child requests may still return a denial.
     mutating func finishWithoutGrant(_ ticket: InvoiceReadTicket) {
         guard let request = pending[ticket.id], request.scope == ticket.scope else { return }
