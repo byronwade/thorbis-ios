@@ -206,6 +206,24 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
     }
 
+    func testPartlyVisibleInvoiceDisclosureDoesNotOpenPayment() {
+        continueAfterFailure = false
+        let app = preview()
+        thorbisStableButton(app, "job-section-money").tap()
+        let disclosure = app.buttons["job-invoice-items-\(invoiceA)"]
+        let footer = app.buttons["Collect payment"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        XCTAssertTrue(footer.waitForExistence(timeout: 10))
+        XCTAssertLessThan(disclosure.frame.minY, footer.frame.minY)
+        XCTAssertGreaterThan(disclosure.frame.maxY, footer.frame.minY, "Fixture must exercise a partially obscured control")
+        let point = disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: 40, dy: 8))
+        point.tap()
+        let line = app.descendants(matching: .any)["job-invoice-line-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+    }
+
     func testCommercialHandoffListsOnlyThisJobsEstimatesAndInvoices() {
         continueAfterFailure = false
         let app = preview()

@@ -257,6 +257,12 @@ struct JobDetailView: View {
                 .accessibilityLabel("Loading job")
                 Spacer(minLength: 0)
             }
+            // The Money action is a sibling of the scroll view, so document
+            // controls cannot draw or receive taps underneath the payment bar.
+            if job != nil, selectedTab == "Money", !typeSize.isAccessibilitySize {
+                primaryAction.environment(\.thorbisSheetCanvas, true)
+                    .padding(.horizontal, 1)
+            }
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
@@ -457,7 +463,7 @@ struct JobDetailView: View {
                     .background(alignment: .top) {
                         Theme.card.padding(.bottom, -120).ignoresSafeArea()
                     }
-            } else if !typeSize.isAccessibilitySize { primaryAction.environment(\.thorbisSheetCanvas, true) }
+            } else if !typeSize.isAccessibilitySize, selectedTab != "Money" { primaryAction.environment(\.thorbisSheetCanvas, true) }
             }
             // 1pt in from each side, so every bar (Overview, Money, Activity's composer) sits inside
             // the job's sheet and the sheet's rim runs on to the bottom edge.
