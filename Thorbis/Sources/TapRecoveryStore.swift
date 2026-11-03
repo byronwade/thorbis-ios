@@ -24,6 +24,8 @@ struct TapRecoveryScope: Codable, Equatable {
 /// means the preparation response was lost and requires server-side reconciliation.
 struct TapRecoveryHold: Codable, Equatable {
     let scope: TapRecoveryScope
+    let operationID: String
+    let jobID: String
     let amount: Int
     let currency: String
     var attemptID: String?
@@ -46,11 +48,14 @@ final class TapRecoveryStore {
         let decoded = try JSONDecoder().decode([TapRecoveryHold].self, from: data)
         var holds: [TapRecoveryHold] = []
         for item in decoded {
-            guard let scope = item.scope.canonical(), item.amount > 0, item.currency == "USD",
+            guard let scope = item.scope.canonical(),
+                  let operationID = UUID(uuidString: item.operationID)?.uuidString.lowercased(),
+                  let jobID = UUID(uuidString: item.jobID)?.uuidString.lowercased(),
+                  item.amount > 0, item.currency == "USD",
                   item.attemptID == nil || UUID(uuidString: item.attemptID!) != nil,
-                  !holds.contains(where: { $0.scope.sameInvoice(as: scope) }) else { throw Failure.invalid }
+                  !holds.contains(where: { $0.scope.sameInvoice(as: scope) || $0.operationID == operationID }) else { throw Failure.invalid }
             let attemptID = item.attemptID.flatMap { UUID(uuidString: $0)?.uuidString.lowercased() }
-            holds.append(TapRecoveryHold(scope: scope, amount: item.amount, currency: item.currency, attemptID: attemptID))
+            holds.append(TapRecoveryHold(scope: scope, operationID: operationID, jobID: jobID, amount: item.amount, currency: item.currency, attemptID: attemptID))
         }
         return holds
     }
@@ -66,26 +71,38 @@ final class TapRecoveryStore {
         guard let scope = scope.canonical() else { throw Failure.invalid }
         return try read().first { $0.scope == scope }
     }
-    func begin(scope: TapRecoveryScope, amount: Int, currency: String) throws {
-        guard let scope = scope.canonical(), amount > 0, currency == "USD" else { throw Failure.invalid }
+    /// Must succeed before the first request. The operation ID is generated once and persisted.
+    func begin(scope: TapRecoveryScope, jobID: String, amount: Int, currency: String) throws -> TapRecoveryHold {
+        guard let scope = scope.canonical(), let jobID = UUID(uuidString: jobID)?.uuidString.lowercased(),
+              amount > 0, currency == "USD" else { throw Failure.invalid }
         var holds = try read()
         guard !holds.contains(where: { $0.scope.sameInvoice(as: scope) }) else { throw Failure.held }
-        holds.append(TapRecoveryHold(scope: scope, amount: amount, currency: currency, attemptID: nil))
+        let hold = TapRecoveryHold(scope: scope, operationID: UUID().uuidString.lowercased(), jobID: jobID,
+                                   amount: amount, currency: currency, attemptID: nil)
+        guard !holds.contains(where: { $0.operationID == hold.operationID }) else { throw Failure.invalid }
+        holds.append(hold)
         try write(holds)
+        return hold
     }
-    func bindAttempt(scope: TapRecoveryScope, attemptID: String) throws {
-        guard let scope = scope.canonical(), let id = UUID(uuidString: attemptID)?.uuidString.lowercased() else { throw Failure.invalid }
+    func bindAttempt(scope: TapRecoveryScope, operationID: String, jobID: String, attemptID: String) throws {
+        guard let scope = scope.canonical(), let id = UUID(uuidString: attemptID)?.uuidString.lowercased(),
+              let operation = UUID(uuidString: operationID)?.uuidString.lowercased(),
+              let job = UUID(uuidString: jobID)?.uuidString.lowercased() else { throw Failure.invalid }
         var holds = try read()
         guard let i = holds.firstIndex(where: { $0.scope == scope }),
+              holds[i].operationID == operation, holds[i].jobID == job,
               holds[i].attemptID == nil || holds[i].attemptID == id else { throw Failure.mismatch }
         holds[i].attemptID = id
         try write(holds)
     }
     /// Caller must first verify the authoritative receipt and current session.
-    func confirmReceipt(scope: TapRecoveryScope, attemptID: String, amount: Int, currency: String) throws {
-        guard let scope = scope.canonical(), let id = UUID(uuidString: attemptID)?.uuidString.lowercased() else { throw Failure.invalid }
+    func confirmReceipt(scope: TapRecoveryScope, operationID: String, jobID: String, attemptID: String, amount: Int, currency: String) throws {
+        guard let scope = scope.canonical(), let id = UUID(uuidString: attemptID)?.uuidString.lowercased(),
+              let operation = UUID(uuidString: operationID)?.uuidString.lowercased(),
+              let job = UUID(uuidString: jobID)?.uuidString.lowercased() else { throw Failure.invalid }
         var holds = try read()
         guard let i = holds.firstIndex(where: { $0.scope == scope }), holds[i].attemptID == id,
+              holds[i].operationID == operation, holds[i].jobID == job,
               holds[i].amount == amount, holds[i].currency == currency else { throw Failure.mismatch }
         holds.remove(at: i)
         try write(holds)
