@@ -132,4 +132,37 @@ import XCTest
         }
         XCTAssertEqual(try second.withAttemptLock(scope: key) { try second.load(String.self, scope: key) }, "first")
     }
+    func testLegacyMarkerBlocksAtomicAttemptAndRemainsUnresolvedAfterReopen() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root), journal = AtomicEstimateAttemptJournal(store: store), owner = UUID()
+        XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner)); try store.save(draft(), scope: sourceScope)
+        let id = UUID()
+        let staged = try journal.stageLegacy(draftScope: sourceScope, draftOwner: owner, actorID: actor,
+            organizationID: org, origin: origin, jobID: job, customerID: actor, locationID: nil, attemptID: id)
+        XCTAssertEqual(staged.attemptID, id)
+        XCTAssertThrowsError(try journal.stageLegacy(draftScope: sourceScope, draftOwner: owner, actorID: actor,
+            organizationID: org, origin: origin, jobID: job, customerID: actor, locationID: nil, attemptID: id))
+        XCTAssertThrowsError(try journal.prepare(operation: operation(), draftScope: sourceScope, draftOwner: owner,
+            actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false))
+        let reopened = AtomicEstimateAttemptJournal(store: CommercialDraftStore(directory: root))
+        guard case .legacyPending(let recovered) = try reopened.status(actorID: actor, organizationID: org, origin: origin, jobID: job) else { return XCTFail("Legacy attempt was lost") }
+        XCTAssertEqual(recovered, staged)
+        XCTAssertThrowsError(try reopened.recover(actorID: actor, organizationID: org, origin: origin, jobID: job))
+        XCTAssertThrowsError(try journal.stageLegacy(draftScope: sourceScope, draftOwner: owner, actorID: actor,
+            organizationID: org, origin: origin, jobID: job, customerID: actor, locationID: nil, attemptID: UUID()))
+    }
+    func testAtomicMarkerBlocksLegacyAndMalformedMarkerDoesNotLookMissing() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root), journal = AtomicEstimateAttemptJournal(store: store), owner = UUID()
+        XCTAssertTrue(store.acquire(scope: sourceScope, owner: owner)); try store.save(draft(), scope: sourceScope)
+        let saved = try journal.prepare(operation: operation(), draftScope: sourceScope, draftOwner: owner,
+            actorID: actor, organizationID: org, origin: origin, jobID: job, storesLineGroups: false)
+        XCTAssertThrowsError(try journal.stageLegacy(draftScope: sourceScope, draftOwner: owner, actorID: actor,
+            organizationID: org, origin: origin, jobID: job, customerID: actor, locationID: nil, attemptID: UUID()))
+        guard case .atomicPending(let current) = try journal.status(actorID: actor, organizationID: org, origin: origin, jobID: job) else { return XCTFail("Atomic attempt was lost") }
+        XCTAssertEqual(current, saved)
+        let key = CommercialDraftScope(actor: actor, organization: org, origin: origin, kind: "atomic-estimate-attempt", document: job)
+        try store.save("invalid marker", scope: key)
+        XCTAssertThrowsError(try journal.status(actorID: actor, organizationID: org, origin: origin, jobID: job))
+    }
 }

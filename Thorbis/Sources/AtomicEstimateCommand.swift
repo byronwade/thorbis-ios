@@ -124,7 +124,7 @@ struct AtomicEstimateCommand: Codable, Equatable {
         return formatter.date(from: value) != nil
     }
 
-    private static func validOrigin(_ value: String) -> Bool {
+    static func validOrigin(_ value: String) -> Bool {
         guard let parts = URLComponents(string: value), let host = parts.host,
               host == host.lowercased(), !host.isEmpty, parts.user == nil, parts.password == nil,
               parts.path.isEmpty, parts.query == nil, parts.fragment == nil,
