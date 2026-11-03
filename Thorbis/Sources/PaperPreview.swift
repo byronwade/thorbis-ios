@@ -121,7 +121,21 @@ enum PaperPreview {
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
             draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([invalid]))])
         }
-        return [changed(estimate, ["title": "Main drain repair", "options": NSNull()]), draft,
+        var main = changed(estimate, ["title": "Main drain repair", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-review-states") {
+            main = changed(main, ["status": "declined"])
+            draft = changed(draft, ["status": "approved"])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-multiple-options"),
+           let original = estimate.options,
+           var options = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(original)) as? [[String: Any]],
+           var second = options.first {
+            second["id"] = "00000000-0000-4000-8000-000000009219"
+            second["title"] = "Second complete package"
+            options.append(second)
+            main = changed(estimate, ["title": "Main drain repair", "options": options])
+        }
+        return [main, draft,
                 changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()])]
     }
     static var jobDocumentInvoices: [InvoiceRecord] {
