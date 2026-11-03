@@ -85,36 +85,67 @@ final class SessionControllerTests: XCTestCase {
     func testCustomerRecordsScopeRejectsStaleCompletionAfterSameVersionRevokeAndRegrant() async {
         let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
         let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
-        let (session, _) = controller([
+        let (session, api) = controller([
             .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabledFeatures),
             .init(200, activeSession), .init(200, revoked), .init(200, enabledFeatures),
             .init(200, activeSession), .init(200, catalog), .init(200, enabledFeatures)
         ])
         await session.restore()
-        let oldScope = CustomerRecordsScope.capture(session: session, customerID: first)
+        let oldScope = CustomerRecordsScope.capture(session: session, api: api, customerID: first)
         XCTAssertNotNil(oldScope)
         let (completion, continuation) = AsyncStream<Void>.makeStream()
         var stalePublished = false
         let oldRequest = Task { @MainActor in
             for await _ in completion {
-                if oldScope!.isCurrent(session: session) { stalePublished = true }
+                if oldScope!.isCurrent(session: session, api: api) { stalePublished = true }
                 break
             }
         }
         await session.revalidate()
-        XCTAssertNil(CustomerRecordsScope.capture(session: session, customerID: first))
+        XCTAssertNil(CustomerRecordsScope.capture(session: session, api: api, customerID: first))
         await session.revalidate()
-        let newScope = CustomerRecordsScope.capture(session: session, customerID: first)
+        let newScope = CustomerRecordsScope.capture(session: session, api: api, customerID: first)
         XCTAssertNotNil(newScope)
         XCTAssertNotEqual(oldScope, newScope, "A completion captured before revocation cannot publish after regrant")
-        XCTAssertFalse(oldScope!.isCurrent(session: session), "An old in-flight request must fail the same guard used by the view")
-        XCTAssertTrue(newScope!.isCurrent(session: session))
+        XCTAssertFalse(oldScope!.isCurrent(session: session, api: api), "An old in-flight request must fail the same guard used by the view")
+        XCTAssertTrue(newScope!.isCurrent(session: session, api: api))
         XCTAssertEqual(oldScope?.generation, newScope?.generation)
         XCTAssertEqual(oldScope?.policyVersion, newScope?.policyVersion)
         continuation.yield(())
         continuation.finish()
         await oldRequest.value
         XCTAssertFalse(stalePublished, "A request that completes after regrant must not publish its old data")
+    }
+
+    func testCustomerRecordsScopeRetiresWhenAPIOriginOrGenerationChanges() async {
+        let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
+        let (session, api) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabledFeatures)
+        ])
+        await session.restore()
+        let original = CustomerRecordsScope.capture(session: session, api: api, customerID: first)
+        XCTAssertNotNil(original)
+        api.invalidateRequests()
+        XCTAssertFalse(original!.isCurrent(session: session, api: api))
+        let rebound = CustomerRecordsScope.capture(session: session, api: api, customerID: first)
+        XCTAssertNotEqual(original, rebound)
+        let savedOrigin = UserDefaults.standard.object(forKey: "thorbis.apiBaseURL")
+        defer {
+            if let savedOrigin { UserDefaults.standard.set(savedOrigin, forKey: "thorbis.apiBaseURL") }
+            else { UserDefaults.standard.removeObject(forKey: "thorbis.apiBaseURL") }
+        }
+        api.baseURL = "http://127.0.0.1:4321"
+        XCTAssertFalse(rebound!.isCurrent(session: session, api: api))
+    }
+
+    func testCustomerRecordsReadErrorClassification() {
+        for status in [401, 403, 404] {
+            XCTAssertTrue(CustomerRecordsScope.mustRetireAfterReadError(Problem(title: nil, status: status, detail: nil)))
+        }
+        for status in [408, 429, 500] {
+            XCTAssertFalse(CustomerRecordsScope.mustRetireAfterReadError(Problem(title: nil, status: status, detail: nil)))
+        }
+        XCTAssertFalse(CustomerRecordsScope.mustRetireAfterReadError(URLError(.notConnectedToInternet)))
     }
 
     func testRestoreNullSessionLeavesNoAuthority() async {

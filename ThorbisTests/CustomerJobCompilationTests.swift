@@ -9,6 +9,49 @@ final class CustomerJobCompilationTests: XCTestCase {
     private let jobB = uid(2)
     private let author = uid(5)
 
+    func testCustomerJobRecordsDoNotLoadAllHistoryPagesImmediately() async throws {
+        var replies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 0, estimatesB: 0, invoicesA: 0, invoicesB: 0, historyA: 0, historyB: 0)
+        let cursor = uid(42)
+        let firstPage: [String: Any] = ["items": [historyEntry(day: 1, job: jobA, summary: "First")], "nextCursor": cursor]
+        replies[13] = String(decoding: try JSONSerialization.data(withJSONObject: firstPage), as: UTF8.self)
+        // The extra empty response supports the old implementation's eager
+        // second history request and the two subsequent legacy photo reads.
+        replies.insert(page([]), at: 14)
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client)
+        XCTAssertEqual(compiled.activityCount, 1)
+        XCTAssertEqual(compiled.activityCursor, cursor)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path.hasSuffix("/history") == true }.count, 1)
+    }
+
+    func testEarlierActivityPreservesJobGroupsAndIdenticalVisibleEvents() async throws {
+        let replies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 0, estimatesB: 0, invoicesA: 0, invoicesB: 0, historyA: 1, historyB: 0)
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+        var compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client)
+        let original = try XCTUnwrap(compiled.activity.first?.items.first)
+        let secondData = try JSONSerialization.data(withJSONObject: historyEntry(day: 2, job: jobB, summary: "Earlier"))
+        let second = try JSONDecoder().decode(CustomerHistoryEntry.self, from: secondData)
+        let account = CustomerHistoryEntry(occurredAt: "2026-07-01T12:00:00Z", kind: "contact", subjectId: author, summary: "Contact added")
+        compiled.appendActivityPage(CustomerHistoryPage(items: [original, second, account], nextCursor: nil))
+        XCTAssertEqual(compiled.activity.map(\.jobID), [jobA, jobB])
+        XCTAssertEqual(compiled.activity.map(\.count), [2, 1])
+        XCTAssertEqual(compiled.accountActivity, [account])
+        XCTAssertNil(compiled.activityCursor)
+    }
+
+    func testRepeatedActivityCursorStopsAndKeepsTheReturnedPage() async throws {
+        var replies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0, estimatesA: 0, estimatesB: 0, invoicesA: 0, invoicesB: 0, historyA: 0, historyB: 0)
+        let cursor = uid(42)
+        replies[13] = String(decoding: try JSONSerialization.data(withJSONObject: ["items": [historyEntry(day: 1, job: jobA, summary: "First")], "nextCursor": cursor]), as: UTF8.self)
+        let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+        var compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client)
+        let first = try XCTUnwrap(compiled.activity.first?.items.first)
+        compiled.appendActivityPage(CustomerHistoryPage(items: [first], nextCursor: cursor))
+        XCTAssertEqual(compiled.activityCount, 2)
+        XCTAssertTrue(compiled.activityIncomplete)
+        XCTAssertNil(compiled.activityCursor)
+    }
+
     func testTwoJobsCompileToThirtyFiveAndStayGrouped() async throws {
         let replies = fixture(photosA: 15, photosB: 20, notesA: 15, notesB: 20, documentsA: 15, documentsB: 20, estimatesA: 15, estimatesB: 20, invoicesA: 15, invoicesB: 20, historyA: 15, historyB: 20)
         let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
@@ -317,9 +360,10 @@ final class CustomerJobCompilationTests: XCTestCase {
         let first = ["items": [historyEntry(day: 1, job: jobA, summary: "First")], "nextCursor": "same"] as [String: Any]
         let second = ["items": [historyEntry(day: 2, job: jobA, summary: "Second")], "nextCursor": "same"] as [String: Any]
         replies[13] = String(decoding: try JSONSerialization.data(withJSONObject: first), as: UTF8.self)
-        replies.insert(String(decoding: try JSONSerialization.data(withJSONObject: second), as: UTF8.self), at: 14)
         let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
-        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client)
+        var compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client)
+        let page = try JSONDecoder().decode(CustomerHistoryPage.self, from: JSONSerialization.data(withJSONObject: second))
+        compiled.appendActivityPage(page)
         XCTAssertTrue(compiled.activityIncomplete)
         XCTAssertEqual(compiled.activityCount, 2)
     }

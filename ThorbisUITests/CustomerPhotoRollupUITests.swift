@@ -2,6 +2,38 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoRollupUITests: XCTestCase {
+    func testEarlierActivityLoadsOnlyOnRequestAndStaysGrouped() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-history-pages"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Photos"].waitForExistence(timeout: 20))
+        let load = app.buttons["customer-records-load-activity"]
+        for _ in 0..<20 where !load.isHittable { app.swipeUp() }
+        XCTAssertTrue(load.waitForExistence(timeout: 10))
+        bringClearOfNewJob(load, in: app)
+        XCTAssertFalse(app.staticTexts["Earlier activity shown"].exists)
+        load.tap()
+        XCTAssertTrue(app.staticTexts["Earlier activity shown"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["First activity shown"].exists)
+        XCTAssertFalse(load.exists)
+    }
+
+    func testEarlierActivityDenialRetiresPreviouslyShownRecords() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-history-denial"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Photos"].waitForExistence(timeout: 20))
+        let load = app.buttons["customer-records-load-activity"]
+        for _ in 0..<20 where !load.isHittable { app.swipeUp() }
+        XCTAssertTrue(load.waitForExistence(timeout: 20))
+        bringClearOfNewJob(load, in: app)
+        XCTAssertTrue(app.staticTexts["First activity shown"].exists)
+        load.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "no longer available")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["First activity shown"].exists)
+    }
     /// The customer page pins its New job commit at the bottom (#203). A photo partly under it still
     /// reads as hittable, but a tap at its centre lands on the bar, so scroll in short drags until the
     /// photo sits between the header and the bar, then let the scroll settle.

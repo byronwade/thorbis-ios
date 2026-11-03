@@ -215,18 +215,27 @@ struct CustomerRecordsScope: Equatable, Sendable {
     let customerID: String
     let generation: UUID
     let authorityRevision: UUID
+    let apiGeneration: UUID
+    let origin: String
     let policyVersion: Int?
     let access: CustomerRecordAccess
 
-    @MainActor func isCurrent(session: SessionController) -> Bool {
-        Self.capture(session: session, customerID: customerID) == self
+    @MainActor func isCurrent(session: SessionController, api: APIClient) -> Bool {
+        Self.capture(session: session, api: api, customerID: customerID) == self
     }
 
-    @MainActor static func capture(session: SessionController, customerID: String) -> CustomerRecordsScope? {
+    static func mustRetireAfterReadError(_ error: Error) -> Bool {
+        guard let status = (error as? Problem)?.status else { return false }
+        return status == 401 || status == 403 || status == 404
+    }
+
+    @MainActor static func capture(session: SessionController, api: APIClient, customerID: String) -> CustomerRecordsScope? {
         guard session.can("customer.view", feature: "core_crm"),
-              let actorID = session.user?.id, let organizationID = session.activeOrganization?.id else { return nil }
+              let actorID = session.user?.id, let organizationID = session.activeOrganization?.id,
+              let origin = api.normalizedOrigin else { return nil }
         return CustomerRecordsScope(actorID: actorID, organizationID: organizationID, customerID: customerID,
-            generation: session.generation, authorityRevision: session.authorityRevision, policyVersion: session.policyVersion,
+            generation: session.generation, authorityRevision: session.authorityRevision,
+            apiGeneration: api.requestGeneration, origin: origin, policyVersion: session.policyVersion,
             access: CustomerRecordAccess(jobs: session.can("job.view", feature: "jobs"),
                 estimates: session.can("estimate.view", feature: "estimates"),
                 invoices: session.can("invoice.view", feature: "invoicing")))
@@ -266,7 +275,10 @@ struct CustomerDetailView: View {
     @State private var recordsLoadGeneration = 0
     @State private var recordsPublishedScope: CustomerRecordsScope?
     @State private var recordsRequestedScope: CustomerRecordsScope?
-    private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
+    @State private var recordsActivityLoading = false
+    @State private var recordsActivityError: String?
+    @State private var recordsActivityGeneration = 0
+    private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, api: api, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
     @State private var smsConsentKey = UUID().uuidString
@@ -359,6 +371,9 @@ struct CustomerDetailView: View {
         .task { await loadActivity(reset: true) }
         .task(id: recordsScope) {
             if recordsPublishedScope != recordsScope {
+                recordsActivityGeneration += 1
+                recordsActivityLoading = false
+                recordsActivityError = nil
                 records = nil
                 recordsPublishedScope = nil
                 recordsError = nil
@@ -1004,7 +1019,9 @@ struct CustomerDetailView: View {
                 if visible == nil && visibleError == nil {
                     SkeletonRows(count: 3, inset: 0)
                 } else if let visible {
-                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() }, parts: parts)
+                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() },
+                        loadEarlierActivity: { await loadMoreRecordsActivity() }, activityLoading: recordsActivityLoading || recordsLoading,
+                        activityError: recordsActivityError, parts: parts)
                 }
             }
         }
@@ -1021,6 +1038,9 @@ struct CustomerDetailView: View {
         guard let scope = recordsScope else { return }
         guard !recordsLoading || recordsRequestedScope != scope else { return }
         recordsLoadGeneration += 1
+        recordsActivityGeneration += 1
+        recordsActivityLoading = false
+        recordsActivityError = nil
         let request = recordsLoadGeneration
         recordsLoading = true
         recordsRequestedScope = scope
@@ -1028,17 +1048,56 @@ struct CustomerDetailView: View {
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
             let recordsSession = session
+            let recordsAPI = api
             let compiled = try await CustomerJobCompilationLoader.load(customerID: scope.customerID,
                 organizationID: scope.organizationID, api: api, access: scope.access,
-                isCurrent: { scope.isCurrent(session: recordsSession) })
-            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
+                isCurrent: { scope.isCurrent(session: recordsSession, api: recordsAPI) })
+            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session, api: api) else { return }
             records = compiled
             recordsPublishedScope = scope
             recordsError = nil
         } catch is CancellationError {
         } catch {
-            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
+            guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session, api: api) else { return }
+            if CustomerRecordsScope.mustRetireAfterReadError(error) {
+                records = nil
+                recordsPublishedScope = nil
+            }
             recordsError = error.localizedDescription
+        }
+    }
+
+    private func loadMoreRecordsActivity() async {
+        guard !recordsLoading, !recordsActivityLoading, let scope = recordsScope,
+              recordsPublishedScope == scope, let cursor = records?.activityCursor else { return }
+        recordsActivityGeneration += 1
+        let request = recordsActivityGeneration
+        let recordRequest = recordsLoadGeneration
+        let apiGeneration = api.requestGeneration
+        recordsActivityLoading = true
+        recordsActivityError = nil
+        defer { if recordsActivityGeneration == request { recordsActivityLoading = false } }
+        let current = {
+            !Task.isCancelled && recordsActivityGeneration == request && recordsLoadGeneration == recordRequest &&
+            api.requestGeneration == apiGeneration && recordsPublishedScope == scope && scope.isCurrent(session: session, api: api) &&
+            records?.activityCursor == cursor && !recordsLoading
+        }
+        do {
+            let page = try await api.fieldCustomerHistory(scope.customerID, cursor: cursor)
+            guard current() else { return }
+            records?.appendActivityPage(page)
+        } catch is CancellationError {
+        } catch {
+            guard current() else { return }
+            if CustomerRecordsScope.mustRetireAfterReadError(error) {
+                recordsActivityGeneration += 1
+                recordsActivityLoading = false
+                records = nil
+                recordsPublishedScope = nil
+                recordsError = "These records are no longer available. Refresh access and try again."
+            } else {
+                recordsActivityError = "Earlier activity could not be loaded. Try again."
+            }
         }
     }
 

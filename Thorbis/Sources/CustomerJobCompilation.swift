@@ -19,10 +19,15 @@ struct CustomerJobCompilation: Equatable {
     let documents: [CustomerJobGroup<MediaAssetRecord>]
     let estimates: [CustomerJobGroup<EstimateRecord>]
     let invoices: [CustomerJobGroup<InvoiceRecord>]
-    let activity: [CustomerJobGroup<CustomerHistoryEntry>]
+    var activity: [CustomerJobGroup<CustomerHistoryEntry>]
     /// History that names a contact, a location, or a payment, which the customer
     /// history payload does not attach to a job.
-    let accountActivity: [CustomerHistoryEntry]
+    var accountActivity: [CustomerHistoryEntry]
+    var activityCursor: String?
+    var activitySeenCursors: Set<String>
+    let activityJobs: [JobRecord]
+    let activityEstimateJobs: [String: String]
+    let activityInvoices: [String: InvoiceRecord]
     let estimatesOffJob: [EstimateRecord]
     let invoicesOffJob: [InvoiceRecord]
 
@@ -36,7 +41,7 @@ struct CustomerJobCompilation: Equatable {
     let notesIncomplete: Bool
     let estimatesIncomplete: Bool
     let invoicesIncomplete: Bool
-    let activityIncomplete: Bool
+    var activityIncomplete: Bool
 
     var photoCount: Int { photos.reduce(0) { $0 + $1.count } }
     var noteCount: Int { notes.reduce(0) { $0 + $1.count } }
@@ -65,7 +70,8 @@ struct CustomerJobCompilation: Equatable {
         notesIncomplete: Bool = false,
         estimatesIncomplete: Bool = false,
         invoicesIncomplete: Bool = false,
-        activityIncomplete: Bool = false
+        activityIncomplete: Bool = false,
+        activityCursor: String? = nil
     ) -> CustomerJobCompilation {
         let jobIDs = Set(jobs.map(\.id))
         var incomplete = mediaIncompleteJobIDs
@@ -144,6 +150,11 @@ struct CustomerJobCompilation: Equatable {
             invoices: groups { invoicesOn[$0.id] ?? [] },
             activity: groups { activityOn[$0.id] ?? [] },
             accountActivity: account,
+            activityCursor: activityCursor?.isEmpty == false ? activityCursor : nil,
+            activitySeenCursors: Set(activityCursor.flatMap { $0.isEmpty ? nil : $0 }.map { [$0] } ?? []),
+            activityJobs: jobs,
+            activityEstimateJobs: estimateJob,
+            activityInvoices: invoiceByID,
             estimatesOffJob: estimatesOff,
             invoicesOffJob: invoicesOff,
             mediaIncompleteJobIDs: incomplete,
@@ -155,8 +166,31 @@ struct CustomerJobCompilation: Equatable {
             notesIncomplete: notesIncomplete,
             estimatesIncomplete: estimatesIncomplete,
             invoicesIncomplete: invoicesIncomplete,
-            activityIncomplete: activityIncomplete
+            activityIncomplete: activityIncomplete || activityCursor == ""
         )
+    }
+
+    /// Add one accepted page without reloading the customer's other records.
+    /// Identical visible events may be distinct: the server omits event IDs.
+    mutating func appendActivityPage(_ page: CustomerHistoryPage) {
+        let invalidContinuation = page.nextCursor.map { $0.isEmpty || activitySeenCursors.contains($0) } ?? false
+        var byJob: [String: [CustomerHistoryEntry]] = [:]
+        for group in activity { byJob[group.jobID, default: []].append(contentsOf: group.items) }
+        let jobIDs = Set(activityJobs.map(\.id))
+        for entry in page.items {
+            if let id = Self.jobID(for: entry, jobs: jobIDs, estimateJob: activityEstimateJobs, invoices: activityInvoices) {
+                byJob[id, default: []].append(entry)
+            } else {
+                accountActivity.append(entry)
+            }
+        }
+        activity = activityJobs.compactMap { job in
+            guard let entries = byJob[job.id], !entries.isEmpty else { return nil }
+            return CustomerJobGroup(jobID: job.id, title: job.title, items: entries)
+        }
+        activityCursor = invalidContinuation ? nil : page.nextCursor
+        if invalidContinuation { activityIncomplete = true }
+        else if let next = page.nextCursor { activitySeenCursors.insert(next) }
     }
 
     static func jobID(
@@ -265,21 +299,8 @@ enum CustomerJobCompilationLoader {
             }
         }
         try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
-        var history: [CustomerHistoryEntry] = []
-        var cursor: String?
-        var seen = Set<String>()
-        var activityIncomplete = false
-        repeat {
-            try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
-            let page = try await api.fieldCustomerHistory(customerID, cursor: cursor)
-            try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
-            history.append(contentsOf: page.items)
-            cursor = page.nextCursor
-            if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
-                activityIncomplete = true
-                break
-            }
-        } while cursor != nil
+        let history = try await api.fieldCustomerHistory(customerID)
+        try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         var legacyPhotosByJob: [String: [JobPhotoRecord]] = [:]
         // Only an archived-inclusive media read permits a legacy photo fallback.
         let photoJobs = jobs.filter { mediaByJob[$0.id] != nil }
@@ -311,7 +332,7 @@ enum CustomerJobCompilationLoader {
             estimates: estimates,
             linksByJob: linksByJob,
             invoices: invoices,
-            history: history,
+            history: history.items,
             legacyPhotosByJob: legacyPhotosByJob,
             mediaIncompleteJobIDs: mediaIncompleteJobIDs,
             documentIncompleteJobIDs: documentIncompleteJobIDs,
@@ -322,7 +343,7 @@ enum CustomerJobCompilationLoader {
             notesIncomplete: notesIncomplete,
             estimatesIncomplete: estimatesIncomplete,
             invoicesIncomplete: invoicesIncomplete,
-            activityIncomplete: activityIncomplete
+            activityCursor: history.nextCursor
         )
     }
 

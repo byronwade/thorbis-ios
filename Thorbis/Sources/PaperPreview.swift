@@ -765,6 +765,24 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if PaperPreview.screen == "customer-records",
+                  (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-history-denial") ||
+                   ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-history-pages")),
+                  url.path.hasPrefix("/v1/customers/"), url.path.hasSuffix("/history") {
+            let cursor = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "cursor" }?.value
+            if cursor == nil {
+                status = 200
+                payload = ["items": [["occurredAt": "2026-10-27T16:10:00Z", "kind": "job",
+                                      "subjectId": PaperPreview.jobID, "summary": "First activity shown"]],
+                           "nextCursor": "customer-history-next"] as [String: Any]
+            } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-history-denial") {
+                status = 403
+                payload = ["status": 403, "title": "Customer history access denied"]
+            } else {
+                status = 200
+                payload = ["items": [["occurredAt": "2026-10-20T15:00:00Z", "kind": "job",
+                                      "subjectId": PaperPreview.jobID, "summary": "Earlier activity shown"]]]
+            }
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-review-pending") {

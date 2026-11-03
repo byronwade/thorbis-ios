@@ -13,6 +13,9 @@ struct CustomerRecordsView: View {
     let compilation: CustomerJobCompilation
     let customerID: String
     var retryMedia: () async -> Void = {}
+    var loadEarlierActivity: () async -> Void = {}
+    var activityLoading = false
+    var activityError: String?
     var parts: Set<CustomerRecordsPart> = Set(CustomerRecordsPart.allCases)
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.paperGroupedWells) private var wells
@@ -214,31 +217,45 @@ struct CustomerRecordsView: View {
 
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            heading("Activity", count: compilation.activityCount + compilation.accountActivity.count, symbol: "clock", incomplete: compilation.activityIncomplete)
+            // The server caps source collections before composing history, so
+            // even the last page cannot establish an exact all-time total.
+            heading("Activity", count: compilation.activityCount + compilation.accountActivity.count, symbol: "clock", incomplete: true)
             if compilation.activityIncomplete {
                 ErrorBanner(message: "Some activity could not be loaded. Please try again.") { await retryMedia() }
+            } else if let activityError {
+                ErrorBanner(message: activityError) { await loadEarlierActivity() }
             } else if compilation.activity.isEmpty && compilation.accountActivity.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                Text("No activity loaded").font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             if !compilation.activity.isEmpty || !compilation.accountActivity.isEmpty {
                 panel {
-                    ForEach(compilation.activity, id: \.jobID) { group in
-                        jobHeading(group.title, jobID: group.jobID, count: group.count)
-                        ForEach(group.items) { entry in
-                            ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
-                                Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(compilation.activity, id: \.jobID) { group in
+                            jobHeading(group.title, jobID: group.jobID, count: group.count, incomplete: true)
+                            ForEach(Array(group.items.enumerated()), id: \.offset) { _, entry in
+                                ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                                    Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                                }
                             }
                         }
-                    }
-                    if !compilation.accountActivity.isEmpty {
-                        Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
-                        ForEach(compilation.accountActivity) { entry in
-                            ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
-                                Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                        if !compilation.accountActivity.isEmpty {
+                            Text("Account").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
+                            ForEach(Array(compilation.accountActivity.enumerated()), id: \.offset) { _, entry in
+                                ActivityLink(destination: ActivityDestinationMapping.customerHistory(entry, customerID: customerID)) {
+                                    Text(entry.summary).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(3)
+                                }
                             }
                         }
                     }
                 }
+            }
+            if compilation.activityCursor != nil {
+                Button { Task { await loadEarlierActivity() } } label: {
+                    Text(activityLoading ? "Loading…" : "Load earlier activity")
+                        .font(Theme.font(15, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .disabled(activityLoading)
+                .accessibilityIdentifier("customer-records-load-activity")
             }
         }
     }
