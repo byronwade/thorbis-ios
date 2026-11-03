@@ -412,18 +412,17 @@ enum CustomerJobCompilationLoader {
         try requireCurrent(api, generation: generation, isCurrent: isCurrent)
         let links = access.estimates ? try await api.fieldJobEstimateLinks(job.id, isCurrent: isCurrent) : []
         try requireCurrent(api, generation: generation, isCurrent: isCurrent)
-        let invoices = access.invoices ? try await jobInvoices(job.id, api: api, requireCompleteReads: requireCompleteReads, isCurrent: isCurrent) : []
+        let invoices = access.invoices ? try await jobInvoices(job.id, api: api, isCurrent: isCurrent) : []
         try requireCurrent(api, generation: generation, isCurrent: isCurrent)
         return JobRead(notes: notes, media: media, links: links, invoices: invoices)
     }
 
     /// The organization invoice list is empty for a technician who can still read the job.
     /// A server without this route (404 or 405) keeps the customer list. Any other failure still fails the load.
-    private static func jobInvoices(_ jobID: String, api: APIClient, requireCompleteReads: Bool, isCurrent: @MainActor () -> Bool) async throws -> [InvoiceRecord] {
+    private static func jobInvoices(_ jobID: String, api: APIClient, isCurrent: @MainActor () -> Bool) async throws -> [InvoiceRecord] {
         do {
             return try await api.fieldJobInvoices(jobID, isCurrent: isCurrent)
         } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
-            if requireCompleteReads { throw problem }
             return []
         }
     }
