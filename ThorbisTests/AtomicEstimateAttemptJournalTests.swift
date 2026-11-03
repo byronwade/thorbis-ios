@@ -165,7 +165,7 @@ import XCTest
         try store.save("invalid marker", scope: key)
         XCTAssertThrowsError(try journal.status(actorID: actor, organizationID: org, origin: origin, jobID: job))
     }
-    func testSourceLeaseBlocksOtherWritersWithoutBlockingOtherDrafts() throws {
+    func testSourceLeaseBlocksCoordinatedWritersWithoutBlockingOtherDrafts() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let first = CommercialDraftStore(directory: root), second = CommercialDraftStore(directory: root), owner = UUID(), secondOwner = UUID()
         try first.save("original", scope: sourceScope)
@@ -174,9 +174,8 @@ import XCTest
         let caseVariant = CommercialDraftScope(actor: actor.uppercased(), organization: org.uppercased(),
             origin: origin.uppercased(), kind: "new-estimate", document: sourceScope.document.uppercased())
         XCTAssertFalse(try second.acquireCoordinatedDraft(scope: caseVariant, owner: secondOwner))
-        XCTAssertThrowsError(try second.save("overwritten", scope: sourceScope))
-        XCTAssertThrowsError(try second.remove(scope: sourceScope))
         XCTAssertThrowsError(try second.saveCoordinatedDraft("overwritten", scope: sourceScope, owner: secondOwner))
+        XCTAssertThrowsError(try second.removeCoordinatedDraft(scope: sourceScope, owner: secondOwner))
         let other = CommercialDraftScope(actor: actor, organization: org, origin: origin, kind: "new-estimate", document: "job:other")
         try second.save("other", scope: other)
         XCTAssertEqual(try first.load(String.self, scope: sourceScope), "original")
@@ -185,5 +184,17 @@ import XCTest
         try second.saveCoordinatedDraft("after", scope: sourceScope, owner: secondOwner)
         second.release(scope: sourceScope, owner: secondOwner)
         XCTAssertEqual(try first.load(String.self, scope: sourceScope), "after")
+    }
+    func testExistingUncoordinatedWriterBehaviorRemainsUnchanged() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let held = CommercialDraftStore(directory: root), legacy = CommercialDraftStore(directory: root), owner = UUID()
+        XCTAssertTrue(try held.acquireCoordinatedDraft(scope: sourceScope, owner: owner))
+        // This deliberately demonstrates why the prototype is not ready to wire:
+        // the existing editor has not adopted the long-lived lease yet.
+        try legacy.save("legacy", scope: sourceScope)
+        XCTAssertEqual(try held.load(String.self, scope: sourceScope), "legacy")
+        try legacy.remove(scope: sourceScope)
+        XCTAssertNil(try held.load(String.self, scope: sourceScope))
+        held.release(scope: sourceScope, owner: owner)
     }
 }

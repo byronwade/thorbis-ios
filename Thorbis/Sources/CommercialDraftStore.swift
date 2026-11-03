@@ -124,21 +124,6 @@ struct CommercialDraftScope: Codable, Hashable {
         return directory.appendingPathComponent(digest + ".json")
     }
 
-    /// Ordinary source-draft writers take the same nonblocking lease for each
-    /// write. A long-lived coordinated owner uses the guarded methods above.
-    private func withSourceWriteLock<T>(scope: CommercialDraftScope, _ body: () throws -> T) throws -> T {
-        guard coordinatedDrafts[scope] == nil else { throw CocoaError(.fileWriteNoPermission) }
-        let existingOwner = owners[scope]
-        let owner = existingOwner ?? UUID()
-        guard try acquireCoordinatedDraft(scope: scope, owner: owner) else { throw CocoaError(.fileWriteNoPermission) }
-        defer {
-            if existingOwner != nil, let lease = coordinatedDrafts.removeValue(forKey: scope) {
-                _ = flock(lease.fd, LOCK_UN); close(lease.fd)
-            } else { release(scope: scope, owner: owner) }
-        }
-        return try body()
-    }
-
     /// Stable per-attempt lock file. Never unlink it: another process may hold
     /// the inode. Callers may not await or acquire a second lock in `body`.
     func withAttemptLock<T>(scope: CommercialDraftScope, _ body: () throws -> T) throws -> T {
@@ -170,7 +155,6 @@ struct CommercialDraftScope: Codable, Hashable {
     }
 
     func save<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {
-        if scope.kind == "new-estimate" { try withSourceWriteLock(scope: scope) { try saveRaw(value, scope: scope) }; return }
         try saveRaw(value, scope: scope)
     }
 
@@ -199,7 +183,6 @@ struct CommercialDraftScope: Codable, Hashable {
     }
 
     func remove(scope: CommercialDraftScope) throws {
-        if scope.kind == "new-estimate" { try withSourceWriteLock(scope: scope) { try removeRaw(scope: scope) }; return }
         try removeRaw(scope: scope)
     }
 
