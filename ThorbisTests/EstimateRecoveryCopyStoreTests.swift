@@ -2,7 +2,7 @@ import XCTest
 @testable import Thorbis
 
 @MainActor final class EstimateRecoveryCopyStoreTests: XCTestCase {
-    private struct Scope: Codable, Equatable { let actor, organization, origin, job: String }
+    private struct Scope: Codable, Equatable, Hashable { let actor, organization, origin, job: String }
     private struct Draft: Codable, Equatable { let title: String; let lines: [String] }
 
     func testScopedCopyCanReplayWithoutReplacingDifferentContent() throws {
@@ -38,6 +38,33 @@ import XCTest
         fail = false
         XCTAssertEqual(try store.read(scope: scope, id: id), draft)
         try store.install(draft, scope: scope, id: id)
+    }
+
+    func testUncertainAttemptRetriesSameIDAndRejectsChangedDraft() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let draft = Draft(title: "Unfinished", lines: ["Details"])
+        var failRead = true, ids: [UUID] = []
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory, inspectRead: { data in
+            if failRead { throw CocoaError(.fileReadUnknown) }; return data
+        })
+        let attempts = EstimateRecoveryCopyAttempts<Scope, Draft>()
+        XCTAssertThrowsError(try attempts.perform(draft, scope: scope) { id, value in
+            ids.append(id); try store.install(value, scope: scope, id: id)
+        })
+        failRead = false
+        XCTAssertThrowsError(try attempts.perform(.init(title: "Changed", lines: []), scope: scope) { id, value in
+            ids.append(id); try store.install(value, scope: scope, id: id)
+        })
+        XCTAssertEqual(ids.count, 1)
+        try attempts.perform(draft, scope: scope) { id, value in
+            ids.append(id); try store.install(value, scope: scope, id: id)
+        }
+        XCTAssertEqual(ids.count, 2)
+        XCTAssertEqual(ids[0], ids[1])
+        XCTAssertEqual(try store.list(scope: scope), [ids[0]])
+        XCTAssertEqual(try store.read(scope: scope, id: ids[0]), draft)
     }
 
 }

@@ -562,6 +562,9 @@ struct NewEstimateView: View {
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
             if memoryRecoveryPending {
                 Button("Save a recovery copy") { saveRecoveryCopy(currentDraft()) }.buttonStyle(.bordered)
+                if let scope = draftScope, let pending = CommercialDraftStore.estimateRecoveryCopyAttempts.pendingDraft(for: scope) {
+                    Button("Retry previous recovery copy") { saveRecoveryCopy(pending) }.buttonStyle(.bordered)
+                }
             }
             if jobID != nil && jobDraftSaveGuard.requiresRetry {
                 Button("Try saving draft again") {
@@ -591,6 +594,9 @@ struct NewEstimateView: View {
                     catch { error = "This recovery copy could not be opened." }
                 }.buttonStyle(.bordered)
             }
+            if let scope = draftScope, let pending = CommercialDraftStore.estimateRecoveryCopyAttempts.pendingDraft(for: scope) {
+                Button("Retry previous recovery copy") { saveRecoveryCopy(pending) }.buttonStyle(.bordered)
+            }
             if let error { ErrorBanner(message: error) }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.gutter)
     }
@@ -612,6 +618,12 @@ struct NewEstimateView: View {
                     Text("Quantity: \(line.quantity) · Price: \(line.unitPrice)").foregroundStyle(Theme.muted)
                 }
             }
+            if recoveryMemoryDraft != nil {
+                Button("Save this draft as a copy") { saveRecoveryCopy(draft) }.buttonStyle(.bordered)
+            }
+            if let scope = draftScope, let pending = CommercialDraftStore.estimateRecoveryCopyAttempts.pendingDraft(for: scope) {
+                Button("Retry previous recovery copy") { saveRecoveryCopy(pending) }.buttonStyle(.bordered)
+            }
             Button("Back to drafts") {
                 recoveryPreview = nil; customerID = initialCustomerID; created = nil; verifiedScope = nil
                 Task { await verifyDraftAccess() }
@@ -620,12 +632,20 @@ struct NewEstimateView: View {
     }
     private func saveRecoveryCopy(_ draft: CommercialNewEstimateDraft) {
         guard (memoryRecoveryPending || recoveryChoicePending), scopeMatches, resourceAuthorized, ownsDraft,
-              draft.customerID.lowercased() == initialCustomerID.lowercased(), (try? draft.lines()) != nil,
-              let draftScope else { return }
+              draft.customerID.lowercased() == initialCustomerID.lowercased(),
+              verifiedCustomerID?.lowercased() == draft.customerID.lowercased(),
+              verifiedCreatedID == draft.created?.id, (try? draft.lines()) != nil,
+              let draftScope else { error = "Review this draft and verify access before saving a recovery copy."; return }
         do {
-            try CommercialDraftStore.estimateRecoveryCopies.install(draft, scope: draftScope, id: UUID())
-            if recoveryChoicePending { recoveryCopyIDs = try CommercialDraftStore.estimateRecoveryCopies.list(scope: draftScope) }
+            var discovered: [UUID]?
+            try CommercialDraftStore.estimateRecoveryCopyAttempts.perform(draft, scope: draftScope) { id, intended in
+                try CommercialDraftStore.estimateRecoveryCopies.install(intended, scope: draftScope, id: id)
+                if recoveryChoicePending { discovered = try CommercialDraftStore.estimateRecoveryCopies.list(scope: draftScope) }
+            }
+            if let discovered { recoveryCopyIDs = discovered }
             error = "Recovery copy saved. New changes remain in memory until you save another copy."
+        } catch EstimateRecoveryCopyAttempts<CommercialDraftScope, CommercialNewEstimateDraft>.Failure.changedIntent {
+            error = "A previous recovery copy needs confirmation. Review and retry the previous draft first."
         } catch {
             error = "The recovery copy could not be confirmed. Keep the app open and try again."
         }
