@@ -36,6 +36,12 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     static var newerRevisionEnabled: Bool {
         PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-newer-revision")
     }
+    static var invoiceHeldReloadEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-recovery-held-reload")
+    }
+    static var invoiceNewerRevisionEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-recovery-newer-revision")
+    }
     var reloadHoldState: String { lock.withLock { heldReply == nil ? "idle" : "waiting" } }
     func armHeldReload() { lock.withLock { holdNextReload = true } }
 
@@ -58,6 +64,14 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     }
 
     func reply(for request: URLRequest) -> Reply? {
+        if (Self.invoiceHeldReloadEnabled || Self.invoiceNewerRevisionEnabled), request.httpMethod == "GET",
+           request.url?.path == "/v1/invoices/\(PaperPreview.invoice.id)" {
+            let shouldHold = lock.withLock { let value = holdNextReload; holdNextReload = false; return value }
+            guard let data = try? JSONEncoder().encode(PaperPreview.invoice),
+                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            object["linesRevision"] = PaperPreview.invoice.linesRevision + 1
+            return Reply(status: 200, payload: object, hold: Self.invoiceHeldReloadEnabled && shouldHold)
+        }
         if (Self.heldReloadEnabled || Self.newerRevisionEnabled), request.httpMethod == "GET",
            request.url?.path == "/v1/estimates/\(PaperPreview.estimate.id)" {
             let shouldHold = lock.withLock {

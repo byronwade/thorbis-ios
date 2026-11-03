@@ -17,6 +17,9 @@ struct InvoiceLineEditorView: View {
     @State private var pendingReload: InvoiceRecord?
     @State private var pendingReloadScope: EstimateCreationScope?
     @State private var pendingReloadAttempt: UUID?
+    #if DEBUG
+    @State private var simulatedConfirmationInterruption = false
+    #endif
     @State private var confirmIssue = false
     @State private var confirmDiscard = false
     @State private var busy = false
@@ -255,6 +258,24 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             #if DEBUG
+            if EstimateRecoveryPreview.invoiceHeldReloadEnabled {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                            Text("Sample invoice reload")
+                                .accessibilityIdentifier("invoice-held-reload-count")
+                                .accessibilityValue(EstimateRecoveryPreview.shared.reloadHoldState)
+                        }
+                        Button("Dismiss held reload") {
+                            dismiss()
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(500))
+                                EstimateRecoveryPreview.shared.release()
+                            }
+                        }.accessibilityIdentifier("invoice-held-reload-dismiss")
+                    }
+                }
+            }
             if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-toggle-access") {
                 ThorbisToolbarItem(placement: .principal) {
                     Button("Toggle sample invoice access") {
@@ -299,6 +320,20 @@ struct InvoiceLineEditorView: View {
         .onChange(of: session.isOffline) { _, offline in
             if offline { accessAttempt = UUID(); invalidatePendingReload(); if didRecoverDraft { verifiedScope = nil } }
         }
+        #if DEBUG
+        .onChange(of: confirmReload) { _, presented in
+            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption") else { return }
+            simulatedConfirmationInterruption = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1500))
+                PaperPreviewProtocol.simulateNoSignal = true
+                await session.revalidate()
+                PaperPreviewProtocol.simulateNoSignal = false
+                await session.revalidate()
+            }
+        }
+        #endif
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 invalidatePendingReload()
@@ -658,6 +693,9 @@ struct InvoiceLineEditorView: View {
         guard scopeMatches, let expected = currentScope, ownsDraft else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
         let attempt = UUID(); accessAttempt = attempt
+        #if DEBUG
+        if EstimateRecoveryPreview.invoiceHeldReloadEnabled { EstimateRecoveryPreview.shared.armHeldReload() }
+        #endif
         defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             let latest = try await api.fieldInvoice(invoice.id, requireFresh: true)
