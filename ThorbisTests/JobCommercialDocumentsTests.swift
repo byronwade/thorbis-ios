@@ -142,6 +142,60 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
     }
 
+    func testJobInvoiceMixedSavedAndLivePagesAreVisibleButNotFresh() async throws {
+        let cursor = id(990)
+        let path = "/v1/jobs/\(id(100))/invoices"
+        let client = api([.init(200, page([invoice(50)], cursor: cursor)),
+                          URLProtocolFixture.offline, .init(200, page([invoice(52)]))])
+        client.savedCopyScope = "invoice-provenance-\(UUID().uuidString)"
+        let _: Items<InvoiceRecord> = try await client.send("GET", path)
+        try await waitForSavedInvoice(client, path: path)
+        client.invalidateRequests()
+        let result = await JobDocumentsLoader.invoices(scope: scope(), api: client, knownIDs: [], retaining: nil, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(Set(read.records.map(\.id)), Set([id(50), id(52)]))
+        XCTAssertTrue(read.freshIDs.isEmpty, "A later live page cannot make a mixed snapshot fresh")
+        XCTAssertFalse(read.isComplete, "A saved page does not establish current job membership")
+    }
+
+    func testLegacyMixedSavedAndLiveInvoicePagesNeverBecomeFresh() async throws {
+        let cursor = id(990)
+        let client = api([.init(200, page([invoice(50)], cursor: cursor)),
+                          .init(404, problem(404)), URLProtocolFixture.offline,
+                          .init(200, page([invoice(52)]))])
+        client.savedCopyScope = "invoice-provenance-\(UUID().uuidString)"
+        let _: Items<InvoiceRecord> = try await client.send("GET", "/v1/invoices")
+        try await waitForSavedInvoice(client, path: "/v1/invoices")
+        client.invalidateRequests()
+        let result = await JobDocumentsLoader.invoices(scope: scope(), api: client, knownIDs: [], retaining: nil, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(Set(read.records.map(\.id)), Set([id(50), id(52)]), "Offline content stays visible")
+        XCTAssertTrue(read.freshIDs.isEmpty, "A later live page cannot erase evidence that an earlier page was saved")
+    }
+
+    func testLegacySavedIndividualInvoiceNeverBecomesFresh() async throws {
+        let path = "/v1/invoices/\(id(50))"
+        let client = api([.init(200, invoice(50)), .init(404, problem(404)),
+                          .init(200, page([])), URLProtocolFixture.offline])
+        client.savedCopyScope = "invoice-provenance-\(UUID().uuidString)"
+        let _: InvoiceRecord = try await client.send("GET", path)
+        try await waitForSavedInvoice(client, path: path)
+        client.invalidateRequests()
+        let result = await JobDocumentsLoader.invoices(scope: scope(), api: client, knownIDs: [id(50)], retaining: nil, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(read.records.map(\.id), [id(50)])
+        XCTAssertTrue(read.freshIDs.isEmpty, "A saved copy must not authorize fresh invoice actions")
+    }
+
+    private func waitForSavedInvoice(_ client: APIClient, path: String) async throws {
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+    }
+
     func testLegacyFailureRetainsPreviouslyVerifiedInvoiceAsStale() async throws {
         let first = api([.init(200, page([invoice(50), invoice(52)]))])
         let previous = await JobDocumentsLoader.invoices(scope: scope(), api: first, knownIDs: [], retaining: nil, isCurrent: { true })
