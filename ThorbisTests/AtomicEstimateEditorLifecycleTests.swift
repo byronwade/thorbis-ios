@@ -189,4 +189,27 @@ import XCTest
         XCTAssertEqual(editor.state, .writeUncertain)
         XCTAssertEqual(try other.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Newer")
     }
+    func testPreviousDraftObservationRequiresExactRetryAndKeepsEditorOpen() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        var fail = false
+        let store = CommercialDraftStore(directory: root, writeItem: { data, url in
+            if fail { throw CocoaError(.fileWriteNoPermission) }
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        })
+        let prior = draft
+        let intended = CommercialNewEstimateDraft(customerID: actor, title: "Unsaved changes", lines: [], uncertain: false,
+            created: nil, requiresLocationVerification: false, requiresManualReview: false,
+            requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        try store.save(prior, scope: scope)
+        let editor = lifecycle(store); try editor.open(); try editor.acknowledgeRestored(prior)
+        fail = true; XCTAssertThrowsError(try editor.save(intended)); fail = false
+        XCTAssertEqual(try editor.reconcileUncertainWrite(), .previousDraftPresent)
+        XCTAssertEqual(editor.state, .writeRetryRequired)
+        XCTAssertThrowsError(try editor.close(preserving: prior))
+        XCTAssertThrowsError(try editor.retryUncertainWrite(prior))
+        try editor.retryUncertainWrite(intended)
+        XCTAssertEqual(editor.state, .editable)
+        XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Unsaved changes")
+    }
+
 }

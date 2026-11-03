@@ -4,8 +4,9 @@ import Foundation
 /// send implementation. The editor must still prove its live authority, guard
 /// every exit and coordinate all other writers before this may be wired.
 @MainActor final class AtomicEstimateEditorLifecycle {
-    enum State: Equatable { case notOpen, needsRestore, editable, saveFailed, writeUncertain, stageUncertain, attemptPending, closed }
+    enum State: Equatable { case notOpen, needsRestore, editable, saveFailed, writeUncertain, writeRetryRequired, stageUncertain, attemptPending, closed }
     enum Failure: Error { case invalidState, unavailable }
+    enum WriteReconciliation: Equatable { case intendedDraftPresent, previousDraftPresent }
     private(set) var state: State = .notOpen
     private(set) var recoveredDraft: CommercialNewEstimateDraft?
     private var recoveredBytes: Data?
@@ -98,14 +99,33 @@ import Foundation
         }
     }
 
-    /// No write is issued here. Only a currently readable exact intended draft
-    /// resolves an ambiguous local write; anything else remains held for review.
-    func reconcileUncertainWrite() throws {
+    /// Observes the current file without writing. Seeing the previous version
+    /// does not prove what happened during the attempted write; it only permits
+    /// an explicit, intent-bound retry while the caller retains its edits.
+    @discardableResult func reconcileUncertainWrite() throws -> WriteReconciliation {
         guard state == .writeUncertain, let intended = pendingWrite,
               let current = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope) else { throw Failure.unavailable }
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
-        guard try encoder.encode(current.value) == intended else { throw Failure.unavailable }
-        sourceSnapshot = current.bytes; pendingWrite = nil; state = .editable
+        if try encoder.encode(current.value) == intended {
+            sourceSnapshot = current.bytes; pendingWrite = nil; state = .editable
+            return .intendedDraftPresent
+        }
+        guard let previous = sourceSnapshot, current.bytes == previous else { throw Failure.unavailable }
+        state = .writeRetryRequired
+        return .previousDraftPresent
+    }
+
+    /// Retry only the exact in-memory draft from the uncertain write. The
+    /// previous file is checked again by save; a different source stays held.
+    func retryUncertainWrite(_ draft: CommercialNewEstimateDraft) throws {
+        guard state == .writeRetryRequired, let intended = pendingWrite else { throw Failure.invalidState }
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        guard try encoder.encode(draft) == intended else { throw Failure.invalidState }
+        state = .saveFailed
+        do { try save(draft) } catch {
+            if state == .saveFailed { state = .writeRetryRequired }
+            throw error
+        }
     }
 
     /// The caller must keep the editor visible and retain its in-memory draft
