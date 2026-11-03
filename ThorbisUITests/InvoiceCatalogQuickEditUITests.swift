@@ -86,12 +86,47 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         proof.lifetime = .keepAlways
         add(proof)
 
-        app.buttons["Close line"].firstMatch.tap()
+        let close = app.buttons["Close line"].firstMatch
+        XCTAssertTrue(close.isHittable, "The line's Done control should be directly reachable while editing")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(close.frame.intersects(app.keyboards.firstMatch.frame), "The keyboard must not cover the line's Done control")
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.exists)
+        XCTAssertFalse(close.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover the line's Done control")
+        let saveWhileTyping = app.buttons["Save draft"]
+        if saveWhileTyping.exists && saveWhileTyping.isHittable {
+            XCTAssertFalse(close.frame.intersects(saveWhileTyping.frame), "Invoice actions must not cover the line's Done control")
+        }
+        close.tap()
         XCTAssertTrue(quantity.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "Closing the line must dismiss the keyboard")
         let summary = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "10", "245.00")).firstMatch
         XCTAssertTrue(summary.waitForExistence(timeout: 5), "The closed line keeps the edited quantity")
         XCTAssertTrue(app.buttons["Save draft"].isHittable)
         XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
+    }
+
+    func testClosingFocusedPriceKeepsAndFormatsTheEnteredAmount() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let price = app.textFields["invoice-line-price-" + identity]
+        XCTAssertTrue(price.waitForExistence(timeout: 10))
+        reveal(price, in: app); price.tap(); price.doubleTap(); app.typeText("12.5")
+        XCTAssertEqual(price.value as? String, "12.5")
+        let close = app.buttons["Close line"].firstMatch
+        reveal(close, in: app)
+        close.tap()
+        XCTAssertTrue(price.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Save draft"].isHittable)
+        XCTAssertTrue(app.buttons["Issue invoice"].isHittable)
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Compressor diagnostic", "12.50")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertEqual(app.textFields["invoice-line-price-" + identity].value as? String, "12.50")
     }
 
     func testTypedLineBecomesACustomLineOpenForItsPrice() {
@@ -138,15 +173,17 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let search = openCatalog(app, typing: "Camera sewer inspection")
         let item = app.buttons[itemID]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
-        // At this size the row can sit under the keyboard; the catalog scrolls it up as a person would.
-        for _ in 0..<6 where !item.isHittable {
+        // A partly visible accessibility row can report hittable while its tap point is
+        // covered by the fixed Done bar. Scroll until the center is visibly above it.
+        let done = app.buttons["price-book-done"]
+        for _ in 0..<10 where !item.isHittable || item.frame.midY >= done.frame.minY {
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -80)))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -50)))
         }
         XCTAssertTrue(item.isHittable)
+        XCTAssertLessThan(item.frame.midY, done.frame.minY, "The catalog item's tap point must clear the Done bar")
         item.tap()
         XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch.waitForExistence(timeout: 5))
-        let done = app.buttons["price-book-done"]
         XCTAssertTrue(done.isHittable)
         done.tap()
         XCTAssertTrue(search.waitForNonExistence(timeout: 5))
