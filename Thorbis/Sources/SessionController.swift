@@ -344,6 +344,34 @@ final class SessionController: ObservableObject {
         return (created.id, opened)
     }
 
+    /// Recheck server membership before retrying an already-created company's switch.
+    /// The returned ID is not evidence that a later account belongs to that company.
+    func openCreatedCompany(id: String, actor: String, origin: String) async -> Bool {
+        guard !signingOut, phase == .ready, user?.id == actor, api.normalizedOrigin == origin else {
+            error = "Sign in to the account that created this company."
+            return false
+        }
+        let originalGeneration = generation
+        do {
+            let memberships: [SessionOrganization] = try await api.send("GET", "/api/auth/organization/list", authed: false)
+            guard generation == originalGeneration, phase == .ready, user?.id == actor,
+                  api.normalizedOrigin == origin else { return false }
+            guard Set(memberships.map(\.id)).count == memberships.count,
+                  memberships.allSatisfy({ !$0.id.isEmpty && !$0.name.isEmpty }),
+                  memberships.contains(where: { $0.id == id }) else {
+                error = "This account cannot open the created company yet."
+                return false
+            }
+            organizations = memberships
+            return await selectOrganization(id: id)
+        } catch {
+            guard generation == originalGeneration, phase == .ready, user?.id == actor,
+                  api.normalizedOrigin == origin else { return false }
+            error = "The company was created, but its membership could not be checked. Try again."
+            return false
+        }
+    }
+
     @discardableResult func selectOrganization(id: String) async -> Bool {
         guard !signingOut else { return false }
         guard organizations.contains(where: { $0.id == id }), user != nil else {

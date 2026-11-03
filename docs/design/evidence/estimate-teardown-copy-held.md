@@ -28,3 +28,9 @@ The real unbind callback posts `/v1/devices/unregister`. If the second preservat
 The workspace menus now show a failure alert. After a successful company-create response followed by a failed switch, the form keeps that returned company ID with the originating actor and server and offers a switch-only retry. This is process/view-local: destroying the form or process loses that retry state. A lost or malformed create response can still represent a committed creation, and this change does not establish create idempotency or prevent duplicates in that case.
 
 Four focused `SessionControllerTests` were added for failed post-unbind sign-out, failed post-unbind switching, identity loss during unbind, and one create followed by switch-only retry. They are unrun until simulator access is coordinated. The app and these tests have only been syntax-parsed, not typechecked or executed. Real push delivery, every workspace entry point, SwiftUI alert behavior, and company-form loss remain unqualified.
+
+## Created-company membership refresh
+
+A switch-only retry now refreshes memberships from the server, checks the original actor, server and current session generation before and after the read, and opens only an ID in the refreshed membership list. It does not append an ID from an older response to another actor's organizations. Unrun tests cover a missing local membership and a different actor.
+
+`APIClient.sendData` rejects an in-flight response when its request generation is retired. Consequently a company-create request that may have committed during session change can throw before returning its ID. This candidate prevents another create tap in the same visible form after any unconfirmed response and tells the user to check their company list. That hold is not durable across form destruction or process death; it does not solve server idempotency or make a later retry safe. App and UI verification remain outstanding.

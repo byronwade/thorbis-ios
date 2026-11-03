@@ -320,6 +320,7 @@ struct CreateCompanyForm: View {
     @State private var error: String?
     @State private var confirmSignOut = false
     @State private var createdCompany: (id: String, actor: String, origin: String)?
+    @State private var companyCreateUnconfirmed = false
     @FocusState private var focused: Bool
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -390,7 +391,7 @@ struct CreateCompanyForm: View {
             }
             .buttonStyle(PressStyle())
             // Not pre-disabled: pressed without a name, it says so under the field.
-            .disabled(busy)
+            .disabled(busy || companyCreateUnconfirmed)
             .padding(.horizontal, 20).padding(.vertical, 10)
             .frame(maxWidth: 470)
             .frame(maxWidth: .infinity)
@@ -418,7 +419,7 @@ struct CreateCompanyForm: View {
             }
             busy = true
             defer { busy = false }
-            if await session.selectOrganization(id: createdCompany.id) { error = nil }
+            if await session.openCreatedCompany(id: createdCompany.id, actor: createdCompany.actor, origin: createdCompany.origin) { error = nil }
             else { error = "The company was created, but it could not be opened. \(session.error ?? "Try opening it again.")" }
             return
         }
@@ -437,9 +438,9 @@ struct CreateCompanyForm: View {
                 createdCompany = (result.id, actor, origin)
                 error = "The company was created, but it could not be opened. \(session.error ?? "Try opening it again.")"
             }
-        } catch is CancellationError {
         } catch {
-            self.error = (error as? LocalizedError)?.errorDescription ?? "The company was not created. Try again."
+            companyCreateUnconfirmed = true
+            self.error = "The company creation could not be confirmed. Check your company list before trying again."
         }
     }
 }

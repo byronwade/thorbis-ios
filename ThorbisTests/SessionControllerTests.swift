@@ -83,6 +83,7 @@ final class SessionControllerTests: XCTestCase {
         let (session, _) = controller([
             .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
             .init(200, "{\"id\":\"\(second)\",\"name\":\"New company\"}"),
+            .init(200, "[{\"id\":\"\(first)\",\"name\":\"Fixture workspace\"},{\"id\":\"\(second)\",\"name\":\"New company\"}]"),
             .init(200, "{}"), .init(200, secondSession), .init(200, secondCatalog), .init(200, secondFeatures)
         ])
         await session.restore()
@@ -94,10 +95,39 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertEqual(result.id, second)
         XCTAssertFalse(result.opened)
         safe = true
-        let changed = await session.selectOrganization(id: result.id)
+        let changed = await session.openCreatedCompany(id: result.id, actor: actor, origin: "https://app.thorbis.com")
         XCTAssertTrue(changed)
         XCTAssertEqual(session.activeOrganization?.id, second)
         XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == "/api/auth/organization/create" }.count, 1)
+    }
+
+    func testCreatedCompanyRetryRejectsDifferentActorBeforeReadingMembership() async {
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)
+        ])
+        await session.restore()
+        let before = URLProtocolFixture.recorded.count
+        let changed = await session.openCreatedCompany(id: second, actor: "another-actor", origin: "https://app.thorbis.com")
+        XCTAssertFalse(changed)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, before)
+        XCTAssertFalse(session.organizations.contains { $0.id == second })
+    }
+
+    func testCreatedCompanyRetryRefreshesMissingMembershipAndOpens() async {
+        let secondSession = activeSession.replacingOccurrences(of: first, with: second)
+        let secondCatalog = catalog.replacingOccurrences(of: first, with: second)
+        let secondFeatures = features.replacingOccurrences(of: first, with: second)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, "[{\"id\":\"\(first)\",\"name\":\"Fixture workspace\"},{\"id\":\"\(second)\",\"name\":\"New company\"}]"),
+            .init(200, "{}"), .init(200, secondSession), .init(200, secondCatalog), .init(200, secondFeatures)
+        ])
+        await session.restore()
+        XCTAssertFalse(session.organizations.contains { $0.id == second })
+        let changed = await session.openCreatedCompany(id: second, actor: actor, origin: "https://app.thorbis.com")
+        XCTAssertTrue(changed)
+        XCTAssertEqual(session.activeOrganization?.id, second)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == "/api/auth/organization/create" }.count, 0)
     }
 
     #if DEBUG
