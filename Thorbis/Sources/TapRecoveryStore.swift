@@ -7,7 +7,7 @@ struct TapRecoveryScope: Codable, Equatable {
     let actor: String
     let invoice: String
 
-    fileprivate func canonical() -> Self? {
+    func canonical() -> Self? {
         guard let origin = APIOrigin.normalized(origin),
               let organization = UUID(uuidString: organization),
               let actor = UUID(uuidString: actor),

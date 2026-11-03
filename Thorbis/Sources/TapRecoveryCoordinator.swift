@@ -12,6 +12,15 @@ struct TapRecoverySnapshot {
     let status: Status
 }
 
+/// Captured from the current authenticated session, not persisted in the hold.
+/// Every authority or API rebind must create a new generation.
+struct TapRecoveryAuthorityLease: Equatable {
+    let scope: TapRecoveryScope
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let apiGeneration: UUID
+}
+
 @MainActor
 final class TapRecoveryCoordinator {
     enum Outcome: Equatable { case unresolved, recorded }
@@ -23,16 +32,17 @@ final class TapRecoveryCoordinator {
     /// The injected preparation transport may send only the saved operation ID;
     /// it must never accept a client-selected job, amount or merchant as authority.
     func start(scope: TapRecoveryScope, jobID: String, amount: Int, currency: String,
-               authorized: () -> Bool, termsCurrent: () -> Bool,
+               currentLease: () -> TapRecoveryAuthorityLease?, termsCurrent: () -> Bool,
                prepare: (String) async throws -> TapRecoverySnapshot) async -> Outcome {
-        guard !active, authorized(), termsCurrent() else { return .unresolved }
+        guard !active, let lease = capture(scope: scope, currentLease: currentLease), termsCurrent() else { return .unresolved }
         active = true
         defer { active = false }
         do {
             let hold = try store.begin(scope: scope, jobID: jobID, amount: amount, currency: currency)
-            guard authorized(), termsCurrent() else { return .unresolved }
+            guard current(lease, scope: scope, currentLease: currentLease), termsCurrent() else { return .unresolved }
             let snapshot = try await prepare(hold.operationID)
-            guard authorized(), termsCurrent(), matches(snapshot, hold: hold) else { return .unresolved }
+            guard current(lease, scope: scope, currentLease: currentLease), termsCurrent(), matches(snapshot, hold: hold) else { return .unresolved }
+            guard current(lease, scope: scope, currentLease: currentLease) else { return .unresolved }
             try store.bindAttempt(scope: scope, operationID: hold.operationID, jobID: hold.jobID, attemptID: snapshot.attemptID)
         } catch { return .unresolved }
         // A preparation response is not a receipt, even if a transport labels it recorded.
@@ -41,21 +51,37 @@ final class TapRecoveryCoordinator {
 
     /// Only an authenticated status lookup for the original operation may
     /// clear the hold; missing, denied, pending and ambiguous results stay held.
-    func check(scope: TapRecoveryScope, authorized: () -> Bool,
+    func check(scope: TapRecoveryScope, currentLease: () -> TapRecoveryAuthorityLease?,
                lookup: (String) async throws -> TapRecoverySnapshot) async -> Outcome {
-        guard !active, authorized() else { return .unresolved }
+        guard !active, let lease = capture(scope: scope, currentLease: currentLease) else { return .unresolved }
         active = true
         defer { active = false }
         do {
-            guard let hold = try store.pending(scope: scope), authorized() else { return .unresolved }
+            guard let hold = try store.pending(scope: scope), current(lease, scope: scope, currentLease: currentLease) else { return .unresolved }
             let snapshot = try await lookup(hold.operationID)
-            guard authorized(), matches(snapshot, hold: hold) else { return .unresolved }
+            guard current(lease, scope: scope, currentLease: currentLease), matches(snapshot, hold: hold) else { return .unresolved }
+            guard current(lease, scope: scope, currentLease: currentLease) else { return .unresolved }
             try store.bindAttempt(scope: scope, operationID: hold.operationID, jobID: hold.jobID, attemptID: snapshot.attemptID)
-            guard authorized(), snapshot.status == .recorded else { return .unresolved }
+            guard current(lease, scope: scope, currentLease: currentLease), snapshot.status == .recorded else { return .unresolved }
             try store.confirmReceipt(scope: scope, operationID: hold.operationID, jobID: hold.jobID,
                                      attemptID: snapshot.attemptID, amount: snapshot.amount, currency: snapshot.currency)
             return .recorded
         } catch { return .unresolved }
+    }
+
+    private func capture(scope: TapRecoveryScope, currentLease: () -> TapRecoveryAuthorityLease?) -> TapRecoveryAuthorityLease? {
+        guard !Task.isCancelled, let canonical = scope.canonical(), let lease = currentLease(),
+              lease.scope.canonical() == canonical else { return nil }
+        return lease
+    }
+
+    private func current(_ lease: TapRecoveryAuthorityLease, scope: TapRecoveryScope,
+                         currentLease: () -> TapRecoveryAuthorityLease?) -> Bool {
+        guard !Task.isCancelled, let current = currentLease(),
+              let canonical = scope.canonical(), current.scope.canonical() == canonical,
+              lease.scope.canonical() == canonical else { return false }
+        return current.sessionGeneration == lease.sessionGeneration &&
+            current.authorityRevision == lease.authorityRevision && current.apiGeneration == lease.apiGeneration
     }
 
     private func matches(_ snapshot: TapRecoverySnapshot, hold: TapRecoveryHold) -> Bool {
