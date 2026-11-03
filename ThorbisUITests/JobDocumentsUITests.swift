@@ -149,6 +149,60 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2241")).firstMatch.exists)
     }
 
+    func testInvoiceItemsCanBeOpenedIndependentlyWithoutHidingInvoiceActions() {
+        continueAfterFailure = false
+        let app = preview()
+        thorbisStableButton(app, "job-section-money").tap()
+        let first = app.buttons["job-invoice-items-\(invoiceA)"]
+        let second = app.buttons["job-invoice-items-\(depositA)"]
+        let firstLine = app.descendants(matching: .any)["job-invoice-line-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        let secondLine = app.descendants(matching: .any)["job-invoice-line-\(depositA)-00000000-0000-4000-8000-000000009101"]
+        revealJobItem(first, in: app)
+        XCTAssertFalse(firstLine.exists, "Invoice items should start collapsed")
+        XCTAssertFalse(secondLine.exists)
+        first.tap()
+        XCTAssertTrue(firstLine.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstLine.label.contains("Compressor diagnostic"))
+        XCTAssertTrue(firstLine.label.contains("quantity 1"))
+        XCTAssertTrue(firstLine.label.contains("$120.00"))
+        XCTAssertFalse(secondLine.exists, "Opening one invoice must not expand another")
+        revealJobItem(second, in: app)
+        second.tap()
+        XCTAssertTrue(secondLine.waitForExistence(timeout: 5))
+        for _ in 0..<10 where !first.isHittable { app.scrollViews.firstMatch.swipeDown() }
+        revealJobItem(first, in: app)
+        first.tap()
+        XCTAssertFalse(firstLine.exists)
+        XCTAssertTrue(secondLine.exists, "Closing one invoice must not close another")
+        let invoice = app.buttons["job-invoice-\(depositA)"]
+        revealJobItem(invoice, in: app)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testLargestTextKeepsInvoiceItemsReachable() {
+        continueAfterFailure = false
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15))
+        chooser.tap()
+        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
+        XCTAssertTrue(money.waitForExistence(timeout: 5))
+        money.tap()
+        let items = app.buttons["job-invoice-items-\(invoiceA)"]
+        revealJobItem(items, in: app)
+        XCTAssertGreaterThanOrEqual(items.frame.height, 44)
+        XCTAssertTrue(items.label.contains("INV-2209"))
+        items.tap()
+        let line = app.descendants(matching: .any)["job-invoice-line-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        XCTAssertTrue(line.label.contains("Compressor diagnostic"))
+        let invoice = app.buttons["job-invoice-\(depositA)"]
+        revealJobItem(invoice, in: app)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
+    }
+
     func testCommercialHandoffListsOnlyThisJobsEstimatesAndInvoices() {
         continueAfterFailure = false
         let app = preview()

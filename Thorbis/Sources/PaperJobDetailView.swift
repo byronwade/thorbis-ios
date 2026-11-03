@@ -1910,11 +1910,8 @@ struct JobDetailView: View {
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("job-invoice-\(invoice.id)")
                             .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
-                            // What the invoice is for: each line, its quantity and amount, two
-                            // decimals, tabular (design.thorbis.com "Money is two decimals").
                             if !invoice.lines.isEmpty, invoiceRead?.freshIDs.contains(invoice.id) == true {
-                                JobInvoiceLineRows(lines: invoice.lines, currency: invoice.currency)
-                                    .padding(.bottom, 6)
+                                JobInvoiceItemsDisclosure(invoice: invoice)
                             }
                         }
                     }
@@ -2778,6 +2775,42 @@ struct JobDetailView: View {
                 note = ""
             } else {
                 self.error = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// Keep each invoice scannable while leaving its line quantities and amounts a tap away.
+private struct JobInvoiceItemsDisclosure: View {
+    let invoice: InvoiceRecord
+    @State private var expanded = false
+
+    private var itemCount: String {
+        "\(invoice.lines.count) \(invoice.lines.count == 1 ? "item" : "items")"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 8) {
+                    Text("\(expanded ? "Hide" : "Show") \(itemCount)")
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .medium))
+                    Spacer(minLength: 0)
+                }
+                .font(Theme.font(14, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityLabel("\(expanded ? "Hide" : "Show") \(itemCount) for invoice INV-\(invoice.id.suffix(4).uppercased())")
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("job-invoice-items-\(invoice.id)")
+            if expanded {
+                JobInvoiceLineRows(lines: invoice.lines, currency: invoice.currency, invoiceID: invoice.id)
+                    .padding(.bottom, 6)
             }
         }
     }
