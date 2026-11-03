@@ -84,7 +84,7 @@ import Foundation
         let key = try scope(operation: operation, actorID: actorID, organizationID: organizationID,
                             origin: origin, jobID: jobID)
         return try store.withAttemptLock(scope: key) {
-            guard let target = operation.draftTarget, store.isOwned(scope: draftScope, owner: draftOwner),
+            guard let target = operation.draftTarget, store.isCoordinatedOwner(scope: draftScope, owner: draftOwner),
                   draftScope.kind == "new-estimate", draftScope.actor.lowercased() == operation.actorID,
                   draftScope.organization.lowercased() == operation.organizationID, draftScope.origin == operation.origin,
                   draftScope.document.lowercased() == "job:\(operation.payload.jobId)|customer:\(target.customerID)|location:\(target.locationID ?? "")",
@@ -126,7 +126,7 @@ import Foundation
         let key = try key(actorID: actorID, organizationID: organizationID, origin: origin, jobID: jobID)
         guard UUID(uuidString: customerID) != nil, locationID.map({ UUID(uuidString: $0) != nil }) ?? true else { throw Failure.invalidScope }
         return try store.withAttemptLock(scope: key) {
-            guard store.isOwned(scope: draftScope, owner: draftOwner), draftScope.kind == "new-estimate",
+            guard store.isCoordinatedOwner(scope: draftScope, owner: draftOwner), draftScope.kind == "new-estimate",
                   draftScope.actor.lowercased() == key.actor, draftScope.organization.lowercased() == key.organization,
                   draftScope.origin == key.origin,
                   draftScope.document.lowercased() == "job:\(key.document)|customer:\(customerID.lowercased())|location:\(locationID?.lowercased() ?? "")",

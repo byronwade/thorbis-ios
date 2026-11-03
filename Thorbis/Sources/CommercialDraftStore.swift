@@ -47,6 +47,7 @@ struct CommercialDraftScope: Codable, Hashable {
     private let removeItem: (URL) throws -> Void
     private let writeItem: (Data, URL) throws -> Void
     private var owners: [CommercialDraftScope: UUID] = [:]
+    private var coordinatedDrafts: [CommercialDraftScope: (owner: UUID, fd: Int32)] = [:]
 
     private struct Envelope<Value: Codable>: Codable {
         let version: Int
@@ -70,15 +71,72 @@ struct CommercialDraftScope: Codable, Hashable {
         return true
     }
     func release(scope: CommercialDraftScope, owner: UUID) {
+        if let lease = coordinatedDrafts[scope], lease.owner == owner {
+            _ = flock(lease.fd, LOCK_UN); close(lease.fd); coordinatedDrafts.removeValue(forKey: scope)
+        }
         if owners[scope] == owner { owners.removeValue(forKey: scope) }
     }
     func isOwned(scope: CommercialDraftScope, owner: UUID) -> Bool { owners[scope] == owner }
+
+    /// Held protocol: acquire this source lease before the job attempt lock.
+    /// Lock files are permanent and no blocking lock or await occurs here.
+    func acquireCoordinatedDraft(scope: CommercialDraftScope, owner: UUID) throws -> Bool {
+        guard scope.kind == "new-estimate" else { throw CocoaError(.fileWriteNoPermission) }
+        if let existing = coordinatedDrafts[scope] { return existing.owner == owner }
+        let alreadyOwned = owners[scope] == owner
+        guard acquire(scope: scope, owner: owner) else { return false }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            // Scope identity is UUID-based. Case variants must contend on the
+            // same lease even if a legacy draft used different casing.
+            let lockScope = CommercialDraftScope(actor: scope.actor.lowercased(), organization: scope.organization.lowercased(),
+                                                 origin: scope.origin.lowercased(), kind: scope.kind, document: scope.document.lowercased())
+            let lock = try file(for: lockScope).deletingPathExtension().appendingPathExtension("draft.lock")
+            let fd = open(lock.path, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+            guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+                let error = errno; close(fd)
+                if error == EWOULDBLOCK || error == EAGAIN { if !alreadyOwned { release(scope: scope, owner: owner) }; return false }
+                throw POSIXError(POSIXErrorCode(rawValue: error) ?? .EIO)
+            }
+            coordinatedDrafts[scope] = (owner, fd)
+            return true
+        } catch { if !alreadyOwned { release(scope: scope, owner: owner) }; throw error }
+    }
+    func isCoordinatedOwner(scope: CommercialDraftScope, owner: UUID) -> Bool {
+        owners[scope] == owner && coordinatedDrafts[scope]?.owner == owner
+    }
+    func saveCoordinatedDraft<Value: Codable>(_ value: Value, scope: CommercialDraftScope, owner: UUID) throws {
+        guard isCoordinatedOwner(scope: scope, owner: owner) else { throw CocoaError(.fileWriteNoPermission) }
+        try saveRaw(value, scope: scope)
+    }
+    func removeCoordinatedDraft(scope: CommercialDraftScope, owner: UUID) throws {
+        guard isCoordinatedOwner(scope: scope, owner: owner) else { throw CocoaError(.fileWriteNoPermission) }
+        try removeRaw(scope: scope)
+    }
+
+    deinit { for (_, lease) in coordinatedDrafts { _ = flock(lease.fd, LOCK_UN); close(lease.fd) } }
 
     private func file(for scope: CommercialDraftScope) throws -> URL {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let digest = SHA256.hash(data: try encoder.encode(scope)).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent(digest + ".json")
+    }
+
+    /// Ordinary source-draft writers take the same nonblocking lease for each
+    /// write. A long-lived coordinated owner uses the guarded methods above.
+    private func withSourceWriteLock<T>(scope: CommercialDraftScope, _ body: () throws -> T) throws -> T {
+        guard coordinatedDrafts[scope] == nil else { throw CocoaError(.fileWriteNoPermission) }
+        let existingOwner = owners[scope]
+        let owner = existingOwner ?? UUID()
+        guard try acquireCoordinatedDraft(scope: scope, owner: owner) else { throw CocoaError(.fileWriteNoPermission) }
+        defer {
+            if existingOwner != nil, let lease = coordinatedDrafts.removeValue(forKey: scope) {
+                _ = flock(lease.fd, LOCK_UN); close(lease.fd)
+            } else { release(scope: scope, owner: owner) }
+        }
+        return try body()
     }
 
     /// Stable per-attempt lock file. Never unlink it: another process may hold
@@ -112,6 +170,11 @@ struct CommercialDraftScope: Codable, Hashable {
     }
 
     func save<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {
+        if scope.kind == "new-estimate" { try withSourceWriteLock(scope: scope) { try saveRaw(value, scope: scope) }; return }
+        try saveRaw(value, scope: scope)
+    }
+
+    private func saveRaw<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {
         #if DEBUG
         Self.trace("save \(scope.kind)")
         #endif
@@ -136,6 +199,11 @@ struct CommercialDraftScope: Codable, Hashable {
     }
 
     func remove(scope: CommercialDraftScope) throws {
+        if scope.kind == "new-estimate" { try withSourceWriteLock(scope: scope) { try removeRaw(scope: scope) }; return }
+        try removeRaw(scope: scope)
+    }
+
+    private func removeRaw(scope: CommercialDraftScope) throws {
         let url = try file(for: scope)
         #if DEBUG
         Self.trace("remove \(scope.kind) exists=\(FileManager.default.fileExists(atPath: url.path))")
