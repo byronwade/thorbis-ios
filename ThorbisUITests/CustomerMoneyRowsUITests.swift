@@ -21,6 +21,10 @@ final class CustomerMoneyRowsUITests: XCTestCase {
         let title = app.staticTexts["invoice-detail-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         XCTAssertTrue(title.label.contains("2209"))
+        let payment = app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Card", "$100.00")).firstMatch
+        for _ in 0..<10 where !payment.exists { app.swipeUp() }
+        XCTAssertTrue(payment.waitForExistence(timeout: 10), "The invoice must show the recorded $100 payment")
+        XCTAssertTrue(payment.label.contains("Received"))
         app.navigationBars.buttons["Back"].tap()
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
     }

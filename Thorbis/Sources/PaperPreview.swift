@@ -1073,6 +1073,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if path == "/v1/invoices" { return ["items": matchingCustomer([invoice], queryItems: queryItems)] }
             if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return ["items": [invoice]] }
             if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" { return invoice }
+            if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/payments" {
+                var payment = (jsonObject(PaperPreview.refundPayment) as? [String: Any]) ?? [:]
+                payment["id"] = "00000000-0000-4000-8000-000000002260"
+                payment["invoiceId"] = PaperPreview.issuedInvoice.id
+                payment["amount"] = ["amount": 10_000, "currency": "USD"]
+                payment["netAmount"] = ["amount": 10_000, "currency": "USD"]
+                payment["idempotencyKey"] = "paper-preview-customer-partial-payment"
+                return ["items": [payment]]
+            }
         }
         if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
             if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
