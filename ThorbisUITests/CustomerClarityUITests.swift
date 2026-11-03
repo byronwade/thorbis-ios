@@ -2,6 +2,47 @@ import XCTest
 
 @MainActor
 final class CustomerClarityUITests: XCTestCase {
+    func testContactOffersDirectCallAndTextWithoutHidingOtherActions() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-scroll", "center"]
+        app.launch()
+        let call = app.buttons["Call Danielle Marlowe"]
+        XCTAssertTrue(app.staticTexts["Contacts"].waitForExistence(timeout: 20))
+        app.swipeUp()
+        for _ in 0..<12 where !call.isHittable { app.swipeUp() }
+        XCTAssertTrue(call.waitForExistence(timeout: 20))
+        XCTAssertTrue(call.isHittable)
+        XCTAssertGreaterThanOrEqual(call.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(call.frame.width, 44)
+        let text = app.buttons["Text Danielle Marlowe"]
+        XCTAssertTrue(text.isHittable)
+        XCTAssertGreaterThanOrEqual(text.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(text.frame.width, 44)
+        let actions = app.buttons["Contact actions for Danielle Marlowe"]
+        XCTAssertTrue(actions.isHittable)
+        capture("Customer contacts and quick actions")
+        actions.tap()
+        XCTAssertTrue(app.buttons["Save to Contacts"].waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(app.buttons["Edit contact"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    func testContactActionsStayReachableAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-name-long", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let name = "Birch Community Hall and Neighborhood Services Center"
+        let call = app.buttons["Call \(name)"]
+        for _ in 0..<20 where !call.isHittable { app.swipeUp() }
+        XCTAssertTrue(call.waitForExistence(timeout: 20))
+        XCTAssertTrue(call.isHittable)
+        XCTAssertGreaterThanOrEqual(call.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(call.frame.height, 44)
+        XCTAssertTrue(app.buttons["Text \(name)"].isHittable)
+        XCTAssertTrue(app.buttons["Contact actions for \(name)"].isHittable)
+        capture("Customer contact and quick actions, largest text")
+    }
     func testNextVisitStaysReadableAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()
