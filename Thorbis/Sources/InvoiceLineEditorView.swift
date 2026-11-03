@@ -434,7 +434,7 @@ struct InvoiceLineEditorView: View {
             commitPrices()
             let request = try editor.makeRequest(extendedTextVerified: verified)
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
-            guard scopeMatches else { error = "The workspace changed. Your edits are still here. Check the original workspace before retrying."; return }
+            guard scopeMatches, canEdit else { error = "The workspace or access changed. Your edits are still here. Check the original workspace before retrying."; return }
             addedLineSelection = nil
             onSaved(updated)
             dismiss()
@@ -498,7 +498,7 @@ struct InvoiceLineEditorView: View {
                 onSaved(current)
             }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)
-            guard scopeMatches else { error = "The workspace changed. Check the invoice in the original workspace."; return }
+            guard scopeMatches, canIssue else { error = "The workspace or access changed. Check the invoice in the original workspace."; return }
             onSaved(issued)
             dismiss()
         } catch is CancellationError {
