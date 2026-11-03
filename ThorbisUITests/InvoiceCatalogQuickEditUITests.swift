@@ -49,6 +49,419 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(element.isHittable, app.debugDescription)
     }
 
+    func testFailedInvoiceUndoCleanupStillRequiresDiscardConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--commercial-draft-test-cleanup-fails"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        app.buttons["One more"].firstMatch.tap(); XCTAssertEqual(quantity.value as? String, "2")
+        app.buttons["One fewer"].firstMatch.tap(); XCTAssertEqual(quantity.value as? String, "1")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "undone draft could not be removed")).firstMatch.waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "saved draft could not be removed")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(quantity.exists)
+    }
+
+    func testSameSessionInvoiceRevalidationHidesAndRestoresEdits() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--paper-preview-invoice-toggle-access", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        app.buttons["One more"].firstMatch.tap()
+        XCTAssertEqual(quantity.value as? String, "2")
+        let toggle = app.buttons["invoice-toggle-sample-access"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10)); toggle.tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 15))
+        XCTAssertFalse(quantity.exists)
+        toggle.tap()
+        XCTAssertTrue(quantity.waitForExistence(timeout: 15))
+        XCTAssertEqual(quantity.value as? String, "2")
+    }
+
+    private func saveSampleInvoiceDraft(_ app: XCUIApplication) {
+        app.launch()
+        let quantity = app.textFields["invoice-line-quantity-" + openLineIdentity(app)]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        app.buttons["One more"].firstMatch.tap()
+        XCTAssertEqual(quantity.value as? String, "2")
+        app.terminate()
+    }
+
+    private func assertSampleInvoiceQuantity(_ app: XCUIApplication, _ expected: String) {
+        let fields = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-"))
+        if !fields.firstMatch.waitForExistence(timeout: 5) {
+            let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Compressor diagnostic")).firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 15)); row.tap()
+        }
+        let quantity = app.textFields["invoice-line-quantity-" + openLineIdentity(app)]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 15))
+        XCTAssertEqual(quantity.value as? String, expected)
+    }
+
+    func testInvoiceDelayedReloadAfterDismissalKeepsDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments.append("--paper-preview-invoice-recovery-held-reload")
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let state = app.staticTexts["invoice-held-reload-count"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "waiting"), evaluatedWith: state)
+        waitForExpectations(timeout: 10)
+        app.buttons["invoice-held-reload-dismiss"].tap()
+        XCTAssertTrue(state.waitForNonExistence(timeout: 10))
+        let delivered = XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)
+        delivered.isInverted = true; wait(for: [delivered], timeout: 2)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-held-reload" }
+        app.launchArguments.append("--paper-preview-invoice-check-delivery")
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+        let delivery = app.staticTexts["invoice-reload-delivery"]
+        XCTAssertTrue(delivery.waitForExistence(timeout: 10))
+        XCTAssertEqual(delivery.value as? String, "delivered")
+    }
+
+    func testInvoiceDelayedFinalReadAfterDismissalKeepsDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-final-read-held"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15)); check.tap()
+        let state = app.staticTexts["invoice-held-reload-count"]
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "waiting"), evaluatedWith: state)
+        waitForExpectations(timeout: 10)
+        app.buttons["invoice-held-reload-dismiss"].tap()
+        XCTAssertTrue(state.waitForNonExistence(timeout: 10))
+        let delivered = XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)
+        delivered.isInverted = true; wait(for: [delivered], timeout: 2)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-final-read-held" }
+        app.launchArguments.append("--paper-preview-invoice-check-delivery")
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+        let delivery = app.staticTexts["invoice-reload-delivery"]
+        XCTAssertTrue(delivery.waitForExistence(timeout: 10))
+        XCTAssertEqual(delivery.value as? String, "delivered")
+    }
+
+    func testInvoiceConfirmedReloadDiscardsDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments.append("--paper-preview-invoice-recovery-newer-revision")
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let discard = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15)); discard.tap()
+        let finalDiscard = app.buttons["Discard draft and reload"]
+        XCTAssertTrue(finalDiscard.waitForExistence(timeout: 15)); finalDiscard.tap()
+        XCTAssertTrue(app.buttons["Save draft"].waitForExistence(timeout: 15))
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" }
+        app.launch(); assertSampleInvoiceQuantity(app, "1")
+    }
+
+    func testInvoiceCancelFinalConfirmationKeepsDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments.append("--paper-preview-invoice-recovery-newer-revision")
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15)); check.tap()
+        let discard = app.buttons["Discard draft and reload"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15))
+        let cancels = app.buttons.matching(identifier: "Cancel")
+        XCTAssertGreaterThan(cancels.count, 0); cancels.element(boundBy: cancels.count - 1).tap()
+        XCTAssertTrue(discard.waitForNonExistence(timeout: 10))
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceFailedReloadCleanupKeepsDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--commercial-draft-test-cleanup-fails"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let discard = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15)); discard.tap()
+        let finalDiscard = app.buttons["Discard draft and reload"]
+        XCTAssertTrue(finalDiscard.waitForExistence(timeout: 15)); finalDiscard.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "draft could not be cleared")).firstMatch.waitForExistence(timeout: 10))
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--commercial-draft-test-cleanup-fails" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceConfirmationIsRetiredAfterNetworkInterruption() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-confirm-network-interruption"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let discard = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15))
+        XCTAssertTrue(discard.waitForNonExistence(timeout: 20), "The stale confirmation must close when connectivity changes")
+        let network = app.staticTexts["invoice-confirm-network-state"]
+        XCTAssertTrue(network.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "offline"), evaluatedWith: network)
+        waitForExpectations(timeout: 15)
+        app.buttons["invoice-confirm-network-restore"].tap()
+        expectation(for: NSPredicate(format: "value == %@", "online"), evaluatedWith: network)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(discard.exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-network-interruption" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceConfirmationIsRetiredAfterNewerRevision() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-confirm-revision-change"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let discard = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 15))
+        XCTAssertTrue(discard.waitForNonExistence(timeout: 20), "A later authority refresh must retire the old confirmation")
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-revision-change" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceConfirmationIsRetiredAfterPermissionLossAndRestoration() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-confirm-permission-interruption"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15))
+        XCTAssertTrue(check.waitForNonExistence(timeout: 20))
+        let access = app.staticTexts["invoice-confirm-permission-state"]
+        XCTAssertTrue(access.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "denied"), evaluatedWith: access)
+        waitForExpectations(timeout: 15)
+        app.buttons["invoice-confirm-permission-restore"].tap()
+        expectation(for: NSPredicate(format: "value == %@", "allowed"), evaluatedWith: access)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(check.exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-permission-interruption" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceConfirmationIsRetiredAfterWorkspaceChange() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", "--paper-preview-invoice-confirm-workspace-interruption"]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15))
+        XCTAssertTrue(check.waitForNonExistence(timeout: 20))
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-quantity-")).firstMatch.exists)
+        let switchState = app.staticTexts["invoice-workspace-switch-result"]
+        XCTAssertTrue(switchState.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "switched"), evaluatedWith: switchState)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-quantity-")).firstMatch.exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == "--paper-preview-invoice-confirm-workspace-interruption" }
+        app.launchArguments.append("--paper-preview-invoice-check-workspace")
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+        let switched = app.staticTexts["invoice-workspace-switch-result"]
+        XCTAssertTrue(switched.waitForExistence(timeout: 10))
+        XCTAssertEqual(switched.value as? String, "switched")
+    }
+
+    func testCanceledInvoiceVerificationCannotRetireReplacement() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments.append("--paper-preview-invoice-verification-held")
+        app.launch()
+        let state = app.staticTexts["invoice-verification-requests"]
+        XCTAssertTrue(state.waitForExistence(timeout: 20))
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":waiting"), evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        let initialCount = Int((state.value as? String ?? "").components(separatedBy: ":").first ?? "") ?? 0
+        app.buttons["invoice-verification-refresh"].tap()
+        expectation(for: NSPredicate { object, _ in
+            guard let element = object as? XCUIElement, let value = element.value as? String,
+                  value.hasSuffix(":waiting"), let count = Int(value.components(separatedBy: ":").first ?? "") else { return false }
+            return count > initialCount
+        }, evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        assertSampleInvoiceQuantity(app, "2")
+        app.buttons["invoice-verification-release"].tap()
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":idle"), evaluatedWith: state)
+        waitForExpectations(timeout: 10)
+        assertSampleInvoiceQuantity(app, "2")
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-verification-held" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testCanceledInvoiceVerificationCannotRevealDeniedReplacement() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments.append("--paper-preview-invoice-verification-held")
+        app.launch()
+        let state = app.staticTexts["invoice-verification-requests"]
+        XCTAssertTrue(state.waitForExistence(timeout: 20))
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":waiting"), evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        let initialCount = Int((state.value as? String ?? "").components(separatedBy: ":").first ?? "") ?? 0
+        let access = app.buttons["invoice-verification-toggle-resource"]
+        XCTAssertTrue(access.waitForExistence(timeout: 10)); access.tap()
+        expectation(for: NSPredicate { object, _ in
+            guard let element = object as? XCUIElement, let value = element.value as? String,
+                  value.hasSuffix(":waiting"), let count = Int(value.components(separatedBy: ":").first ?? "") else { return false }
+            return count > initialCount
+        }, evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        let result = app.staticTexts["invoice-verification-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value == %@", "denied"), evaluatedWith: result)
+        waitForExpectations(timeout: 15)
+        XCTAssertTrue(app.staticTexts["Document unavailable"].exists)
+        app.buttons["invoice-verification-release"].tap()
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":idle"), evaluatedWith: state)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-quantity-")).firstMatch.exists)
+        access.tap()
+        expectation(for: NSPredicate(format: "value == %@", "allowed"), evaluatedWith: result)
+        waitForExpectations(timeout: 15)
+        assertSampleInvoiceQuantity(app, "2")
+    }
+
+    private func assertInvoiceFreshReadProtectsDraft(_ flag: String) {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments += ["--paper-preview-invoice-recovery-newer-revision", flag]
+        app.launch()
+        let review = app.buttons["Review latest and discard draft"]
+        XCTAssertTrue(review.waitForExistence(timeout: 20)); review.tap()
+        let check = app.buttons["Check latest before discarding"]
+        XCTAssertTrue(check.waitForExistence(timeout: 15)); check.tap()
+        XCTAssertTrue(check.waitForNonExistence(timeout: 10))
+        let result = app.staticTexts["invoice-final-read-result"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        let expected = flag.hasSuffix("denied") ? "denied or failed" : "changed"
+        expectation(for: NSPredicate(format: "value == %@", expected), evaluatedWith: result)
+        waitForExpectations(timeout: 15)
+        XCTAssertTrue(review.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Discard draft and reload"].exists)
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-recovery-newer-revision" || $0 == flag }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
+    func testInvoiceFreshReadDenialKeepsDraft() {
+        continueAfterFailure = false
+        assertInvoiceFreshReadProtectsDraft("--paper-preview-invoice-final-read-denied")
+    }
+
+    func testInvoiceFreshReadNewRevisionKeepsDraft() {
+        continueAfterFailure = false
+        assertInvoiceFreshReadProtectsDraft("--paper-preview-invoice-final-read-changed")
+    }
+
+    func testNumericFormattingOnlyEditRequiresDiscardConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        quantity.tap(); replaceQuantity(quantity, with: "01", in: app)
+        XCTAssertEqual(quantity.value as? String, "01")
+        app.navigationBars.buttons["Cancel"].tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+    }
+
+    func testUndoToOriginalQuantityDoesNotResurrectAnOldLocalDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        XCTAssertEqual(quantity.value as? String, "1")
+        quantity.tap()
+        replaceQuantity(quantity, with: "2", in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
+        replaceQuantity(quantity, with: "1", in: app)
+        XCTAssertEqual(quantity.value as? String, "1")
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        let reopenedID = openLineIdentity(app)
+        XCTAssertEqual(app.textFields["invoice-line-quantity-" + reopenedID].value as? String, "1")
+    }
+
     func testCatalogAddsDistinctLinesAndOpensTheLastForEditing() {
         let app = launch()
         let before = lineCount(app)

@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-03-saved-document-drafts",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "doc.text", title: "Return to unfinished drafts",
+                      detail: "Return to saved estimate and invoice drafts on this phone."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-03-customer-records-loading",
             date: "2026-11-03",
             highlights: [
@@ -42,6 +50,14 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "doc.text", title: "Read estimate details",
                       detail: "Open long item and package details while reviewing work with your customer."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-02-long-item-details",
+            date: "2026-11-02",
+            highlights: [
+                .init(symbol: "text.alignleft", title: "Add longer item details",
+                      detail: "When available, add paragraphs to estimate and invoice items."),
             ]
         ),
         ReleaseNote(

@@ -2,6 +2,95 @@ import XCTest
 @testable import Thorbis
 
 final class EstimateRevisionEditorTests: XCTestCase {
+    @MainActor func testLargeDraftWriteLatencyOnSimulator() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root)
+        let scope = CommercialDraftScope(actor: "actor", organization: "org", origin: "https://app.thorbis.com", kind: "estimate", document: "document")
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        state.lines = (0..<500).map { _ in
+            EstimateRevisionLineDraft(description: String(repeating: "a", count: 100), quantity: "1", unitPrice: "12.00", source: .priceBookSelection(itemID: "11111111-1111-4111-8111-111111111111", revision: 7), priceBookOriginal: .init(description: "Plumbing service", unitPrice: "12.00"))
+        }
+        let draft = CommercialEstimateDraft(state: state)
+        let size = try JSONEncoder().encode(draft).count
+        var milliseconds: [Double] = []
+        for _ in 0..<50 {
+            let start = DispatchTime.now().uptimeNanoseconds
+            try store.save(draft, scope: scope)
+            milliseconds.append(Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
+        }
+        milliseconds.sort()
+        print("COMMERCIAL_DRAFT_LATENCY lines=500 bytes=\(size) median_ms=\(milliseconds[25]) p95_ms=\(milliseconds[47]) max_ms=\(milliseconds[49])")
+        let recovered = try XCTUnwrap(store.load(CommercialEstimateDraft.self, scope: scope))
+        var reopened = EstimateRevisionEditorState(estimate: try makeEstimate())
+        try recovered.apply(to: &reopened)
+        XCTAssertEqual(reopened.lines.count, 500)
+    }
+    @MainActor func testFailedCleanupLeavesSavedRevisionBlockedWhenReopened() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let scope = CommercialDraftScope(actor: "a", organization: "o", origin: "https://one.example", kind: "estimate", document: "e")
+        let store = CommercialDraftStore(directory: root, removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        var original = EstimateRevisionEditorState(estimate: try makeEstimate(revision: 2))
+        original.lines[0].description = "Unsaved words"
+        try store.save(CommercialEstimateDraft(state: original), scope: scope)
+        XCTAssertThrowsError(try store.remove(scope: scope))
+        let reopened = try XCTUnwrap(CommercialDraftStore(directory: root).load(CommercialEstimateDraft.self, scope: scope))
+        var savedRevision = EstimateRevisionEditorState(estimate: try makeEstimate(revision: 3))
+        XCTAssertThrowsError(try reopened.apply(to: &savedRevision))
+        try reopened.apply(to: &savedRevision, requireMatchingRevision: false)
+        XCTAssertEqual(savedRevision.lines[0].description, "Unsaved words")
+    }
+    func testDraftRoundTripPreservesInvalidInProgressTextAndCatalogEvidence() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        state.lines[0].description = "first paragraph\n\nsecond 🛠"
+        state.lines[0].quantity = "not finished"
+        state.lines[0].source = .priceBookSelection(itemID: "item", revision: 7)
+        state.options = [.init(id: "option", title: "Option", description: "Details", lines: state.lines)]
+        let saved = CommercialEstimateDraft(state: state)
+        let restored = try JSONDecoder().decode(CommercialEstimateDraft.self, from: JSONEncoder().encode(saved))
+        var reopened = EstimateRevisionEditorState(estimate: try makeEstimate())
+        try restored.apply(to: &reopened)
+        XCTAssertEqual(reopened.title, state.title)
+        XCTAssertEqual(reopened.lines, state.lines)
+        XCTAssertEqual(reopened.options, state.options)
+        var newer = EstimateRevisionEditorState(estimate: try makeEstimate(revision: 3))
+        XCTAssertThrowsError(try restored.apply(to: &newer))
+        try restored.apply(to: &newer, requireMatchingRevision: false)
+        XCTAssertEqual(newer.lines, state.lines)
+    }
+    func testNewEstimateRecoveryRetainsUnknownCreateAndLongText() throws {
+        let line = EstimateRevisionLineDraft(description: "First paragraph\n\nSecond 🛠", quantity: "incomplete", unitPrice: "12.", source: .priceBookSelection(itemID: "item", revision: 3))
+        let draft = CommercialNewEstimateDraft(customerID: "customer", title: "Title", lines: [line], uncertain: true, created: nil, requiresLocationVerification: false, requiresManualReview: false, requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        let recovered = try JSONDecoder().decode(CommercialNewEstimateDraft.self, from: JSONEncoder().encode(draft))
+        XCTAssertTrue(recovered.uncertain)
+        XCTAssertNil(recovered.created)
+        XCTAssertEqual(try recovered.lines(), [line])
+    }
+    @MainActor func testFailedCleanupOfCompletedLinkReopensWithKnownIDForVerifiedRetry() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let scope = CommercialDraftScope(actor: "a", organization: "o", origin: "https://one.example", kind: "new-estimate", document: "job")
+        let store = CommercialDraftStore(directory: root, removeItem: { _ in throw CocoaError(.fileWriteNoPermission) })
+        let saved = try makeEstimate()
+        let journal = CommercialNewEstimateDraft(customerID: saved.customerId, title: saved.title, lines: [], uncertain: true, created: saved, requiresLocationVerification: false, requiresManualReview: false, requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        try store.save(journal, scope: scope)
+        XCTAssertThrowsError(try store.remove(scope: scope))
+        let recovered = try XCTUnwrap(CommercialDraftStore(directory: root).load(CommercialNewEstimateDraft.self, scope: scope))
+        let decision = EstimateCreationRecovery(isSaving: false, savedEstimateID: recovered.created?.id, createOutcomeUncertain: recovered.uncertain)
+        XCTAssertTrue(decision.mayProceed(validDraft: true))
+    }
+    func testLongDescriptionSurvivesUnavailableCapabilityAndRetry() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        let text = String(repeating: "Detailed scope. ", count: 30) + "\n\nFinal checks."
+        state.lines[0].description = text
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
+            XCTAssertEqual($0 as? CommercialDescriptionPolicy.Problem, .unavailable)
+        }
+        XCTAssertEqual(state.lines[0].description, text)
+        let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true, extendedTextVerified: true)
+        XCTAssertEqual(request.lines[0].description, text)
+    }
     private let estimateID = "00000000-0000-4000-8000-000000000008"
     private let optionID = "00000000-0000-4000-8000-000000000010"
 

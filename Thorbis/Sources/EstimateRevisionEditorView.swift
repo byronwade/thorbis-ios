@@ -8,12 +8,34 @@ struct EstimateRevisionEditorView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var editor: EstimateRevisionEditorState
+    @State private var persistenceBaseline: EstimateRevisionEditorState
     @State private var busy = false
     @State private var error: String?
+    @State private var originalScope: EstimateCreationScope?
+    @State private var scopeCaptured = false
+    @State private var recoveryBlocked = false
+    @State private var draftOwner = UUID()
+    @State private var ownsDraft = false
+    @State private var viewVisible = false
+    @State private var didRestoreDraft = false
+    @State private var didRecoverDraft = false
+    @State private var wroteFreshDraft = false
+    @State private var verifiedScope: EstimateCreationScope?
+    @State private var accessAttempt = UUID()
+    @State private var intentionallyDiscarded = false
+    @State private var cleanupFailedAfterSave = false
     @State private var descriptionProblem: String?
     @State private var staleRevision = false
     @State private var confirmReload = false
+    @State private var confirmVerifiedReload = false
+    #if DEBUG
+    @State private var sampleFinalReadResult = "idle"
+    #endif
+    @State private var pendingReload: EstimateRecord?
+    @State private var pendingReloadScope: EstimateCreationScope?
+    @State private var pendingReloadAttempt: UUID?
     @State private var confirmDiscard = false
     @State private var picker: EstimateBuilderTarget?
     @State private var discountTarget: EstimateBuilderTarget?
@@ -30,10 +52,114 @@ struct EstimateRevisionEditorView: View {
         self.estimate = estimate
         self.onSaved = onSaved
         _editor = State(initialValue: EstimateRevisionEditorState(estimate: estimate))
+        _persistenceBaseline = State(initialValue: EstimateRevisionEditorState(estimate: estimate))
     }
 
     private var canRevise: Bool {
-        editor.canRevise && session.can("estimate.create", feature: "estimates")
+        resourceAuthorized && ownsDraft && !cleanupFailedAfterSave && editor.canRevise && session.can("estimate.create", feature: "estimates")
+    }
+
+    private var currentScope: EstimateCreationScope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let org = session.activeOrganization?.id, org == estimate.organizationId,
+              let origin = api.normalizedOrigin else { return nil }
+        return .init(actorID: actor, organizationID: org, sessionGeneration: session.generation,
+                     authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration, origin: origin)
+    }
+    private var scopeMatches: Bool {
+        guard let originalScope, let currentScope else { return false }
+        return originalScope.sameIdentityAndTransport(as: currentScope)
+    }
+    private var resourceAuthorized: Bool {
+        guard let currentScope else { return false }
+        return (!didRecoverDraft || !session.isOffline) && scopeMatches && verifiedScope == currentScope && !recoveryBlocked
+    }
+    private struct DraftAccessKey: Equatable {
+        let scope: EstimateCreationScope?
+        let ownsDraft: Bool
+        let offline: Bool
+    }
+    private var draftAccessKey: DraftAccessKey { .init(scope: currentScope, ownsDraft: ownsDraft, offline: session.isOffline) }
+    private var draftScope: CommercialDraftScope? {
+        guard let originalScope else { return nil }
+        return .init(actor: originalScope.actorID, organization: originalScope.organizationID,
+                     origin: originalScope.origin, kind: "estimate-revision", document: estimate.id)
+    }
+    private func restoreDraft() {
+        guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
+        do {
+            guard let draft = try CommercialDraftStore.shared.load(CommercialEstimateDraft.self, scope: draftScope) else { return }
+            didRecoverDraft = true
+            do { try draft.apply(to: &editor) }
+            catch CommercialDraftRecoveryError.differentRevision {
+                recoveryBlocked = true
+                error = CommercialDraftRecoveryError.differentRevision.localizedDescription
+            }
+        } catch { recoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
+    }
+    private func verifyDraftAccess() async {
+        guard !Task.isCancelled else { return }
+        accessAttempt = UUID()
+        invalidatePendingReload()
+        guard viewVisible, ownsDraft, scopeMatches, let expected = currentScope,
+              session.can("estimate.create", feature: "estimates") else { return }
+        if !didRecoverDraft && verifiedScope == expected { return }
+        guard !session.isOffline else { return }
+        let attempt = UUID(); accessAttempt = attempt
+        var latestRecord: EstimateRecord?
+        let allowed = await CommercialDraftAccess.verify(expectedScope: expected, currentScope: { session.isOffline ? nil : currentScope },
+            read: { try await api.fieldEstimate(estimate.id, requireFresh: true) }, matches: { latest in
+                latestRecord = latest
+                return latest.id == estimate.id && latest.organizationId == expected.organizationID
+            })
+        guard !Task.isCancelled, viewVisible, accessAttempt == attempt, !session.isOffline, currentScope == expected else { return }
+        guard allowed else {
+            verifiedScope = nil
+            error = "Could not verify access or the document changed. Your draft is still on this phone."
+            return
+        }
+        if error == "Could not verify access or the document changed. Your draft is still on this phone." { error = nil }
+        verifiedScope = expected
+        guard let latest = latestRecord, latest.currentRevisionNumber == editor.estimate.currentRevisionNumber && latest.status == editor.estimate.status else {
+            recoveryBlocked = true
+            staleRevision = true
+            error = CommercialDraftRecoveryError.differentRevision.localizedDescription
+            return
+        }
+        if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
+        if recoveryBlocked { staleRevision = true }
+    }
+    private var hasRawDraftChanges: Bool {
+        guard editor.title == persistenceBaseline.title,
+              editor.lines.count == persistenceBaseline.lines.count,
+              editor.options.count == persistenceBaseline.options.count else { return true }
+        func changed(_ lhs: [EstimateRevisionLineDraft], _ rhs: [EstimateRevisionLineDraft]) -> Bool {
+            lhs.count != rhs.count || zip(lhs, rhs).contains { a, b in
+                a.originalLineID != b.originalLineID || a.description != b.description ||
+                a.quantity != b.quantity || a.unitPrice != b.unitPrice || a.source != b.source ||
+                a.group != b.group || a.movedByPerson != b.movedByPerson || a.showToCustomer != b.showToCustomer
+            }
+        }
+        if changed(editor.lines, persistenceBaseline.lines) { return true }
+        return zip(editor.options, persistenceBaseline.options).contains { a, b in
+            a.id != b.id || a.title != b.title || a.description != b.description || changed(a.lines, b.lines)
+        }
+    }
+    private func persistDraft(leavingOriginalScope: Bool = false) {
+        guard !intentionallyDiscarded, ownsDraft, didRestoreDraft, (scopeMatches || leavingOriginalScope), !recoveryBlocked, let draftScope else { return }
+        if !didRecoverDraft && !hasRawDraftChanges {
+            guard wroteFreshDraft else { return }
+            do { try CommercialDraftStore.shared.remove(scope: draftScope); wroteFreshDraft = false }
+            catch { self.error = "The undone draft could not be removed from this phone. Try again before closing." }
+            return
+        }
+        do { try CommercialDraftStore.shared.save(CommercialEstimateDraft(state: editor), scope: draftScope); if !didRecoverDraft { wroteFreshDraft = true } }
+        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
+    }
+    private func discardDraft() {
+        guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
+        do { try CommercialDraftStore.shared.remove(scope: draftScope); intentionallyDiscarded = true; dismiss() }
+        catch { self.error = "The saved draft could not be removed. Try again." }
     }
 
     /// Good / better / best stays behind its flag (`estimate_option_signing`).
@@ -77,10 +203,29 @@ struct EstimateRevisionEditorView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack { editorContainer }
+    }
+
+    private var editorScroll: some View {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
-                    ScrollView { content }
+                    ScrollView {
+                        if !resourceAuthorized || !session.can("estimate.create", feature: "estimates") {
+                            VStack {
+                                ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text(
+                                    error == "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
+                                    ? "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
+                                    : "Connect to verify access to this document. Your draft stays on this phone."))
+                                if recoveryBlocked && verifiedScope == currentScope && scopeMatches && staleRevision {
+                                    Button("Review latest and discard draft") { Task { await reloadLatest() } }
+                                        .buttonStyle(.bordered)
+                                } else if scopeMatches && ownsDraft {
+                                    Button("Try again") { Task { await verifyDraftAccess() } }
+                                        .buttonStyle(.bordered)
+                                }
+                            }
+                        } else { content }
+                    }
                     .scrollDismissesKeyboard(.interactively)
                     .onChange(of: focus) { _, value in
                         guard let id = value?.lineID else { return }
@@ -101,20 +246,118 @@ struct EstimateRevisionEditorView: View {
                         scrollTarget = nil
                     }
                 }
-                revisionFooter
+                if resourceAuthorized && session.can("estimate.create", feature: "estimates") { revisionFooter }
             }
+    }
+
+    private var editorDecorated: some View {
+        editorScroll
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationTitle(editingDraft ? "Edit estimate" : "Revise estimate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                #if DEBUG
+                if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-denied") || ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-changed")) {
+                    ThorbisToolbarItem(placement: .principal) {
+                        Text("Sample final read")
+                            .accessibilityIdentifier("estimate-final-read-result")
+                            .accessibilityValue(sampleFinalReadResult)
+                    }
+                }
+                if EstimateRecoveryPreview.heldReloadEnabled {
+                    ThorbisToolbarItem(placement: .principal) {
+                        HStack {
+                            TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                                Text("Sample reload requests")
+                                    .accessibilityIdentifier("estimate-held-reload-count")
+                                    .accessibilityValue(EstimateRecoveryPreview.shared.reloadHoldState)
+                            }
+                            Button("Dismiss held reload") {
+                                CommercialDraftStore.trace("debug dismiss")
+                                dismiss()
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(500))
+                                    CommercialDraftStore.trace("debug release")
+                                    EstimateRecoveryPreview.shared.release()
+                                }
+                            }.accessibilityIdentifier("estimate-held-reload-dismiss")
+                        }
+                    }
+                }
+                #endif
                 ThorbisToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                    Button(cleanupFailedAfterSave ? "Close" : "Cancel") { if cleanupFailedAfterSave { dismiss() } else if hasRawDraftChanges || didRecoverDraft || wroteFreshDraft || recoveryBlocked { confirmDiscard = true } else { dismiss() } }.disabled(busy)
                 }
             }
             .keyboardDoneButton()
+    }
+
+    private func openDraft() {
+                #if DEBUG
+                CommercialDraftStore.trace("open scene=\(String(describing: scenePhase))")
+                #endif
+                viewVisible = true
+                if !scopeCaptured { scopeCaptured = true; originalScope = currentScope }
+                guard scopeMatches, session.can("estimate.create", feature: "estimates"), let draftScope else { return }
+                guard CommercialDraftStore.shared.acquire(scope: draftScope, owner: draftOwner) else {
+                    recoveryBlocked = true; error = "This draft is already open in another window."; return
+                }
+                ownsDraft = true
+                if !didRestoreDraft && !didRecoverDraft {
+                    do {
+                        if try CommercialDraftStore.shared.load(CommercialEstimateDraft.self, scope: draftScope) != nil {
+                            didRecoverDraft = true
+                        } else {
+                            didRestoreDraft = true; verifiedScope = currentScope
+                        }
+                    } catch {
+                        recoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone."
+                    }
+                }
+    }
+
+    private var editorLifecycle: some View {
+        editorDecorated
+            .onAppear { openDraft() }
+            .task(id: draftAccessKey) { await verifyDraftAccess() }
+            .onChange(of: session.isOffline) { _, offline in
+                if offline { accessAttempt = UUID(); invalidatePendingReload(); if didRecoverDraft { verifiedScope = nil } }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                #if DEBUG
+                CommercialDraftStore.trace("scene \(String(describing: phase))")
+                #endif
+                if phase != .active {
+                    invalidatePendingReload()
+                    accessAttempt = UUID()
+                    if didRecoverDraft { verifiedScope = nil }
+                } else if didRecoverDraft && verifiedScope != currentScope {
+                    Task { await verifyDraftAccess() }
+                }
+            }
+            .onDisappear {
+                #if DEBUG
+                CommercialDraftStore.trace("disappear busy=\(busy)")
+                #endif
+                viewVisible = false; accessAttempt = UUID(); invalidatePendingReload(); if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() }
+            }
             .trackKeyboard($keyboardUp)
-            .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
+    }
+
+    private var editorContainer: some View {
+        editorLifecycle
+            .discardChangesGuard(hasChanges: hasRawDraftChanges || didRecoverDraft || wroteFreshDraft || recoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
+            .onChange(of: editor) { _, _ in persistDraft() }
+            .onChange(of: scopeMatches) { wasMatching, matches in
+                if !matches {
+                    if wasMatching { persistDraft(leavingOriginalScope: true) }
+                    picker = nil; discountTarget = nil; focus = nil
+                }
+            }
+            .onChange(of: session.can("estimate.create", feature: "estimates")) { _, allowed in
+                if !allowed { picker = nil; discountTarget = nil; focus = nil }
+            }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: optionName(target.optionID),
@@ -127,11 +370,20 @@ struct EstimateRevisionEditorView: View {
                     refresh: { await refreshCatalog(force: $0) }
                 )
                 .environmentObject(session).environmentObject(api)
+                .opacity(resourceAuthorized ? 1 : 0)
+                .accessibilityHidden(!resourceAuthorized)
+                .allowsHitTesting(resourceAuthorized)
+                .overlay { if !resourceAuthorized { ContentUnavailableView("Checking access", systemImage: "lock") } }
             } }
             .sheet(item: $discountTarget) { target in SheetSurface {
                 EstimateDiscountSheet(target: optionName(target.optionID), subtotal: lines(for: target.optionID).subtotal()) { label, cents in
+                    guard resourceAuthorized else { return }
                     mutateLines(target.optionID) { _ = $0.addCreditLine(label, cents: cents) }
                 }
+                .opacity(resourceAuthorized ? 1 : 0)
+                .accessibilityHidden(!resourceAuthorized)
+                .allowsHitTesting(resourceAuthorized)
+                .overlay { if !resourceAuthorized { ContentUnavailableView("Checking access", systemImage: "lock") } }
             } }
             .animation(EstimateLineGroupsEditor.spring, value: keyboardUp)
             .task(id: PriceBookCatalogContext(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)) { await refreshCatalog() }
@@ -144,7 +396,11 @@ struct EstimateRevisionEditorView: View {
             .thorbisConfirm("Reload the latest estimate?",
                             message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
                             isPresented: $confirmReload,
-                            actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+                            actions: [ThorbisConfirmAction("Check latest before discarding") { Task { await verifyPendingReload() } }])
+            .thorbisConfirm("Discard saved draft?",
+                            message: "The latest document was checked. Discard the saved draft and open it?",
+                            isPresented: $confirmVerifiedReload,
+                            actions: [ThorbisConfirmAction("Discard draft and reload", role: .destructive) { applyPendingReload() }])
             #if DEBUG
             .task {
                 guard PaperPreview.enabled else { return }
@@ -155,7 +411,6 @@ struct EstimateRevisionEditorView: View {
                 }
             }
             #endif
-        }
     }
 
     private var revisionFooter: some View {
@@ -181,7 +436,7 @@ struct EstimateRevisionEditorView: View {
         VStack(alignment: .leading, spacing: 18) {
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
             if staleRevision {
-                Button { confirmReload = true } label: {
+                Button { Task { await reloadLatest() } } label: {
                     Label("Review latest estimate", systemImage: "arrow.clockwise")
                         .font(Theme.font(14, weight: .medium))
                         .foregroundStyle(Theme.brandText)
@@ -401,7 +656,9 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func classifyLines() {
+        let wasUntouched = !didRecoverDraft && !hasRawDraftChanges
         editor.classify(kinds: Dictionary(catalog.items.map { ($0.id, $0.kind) }, uniquingKeysWith: { first, _ in first }))
+        if wasUntouched { persistenceBaseline = editor }
     }
 
     private func lines(for optionID: String?) -> [EstimateRevisionLineDraft] {
@@ -471,8 +728,10 @@ struct EstimateRevisionEditorView: View {
         let lines = editor.lines + editor.options.flatMap(\.lines)
         if lines.contains(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
             descriptionProblem = EstimateRevisionEditorError.priceBookOriginalTooLong.localizedDescription
-        } else if lines.contains(where: { $0.estimateDescriptionProblem == .tooLong }) {
-            descriptionProblem = "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+        } else if let problem = CommercialDescriptionPolicy.problem(lines.map(\.description), kind: .estimate,
+            optionCount: editor.options.count,
+            capabilityVerified: session.isFeatureOn("commercial_extended_descriptions") && !session.isOffline) {
+            descriptionProblem = problem.localizedDescription
         } else {
             descriptionProblem = nil
         }
@@ -488,23 +747,35 @@ struct EstimateRevisionEditorView: View {
             return
         }
         let allLines = editor.lines + editor.options.flatMap(\.lines)
-        if let line = allLines.first(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong })
-            ?? allLines.first(where: { $0.estimateDescriptionProblem == .tooLong }) {
+        if let line = allLines.first(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
             refreshDescriptionProblem()
             expandedLine = line.id
             revealProblem += 1
             return
         }
+        let descriptions = allLines.map(\.description)
+        let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, kind: .estimate)
         descriptionProblem = nil
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
+            let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
+            if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
+            guard canEdit else { throw CommercialDescriptionPolicy.Problem.unavailable }
             commitPrices()
             let revised = try await api.reviseFieldEstimate(
                 editor.estimate.id,
-                request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount)
+                request: editor.makeRequest(optionsFeatureEnabled: optionsFeatureEnabled, canDiscount: canDiscount, extendedTextVerified: verified)
             )
+            guard scopeMatches, canEdit else { error = "The workspace or access changed. Your edits are still here. Check the original workspace before retrying."; return }
+            intentionallyDiscarded = true
             onSaved(revised)
+            do { if ownsDraft, let draftScope { try CommercialDraftStore.shared.remove(scope: draftScope) } }
+            catch {
+                cleanupFailedAfterSave = true
+                self.error = "The estimate was saved, but its local draft could not be removed. Close this screen and check the saved estimate before making another change."
+                return
+            }
             dismiss()
         } catch is CancellationError {
         } catch {
@@ -514,18 +785,120 @@ struct EstimateRevisionEditorView: View {
     }
 
     private func reloadLatest() async {
+        guard !busy else { return }
+        #if DEBUG
+        CommercialDraftStore.trace("reload start")
+        #endif
+        guard scopeMatches, let expected = currentScope, ownsDraft else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
-        defer { busy = false }
+        let attempt = UUID(); accessAttempt = attempt
+        #if DEBUG
+        if EstimateRecoveryPreview.heldReloadEnabled { EstimateRecoveryPreview.shared.armHeldReload() }
+        #endif
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
-            let latest = try await api.liveFieldEstimate(estimate.id)
-            editor = EstimateRevisionEditorState(estimate: latest)
-            editor.storesLineGroups = storesLineGroups
-            classifyLines()
-            staleRevision = false
-            error = nil
+            let latest = try await api.fieldEstimate(estimate.id, requireFresh: true)
+            #if DEBUG
+            CommercialDraftStore.trace("reload response visible=\(viewVisible) scene=\(String(describing: scenePhase)) sameAttempt=\(accessAttempt == attempt) cancelled=\(Task.isCancelled)")
+            #endif
+            guard !Task.isCancelled, viewVisible, scenePhase == .active, !session.isOffline, accessAttempt == attempt,
+                  currentScope == expected, latest.id == estimate.id,
+                  latest.organizationId == expected.organizationID,
+                  session.can("estimate.create", feature: "estimates"), draftScope != nil else { return }
+            pendingReload = latest
+            pendingReloadScope = expected
+            pendingReloadAttempt = attempt
+            confirmReload = true
         } catch is CancellationError {
         } catch {
-            self.error = error.localizedDescription
+            #if DEBUG
+            CommercialDraftStore.trace("reload error type=\(String(describing: type(of: error)))")
+            #endif
+            self.error = "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
         }
+    }
+
+    private func invalidatePendingReload() {
+        pendingReload = nil
+        pendingReloadScope = nil
+        pendingReloadAttempt = nil
+        confirmReload = false
+        confirmVerifiedReload = false
+    }
+
+    private func verifyPendingReload() async {
+        guard !busy else { return }
+        guard viewVisible, scenePhase == .active, !session.isOffline, ownsDraft,
+              let expected = pendingReloadScope, currentScope == expected, verifiedScope == expected,
+              pendingReloadAttempt == accessAttempt, let prior = pendingReload else {
+            invalidatePendingReload()
+            error = "The workspace changed or the document is unavailable. Your draft is still on this phone."
+            return
+        }
+        busy = true
+        let attempt = UUID(); accessAttempt = attempt; pendingReloadAttempt = attempt
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-denied") {
+            EstimateRecoveryPreview.shared.denyNextEstimateRead()
+        }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-final-read-changed") {
+            EstimateRecoveryPreview.shared.advanceEstimateRevision()
+        }
+        #endif
+        defer { busy = false; if !viewVisible { releaseDraft() } }
+        do {
+            let latest = try await api.fieldEstimate(estimate.id, requireFresh: true)
+            guard !Task.isCancelled, viewVisible, scenePhase == .active, !session.isOffline,
+                  accessAttempt == attempt, currentScope == expected, verifiedScope == expected,
+                  pendingReloadAttempt == attempt, latest.id == prior.id,
+                  latest.organizationId == expected.organizationID, latest == prior else {
+                guard accessAttempt == attempt else { return }
+                #if DEBUG
+                sampleFinalReadResult = "changed"
+                #endif
+                invalidatePendingReload()
+                error = "The document or access changed. Your draft is still on this phone. Check again."
+                return
+            }
+            pendingReload = latest
+            confirmVerifiedReload = true
+        } catch {
+            guard accessAttempt == attempt else { return }
+            #if DEBUG
+            sampleFinalReadResult = "denied or failed"
+            #endif
+            invalidatePendingReload()
+            self.error = "The latest document could not be verified. Your draft is still on this phone."
+        }
+    }
+
+    private func applyPendingReload() {
+        guard viewVisible, scenePhase == .active, !session.isOffline, ownsDraft,
+              let expected = pendingReloadScope, pendingReloadAttempt == accessAttempt, currentScope == expected, verifiedScope == expected, scopeMatches,
+              session.can("estimate.create", feature: "estimates"), let latest = pendingReload,
+              latest.id == estimate.id, latest.organizationId == expected.organizationID,
+              let draftScope else {
+            invalidatePendingReload()
+            error = "The workspace changed or the document is unavailable. Your draft is still on this phone."
+            return
+        }
+        invalidatePendingReload()
+        do {
+            try CommercialDraftStore.shared.remove(scope: draftScope)
+            didRestoreDraft = false; didRecoverDraft = false; wroteFreshDraft = false
+            editor = EstimateRevisionEditorState(estimate: latest)
+            persistenceBaseline = editor
+            editor.storesLineGroups = storesLineGroups
+            classifyLines()
+            recoveryBlocked = false; staleRevision = false; error = nil
+            didRestoreDraft = true; verifiedScope = expected
+        } catch {
+            self.error = "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
+        }
+    }
+
+    private func releaseDraft() {
+        if ownsDraft, let draftScope { CommercialDraftStore.shared.release(scope: draftScope, owner: draftOwner) }
+        ownsDraft = false
     }
 }

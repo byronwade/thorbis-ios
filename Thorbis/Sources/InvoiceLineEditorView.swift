@@ -8,14 +8,40 @@ struct InvoiceLineEditorView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var editor: InvoiceLineEditorState
+    @State private var persistenceBaseline: InvoiceLineEditorState
     @State private var showPriceBook = false
     @State private var confirmReload = false
+    @State private var confirmVerifiedReload = false
+    @State private var pendingReload: InvoiceRecord?
+    @State private var pendingReloadScope: EstimateCreationScope?
+    @State private var pendingReloadAttempt: UUID?
+    #if DEBUG
+    @State private var simulatedConfirmationInterruption = false
+    @State private var sampleFinalReadResult = "idle"
+    @State private var sampleNetworkState = "online"
+    @State private var samplePermissionState = "allowed"
+    @State private var sampleVerificationResult = "idle"
+    #endif
     @State private var confirmIssue = false
     @State private var confirmDiscard = false
     @State private var busy = false
     @State private var error: String?
+    @State private var originalScope: EstimateCreationScope?
+    @State private var scopeCaptured = false
+    @State private var recoveryBlocked = false
+    @State private var draftOwner = UUID()
+    @State private var ownsDraft = false
+    @State private var viewVisible = false
+    @State private var didRestoreDraft = false
+    @State private var didRecoverDraft = false
+    @State private var wroteFreshDraft = false
+    @State private var verifiedScope: EstimateCreationScope?
+    @State private var accessAttempt = UUID()
+    @State private var intentionallyDiscarded = false
+    @State private var cleanupFailedAfterSave = false
     @State private var staleRevision = false
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
@@ -27,14 +53,119 @@ struct InvoiceLineEditorView: View {
         .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
     }
 
+    private var currentScope: EstimateCreationScope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let org = session.activeOrganization?.id, org == invoice.organizationId,
+              let origin = api.normalizedOrigin else { return nil }
+        return .init(actorID: actor, organizationID: org, sessionGeneration: session.generation,
+                     authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration, origin: origin)
+    }
+    private var scopeMatches: Bool {
+        guard let originalScope, let currentScope else { return false }
+        return originalScope.sameIdentityAndTransport(as: currentScope)
+    }
+    private var resourceAuthorized: Bool {
+        guard let currentScope else { return false }
+        return (!didRecoverDraft || !session.isOffline) && scopeMatches && verifiedScope == currentScope && !recoveryBlocked
+    }
+    private struct DraftAccessKey: Equatable {
+        let scope: EstimateCreationScope?
+        let ownsDraft: Bool
+        let offline: Bool
+    }
+    private var draftAccessKey: DraftAccessKey { .init(scope: currentScope, ownsDraft: ownsDraft, offline: session.isOffline) }
+    private var draftScope: CommercialDraftScope? {
+        guard let originalScope else { return nil }
+        return .init(actor: originalScope.actorID, organization: originalScope.organizationID,
+                     origin: originalScope.origin, kind: "invoice-lines", document: invoice.id)
+    }
+    private func restoreDraft() {
+        guard scopeMatches, session.can("invoice.edit", feature: "invoicing"), let draftScope else { return }
+        do {
+            guard let draft = try CommercialDraftStore.shared.load(CommercialInvoiceDraft.self, scope: draftScope) else { return }
+            didRecoverDraft = true
+            do { try draft.apply(to: &editor) }
+            catch CommercialDraftRecoveryError.differentRevision {
+                recoveryBlocked = true
+                error = CommercialDraftRecoveryError.differentRevision.localizedDescription
+            }
+        } catch { recoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
+    }
+    private func verifyDraftAccess() async {
+        guard !Task.isCancelled else { return }
+        accessAttempt = UUID()
+        invalidatePendingReload()
+        guard viewVisible, ownsDraft, scopeMatches, let expected = currentScope,
+              session.can("invoice.edit", feature: "invoicing") else { return }
+        if !didRecoverDraft && verifiedScope == expected { return }
+        guard !session.isOffline else { return }
+        #if DEBUG
+        if didRecoverDraft && EstimateRecoveryPreview.invoiceVerificationHeldEnabled { EstimateRecoveryPreview.shared.armFirstInvoiceVerification() }
+        #endif
+        let attempt = UUID(); accessAttempt = attempt
+        var latestRecord: InvoiceRecord?
+        let allowed = await CommercialDraftAccess.verify(expectedScope: expected, currentScope: { session.isOffline ? nil : currentScope },
+            read: { try await api.fieldInvoice(invoice.id, requireFresh: true) }, matches: { latest in
+                latestRecord = latest
+                return latest.id == invoice.id && latest.organizationId == expected.organizationID
+            })
+        guard !Task.isCancelled, viewVisible, accessAttempt == attempt, !session.isOffline, currentScope == expected else { return }
+        guard allowed else {
+            #if DEBUG
+            if EstimateRecoveryPreview.invoiceVerificationHeldEnabled { sampleVerificationResult = "denied" }
+            #endif
+            verifiedScope = nil
+            error = "Could not verify access or the document changed. Your draft is still on this phone."
+            return
+        }
+        if error == "Could not verify access or the document changed. Your draft is still on this phone." { error = nil }
+        verifiedScope = expected
+        #if DEBUG
+        if EstimateRecoveryPreview.invoiceVerificationHeldEnabled { sampleVerificationResult = "allowed" }
+        #endif
+        guard let latest = latestRecord, latest.linesRevision == editor.invoice.linesRevision && latest.status == editor.invoice.status else {
+            recoveryBlocked = true
+            staleRevision = true
+            error = CommercialDraftRecoveryError.differentRevision.localizedDescription
+            return
+        }
+        if !didRestoreDraft { didRestoreDraft = true; restoreDraft() }
+        if recoveryBlocked { staleRevision = true }
+    }
+    private var hasRawDraftChanges: Bool {
+        if editor.hasChanges { return true }
+        let baseline = persistenceBaseline
+        guard editor.lines.count == baseline.lines.count else { return true }
+        return zip(editor.lines, baseline.lines).contains { a, b in
+            a.description != b.description || a.quantity != b.quantity || a.unitPrice != b.unitPrice
+        }
+    }
+    private func persistDraft(leavingOriginalScope: Bool = false) {
+        guard !intentionallyDiscarded, ownsDraft, didRestoreDraft, (scopeMatches || leavingOriginalScope), !recoveryBlocked, let draftScope else { return }
+        if !didRecoverDraft && !hasRawDraftChanges {
+            guard wroteFreshDraft else { return }
+            do { try CommercialDraftStore.shared.remove(scope: draftScope); wroteFreshDraft = false }
+            catch { self.error = "The undone draft could not be removed from this phone. Try again before closing." }
+            return
+        }
+        do { try CommercialDraftStore.shared.save(CommercialInvoiceDraft(state: editor), scope: draftScope); if !didRecoverDraft { wroteFreshDraft = true } }
+        catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
+    }
+    private func discardDraft() {
+        guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
+        do { try CommercialDraftStore.shared.remove(scope: draftScope); intentionallyDiscarded = true; dismiss() }
+        catch { self.error = "The saved draft could not be removed. Try again." }
+    }
+
     init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
         self.onSaved = onSaved
         _editor = State(initialValue: InvoiceLineEditorState(invoice: invoice))
+        _persistenceBaseline = State(initialValue: InvoiceLineEditorState(invoice: invoice))
     }
 
     private var canEdit: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+        resourceAuthorized && ownsDraft && !cleanupFailedAfterSave && editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
     }
 
     private var canUsePriceBook: Bool {
@@ -42,50 +173,25 @@ struct InvoiceLineEditorView: View {
     }
 
     private var canIssue: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
+        resourceAuthorized && ownsDraft && !cleanupFailedAfterSave && editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
     }
 
     private var linesDisabled: Bool { busy || !canEdit || editor.hasUnsupportedLineSources }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView { content }
-                // The keyboard's floating Done control sits above the keyboard safe area.
-                // Reserve room inside the scroll view so line actions can move above it.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if keyboardUp { Color.clear.frame(height: 72).allowsHitTesting(false) }
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: focus) { _, value in
-                    guard let id = value?.lineID else { return }
-                    expandedLine = id
-                    withAnimation { proxy.scrollTo(id, anchor: .center) }
-                }
-                .onChange(of: expandedLine) { _, id in
-                    guard let id else { return }
-                    withAnimation { proxy.scrollTo(id, anchor: .center) }
-                }
-        }
-        .background(Theme.canvas)
-        .foregroundStyle(Theme.foreground)
-        .navigationTitle("Edit invoice")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ThorbisToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+        editorBase
+        .discardChangesGuard(hasChanges: hasRawDraftChanges || didRecoverDraft || wroteFreshDraft || recoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
+        .onChange(of: editor) { _, _ in persistDraft() }
+        .onChange(of: scopeMatches) { wasMatching, matches in
+            if !matches {
+                if wasMatching { persistDraft(leavingOriginalScope: true) }
+                showPriceBook = false; addedLineSelection = nil; focus = nil
             }
         }
-        .keyboardDoneButton()
-        .trackKeyboard($keyboardUp)
-        .task(id: catalogContext) { await refreshCatalog() }
-        .onChange(of: catalogContext) { previous, current in
-            if !previous.preservesInvoicePickerState(comparedTo: current) {
-                addedLineSelection = nil
-                showPriceBook = false
-            }
+        .onChange(of: session.can("invoice.edit", feature: "invoicing")) { _, allowed in
+            if !allowed { showPriceBook = false; addedLineSelection = nil; focus = nil }
         }
-        .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-        .safeAreaInset(edge: .bottom) { if !keyboardUp { invoiceCommitActions } }
+        .safeAreaInset(edge: .bottom) { if !keyboardUp && resourceAuthorized && session.can("invoice.edit", feature: "invoicing") { invoiceCommitActions } }
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
@@ -103,6 +209,10 @@ struct InvoiceLineEditorView: View {
                 refresh: { await refreshCatalog(force: $0) }
             )
             .environmentObject(session).environmentObject(api)
+                .opacity(resourceAuthorized ? 1 : 0)
+                .accessibilityHidden(!resourceAuthorized)
+                .allowsHitTesting(resourceAuthorized)
+                .overlay { if !resourceAuthorized { ContentUnavailableView("Checking access", systemImage: "lock") } }
         } }
         .task(id: "\(catalogContext.organizationID ?? "")|\(catalogContext.sessionGeneration)|\(invoice.customerId)") {
             memberPricing = nil
@@ -115,12 +225,249 @@ struct InvoiceLineEditorView: View {
         .thorbisConfirm("Reload the latest invoice?",
                         message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
                         isPresented: $confirmReload,
-                        actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+                        actions: [ThorbisConfirmAction("Check latest before discarding") { Task { await verifyPendingReload() } }])
+        .thorbisConfirm("Discard saved draft?",
+                        message: "The latest document was checked. Discard the saved draft and open it?",
+                        isPresented: $confirmVerifiedReload,
+                        actions: [ThorbisConfirmAction("Discard draft and reload", role: .destructive) { applyPendingReload() }])
         #if DEBUG
         .task {
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor-line" { expandedLine = editor.lines.first?.id }
         }
         #endif
+    }
+
+    private var editorScroll: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                if !resourceAuthorized || !session.can("invoice.edit", feature: "invoicing") {
+                    VStack {
+                                ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text(
+                                    error == "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
+                                    ? "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
+                                    : "Connect to verify access to this document. Your draft stays on this phone."))
+                                if recoveryBlocked && verifiedScope == currentScope && scopeMatches && staleRevision {
+                                    Button("Review latest and discard draft") { Task { await reloadLatest() } }
+                                        .buttonStyle(.bordered)
+                                } else if scopeMatches && ownsDraft {
+                                    Button("Try again") { Task { await verifyDraftAccess() } }
+                                        .buttonStyle(.bordered)
+                                }
+                            }
+                } else { content }
+            }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if keyboardUp { Color.clear.frame(height: 72).allowsHitTesting(false) }
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: focus) { _, value in
+                    guard let id = value?.lineID else { return }
+                    expandedLine = id
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                }
+                .onChange(of: expandedLine) { _, id in
+                    guard let id else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                }
+        }
+    }
+
+    private var editorDecorated: some View {
+        editorScroll
+        .background(Theme.canvas)
+        .foregroundStyle(Theme.foreground)
+        .navigationTitle("Edit invoice")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            #if DEBUG
+            if EstimateRecoveryPreview.invoiceVerificationHeldEnabled {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                            Text("Reads")
+                                .accessibilityIdentifier("invoice-verification-requests")
+                                .accessibilityValue("\(EstimateRecoveryPreview.shared.invoiceVerificationReadCount):\(EstimateRecoveryPreview.shared.reloadHoldState)")
+                        }
+                        Text("Result").accessibilityIdentifier("invoice-verification-result").accessibilityValue(sampleVerificationResult)
+                        Button("Refresh") { Task { await session.revalidate() } }
+                            .accessibilityIdentifier("invoice-verification-refresh")
+                        Button("Access") {
+                            PaperPreviewProtocol.toggleInvoiceAccess()
+                            Task { await session.revalidate() }
+                        }.accessibilityIdentifier("invoice-verification-toggle-resource")
+                        Button("Release") { EstimateRecoveryPreview.shared.release() }
+                            .accessibilityIdentifier("invoice-verification-release")
+                    }
+                }
+            }
+            if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-check-workspace") || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-workspace-interruption")) {
+                ThorbisToolbarItem(placement: .principal) {
+                    TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                        Text("Sample workspace switch")
+                            .accessibilityIdentifier("invoice-workspace-switch-result")
+                            .accessibilityValue(EstimateRecoveryPreview.invoiceWorkspaceKey.map { UserDefaults.standard.bool(forKey: $0) } == true ? "switched" : "not switched")
+                    }
+                }
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-permission-interruption") {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        Text("Sample access").accessibilityIdentifier("invoice-confirm-permission-state").accessibilityValue(samplePermissionState)
+                        if samplePermissionState == "denied" {
+                            Button("Restore sample permission") {
+                                Task { @MainActor in
+                                    PaperPreviewProtocol.toggleInvoiceEditing()
+                                    await session.revalidate()
+                                    samplePermissionState = session.can("invoice.edit", feature: "invoicing") ? "allowed" : "denied"
+                                }
+                            }.accessibilityIdentifier("invoice-confirm-permission-restore")
+                        }
+                    }
+                }
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption") {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        Text("Sample network").accessibilityIdentifier("invoice-confirm-network-state").accessibilityValue(sampleNetworkState)
+                        if sampleNetworkState == "offline" {
+                            Button("Restore sample connection") {
+                                Task { @MainActor in
+                                    PaperPreviewProtocol.simulateNoSignal = false
+                                    await session.revalidate()
+                                    sampleNetworkState = session.isOffline ? "offline" : "online"
+                                }
+                            }.accessibilityIdentifier("invoice-confirm-network-restore")
+                        }
+                    }
+                }
+            }
+            if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-denied") || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-changed")) {
+                ThorbisToolbarItem(placement: .principal) {
+                    Text("Sample final read")
+                        .accessibilityIdentifier("invoice-final-read-result")
+                        .accessibilityValue(sampleFinalReadResult)
+                }
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-check-delivery") {
+                ThorbisToolbarItem(placement: .principal) {
+                    Text("Sample delivery")
+                        .accessibilityIdentifier("invoice-reload-delivery")
+                        .accessibilityValue(EstimateRecoveryPreview.invoiceDeliveryKey.map { UserDefaults.standard.bool(forKey: $0) } == true ? "delivered" : "not delivered")
+                }
+            }
+            if EstimateRecoveryPreview.invoiceHeldReloadEnabled || EstimateRecoveryPreview.invoiceFinalReadHeldEnabled {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                            Text("Sample invoice reload")
+                                .accessibilityIdentifier("invoice-held-reload-count")
+                                .accessibilityValue(EstimateRecoveryPreview.shared.reloadHoldState)
+                        }
+                        Button("Dismiss held reload") {
+                            dismiss()
+                            Task { @MainActor in
+                                try? await Task.sleep(for: .milliseconds(500))
+                                EstimateRecoveryPreview.shared.release()
+                            }
+                        }.accessibilityIdentifier("invoice-held-reload-dismiss")
+                    }
+                }
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-toggle-access") {
+                ThorbisToolbarItem(placement: .principal) {
+                    Button("Toggle sample invoice access") {
+                        PaperPreviewProtocol.toggleInvoiceAccess()
+                        Task { await session.revalidate() }
+                    }.accessibilityIdentifier("invoice-toggle-sample-access")
+                }
+            }
+            #endif
+            ThorbisToolbarItem(placement: .cancellationAction) {
+                Button(cleanupFailedAfterSave ? "Close" : "Cancel") { if cleanupFailedAfterSave { dismiss() } else if hasRawDraftChanges || didRecoverDraft || wroteFreshDraft || recoveryBlocked { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+            }
+        }
+        .keyboardDoneButton()
+    }
+
+    private func openDraft() {
+            viewVisible = true
+            if !scopeCaptured { scopeCaptured = true; originalScope = currentScope }
+            guard scopeMatches, session.can("invoice.edit", feature: "invoicing"), let draftScope else { return }
+            guard CommercialDraftStore.shared.acquire(scope: draftScope, owner: draftOwner) else {
+                recoveryBlocked = true; error = "This draft is already open in another window."; return
+            }
+            ownsDraft = true
+            if !didRestoreDraft && !didRecoverDraft {
+                do {
+                    if try CommercialDraftStore.shared.load(CommercialInvoiceDraft.self, scope: draftScope) != nil {
+                        didRecoverDraft = true
+                    } else {
+                        didRestoreDraft = true; verifiedScope = currentScope
+                    }
+                } catch {
+                    recoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone."
+                }
+            }
+    }
+
+    private var editorBase: some View {
+        editorDecorated
+        .onAppear { openDraft() }
+        .trackKeyboard($keyboardUp)
+        .task(id: draftAccessKey) { await verifyDraftAccess() }
+        .onChange(of: session.isOffline) { _, offline in
+            if offline { accessAttempt = UUID(); invalidatePendingReload(); if didRecoverDraft { verifiedScope = nil } }
+        }
+        #if DEBUG
+        .onChange(of: confirmReload) { _, presented in
+            let network = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-network-interruption")
+            let revision = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-revision-change")
+            let permission = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-permission-interruption")
+            let workspace = ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-workspace-interruption")
+            guard PaperPreview.enabled, presented, !simulatedConfirmationInterruption, network || revision || permission || workspace else { return }
+            simulatedConfirmationInterruption = true
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(1500))
+                if network {
+                    PaperPreviewProtocol.simulateNoSignal = true
+                    await session.revalidate()
+                    sampleNetworkState = session.isOffline ? "offline" : "online"
+                }
+                if revision { EstimateRecoveryPreview.shared.advanceInvoiceRevision() }
+                if revision { await session.revalidate() }
+                if permission {
+                    PaperPreviewProtocol.toggleInvoiceEditing()
+                    await session.revalidate()
+                    samplePermissionState = session.can("invoice.edit", feature: "invoicing") ? "allowed" : "denied"
+                }
+                if workspace {
+                    PaperPreviewProtocol.switchSavedWorkWorkspace()
+                    await session.revalidate()
+                    if session.activeOrganization?.id == "00000000-0000-4000-8000-000000000003", let key = EstimateRecoveryPreview.invoiceWorkspaceKey {
+                        UserDefaults.standard.set(true, forKey: key)
+                    }
+                }
+            }
+        }
+        #endif
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                invalidatePendingReload()
+                accessAttempt = UUID()
+                if didRecoverDraft { verifiedScope = nil }
+            } else if didRecoverDraft && verifiedScope != currentScope {
+                Task { await verifyDraftAccess() }
+            }
+        }
+        .onDisappear { viewVisible = false; accessAttempt = UUID(); invalidatePendingReload(); if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
+        .task(id: catalogContext) { await refreshCatalog() }
+        .onChange(of: catalogContext) { previous, current in
+            if !previous.preservesInvoicePickerState(comparedTo: current) {
+                addedLineSelection = nil
+                showPriceBook = false
+            }
+        }
+
     }
 
     @State private var memberPricing: MemberPricing?
@@ -129,7 +476,7 @@ struct InvoiceLineEditorView: View {
         VStack(alignment: .leading, spacing: 18) {
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
             if staleRevision {
-                Button { confirmReload = true } label: {
+                Button { Task { await reloadLatest() } } label: {
                     Label("Review latest invoice", systemImage: "arrow.clockwise")
                         .font(Theme.font(14, weight: .medium))
                         .foregroundStyle(Theme.brandText)
@@ -428,13 +775,26 @@ struct InvoiceLineEditorView: View {
         }
         guard editor.hasChanges else { return }
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
+            let descriptions = editor.lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions, kind: .invoice)
+            let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
+            if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
+            guard canEdit else { throw CommercialDescriptionPolicy.Problem.unavailable }
             commitPrices()
-            let request = try editor.makeRequest()
+            let request = try editor.makeRequest(extendedTextVerified: verified)
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
+            guard scopeMatches, canEdit else { error = "The workspace or access changed. Your edits are still here. Check the original workspace before retrying."; return }
+            intentionallyDiscarded = true
             addedLineSelection = nil
             onSaved(updated)
+            do { if ownsDraft, let draftScope { try CommercialDraftStore.shared.remove(scope: draftScope) } }
+            catch {
+                cleanupFailedAfterSave = true
+                self.error = "The invoice was saved, but its local draft could not be removed. Close this screen and check the saved invoice before making another change."
+                return
+            }
             dismiss()
         } catch is CancellationError {
         } catch {
@@ -457,17 +817,106 @@ struct InvoiceLineEditorView: View {
     }
 
     private func reloadLatest() async {
+        guard !busy else { return }
+        guard scopeMatches, let expected = currentScope, ownsDraft else { error = "The workspace changed. Your edits are still here."; return }
         busy = true
-        defer { busy = false }
+        let attempt = UUID(); accessAttempt = attempt
+        #if DEBUG
+        if EstimateRecoveryPreview.invoiceHeldReloadEnabled { EstimateRecoveryPreview.shared.armHeldReload() }
+        #endif
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
-            let current = try await api.liveFieldInvoice(invoice.id)
-            addedLineSelection = nil
-            editor = InvoiceLineEditorState(invoice: current)
-            staleRevision = false
-            error = nil
+            let latest = try await api.fieldInvoice(invoice.id, requireFresh: true)
+            guard !Task.isCancelled, viewVisible, scenePhase == .active, !session.isOffline, accessAttempt == attempt,
+                  currentScope == expected, latest.id == invoice.id,
+                  latest.organizationId == expected.organizationID,
+                  session.can("invoice.edit", feature: "invoicing"), draftScope != nil else { return }
+            pendingReload = latest
+            pendingReloadScope = expected
+            pendingReloadAttempt = attempt
+            confirmReload = true
         } catch is CancellationError {
         } catch {
-            self.error = error.localizedDescription
+            self.error = "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
+        }
+    }
+
+    private func invalidatePendingReload() {
+        pendingReload = nil
+        pendingReloadScope = nil
+        pendingReloadAttempt = nil
+        confirmReload = false
+        confirmVerifiedReload = false
+    }
+
+    private func verifyPendingReload() async {
+        guard !busy else { return }
+        guard viewVisible, scenePhase == .active, !session.isOffline, ownsDraft,
+              let expected = pendingReloadScope, currentScope == expected, verifiedScope == expected,
+              pendingReloadAttempt == accessAttempt, let prior = pendingReload else {
+            invalidatePendingReload()
+            error = "The workspace changed or the document is unavailable. Your draft is still on this phone."
+            return
+        }
+        busy = true
+        let attempt = UUID(); accessAttempt = attempt; pendingReloadAttempt = attempt
+        #if DEBUG
+        if EstimateRecoveryPreview.invoiceFinalReadHeldEnabled { EstimateRecoveryPreview.shared.armHeldReload() }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-denied") {
+            EstimateRecoveryPreview.shared.denyNextInvoiceRead()
+        }
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-changed") {
+            EstimateRecoveryPreview.shared.advanceInvoiceRevision()
+        }
+        #endif
+        defer { busy = false; if !viewVisible { releaseDraft() } }
+        do {
+            let latest = try await api.fieldInvoice(invoice.id, requireFresh: true)
+            guard !Task.isCancelled, viewVisible, scenePhase == .active, !session.isOffline,
+                  accessAttempt == attempt, currentScope == expected, verifiedScope == expected,
+                  pendingReloadAttempt == attempt, latest.id == prior.id,
+                  latest.organizationId == expected.organizationID, latest == prior else {
+                guard accessAttempt == attempt else { return }
+                #if DEBUG
+                sampleFinalReadResult = "changed"
+                #endif
+                invalidatePendingReload()
+                error = "The document or access changed. Your draft is still on this phone. Check again."
+                return
+            }
+            pendingReload = latest
+            confirmVerifiedReload = true
+        } catch {
+            guard accessAttempt == attempt else { return }
+            #if DEBUG
+            sampleFinalReadResult = "denied or failed"
+            #endif
+            invalidatePendingReload()
+            self.error = "The latest document could not be verified. Your draft is still on this phone."
+        }
+    }
+
+    private func applyPendingReload() {
+        guard viewVisible, scenePhase == .active, !session.isOffline, ownsDraft,
+              let expected = pendingReloadScope, pendingReloadAttempt == accessAttempt, currentScope == expected, verifiedScope == expected, scopeMatches,
+              session.can("invoice.edit", feature: "invoicing"), let latest = pendingReload,
+              latest.id == invoice.id, latest.organizationId == expected.organizationID,
+              let draftScope else {
+            invalidatePendingReload()
+            error = "The workspace changed or the document is unavailable. Your draft is still on this phone."
+            return
+        }
+        invalidatePendingReload()
+        do {
+            try CommercialDraftStore.shared.remove(scope: draftScope)
+            didRestoreDraft = false; didRecoverDraft = false; wroteFreshDraft = false
+            editor = InvoiceLineEditorState(invoice: latest)
+            persistenceBaseline = editor
+            addedLineSelection = nil
+            recoveryBlocked = false; staleRevision = false; error = nil
+            didRestoreDraft = true; verifiedScope = expected
+        } catch {
+            self.error = "The draft could not be cleared or the latest document could not be verified. Your draft is still on this phone."
         }
     }
 
@@ -477,24 +926,42 @@ struct InvoiceLineEditorView: View {
             return
         }
         busy = true
-        defer { busy = false }
+        defer { busy = false; if !viewVisible { releaseDraft() } }
         do {
             commitPrices()
             var current = editor.invoice
+            let descriptions = editor.lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let requiresExtended = CommercialDescriptionPolicy.isExtended(descriptions, kind: .invoice)
+            let verified = requiresExtended ? await session.verifyExtendedCommercialText() : false
+            if requiresExtended && !verified { throw CommercialDescriptionPolicy.Problem.unavailable }
+            guard canEdit, canIssue else { throw CommercialDescriptionPolicy.Problem.unavailable }
             if editor.hasChanges {
-                current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())
+                current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest(extendedTextVerified: verified))
+                guard scopeMatches, canEdit, canIssue else { error = "The workspace changed. Your edits are still here."; return }
                 addedLineSelection = nil
                 editor = InvoiceLineEditorState(invoice: current)
                 onSaved(current)
             }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)
+            guard scopeMatches, canIssue else { error = "The workspace or access changed. Check the invoice in the original workspace."; return }
+            intentionallyDiscarded = true
             onSaved(issued)
+            do { if ownsDraft, let draftScope { try CommercialDraftStore.shared.remove(scope: draftScope) } }
+            catch {
+                cleanupFailedAfterSave = true
+                self.error = "The invoice was issued, but its local draft could not be removed. Close this screen and check the issued invoice before making another change."
+                return
+            }
             dismiss()
         } catch is CancellationError {
         } catch {
             self.error = error.localizedDescription
             staleRevision = (error as? Problem)?.status == 409
         }
+    }
+    private func releaseDraft() {
+        if ownsDraft, let draftScope { CommercialDraftStore.shared.release(scope: draftScope, owner: draftOwner) }
+        ownsDraft = false
     }
 }
 

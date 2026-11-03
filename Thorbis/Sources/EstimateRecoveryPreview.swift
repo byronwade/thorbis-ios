@@ -11,14 +11,75 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     private var links = 0
     private var estimateReads = 0
     private var jobReads = 0
+    private var denyJobAfterRefresh = false
+    private var holdNextReload = false
+    private var invoiceRevisionIncrement = 1
+    private var denyInvoiceRead = false
+    private var invoiceVerificationArmed = false
+    private var invoiceVerificationReads = 0
+    private var estimateRevisionIncrement = 1
+    private var denyEstimateRead = false
     private var savedEstimate: [String: Any]?
     private var heldReply: (@Sendable () -> Void)?
+    private let savedEstimateKey: String?
+
+    private init() {
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--commercial-draft-test-id"),
+           arguments.indices.contains(index + 1), let id = UUID(uuidString: arguments[index + 1]) {
+            let key = "estimate-recovery-preview-\(id.uuidString)"
+            savedEstimateKey = key
+            savedEstimate = UserDefaults.standard.dictionary(forKey: key)
+        } else { savedEstimateKey = nil }
+    }
 
     static var enabled: Bool {
         PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-recovery")
     }
+    static var heldReloadEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-held-reload")
+    }
+    static var newerRevisionEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-newer-revision")
+    }
+    static var invoiceHeldReloadEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-recovery-held-reload")
+    }
+    static var invoiceNewerRevisionEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-recovery-newer-revision")
+    }
+    static var invoiceFinalReadHeldEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-held")
+    }
+    static var invoiceVerificationHeldEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-verification-held")
+    }
+    static var invoiceDeliveryKey: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--commercial-draft-test-id"),
+              arguments.indices.contains(index + 1), let id = UUID(uuidString: arguments[index + 1]) else { return nil }
+        return "invoice-recovery-delivered-\(id.uuidString)"
+    }
+    static var invoiceWorkspaceKey: String? { invoiceDeliveryKey.map { $0 + "-workspace" } }
+    var reloadHoldState: String { lock.withLock { heldReply == nil ? "idle" : "waiting" } }
+    func armHeldReload() { lock.withLock { holdNextReload = true } }
+    func advanceInvoiceRevision() { lock.withLock { invoiceRevisionIncrement += 1 } }
+    func denyNextInvoiceRead() { lock.withLock { denyInvoiceRead = true } }
+    func armFirstInvoiceVerification() {
+        lock.withLock {
+            guard !invoiceVerificationArmed else { return }
+            invoiceVerificationArmed = true; holdNextReload = true
+        }
+    }
+    var invoiceVerificationReadCount: Int { lock.withLock { invoiceVerificationReads } }
+    func advanceEstimateRevision() { lock.withLock { estimateRevisionIncrement += 1 } }
+    func denyNextEstimateRead() { lock.withLock { denyEstimateRead = true } }
 
     var counts: String { lock.withLock { "creates=\(creates),links=\(links),estimateReads=\(estimateReads),jobReads=\(jobReads)" } }
+
+    func toggleJobAccess() {
+        lock.withLock { denyJobAfterRefresh.toggle() }
+    }
 
     func hold(_ action: @escaping @Sendable () -> Void) { lock.withLock { heldReply = action } }
     func release() {
@@ -33,6 +94,34 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     }
 
     func reply(for request: URLRequest) -> Reply? {
+        if (Self.invoiceHeldReloadEnabled || Self.invoiceNewerRevisionEnabled || Self.invoiceVerificationHeldEnabled), request.httpMethod == "GET",
+           request.url?.path == "/v1/invoices/\(PaperPreview.invoice.id)" {
+            let denied = lock.withLock { invoiceVerificationReads += 1; let value = denyInvoiceRead; denyInvoiceRead = false; return value }
+            if denied || (Self.invoiceVerificationHeldEnabled && PaperPreviewProtocol.sampleInvoiceAccessDenied) {
+                return Reply(status: 403, payload: ["status": 403, "title": "Sample access denied"])
+            }
+            let (shouldHold, revisionIncrement) = lock.withLock {
+                let value = holdNextReload; holdNextReload = false; return (value, invoiceRevisionIncrement)
+            }
+            guard let data = try? JSONEncoder().encode(PaperPreview.invoice),
+                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            object["linesRevision"] = PaperPreview.invoice.linesRevision + (Self.invoiceVerificationHeldEnabled ? 0 : revisionIncrement)
+            return Reply(status: 200, payload: object, hold: (Self.invoiceHeldReloadEnabled || Self.invoiceFinalReadHeldEnabled || Self.invoiceVerificationHeldEnabled) && shouldHold)
+        }
+        if (Self.heldReloadEnabled || Self.newerRevisionEnabled), request.httpMethod == "GET",
+           request.url?.path == "/v1/estimates/\(PaperPreview.estimate.id)" {
+            let (shouldHold, revisionIncrement, denied) = lock.withLock {
+                let value = holdNextReload
+                holdNextReload = false
+                let denied = denyEstimateRead; denyEstimateRead = false
+                return (value, estimateRevisionIncrement, denied)
+            }
+            if denied { return Reply(status: 403, payload: ["status": 403, "title": "Sample access denied"]) }
+            guard let data = try? JSONEncoder().encode(PaperPreview.estimate),
+                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+            object["currentRevisionNumber"] = (PaperPreview.estimate.currentRevisionNumber ?? 0) + revisionIncrement
+            return Reply(status: 200, payload: object, hold: Self.heldReloadEnabled && shouldHold)
+        }
         guard Self.enabled, let path = request.url?.path else { return nil }
         if request.httpMethod == "GET", path == "/v1/estimates/\(Self.estimateID)" {
             return lock.withLock {
@@ -51,6 +140,10 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
         }
         if request.httpMethod == "GET", path == "/v1/jobs/\(PaperPreview.jobID)" {
             if request.cachePolicy == .reloadIgnoringLocalCacheData { lock.withLock { jobReads += 1 } }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-deny-job") ||
+                lock.withLock({ denyJobAfterRefresh }) {
+                return Reply(status: 403, payload: ["title": "Sample job access denied", "status": 403])
+            }
             var job: [String: Any] = ["id": PaperPreview.jobID, "organizationId": PaperPreview.organizationID,
                 "customerId": PaperPreview.customerID, "title": "Sample job", "status": "in_progress",
                 "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
@@ -100,14 +193,21 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
                 estimate["locationId"] = "00000000-0000-4000-8000-000000009999"
             }
             lock.withLock { savedEstimate = estimate }
+            // UserDefaults posts SwiftUI notifications synchronously; never post while holding
+            // the counter lock, because the UI reads counts under that same lock.
+            if let savedEstimateKey { UserDefaults.standard.set(estimate, forKey: savedEstimateKey) }
             return Reply(status: 201, payload: estimate, hold: ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold"))
         }
         let expected = "/v1/jobs/\(PaperPreview.jobID)/estimates/\(Self.estimateID)/link"
         guard path == expected else { return nil }
         let attempt = lock.withLock { links += 1; return links }
-        if attempt == 1 { return Reply(status: 503, payload: ["title": "Sample connection unavailable", "status": 503]) }
+        let arguments = ProcessInfo.processInfo.arguments
+        if attempt == 1 && !arguments.contains("--paper-preview-estimate-recovery-link-success") && !arguments.contains("--paper-preview-estimate-link-hold") {
+            return Reply(status: 503, payload: ["title": "Sample connection unavailable", "status": 503])
+        }
         return Reply(status: 201, payload: ["id": "00000000-0000-4000-8000-000000008903", "jobId": PaperPreview.jobID,
-                                                  "estimateId": Self.estimateID, "linkedAt": "2026-10-29T00:00:00Z"])
+                                                  "estimateId": Self.estimateID, "linkedAt": "2026-10-29T00:00:00Z"],
+                     hold: arguments.contains("--paper-preview-estimate-link-hold"))
     }
 }
 #endif
