@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Security
 
 /// EB-01..EB-05: the estimate builder's price book search. It runs on the device over the whole
 /// cached catalog on every keystroke, so it never waits on the network and works offline.
@@ -374,9 +376,73 @@ struct PriceBookFavoritesStore {
 /// The whole active price book for the signed-in organization, kept on the device so search is
 /// instant and works offline (EB-01). Opening a builder shows the cached copy at once and
 /// refreshes it in the background.
+struct PriceBookAuthority: Hashable {
+    let actorID: String
+    let policyVersion: Int
+    let generation: String
+    let revision: UUID
+}
+
 struct PriceBookCatalogContext: Hashable {
     let organizationID: String?
     let sessionGeneration: UUID
+    let authority: PriceBookAuthority?
+
+    init(organizationID: String?, sessionGeneration: UUID, authority: PriceBookAuthority? = nil) {
+        self.organizationID = organizationID
+        self.sessionGeneration = sessionGeneration
+        self.authority = authority
+    }
+}
+
+private struct PriceBookDenialScope: Hashable {
+    let organizationID: String
+    let origin: String
+    let actorID: String
+    let policyVersion: Int
+    let generation: String
+
+    init(organizationID: String, origin: String, authority: PriceBookAuthority) {
+        self.organizationID = organizationID.lowercased()
+        self.origin = origin
+        self.actorID = authority.actorID
+        self.policyVersion = authority.policyVersion
+        self.generation = authority.generation
+    }
+}
+
+/// A denial must outlive an undeletable cache file. Keychain read errors fail closed.
+private enum PriceBookDenialMarker {
+    private static let service = "com.thorbis.field.price-book-denials.v1"
+
+    private static func query(organizationID: String, origin: String, authority: PriceBookAuthority) -> [String: Any] {
+        let parts = [organizationID.lowercased(), origin, authority.actorID, String(authority.policyVersion), authority.generation]
+        let canonical = parts.map { "\($0.utf8.count):\($0)" }.joined()
+        let account = SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                kSecAttrAccount as String: account]
+    }
+
+    static func isDenied(organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        var lookup = query(organizationID: organizationID, origin: origin, authority: authority)
+        lookup[kSecReturnData as String] = true
+        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+        var value: CFTypeRef?
+        return SecItemCopyMatching(lookup as CFDictionary, &value) != errSecItemNotFound
+    }
+
+    @discardableResult
+    static func mark(organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        var attributes = query(organizationID: organizationID, origin: origin, authority: authority)
+        attributes[kSecValueData as String] = Data([1])
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        return status == errSecSuccess || status == errSecDuplicateItem
+    }
+
+    static func clear(organizationID: String, origin: String, authority: PriceBookAuthority) {
+        SecItemDelete(query(organizationID: organizationID, origin: origin, authority: authority) as CFDictionary)
+    }
 }
 
 @MainActor
@@ -392,6 +458,8 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var isPartial = false
     @Published private(set) var origin: String?
     @Published private(set) var needsScopedRefresh = false
+    @Published private(set) var accessDenied = false
+    @Published private(set) var denialPersistenceFailure = false
     @Published private(set) var error: String?
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
     /// Local stars (this device only).
@@ -401,20 +469,41 @@ final class PriceBookCatalog: ObservableObject {
     private var hasCompleteSnapshot = false
     private var lastAPIGeneration: UUID?
     private var partialAPIGeneration: UUID?
+    private var nonDurableDenials: Set<PriceBookDenialScope> = []
     private(set) var context: PriceBookCatalogContext?
     private var loadingRequest: (context: PriceBookCatalogContext, apiGeneration: UUID, id: UUID, task: Task<Void, Never>)?
+    private let removeCacheFile: (URL) -> Bool
+    private let markDenialOverride: ((String, String, PriceBookAuthority) -> Bool)?
+
+    init(removeCacheFile: @escaping (URL) -> Bool = { url in
+        do { try FileManager.default.removeItem(at: url); return true }
+        catch { return false }
+    }, markDenialOverride: ((String, String, PriceBookAuthority) -> Bool)? = nil) {
+        self.removeCacheFile = removeCacheFile
+        self.markDenialOverride = markDenialOverride
+    }
 
     /// Shows the cached catalog for `organizationID` right away, then reloads every page.
-    func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID, force: Bool = false) async {
+    func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID,
+                 authority: PriceBookAuthority? = nil, force: Bool = false) async {
         guard !Task.isCancelled else { return }
         let apiGeneration = api.requestGeneration
         let requestedOrigin = api.normalizedOrigin
-        let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration)
+        let requested = PriceBookCatalogContext(organizationID: organizationID, sessionGeneration: sessionGeneration, authority: authority)
         if context != requested || origin != requestedOrigin {
             context = requested
             origin = requestedOrigin
             self.organizationID = organizationID
-            let cached = organizationID.flatMap { org in requestedOrigin.flatMap { Self.readCache(org, origin: $0) } }
+            let denialScope = organizationID.flatMap { org in requestedOrigin.flatMap { origin in
+                authority.map { PriceBookDenialScope(organizationID: org, origin: origin, authority: $0) }
+            } }
+            let nonDurableDenial = denialScope.map { nonDurableDenials.contains($0) } ?? false
+            let denied = nonDurableDenial || (organizationID.flatMap { org in requestedOrigin.flatMap { origin in
+                authority.map { PriceBookDenialMarker.isDenied(organizationID: org, origin: origin, authority: $0) }
+            } } ?? false)
+            let cached = denied ? nil : organizationID.flatMap { org in requestedOrigin.flatMap { origin in
+                authority.flatMap { Self.readCache(org, origin: origin, authority: $0) }
+            } }
             needsScopedRefresh = cached == nil && (organizationID.map(Self.hasLegacyCache) ?? false)
             hasCompleteSnapshot = cached != nil
             isPartial = false
@@ -425,17 +514,18 @@ final class PriceBookCatalog: ObservableObject {
             lastRefresh = nil
             error = nil
             lastAPIGeneration = nil
+            accessDenied = denied
+            denialPersistenceFailure = nonDurableDenial
         } else if lastAPIGeneration != nil, lastAPIGeneration != apiGeneration {
+            // The generation may reflect changed credentials or revoked authority.
+            // Hide even a complete snapshot until a fresh request succeeds.
             lastRefresh = nil
-            if isPartial {
-                let cached = organizationID.flatMap { org in requestedOrigin.flatMap { Self.readCache(org, origin: $0) } }
-                hasCompleteSnapshot = cached != nil
-                isPartial = false
-                partialAPIGeneration = nil
-                apply(cached ?? [])
-            }
+            hasCompleteSnapshot = false
+            isPartial = false
+            partialAPIGeneration = nil
+            apply([])
         }
-        guard let organizationID, let requestedOrigin else {
+        guard let organizationID, let requestedOrigin, authority != nil else {
             loadingRequest?.task.cancel()
             loadingRequest = nil
             loading = false
@@ -482,6 +572,7 @@ final class PriceBookCatalog: ObservableObject {
                 guard current() else { return }
                 let page = try await api.priceBookItems(limit: 200, cursor: cursor)
                 guard current() else { return }
+                accessDenied = false
                 for item in page.items where seen.insert(item.id).inserted { all.append(item) }
                 cursor = page.nextCursor
                 pages += 1
@@ -504,11 +595,33 @@ final class PriceBookCatalog: ObservableObject {
             hasCompleteSnapshot = true
             lastRefresh = Date()
             error = nil
-            Self.writeCache(all, organizationID: organizationID, origin: requestedOrigin)
+            if let authority = requested.authority,
+               Self.writeCache(all, organizationID: organizationID, origin: requestedOrigin, authority: authority) {
+                PriceBookDenialMarker.clear(organizationID: organizationID, origin: requestedOrigin, authority: authority)
+                nonDurableDenials.remove(PriceBookDenialScope(organizationID: organizationID, origin: requestedOrigin, authority: authority))
+                denialPersistenceFailure = false
+            }
             needsScopedRefresh = false
         } catch is CancellationError {
         } catch {
             guard current() else { return }
+            if let status = (error as? Problem)?.status, (400...499).contains(status), status != 408, status != 429 {
+                // A definitive server rejection cannot fall back to previously authorized data.
+                accessDenied = true
+                hasCompleteSnapshot = false
+                isPartial = false
+                partialAPIGeneration = nil
+                apply([])
+                if let authority = requested.authority {
+                    let marked = markDenialOverride?(organizationID, requestedOrigin, authority) ??
+                        PriceBookDenialMarker.mark(organizationID: organizationID, origin: requestedOrigin, authority: authority)
+                    let removed = removeCache(organizationID, origin: requestedOrigin, authority: authority)
+                    denialPersistenceFailure = !marked && !removed
+                    if denialPersistenceFailure {
+                        nonDurableDenials.insert(PriceBookDenialScope(organizationID: organizationID, origin: requestedOrigin, authority: authority))
+                    }
+                }
+            }
             self.error = PriceBookLoadError.message(for: error)
         }
     }
@@ -529,7 +642,8 @@ final class PriceBookCatalog: ObservableObject {
 
     /// A partial page belongs to the precise API generation that returned it.
     func isCurrent(_ requested: PriceBookCatalogContext, api: APIClient) -> Bool {
-        context == requested && origin != nil && origin == api.normalizedOrigin &&
+        context == requested && requested.authority != nil && !accessDenied && origin != nil && origin == api.normalizedOrigin &&
+        lastAPIGeneration == api.requestGeneration &&
         (!isPartial || partialAPIGeneration == api.requestGeneration)
     }
 
@@ -549,6 +663,9 @@ final class PriceBookCatalog: ObservableObject {
     private struct CachedCatalog: Codable {
         let version: Int
         let origin: String
+        let actorID: String
+        let policyVersion: Int
+        let generation: String
         let items: [CachedItem]
     }
 
@@ -562,10 +679,11 @@ final class PriceBookCatalog: ObservableObject {
         return directory?.appendingPathComponent("\(organizationID.lowercased()).json")
     }
 
-    private static func readCache(_ organizationID: String, origin: String) -> [PriceBookListItem]? {
+    private static func readCache(_ organizationID: String, origin: String, authority: PriceBookAuthority) -> [PriceBookListItem]? {
         guard let url = cacheURL(organizationID), let data = try? Data(contentsOf: url),
               let cached = try? JSONDecoder().decode(CachedCatalog.self, from: data),
-              cached.version == 1, cached.origin == origin else { return nil }
+              cached.version == 2, cached.origin == origin, cached.actorID == authority.actorID,
+              cached.policyVersion == authority.policyVersion, cached.generation == authority.generation else { return nil }
         return cached.items.map {
             PriceBookListItem(id: $0.id, description: $0.description, unit: $0.unit, kind: $0.kind,
                               taxClassification: $0.taxClassification, sellPrice: $0.sellPrice,
@@ -575,18 +693,33 @@ final class PriceBookCatalog: ObservableObject {
 
     private static func hasLegacyCache(_ organizationID: String) -> Bool {
         guard let url = cacheURL(organizationID), let data = try? Data(contentsOf: url) else { return false }
-        return (try? JSONDecoder().decode([CachedItem].self, from: data)) != nil
+        return (try? JSONDecoder().decode([CachedItem].self, from: data)) != nil ||
+            (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["version"] as? Int == 1
     }
 
-    private static func writeCache(_ items: [PriceBookListItem], organizationID: String, origin: String) {
-        guard let url = cacheURL(organizationID), let directory else { return }
+    private func removeCache(_ organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        guard let url = Self.cacheURL(organizationID) else { return false }
+        guard FileManager.default.fileExists(atPath: url.path) else { return true }
+        // If the file cannot be verified, do not assume the denial persisted.
+        guard Self.readCache(organizationID, origin: origin, authority: authority) != nil else { return false }
+        return removeCacheFile(url)
+    }
+
+    private static func writeCache(_ items: [PriceBookListItem], organizationID: String, origin: String, authority: PriceBookAuthority) -> Bool {
+        guard let url = cacheURL(organizationID), let directory else { return false }
         let active = items.filter { $0.archivedAt == nil }.map {
             CachedItem(id: $0.id, description: $0.description, unit: $0.unit, kind: $0.kind,
                        taxClassification: $0.taxClassification, sellPrice: $0.sellPrice, revision: $0.revision)
         }
-        guard let data = try? JSONEncoder().encode(CachedCatalog(version: 1, origin: origin, items: active)) else { return }
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: url, options: [.atomic, .completeFileProtection])
+        guard let data = try? JSONEncoder().encode(CachedCatalog(version: 2, origin: origin, actorID: authority.actorID,
+                                                                     policyVersion: authority.policyVersion, generation: authority.generation, items: active)) else { return false }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Sign-out forgets every organization's cached price book and this session's copy.
@@ -596,6 +729,8 @@ final class PriceBookCatalog: ObservableObject {
         context = nil
         origin = nil
         needsScopedRefresh = false
+        accessDenied = false
+        denialPersistenceFailure = false
         lastAPIGeneration = nil
         partialAPIGeneration = nil
         loadingRequest?.task.cancel()
