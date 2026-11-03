@@ -9,6 +9,35 @@ final class PriceBookPickerUITests: XCTestCase {
     private let sentinelID = "00000000-0000-4000-8000-000000009999"
     private let sentinel = "Camera sewer inspection"
 
+    func testPartialCatalogCanAddLoadedItemAndDoesNotClaimAnUnloadedSearchIsEmpty() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-partial"]
+        app.launch()
+        openPicker(in: app, addItem: "invoice-add-item")
+        let notice = app.staticTexts["price-book-partial"]
+        XCTAssertTrue(notice.waitForExistence(timeout: 20))
+        XCTAssertTrue(notice.label.contains("Search covers loaded items only"))
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009701"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        let loadingShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        loadingShot.name = "Loaded items with partial catalog notice"
+        loadingShot.lifetime = .keepAlways
+        add(loadingShot)
+        for _ in 0..<8 where !item.isHittable { app.swipeUp() }
+        item.tap()
+        XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
+        let search = app.textFields["invoice-catalog-search"]
+        search.tap()
+        search.typeText("camera sewer")
+        XCTAssertTrue(notice.exists)
+        XCTAssertFalse(app.staticTexts["No price book items match. Add it as a custom item above, or try another word."].exists)
+        let searchShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        searchShot.name = "Search while later catalog pages are pending"
+        searchShot.lifetime = .keepAlways
+        add(searchShot)
+    }
+
     func testInvoicePickerSearchesLaterPageAndStaysOpenForMultipleAdds() {
         let app = launchInvoiceEditor()
         let before = lineCount(app)

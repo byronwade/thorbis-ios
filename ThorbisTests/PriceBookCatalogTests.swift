@@ -4,6 +4,62 @@ import XCTest
 
 @MainActor
 final class PriceBookCatalogTests: XCTestCase {
+    func testFirstPageIsUsableWhileLaterPageIsStillLoadingWithoutCachingPartialData() async throws {
+        let org = UUID().uuidString.lowercased()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(1, "First page")], cursor: id(9000))),
+                          .init(200, try page([(2, "Later page")]), gate: gate)])
+        let catalog = PriceBookCatalog()
+        let task = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: UUID(), force: true) }
+        try await waitForRequests(2)
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)], "The first page should be usable before later pages arrive")
+        XCTAssertTrue(catalog.loading)
+        XCTAssertTrue(catalog.isPartial)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL(org).path), "A partial page is not a complete offline cache")
+        gate.release()
+        await task.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(1), id(2)])
+        XCTAssertFalse(catalog.loading)
+        XCTAssertFalse(catalog.isPartial)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL(org).path))
+    }
+
+    func testFailedLaterPageKeepsPartialItemsButNeverWritesCompleteCache() async throws {
+        let org = UUID().uuidString.lowercased()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "First page")], cursor: id(9000))),
+                          .init(503, "{}")])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: UUID(), force: true)
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertTrue(catalog.isPartial)
+        XCTAssertNotNil(catalog.error)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL(org).path))
+    }
+
+    func testRefreshingCompleteCacheDoesNotReplaceItWithAPartialPage() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let api = client([.init(200, try page([(1, "Saved item")])),
+                          .init(200, try page([(2, "New first page")], cursor: id(9000))),
+                          .init(200, try page([(3, "New last page")]), gate: gate)])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true)
+        let saved = try Data(contentsOf: cacheURL(org))
+        let refresh = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, force: true) }
+        try await waitForRequests(3)
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertFalse(catalog.isPartial)
+        XCTAssertEqual(try Data(contentsOf: cacheURL(org)), saved)
+        gate.release()
+        await refresh.value
+        XCTAssertEqual(catalog.items.map(\.id), [id(2), id(3)])
+    }
+
     func testAPIScopeChangeBeforeSharedLoadStartsCannotFillThePreviousWorkspaceCache() async throws {
         let org = UUID().uuidString.lowercased()
         defer { removeOwnCache(org) }

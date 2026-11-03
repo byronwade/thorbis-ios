@@ -366,14 +366,24 @@ struct PriceBookResultsList: View {
             if canUsePriceBook, !current || catalog.items.isEmpty {
                 if !current || catalog.loading {
                     PaperCard { ForEach(0..<6, id: \.self) { _ in skeletonRow } }
-                } else if let error = catalog.error {
+                } else if let error = catalog.error, !catalog.isPartial {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("The price book didn't load. \(error)").font(Theme.font(15)).foregroundStyle(Theme.foreground)
                         Button("Try again", action: retry).font(Theme.font(15, weight: .medium)).frame(minHeight: 44)
                     }
                 }
             }
-            if canUsePriceBook, current, !catalog.items.isEmpty, let error = catalog.error {
+            if canUsePriceBook, current, catalog.isPartial {
+                if let error = catalog.error {
+                    ErrorBanner(message: "Only some price book items loaded. Search covers loaded items only. \(error)") { retry() }
+                } else if catalog.loading {
+                    Text("Loading more price book items. Search covers loaded items only.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("price-book-partial")
+                } else {
+                    ErrorBanner(message: "Only some price book items loaded. Search covers loaded items only. Refresh to load more.") { retry() }
+                }
+            } else if canUsePriceBook, current, !catalog.items.isEmpty, let error = catalog.error {
                 ErrorBanner(message: "Couldn't refresh the price book. Showing saved items. \(error)") { retry() }
             }
             if !favorites.isEmpty {
@@ -385,7 +395,7 @@ struct PriceBookResultsList: View {
             if !page.results.isEmpty {
                 section(trimmedQuery.isEmpty ? (favorites.isEmpty && recent.isEmpty ? nil : "Price book") : "Matches",
                         trailing: page.total > PriceBookSearchIndex.resultLimit
-                            ? "\(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)" : nil) {
+                            ? "\(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)\(catalog.isPartial ? " loaded" : "")" : nil) {
                     if page.offset > 0 {
                         pageButton("Previous items", detail: nil, identifier: "price-book-previous") {
                             pageOffset = max(0, page.offset - PriceBookSearchIndex.resultLimit)
@@ -393,13 +403,13 @@ struct PriceBookResultsList: View {
                     }
                     ForEach(page.results, content: row)
                     if remaining > 0 {
-                        pageButton("Next items", detail: "\(remaining) remaining", identifier: "price-book-show-more") {
+                        pageButton("Next items", detail: "\(remaining)\(catalog.isPartial ? " loaded" : " remaining")", identifier: "price-book-show-more") {
                             pageOffset = page.offset + PriceBookSearchIndex.resultLimit
                         }
                     }
                 }
             }
-            if canUsePriceBook, current, !catalog.loading, catalog.error == nil,
+            if canUsePriceBook, current, !catalog.loading, !catalog.isPartial, catalog.error == nil,
                page.results.isEmpty, recent.isEmpty, favorites.isEmpty {
                 if addCustomLine == nil {
                     ContentUnavailableView(
