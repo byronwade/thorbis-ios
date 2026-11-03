@@ -4,9 +4,11 @@ import Foundation
 /// send implementation. The editor must still prove its live authority, guard
 /// every exit and coordinate all other writers before this may be wired.
 @MainActor final class AtomicEstimateEditorLifecycle {
-    enum State: Equatable { case notOpen, editable, saveFailed, stageUncertain, attemptPending, closed }
+    enum State: Equatable { case notOpen, needsRestore, editable, saveFailed, stageUncertain, attemptPending, closed }
     enum Failure: Error { case invalidState, unavailable }
     private(set) var state: State = .notOpen
+    private(set) var recoveredDraft: CommercialNewEstimateDraft?
+    private var recoveredBytes: Data?
     private let store: CommercialDraftStore
     private let journal: AtomicEstimateAttemptJournal
     private let draftScope: CommercialDraftScope
@@ -42,13 +44,27 @@ import Foundation
                 }
             }
             switch try journal.status(actorID: actorID, organizationID: organizationID, origin: origin, jobID: jobID) {
-            case .missing: state = .editable // local absence is not proof of no prior server write
+            case .missing:
+                if let existing {
+                    let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+                    recoveredDraft = existing; recoveredBytes = try encoder.encode(existing)
+                    state = .needsRestore
+                } else { state = .editable } // local absence is not proof of no prior server write
             case .legacyPending, .atomicPending: state = .attemptPending
             }
         } catch {
             store.release(scope: draftScope, owner: owner)
             throw error
         }
+    }
+
+    /// Only the exact loaded draft can be acknowledged as restored; a caller
+    /// cannot replace saved work with fresh editor defaults on reopen.
+    func acknowledgeRestored(_ draft: CommercialNewEstimateDraft) throws {
+        guard state == .needsRestore, let expected = recoveredBytes else { throw Failure.invalidState }
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        guard try encoder.encode(draft) == expected else { throw Failure.invalidState }
+        recoveredBytes = nil; recoveredDraft = nil; state = .editable
     }
 
     func save(_ draft: CommercialNewEstimateDraft) throws {
@@ -65,8 +81,8 @@ import Foundation
     /// The caller must keep the editor visible and retain its in-memory draft
     /// on failure. Closing preserves the draft; this API does not discard it.
     func close(preserving draft: CommercialNewEstimateDraft) throws {
-        guard state == .editable || state == .saveFailed || state == .attemptPending else { throw Failure.invalidState }
-        if state != .attemptPending { try save(draft) }
+        guard state == .needsRestore || state == .editable || state == .saveFailed || state == .attemptPending else { throw Failure.invalidState }
+        if state == .editable || state == .saveFailed { try save(draft) }
         store.release(scope: draftScope, owner: owner)
         state = .closed
     }

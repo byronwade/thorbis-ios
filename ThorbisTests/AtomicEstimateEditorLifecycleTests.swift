@@ -75,4 +75,35 @@ import XCTest
         XCTAssertTrue(restored.uncertain)
         XCTAssertEqual(restored.title, "Previous")
     }
+    func testExistingDraftRequiresExactRestorationBeforeEditingOrWriting() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root); try store.save(draft, scope: scope)
+        let editor = lifecycle(store); try editor.open()
+        XCTAssertEqual(editor.state, .needsRestore)
+        let defaults = CommercialNewEstimateDraft(customerID: actor, title: "Default", lines: [], uncertain: false,
+            created: nil, requiresLocationVerification: false, requiresManualReview: false,
+            requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        XCTAssertThrowsError(try editor.save(defaults))
+        XCTAssertThrowsError(try editor.acknowledgeRestored(defaults))
+        XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Repair")
+        try editor.acknowledgeRestored(try XCTUnwrap(editor.recoveredDraft))
+        XCTAssertEqual(editor.state, .editable)
+        try editor.close(preserving: draft)
+        let reopened = lifecycle(store); try reopened.open()
+        XCTAssertEqual(reopened.state, .needsRestore)
+        try reopened.close(preserving: defaults)
+        XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Repair")
+    }
+    func testCorruptSourceDraftRefusesOpenAndPreservesBytes() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root); try store.save("wrong type", scope: scope)
+        let editor = lifecycle(store)
+        XCTAssertThrowsError(try editor.open())
+        XCTAssertEqual(editor.state, .notOpen)
+        XCTAssertThrowsError(try editor.save(draft))
+        XCTAssertEqual(try store.load(String.self, scope: scope), "wrong type")
+        let newOwner = UUID()
+        XCTAssertTrue(try store.acquireCoordinatedDraft(scope: scope, owner: newOwner))
+        store.release(scope: scope, owner: newOwner)
+    }
 }
