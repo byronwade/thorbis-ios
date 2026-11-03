@@ -23,6 +23,8 @@ struct NewEstimateView: View {
     @State private var recoveryMemoryDraft: CommercialNewEstimateDraft?
     @State private var recoveryCopyIDs: [UUID] = []
     @State private var recoveryPreview: CommercialNewEstimateDraft?
+    @State private var recoveryPreviewCopyID: UUID?
+    @State private var editingRecoveryCopyID: UUID?
     @State private var jobDraftSaveGuard = JobEstimateDraftSaveGuard()
     @State private var createInFlight = false
     @State private var draftOwner = UUID()
@@ -149,7 +151,11 @@ struct NewEstimateView: View {
     }
     private func holdUnpersistedDraft() {
         guard jobID != nil, ownsDraft, didRestoreDraft, !draftRecoveryBlocked, !intentionallyDiscarded, let draftScope else { return }
-        CommercialDraftStore.unpersistedEstimates.hold(currentDraft(), for: draftScope)
+        if let sourceID = editingRecoveryCopyID {
+            CommercialDraftStore.recoveryCopyEdits.hold(currentDraft(), for: .init(scope: draftScope, sourceID: sourceID))
+        } else {
+            CommercialDraftStore.unpersistedEstimates.hold(currentDraft(), for: draftScope)
+        }
     }
     private func saveDraft(uncertain: Bool? = nil, leavingOriginalScope: Bool = false) throws {
         guard ownsDraft, (scopeMatches || leavingOriginalScope), let draftScope else {
@@ -590,7 +596,7 @@ struct NewEstimateView: View {
             ForEach(Array(recoveryCopyIDs.enumerated()), id: \.element) { index, id in
                 Button("Review recovery copy \(index + 1)") {
                     guard let draftScope, scopeMatches, resourceAuthorized else { return }
-                    do { previewRecovery(try CommercialDraftStore.estimateRecoveryCopies.read(scope: draftScope, id: id)) }
+                    do { previewRecovery(try CommercialDraftStore.estimateRecoveryCopies.read(scope: draftScope, id: id), copyID: id) }
                     catch { error = "This recovery copy could not be opened." }
                 }.buttonStyle(.bordered)
             }
@@ -600,10 +606,10 @@ struct NewEstimateView: View {
             if let error { ErrorBanner(message: error) }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.gutter)
     }
-    private func previewRecovery(_ draft: CommercialNewEstimateDraft) {
+    private func previewRecovery(_ draft: CommercialNewEstimateDraft, copyID: UUID? = nil) {
         guard scopeMatches, resourceAuthorized, draft.customerID.lowercased() == initialCustomerID.lowercased(),
               (try? draft.lines()) != nil else { error = "This draft could not be verified."; return }
-        recoveryPreview = draft
+        recoveryPreviewCopyID = copyID; recoveryPreview = draft
         customerID = draft.customerID; created = draft.created
         verifiedScope = nil
         Task { await verifyDraftAccess() }
@@ -618,6 +624,10 @@ struct NewEstimateView: View {
                     Text("Quantity: \(line.quantity) · Price: \(line.unitPrice)").foregroundStyle(Theme.muted)
                 }
             }
+            if let sourceID = recoveryPreviewCopyID, draft.created == nil, !draft.uncertain,
+               !draft.requiresManualReview, !draft.requiresLocationVerification, !draft.requiresGroupDisclosure {
+                Button("Edit a separate copy") { editRecoveryCopy(sourceID: sourceID, preview: draft) }.buttonStyle(.bordered)
+            }
             if recoveryMemoryDraft != nil {
                 Button("Save this draft as a copy") { saveRecoveryCopy(draft) }.buttonStyle(.bordered)
             }
@@ -625,11 +635,37 @@ struct NewEstimateView: View {
                 Button("Retry previous recovery copy") { saveRecoveryCopy(pending) }.buttonStyle(.bordered)
             }
             Button("Back to drafts") {
-                recoveryPreview = nil; customerID = initialCustomerID; created = nil; verifiedScope = nil
+                recoveryPreview = nil; recoveryPreviewCopyID = nil; customerID = initialCustomerID; created = nil; verifiedScope = nil
                 Task { await verifyDraftAccess() }
             }.buttonStyle(.bordered)
         }.frame(maxWidth: .infinity, alignment: .leading).padding(Theme.gutter)
     }
+    /// Editing a recovery copy never writes the canonical draft or its source.
+    /// New edits remain process-local until a separate copy is confirmed saved.
+    private func editRecoveryCopy(sourceID: UUID, preview: CommercialNewEstimateDraft) {
+        guard scopeMatches, resourceAuthorized, ownsDraft, let draftScope,
+              preview.created == nil, !preview.uncertain, !preview.requiresManualReview,
+              !preview.requiresLocationVerification, !preview.requiresGroupDisclosure else { return }
+        do {
+            let source = try CommercialDraftStore.estimateRecoveryCopies.read(scope: draftScope, id: sourceID)
+            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+            guard try encoder.encode(source) == encoder.encode(preview) else { throw CancellationError() }
+            let key = RecoveryCopyEditKey(scope: draftScope, sourceID: sourceID)
+            let draft = CommercialDraftStore.recoveryCopyEdits.read(for: key) ?? source
+            guard draft.customerID.lowercased() == initialCustomerID.lowercased(), draft.created == nil,
+                  !draft.uncertain, !draft.requiresManualReview, !draft.requiresLocationVerification,
+                  !draft.requiresGroupDisclosure else { throw CancellationError() }
+            let restoredLines = try draft.lines()
+            editingRecoveryCopyID = sourceID; memoryRecoveryPending = true
+            recoveryChoicePending = false; recoveryPreview = nil; recoveryPreviewCopyID = nil
+            customerID = draft.customerID; title = draft.title; lines = restoredLines; created = nil
+            createOutcomeUncertain = false; requiresManualReview = false; requiresLocationVerification = false
+            requiresGroupDisclosure = false; acceptedGroupLoss = draft.acceptedGroupLoss
+            holdUnpersistedDraft()
+            error = "Editing a separate copy. Save a recovery copy to keep these edits; closing the app can lose unsaved changes."
+        } catch { error = "This recovery copy could not be verified. Your saved drafts were not changed." }
+    }
+
     private func saveRecoveryCopy(_ draft: CommercialNewEstimateDraft) {
         guard (memoryRecoveryPending || recoveryChoicePending), scopeMatches, resourceAuthorized, ownsDraft,
               draft.customerID.lowercased() == initialCustomerID.lowercased(),

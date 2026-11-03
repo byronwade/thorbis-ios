@@ -63,6 +63,7 @@ struct CommercialDraftScope: Codable, Hashable {
     #endif
     /// Retains unsaved work only for this app process after an editor vanishes.
     static let unpersistedEstimates = VolatileDraftRecovery<CommercialDraftScope, CommercialNewEstimateDraft>()
+    static let recoveryCopyEdits = VolatileDraftRecovery<RecoveryCopyEditKey<CommercialDraftScope>, CommercialNewEstimateDraft>()
     static let estimateRecoveryCopyAttempts = EstimateRecoveryCopyAttempts<CommercialDraftScope, CommercialNewEstimateDraft>()
     static let estimateRecoveryCopies: EstimateRecoveryCopyStore<CommercialDraftScope, CommercialNewEstimateDraft> = {
         #if DEBUG

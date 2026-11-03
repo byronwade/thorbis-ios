@@ -67,4 +67,28 @@ import XCTest
         XCTAssertEqual(try store.read(scope: scope, id: ids[0]), draft)
     }
 
+    func testEditingSeparateCopyRetainsSourceAndScopesVolatileEdits() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let other = Scope(actor: "a", organization: "two", origin: scope.origin, job: scope.job)
+        let source = Draft(title: "Original", lines: ["Long details"]), edited = Draft(title: "Edited", lines: ["Long details", "New item"])
+        let sourceID = UUID(), store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory)
+        let edits = VolatileDraftRecovery<RecoveryCopyEditKey<Scope>, Draft>()
+        let attempts = EstimateRecoveryCopyAttempts<Scope, Draft>()
+        try store.install(source, scope: scope, id: sourceID)
+        let key = RecoveryCopyEditKey(scope: scope, sourceID: sourceID)
+        edits.hold(edited, for: key)
+        XCTAssertNil(edits.read(for: RecoveryCopyEditKey(scope: other, sourceID: sourceID)))
+        var editedID: UUID?
+        try attempts.perform(edited, scope: scope) { id, draft in
+            editedID = id; try store.install(draft, scope: scope, id: id)
+        }
+        let id = try XCTUnwrap(editedID)
+        XCTAssertNotEqual(id, sourceID)
+        XCTAssertEqual(try store.read(scope: scope, id: sourceID), source)
+        XCTAssertEqual(try store.read(scope: scope, id: id), edited)
+        XCTAssertEqual(edits.read(for: key), edited)
+    }
+
 }

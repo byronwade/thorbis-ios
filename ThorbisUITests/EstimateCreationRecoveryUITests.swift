@@ -180,6 +180,47 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertEqual(title.value as? String, original + " before after")
     }
 
+    func testRecoveredCopyCanBeEditedWithoutReplacingOriginal() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
+            "--paper-preview-estimate-create-recovery", "--commercial-draft-test-all-writes-fail",
+            "--paper-preview-estimate-parent-teardown", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 30)); if !add.isHittable { app.swipeUp() }; add.tap()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" preserved")
+        let sourceTitle = original + " preserved"
+        XCTAssertEqual(title.value as? String, sourceTitle)
+        app.buttons["estimate-recovery-parent-teardown"].tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); if !add.isHittable { app.swipeUp() }; add.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let saveCopy = app.buttons["Save a recovery copy"]
+        XCTAssertTrue(saveCopy.waitForExistence(timeout: 5)); saveCopy.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Recovery copy saved")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["estimate-recovery-parent-teardown"].tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); if !add.isHittable { app.swipeUp() }; add.tap()
+        let first = app.buttons["Review recovery copy 1"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15)); first.tap()
+        let edit = app.buttons["Edit a separate copy"]
+        XCTAssertTrue(edit.waitForExistence(timeout: 15)); edit.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 10)); XCTAssertEqual(title.value as? String, sourceTitle)
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" updated")
+        XCTAssertEqual(title.value as? String, sourceTitle + " updated")
+        XCTAssertTrue(saveCopy.waitForExistence(timeout: 5)); saveCopy.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Recovery copy saved")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["estimate-recovery-parent-teardown"].tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(add.waitForExistence(timeout: 10)); if !add.isHittable { app.swipeUp() }; add.tap()
+        XCTAssertTrue(app.buttons["Review recovery copy 1"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Review recovery copy 2"].exists, "Both the source and edited copy must remain available")
+    }
+
     func testCancelCustomerOnlyEditRequiresConfirmationAndDoesNotRestoreCanceledCustomer() {
         continueAfterFailure = false
         let app = XCUIApplication()
