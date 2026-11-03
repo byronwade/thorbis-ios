@@ -27,6 +27,7 @@ struct InvoiceReadProvenance {
     private struct Pending {
         let scope: InvoiceReadScope
         var canceled: Bool
+        var denied: Bool
     }
     private var pending: [UUID: Pending] = [:]
     private var latest: UUID?
@@ -34,7 +35,7 @@ struct InvoiceReadProvenance {
 
     mutating func begin(scope: InvoiceReadScope) -> InvoiceReadTicket {
         let ticket = InvoiceReadTicket(id: UUID(), scope: scope)
-        pending[ticket.id] = Pending(scope: scope, canceled: false)
+        pending[ticket.id] = Pending(scope: scope, canceled: false, denied: false)
         latest = ticket.id
         grant = nil
         return ticket
@@ -43,11 +44,13 @@ struct InvoiceReadProvenance {
     /// Publication requires every cursor in the chain and a validated network
     /// response for each; a saved page makes the whole membership read stale.
     mutating func publish(_ ticket: InvoiceReadTicket, current: InvoiceReadScope?,
-                          pages: [InvoiceReadPage], invoices: [UUID: String]) -> Bool {
-        guard let request = pending.removeValue(forKey: ticket.id), request.scope == ticket.scope,
-              !request.canceled, latest == ticket.id, current == ticket.scope else { return false }
-        latest = nil
-        guard !pages.isEmpty else { return false }
+                          pages: [InvoiceReadPage], invoices: [UUID: String],
+                          allRequestsTerminal: Bool) -> Bool {
+        guard let request = pending[ticket.id], request.scope == ticket.scope else { return false }
+        // A canceled multi-page read may still have child requests in flight.
+        // Only a definitive terminal signal or denial can retire its ticket.
+        guard !request.canceled, !request.denied, allRequestsTerminal else { return false }
+        guard latest == ticket.id, current == ticket.scope, !pages.isEmpty else { return false }
         var expected: String?
         var seen = Set<String>()
         for (index, page) in pages.enumerated() {
@@ -59,6 +62,8 @@ struct InvoiceReadProvenance {
             expected = page.next
         }
         guard expected == nil, invoices.values.allSatisfy(Self.validDigest) else { return false }
+        pending.removeValue(forKey: ticket.id)
+        latest = nil
         grant = (ticket.scope, invoices)
         return true
     }
@@ -66,7 +71,9 @@ struct InvoiceReadProvenance {
     /// A denial from an older outstanding read still retires a later grant for
     /// the same actor, tenant, origin and job, including after authority changes.
     mutating func deny(_ ticket: InvoiceReadTicket, current: InvoiceReadScope?) {
-        guard let request = pending.removeValue(forKey: ticket.id), request.scope == ticket.scope else { return }
+        guard var request = pending[ticket.id], request.scope == ticket.scope else { return }
+        request.denied = true
+        pending[ticket.id] = request
         guard let current else { grant = nil; latest = nil; return }
         guard ticket.scope.sameResource(as: current) else { return }
         grant = nil
@@ -88,6 +95,15 @@ struct InvoiceReadProvenance {
     mutating func finishCanceled(_ ticket: InvoiceReadTicket) {
         guard let request = pending[ticket.id], request.scope == ticket.scope, request.canceled else { return }
         pending.removeValue(forKey: ticket.id)
+    }
+
+    /// Retire a non-published read only after every child request is terminal
+    /// and every observed denial has been reported. Do not call on mere failure
+    /// to publish, because other child requests may still return a denial.
+    mutating func finishWithoutGrant(_ ticket: InvoiceReadTicket) {
+        guard let request = pending[ticket.id], request.scope == ticket.scope else { return }
+        pending.removeValue(forKey: ticket.id)
+        if latest == ticket.id { latest = nil; grant = nil }
     }
 
     func permits(scope: InvoiceReadScope, invoice: UUID, digest: String) -> Bool {
