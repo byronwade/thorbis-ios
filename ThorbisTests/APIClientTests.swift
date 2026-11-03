@@ -26,6 +26,48 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
     }
 
+    func testCanceledKnownOfflineInvoiceEvidenceDoesNotReturnSavedCopy() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/invoices", query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests()
+        client.knownOffline = true
+        let task = Task { @MainActor in
+            let response: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+            return response.source
+        }
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Canceled evidence read must not return a saved copy") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
+    func testCanceledInvoiceEvidenceNetworkFailureDoesNotReturnSavedCopy() async throws {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), .init(0, gate: gate)]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/invoices", query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests()
+        let task = Task { @MainActor in
+            let response: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+            return response.source
+        }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        task.cancel(); gate.release()
+        do { _ = try await task.value; XCTFail("Canceled network evidence read must not use a saved copy") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+
     func testInvoiceEvidenceRejectsPartialHTTPResponse() async throws {
         let client = APIClient(session: URLProtocolFixture.session([.init(206, "{}")]), baseURL: "https://app.thorbis.com")
         do {

@@ -476,7 +476,11 @@ final class APIClient: ObservableObject {
             PerfProbe.request(method, path, note: "saved copy")
             return DataResponse(data: copy.data, status: 200, contentType: "application/json", source: .savedCopy)
         }
-        if keptKey != nil, knownOffline, !SavedCopies.liveOnly, let copy = savedCopy() { return copy }
+        if invoiceEvidenceRead { try Task.checkCancellation() }
+        if keptKey != nil, knownOffline, !SavedCopies.liveOnly, let copy = savedCopy() {
+            if invoiceEvidenceRead { try Task.checkCancellation() }
+            return copy
+        }
         if let copyScope, let keptKey, SavedCopyStore.shared.exists(scope: copyScope, key: keptKey) {
             // A weak signal should not hold the screen for a minute when a copy is on the phone.
             req.timeoutInterval = 15
@@ -507,10 +511,13 @@ final class APIClient: ObservableObject {
         catch is CancellationError { throw CancellationError() }
         catch let error as URLError where error.code == .cancelled { throw CancellationError() }
         catch {
+            if invoiceEvidenceRead { try Task.checkCancellation() }
             let offline: Set<URLError.Code> = [.notConnectedToInternet, .networkConnectionLost, .timedOut, .cannotFindHost,
                                                .cannotConnectToHost, .dnsLookupFailed, .dataNotAllowed, .internationalRoamingOff]
             if let urlError = error as? URLError, offline.contains(urlError.code), keptKey != nil, let copy = savedCopy() {
+                if invoiceEvidenceRead { try Task.checkCancellation() }
                 onSavedCopyServed?()
+                if invoiceEvidenceRead { try Task.checkCancellation() }
                 return copy
             }
             // A change says plainly that it needs signal; changes that can wait are kept by their
