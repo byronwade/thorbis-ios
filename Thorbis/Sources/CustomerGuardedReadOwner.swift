@@ -1,10 +1,6 @@
 import Foundation
 import Combine
 
-enum CustomerGuardedTransport {
-    @TaskLocal static var liveOnly = false
-    @TaskLocal static var namespace: String? = nil
-}
 enum CustomerGuardedReadEvidence { case completeLive, limitedLive, cached }
 enum CustomerGuardedReadError: Error { case transportNotScoped, stale, denied }
 struct CustomerGuardedValue<Value> { let value: Value; let evidence: CustomerGuardedReadEvidence }
@@ -63,8 +59,8 @@ struct CustomerGuardedSnapshot<Value> {
         let ticket = try quarantine.begin(scope, authority: authority)
         var finished = false
         do {
-            let loaded = try await CustomerGuardedTransport.$liveOnly.withValue(ticket.requiresLive) {
-                try await CustomerGuardedTransport.$namespace.withValue(ticket.cacheNamespace) {
+            let loaded = try await SavedCopies.$liveOnly.withValue(ticket.requiresLive || SavedCopies.liveOnly) {
+                try await SavedCopies.$customerNamespace.withValue(ticket.cacheNamespace) {
                     guard isCurrent(), !Task.isCancelled else { throw CustomerGuardedReadError.stale }
                     return try await read()
                 }

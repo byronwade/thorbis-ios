@@ -27,7 +27,7 @@ import Combine
         let ownerObserver = owner.$snapshot.dropFirst().sink { _ in ownerEvents += 1 }
         do {
             try await owner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { true }) {
-                guard CustomerGuardedTransport.liveOnly, CustomerGuardedTransport.namespace != nil else {
+                guard SavedCopies.liveOnly, SavedCopies.customerNamespace != nil else {
                     throw CustomerGuardedReadError.transportNotScoped
                 }
                 return CustomerGuardedValue(value: "Authorized", evidence: .completeLive)
@@ -38,6 +38,14 @@ import Combine
         }
         guard owner.visibleValue(scope: scope, authority: authority, sessionID: sessionID) == "Authorized" else { print("FAIL: authorized result was not published"); exit(1) }
         guard ownerEvents > 0 else { print("FAIL: owner did not publish loaded value"); exit(1) }
+        do {
+            try await SavedCopies.$liveOnly.withValue(true) {
+                try await owner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { true }) {
+                    guard SavedCopies.liveOnly else { throw CustomerGuardedReadError.transportNotScoped }
+                    return CustomerGuardedValue(value: "Authorized", evidence: .limitedLive)
+                }
+            }
+        } catch { print("FAIL: owner weakened an outer live-only requirement"); exit(1) }
         let anotherOwner = CustomerGuardedReadOwner<String>(quarantine: quarantine)
         var revisionEvents = 0
         let observer = quarantine.$revision.dropFirst().sink { _ in revisionEvents += 1 }
@@ -87,7 +95,7 @@ import Combine
         guard owner.visibleValue(scope: scope, authority: authority, sessionID: sessionID) == nil else { print("FAIL: stale session was published"); exit(1) }
         do {
             try await owner.refresh(scope: scope, authority: authority, sessionID: sessionID, isCurrent: { true }) {
-                guard CustomerGuardedTransport.liveOnly else { throw CustomerGuardedReadError.transportNotScoped }
+                guard SavedCopies.liveOnly else { throw CustomerGuardedReadError.transportNotScoped }
                 return CustomerGuardedValue(value: "Offline copy", evidence: .cached)
             }
             print("FAIL: cached result accepted after denial"); exit(1)

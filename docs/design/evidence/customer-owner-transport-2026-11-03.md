@@ -1,0 +1,9 @@
+# Held customer-owner transport experiment
+
+This branch is not wired to a customer screen and is not a deployable authorization fix. The owner now uses the existing `SavedCopies` task locals for the ticket's cache namespace and combines its live-only requirement with any inherited live-only requirement. Structured child tasks inherit those locals; detached tasks do not.
+
+The initial iOS transport test failed because both real task locals were absent and the request used normal URL cache policy: `/private/tmp/thorbis-owner-transport-red.log`. After the change, the exact final source passed `CustomerGuardedOwnerTransportTests/testFirstCustomerReadUsesRealLiveOnlyAndNamespacedTransport`, including an outer live-only scope: `/private/tmp/thorbis-owner-transport-final.log`, result bundle `/private/tmp/thorbis-owner-ui-derived/Logs/Test/Test-Thorbis-2026.11.03_10-44-52--0500.xcresult`, source hashes `/private/tmp/thorbis-owner-transport-final-manifest.txt`. The Swift 6 standalone harness also passes using an explicit test-only SavedCopies stub.
+
+The test verifies policy and namespace presence and request cache headers for one synthetic history request. It does not prove the persisted key, denial/offline recovery, full compilation propagation, or a complete authorization scope. Its complete-live label is synthetic; the existing strict compilation loader explicitly cannot prove server history completeness or authorize cache recovery. Caller-provided evidence is not trusted proof. Production consumers, scope/session/API generation binding, visible copies, real Keychain and app-extension paths, and signed-device lifecycle tests remain unaddressed. Do not merge or expose this experiment.
+
+The preceding snapshot evidence document records the prior commit's fixture and is historical; this transport follow-up changes that source after its UI run.
