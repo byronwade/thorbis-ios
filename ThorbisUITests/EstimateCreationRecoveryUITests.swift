@@ -25,6 +25,57 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(retry.exists)
     }
 
+    func testActualJobEstimateSheetStaysOpenAfterPostCreateSaveFailure() {
+        let app = openActualJobEstimateWithFailedPostCreateSave()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.exists)
+        let top = app.navigationBars.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        top.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(title.exists)
+        XCTAssertTrue(app.buttons["Try saving draft again"].exists)
+    }
+
+    func testActualJobSheetScopeChangeKeepsFailedPostCreateDraftOpen() {
+        let app = openActualJobEstimateWithFailedPostCreateSave(extra: ["--paper-preview-estimate-test-switch-scope"])
+        let change = app.buttons["estimate-recovery-change-scope"]
+        XCTAssertTrue(change.waitForExistence(timeout: 10)); change.tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Try saving draft again"].waitForExistence(timeout: 5))
+        app.buttons["Try saving draft again"].tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].exists)
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].exists)
+        let allow = app.buttons["estimate-recovery-allow-saves"]
+        XCTAssertTrue(allow.waitForExistence(timeout: 5)); allow.tap()
+        app.buttons["Try saving draft again"].tap()
+        app.navigationBars.buttons["Close"].tap()
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForNonExistence(timeout: 10))
+        let reopen = app.buttons["job-add-estimate"]
+        XCTAssertTrue(reopen.waitForExistence(timeout: 15)); if !reopen.isHittable { app.swipeUp() }; reopen.tap()
+        XCTAssertTrue(app.buttons["Retry adding to job"].waitForExistence(timeout: 15), "The saved estimate should recover from the original job scope")
+    }
+
+    private func openActualJobEstimateWithFailedPostCreateSave(extra: [String] = []) -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages",
+            "--commercial-draft-test-created-write-fails", "--commercial-draft-test-id", UUID().uuidString] + extra
+        app.launch()
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 30))
+        if !add.isHittable { app.swipeUp() }
+        XCTAssertTrue(add.isHittable); add.tap()
+        XCTAssertTrue(app.textFields["Estimate title"].waitForExistence(timeout: 15))
+        addSampleItem(in: app)
+        let save = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Save estimate")).firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10)); save.tap()
+        XCTAssertTrue(app.buttons["Try saving draft again"].waitForExistence(timeout: 15))
+        return app
+    }
+
     func testCancelCustomerOnlyEditRequiresConfirmationAndDoesNotRestoreCanceledCustomer() {
         continueAfterFailure = false
         let app = XCUIApplication()

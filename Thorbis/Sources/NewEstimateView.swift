@@ -353,6 +353,12 @@ struct NewEstimateView: View {
                                 }
                                 .accessibilityIdentifier("estimate-recovery-toggle-job")
                             }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-test-switch-scope") {
+                                Button("Change sample session") { api.invalidateRequests() }
+                                    .accessibilityIdentifier("estimate-recovery-change-scope")
+                                Button("Allow sample saves") { CommercialDraftStore.previewFailCreatedWrites = false }
+                                    .accessibilityIdentifier("estimate-recovery-allow-saves")
+                            }
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
                                     Task {

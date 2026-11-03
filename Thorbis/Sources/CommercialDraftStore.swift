@@ -16,6 +16,7 @@ struct CommercialDraftScope: Codable, Hashable {
 /// provides device-bound data protection, and the directory is excluded from backups.
 @MainActor final class CommercialDraftStore {
     #if DEBUG
+    static var previewFailCreatedWrites = true
     static func trace(_ message: String) {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains("--commercial-draft-test-trace"),
@@ -39,7 +40,7 @@ struct CommercialDraftScope: Codable, Hashable {
             return CommercialDraftStore(directory: directory, writeItem: { data, url in
                 let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                 let value = object?["value"] as? [String: Any]
-                if value?["created"] is [String: Any] { throw CocoaError(.fileWriteNoPermission) }
+                if CommercialDraftStore.previewFailCreatedWrites, value?["created"] is [String: Any] { throw CocoaError(.fileWriteNoPermission) }
                 try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             })
         }
