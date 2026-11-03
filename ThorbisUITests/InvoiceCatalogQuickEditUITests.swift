@@ -55,7 +55,8 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let search = openCatalog(app, typing: "Camera sewer inspection")
         let item = app.buttons[itemID]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
-        item.tap()
+        // The item's text remains a direct add target at the standard text size.
+        item.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch.waitForExistence(timeout: 5))
 
         // A new search keeps the cart; the same item again adds a second, distinct line.
@@ -166,6 +167,45 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         proof.name = "Repeated adds keep the invoice price book reachable"
         proof.lifetime = .keepAlways
         add(proof)
+    }
+
+    func testLargeTextCatalogAddControlIsVisibleAndAddsTwiceWithKeyboard() {
+        let app = launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "--paper-preview-long-catalog-title"])
+        let search = openCatalog(app, typing: "Camera sewer inspection")
+        let item = app.buttons[itemID]
+        let done = app.buttons["price-book-done"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(item.frame.height, 44, "The add target must remain easy to touch")
+        XCTAssertLessThanOrEqual(item.frame.height, 64, "The add control must stay compact even when the item description is long")
+        let scroll = app.scrollViews.containing(NSPredicate(format: "identifier == %@", itemID)).firstMatch
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        for _ in 0..<8 {
+            if item.isHittable && item.frame.minY >= search.frame.maxY && item.frame.maxY < done.frame.minY { break }
+            let upper = search.frame.maxY + 12
+            let lower = done.frame.minY - 12
+            XCTAssertGreaterThan(lower - upper, 70, "The visible results viewport needs room to scroll above the Done bar")
+            let origin = app.coordinate(withNormalizedOffset: .zero)
+            origin.withOffset(CGVector(dx: scroll.frame.midX, dy: lower))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: scroll.frame.midX, dy: upper)))
+        }
+        XCTAssertTrue(item.isHittable)
+        XCTAssertGreaterThanOrEqual(item.frame.minY, search.frame.maxY)
+        XCTAssertLessThan(item.frame.maxY, done.frame.minY)
+        XCTAssertTrue(item.label.contains("Camera sewer inspection"), "The accessibility label identifies the item")
+        XCTAssertTrue(item.label.contains("written repair recommendation"), "The accessibility label retains the full long item name")
+        XCTAssertTrue(item.label.contains("245"), "The accessibility label includes the price")
+        let proof = XCTAttachment(screenshot: app.screenshot())
+        proof.name = "Large text price book with separate add target"
+        proof.lifetime = .keepAlways
+        add(proof)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        item.tap()
+        XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch.waitForExistence(timeout: 5))
+        item.tap()
+        XCTAssertTrue(app.buttons.matching(identifier: itemID).matching(NSPredicate(format: "value == %@", "2 in draft")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(search.value as? String, "Camera sewer inspection")
+        XCTAssertEqual(done.label, "Done · 2 items")
     }
 
     func testLargestTextKeepsCatalogEditingAndInvoiceReviewReachable() {
