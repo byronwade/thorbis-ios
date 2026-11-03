@@ -239,7 +239,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
             "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages", "--paper-preview-estimate-recovery-trace",
-            "--paper-preview-estimate-wait-presentation"]
+            "--paper-preview-estimate-wait-presentation", "--paper-preview-estimate-trace-taps"]
         app.launch()
         XCTAssertTrue(app.staticTexts["estimate-presentation-ready"].waitForExistence(timeout: 30), "The editor presentation must finish before tapping")
         let add = app.buttons["estimate-add-item"]
@@ -256,6 +256,43 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertTrue(found, "The selected item must enter the draft. Trace: \(trace)")
         app.buttons["price-book-done"].tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Replace capacitor")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testPickerTextTapWithKeyboard() { checkPickerTap(position: 0.25, hideKeyboard: false) }
+    func testPickerPlusTapWithKeyboard() { checkPickerTap(position: 0.9, hideKeyboard: false) }
+    func testPickerTextTapWithoutKeyboard() { checkPickerTap(position: 0.25, hideKeyboard: true) }
+    func testPickerPlusTapWithoutKeyboard() { checkPickerTap(position: 0.9, hideKeyboard: true) }
+
+    private func checkPickerTap(position: CGFloat, hideKeyboard: Bool) {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate",
+            "--paper-preview-estimate-create-recovery", "--paper-preview-catalog-pages", "--paper-preview-estimate-recovery-trace",
+            "--paper-preview-estimate-wait-presentation", "--paper-preview-estimate-trace-taps"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["estimate-presentation-ready"].waitForExistence(timeout: 30))
+        let open = app.buttons["estimate-add-item"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10)); open.tap()
+        let search = app.textFields["price-book-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("Replace capacitor")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10))
+        if hideKeyboard {
+            app.buttons["estimate-picker-hide-keyboard"].tap()
+            XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 10))
+        }
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
+        XCTAssertTrue(item.waitForExistence(timeout: 15)); XCTAssertTrue(item.isHittable)
+        let frame = item.frame
+        let point = CGPoint(x: frame.minX + frame.width * position, y: frame.midY)
+        print("PICKER_PROBE_GEOMETRY: frame=\(frame) point=\(point) keyboard=\(app.keyboards.firstMatch.exists)")
+        XCTAssertTrue(app.frame.contains(point))
+        item.coordinate(withNormalizedOffset: CGVector(dx: position, dy: 0.5)).tap()
+        let added = app.buttons.matching(identifier: "price-book-item-00000000-0000-4000-8000-000000009201")
+            .matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch
+        let found = added.waitForExistence(timeout: 5)
+        let trace = app.staticTexts["estimate-picker-event-trace"].value as? String ?? "missing"
+        print("PICKER_PROBE_TRACE: \(trace)")
+        XCTAssertTrue(found, "Exactly one item should be added. Trace: \(trace)")
     }
 
     func testDismissalDuringInitialEstimateReadDoesNotLink() {

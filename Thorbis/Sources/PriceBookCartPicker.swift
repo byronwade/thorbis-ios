@@ -48,8 +48,13 @@ struct PriceBookCartPicker: View {
             #if DEBUG
             if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-trace") {
                 TimelineView(.periodic(from: .now, by: 0.2)) { _ in
-                    Text("Sample picker trace").accessibilityIdentifier("estimate-picker-event-trace")
-                        .accessibilityValue(EstimateRecoveryPreview.shared.eventTrace)
+                    VStack {
+                        Text("Sample picker trace").accessibilityIdentifier("estimate-picker-event-trace")
+                            .accessibilityValue(EstimateRecoveryPreview.shared.eventTrace)
+                        if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-trace-taps") {
+                            Button("Hide sample keyboard") { focus = nil }.accessibilityIdentifier("estimate-picker-hide-keyboard")
+                        }
+                    }
                 }
             }
             #endif
@@ -79,9 +84,15 @@ struct PriceBookCartPicker: View {
                 }
                 .padding(.top, 4)
             }
+            #if DEBUG
+            .modifier(EstimatePickerTapProbe(marker: "scroll-tap"))
+            #endif
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await refresh(true) }
         }
+        #if DEBUG
+        .modifier(EstimatePickerTapProbe(marker: "picker-root-tap"))
+        #endif
         .background(Theme.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             PaperActionBar(title: added == 0 ? "Done" : "Done · \(added) \(added == 1 ? "item" : "items")",

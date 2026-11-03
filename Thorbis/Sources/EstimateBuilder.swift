@@ -701,6 +701,9 @@ private struct PriceBookCatalogResultRow: View {
             .accessibilityIdentifier("price-book-item-\(item.id)")
             .accessibilityValue(quantity.map { "\($0) in draft" } ?? "Not added")
             .accessibilityHint("Adds one to the current draft")
+            #if DEBUG
+            .modifier(EstimatePickerTapProbe(marker: "row-tap"))
+            #endif
         }
         .sensoryFeedback(.impact(weight: .light), trigger: quantity ?? 0)
         .animation(.spring(response: 0.25, dampingFraction: 0.8), value: quantity)
@@ -1361,3 +1364,14 @@ struct EstimateDiscountSheet: View {
         .task { focused = true }
     }
 }
+
+#if DEBUG
+struct EstimatePickerTapProbe: ViewModifier {
+    let marker: String
+    @ViewBuilder func body(content: Content) -> some View {
+        if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-trace-taps") {
+            content.simultaneousGesture(TapGesture().onEnded { EstimateRecoveryPreview.shared.record(marker) })
+        } else { content }
+    }
+}
+#endif
