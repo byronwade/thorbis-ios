@@ -6,7 +6,7 @@ import Foundation
 @MainActor final class AtomicEstimateEditorLifecycle {
     enum State: Equatable { case notOpen, needsRestore, editable, saveFailed, writeUncertain, writeRetryRequired, stageUncertain, attemptPending, closed }
     enum Failure: Error { case invalidState, unavailable }
-    enum WriteReconciliation: Equatable { case intendedDraftPresent, previousDraftPresent }
+    enum WriteReconciliation: Equatable { case intendedDraftPresent, previousDraftPresent, previousDraftAbsent }
     private(set) var state: State = .notOpen
     private(set) var recoveredDraft: CommercialNewEstimateDraft?
     private var recoveredBytes: Data?
@@ -37,7 +37,7 @@ import Foundation
               draftScope.document.lowercased() == "job:\(jobID.lowercased())|customer:\(customerID.lowercased())|location:\(locationID?.lowercased() ?? "")" else { throw Failure.invalidState }
         guard try store.acquireCoordinatedDraft(scope: draftScope, owner: owner) else { throw Failure.unavailable }
         do {
-            let loaded = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope)
+            let loaded = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner)
             let existing = loaded?.value
             sourceSnapshot = loaded?.bytes
             if let existing {
@@ -81,14 +81,14 @@ import Foundation
         guard state == .editable || state == .saveFailed, draft.customerID.lowercased() == customerID.lowercased() else { throw Failure.invalidState }
         var attemptedWrite = false
         do {
-            let current = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope)
+            let current = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner)
             guard current?.bytes == sourceSnapshot else { throw Failure.unavailable }
             let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
             let intended = try encoder.encode(draft)
             pendingWrite = intended
             attemptedWrite = true
             try store.saveCoordinatedDraft(draft, scope: draftScope, owner: owner)
-            guard let saved = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope) else { throw Failure.unavailable }
+            guard let saved = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner) else { throw Failure.unavailable }
             guard try encoder.encode(saved.value) == intended else { throw Failure.unavailable }
             sourceSnapshot = saved.bytes
             pendingWrite = nil
@@ -103,8 +103,14 @@ import Foundation
     /// does not prove what happened during the attempted write; it only permits
     /// an explicit, intent-bound retry while the caller retains its edits.
     @discardableResult func reconcileUncertainWrite() throws -> WriteReconciliation {
-        guard state == .writeUncertain, let intended = pendingWrite,
-              let current = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope) else { throw Failure.unavailable }
+        guard state == .writeUncertain, let intended = pendingWrite else { throw Failure.unavailable }
+        let current = try store.loadCoordinatedVersioned(CommercialNewEstimateDraft.self, scope: draftScope, owner: owner)
+        if current == nil {
+            guard sourceSnapshot == nil else { throw Failure.unavailable }
+            state = .writeRetryRequired
+            return .previousDraftAbsent
+        }
+        guard let current else { throw Failure.unavailable }
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
         if try encoder.encode(current.value) == intended {
             sourceSnapshot = current.bytes; pendingWrite = nil; state = .editable

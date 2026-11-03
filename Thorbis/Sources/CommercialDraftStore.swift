@@ -191,6 +191,24 @@ struct CommercialDraftScope: Codable, Hashable {
         return (envelope.value, bytes)
     }
 
+    /// The held lifecycle distinguishes a truly absent file from an access or
+    /// decoding failure. This remains an observation, not an atomic CAS.
+    func loadCoordinatedVersioned<Value: Codable>(_ type: Value.Type, scope: CommercialDraftScope, owner: UUID) throws -> (value: Value, bytes: Data)? {
+        guard isCoordinatedOwner(scope: scope, owner: owner) else { throw CocoaError(.fileReadNoPermission) }
+        let url = try file(for: scope)
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else {
+            let failure = errno
+            if failure == ENOENT { return nil }
+            throw POSIXError(POSIXErrorCode(rawValue: failure) ?? .EIO)
+        }
+        guard info.st_mode & S_IFMT == S_IFREG else { throw CocoaError(.fileReadCorruptFile) }
+        let bytes = try readItem(url)
+        let envelope = try JSONDecoder().decode(Envelope<Value>.self, from: bytes)
+        guard envelope.version == 1, envelope.scope == scope else { throw CocoaError(.fileReadCorruptFile) }
+        return (envelope.value, bytes)
+    }
+
     func remove(scope: CommercialDraftScope) throws {
         try removeRaw(scope: scope)
     }

@@ -212,4 +212,35 @@ import XCTest
         XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Unsaved changes")
     }
 
+    func testFailedFirstWriteCanRetryExactDraftWhenStillAbsent() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        var fail = true
+        let store = CommercialDraftStore(directory: root, writeItem: { data, url in
+            if fail { throw CocoaError(.fileWriteNoPermission) }
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        })
+        let editor = lifecycle(store); try editor.open()
+        XCTAssertThrowsError(try editor.save(draft)); fail = false
+        XCTAssertEqual(try editor.reconcileUncertainWrite(), .previousDraftAbsent)
+        XCTAssertThrowsError(try editor.close(preserving: draft))
+        try editor.retryUncertainWrite(draft)
+        XCTAssertEqual(editor.state, .editable)
+        XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Repair")
+    }
+    func testFirstWriteRetryDoesNotOverwriteNewerOrUnreadableFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        var fail = true
+        let store = CommercialDraftStore(directory: root, writeItem: { data, url in
+            if fail { throw CocoaError(.fileWriteNoPermission) }
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        })
+        let editor = lifecycle(store); try editor.open(); XCTAssertThrowsError(try editor.save(draft)); fail = false
+        XCTAssertEqual(try editor.reconcileUncertainWrite(), .previousDraftAbsent)
+        let other = CommercialDraftStore(directory: root)
+        try other.save("unreadable as draft", scope: scope)
+        XCTAssertThrowsError(try editor.retryUncertainWrite(draft))
+        XCTAssertEqual(editor.state, .writeRetryRequired)
+        XCTAssertEqual(try other.load(String.self, scope: scope), "unreadable as draft")
+    }
+
 }
