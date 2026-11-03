@@ -116,7 +116,7 @@ final class SessionControllerTests: XCTestCase {
     func testCompanyCreateRejectionAndUnavailableHaveDifferentRetrySafety() async {
         let (session, _) = controller([
             .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
-            .init(422, "{\"detail\":\"Name is invalid\"}"),
+            .init(403, "{\"code\":\"YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION\",\"message\":\"Not allowed\"}"),
             .init(503, "{\"detail\":\"Service unavailable\"}")
         ])
         await session.restore()
@@ -125,7 +125,7 @@ final class SessionControllerTests: XCTestCase {
             XCTFail("Expected rejected request")
         } catch {
             XCTAssertTrue(CompanyCreateFailure.isDefinitive(error))
-            XCTAssertEqual((error as? Problem)?.status, 422)
+            XCTAssertEqual((error as? Problem)?.status, 403)
         }
         do {
             _ = try await session.createCompany(name: "Unknown outcome")
