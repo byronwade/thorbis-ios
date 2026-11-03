@@ -813,11 +813,14 @@ struct CustomerDetailView: View {
                                         .padding(.top, 2)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    let headingLayout = typeSize.isAccessibilitySize
+                                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3))
+                                        : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                                    headingLayout {
                                         Text(location.label).font(Theme.font(16, weight: .medium))
-                                            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
-                                        Spacer(minLength: 4)
-                                        StatusWord(text: location.kind.statusLabel)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        StatusWord(text: location.kind.statusLabel).fixedSize()
                                     }
                                     .accessibilityElement(children: .combine)
                                     AddressLink(address: location.address, coordinates: location.coordinates)

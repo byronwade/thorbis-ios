@@ -1590,7 +1590,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                        "label": "Home", "kind": "service", "address": address, "createdAt": now, "updatedAt": now]]]
                 }
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
-                                    "label": "Home", "kind": "service", "address": address,
+                                    "label": ProcessInfo.processInfo.arguments.contains("--paper-preview-long-location-label")
+                                        ? "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
+                                        : "Home", "kind": "service", "address": address,
                                     "notes": "Sample location for design preview",
                                     "coordinates": previewCoordinates(customerID: id),
                                     "gateCode": "4821#", "alarmCode": "7350",
