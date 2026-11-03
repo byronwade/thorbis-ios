@@ -150,6 +150,24 @@ final class PriceBookSearchTests: XCTestCase {
         XCTAssertEqual(index.page("unknown", limit: 50).total, 0)
     }
 
+    func testCompletedRankingKeepsThePartialPageAnchorVisible() {
+        let partial = (1...100).map { item($0, String(format: "Valve %03d", $0), kind: "service") }
+        let newer = (101...160).map { item($0, String(format: "Valve 000 %03d", $0), kind: "service") }
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let original = PriceBookSearchIndex(items: partial)
+        let anchor = original.page("", kind: .service, now: now, limit: 50, offset: 50).results.first!.id
+        let completed = PriceBookSearchIndex(items: partial + newer)
+        let offset = completed.pageOffset(containing: anchor, query: "", kind: .service,
+                                          usage: [:], now: now, excludingIDs: [], limit: 50)!
+        XCTAssertEqual(offset, 100)
+        let page = completed.page("", kind: .service, now: now, limit: 50, offset: offset)
+        XCTAssertTrue(page.results.contains { $0.id == anchor })
+        XCTAssertNil(completed.pageOffset(containing: anchor, query: "", kind: .material,
+                                          usage: [:], now: now, excludingIDs: [], limit: 50))
+        XCTAssertNil(completed.pageOffset(containing: anchor, query: "", kind: .service,
+                                          usage: [:], now: now, excludingIDs: [anchor], limit: 50))
+    }
+
     func testRepeatedSearchChangesRespectFiltersUsageAndCatalogSnapshot() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let first = item(1, "Copper valve", cents: 100)
