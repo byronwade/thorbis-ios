@@ -12,7 +12,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         thorbisCustomerViewMenuItem(app).tap()
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
-        let more = app.buttons["Show more"]
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 10)); more.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final detail: return the work area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.textViews.firstMatch.exists)
@@ -42,7 +42,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         thorbisCustomerViewMenuItem(app).tap()
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
-        XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 5)); app.buttons["Show more"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.waitForExistence(timeout: 5)); app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 20), .completed)
@@ -66,14 +66,14 @@ final class CustomerDocumentBookUITests: XCTestCase {
         thorbisCustomerViewMenuItem(app).tap()
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
-        XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 5)); app.buttons["Show more"].tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.waitForExistence(timeout: 5)); app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
         let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 20), .completed)
         if canReopen {
-            XCTAssertTrue(app.buttons["Show more"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.waitForExistence(timeout: 5))
         } else {
-            XCTAssertFalse(app.buttons["Show more"].exists)
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch.exists)
         }
     }
 
