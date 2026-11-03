@@ -17,6 +17,11 @@ final class JobDocumentsUITests: XCTestCase {
         let second = app.buttons["job-estimate-\(addonA)"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
         XCTAssertTrue(second.exists)
+        XCTAssertTrue(first.label.contains("Awaiting approval"), "Sent work needs a clear next step")
+        XCTAssertTrue(second.label.contains("Not sent yet"), "Drafts must not look sent")
+        XCTAssertTrue(first.label.contains("EST-2218"))
+        XCTAssertTrue(second.label.contains("EST-2238"))
+        XCTAssertFalse(app.buttons["job-estimate-00000000-0000-4000-8000-000000002239"].exists, "Other jobs' estimates must not appear")
         // The $340 owed takes Money's bar; the estimates' Customer view stays beneath them, quieter.
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
@@ -31,6 +36,74 @@ final class JobDocumentsUITests: XCTestCase {
         capture(app, "Job estimate cards")
         first.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EST-2218")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testEstimateCardsKeepApprovedDeclinedAndUnknownAmountHonest() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-estimate-review-states"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let declined = app.buttons["job-estimate-\(estimateA)"]
+        let approved = app.buttons["job-estimate-\(addonA)"]
+        XCTAssertTrue(declined.waitForExistence(timeout: 10))
+        XCTAssertTrue(approved.exists)
+        XCTAssertTrue(declined.label.contains("Declined"))
+        XCTAssertFalse(declined.label.contains("Awaiting approval"))
+        XCTAssertTrue(approved.label.contains("Approved"))
+        XCTAssertTrue(approved.label.contains("View estimate details"))
+        XCTAssertFalse(approved.label.contains("$970.00"), "An unknown accepted scope has no invented total")
+    }
+
+    func testEstimateCardKeepsCompleteOptionsSeparateFromAnAmount() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-estimate-multiple-options"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let estimate = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.label.contains("2 options"))
+        XCTAssertTrue(estimate.label.contains("Awaiting approval"))
+        XCTAssertFalse(estimate.label.contains("$970.00"), "Complete alternatives cannot be summed or represented as one amount")
+    }
+
+    func testLargestTextKeepsJobEstimateCardsAndCustomerActionReachable() {
+        continueAfterFailure = false
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-thorbis.appearance", "dark"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15))
+        chooser.tap()
+        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
+        XCTAssertTrue(money.waitForExistence(timeout: 5))
+        money.tap()
+        let first = app.buttons["job-estimate-\(estimateA)"]
+        let second = app.buttons["job-estimate-\(addonA)"]
+        for _ in 0..<8 where !first.exists { app.swipeUp() }
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        XCTAssertTrue(first.label.contains("Awaiting approval"))
+        for _ in 0..<8 where !second.exists { app.swipeUp() }
+        XCTAssertTrue(second.waitForExistence(timeout: 5))
+        XCTAssertTrue(second.label.contains("Not sent yet"))
+        revealJobItem(second, in: app)
+        XCTAssertGreaterThanOrEqual(second.frame.height, 44)
+        capture(app, "Large text job estimates")
+        second.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EST-2238")).firstMatch.waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let present = app.buttons["job-money-customer-view"]
+        revealJobItem(present, in: app)
+        XCTAssertTrue(present.isHittable)
+    }
+
+    private func revealJobItem(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 10))
+        let chooser = app.buttons["job-section-chooser"]
+        let list = app.scrollViews.firstMatch
+        for _ in 0..<10 {
+            let frame = element.frame
+            if element.isHittable && frame.midY > chooser.frame.maxY && frame.midY < app.frame.maxY { break }
+            list.swipeUp()
+        }
+        XCTAssertTrue(element.isHittable)
+        XCTAssertGreaterThan(element.frame.midY, chooser.frame.maxY)
+        XCTAssertLessThan(element.frame.midY, app.frame.maxY)
     }
 
     func testNarrowJobSectionsCanReachEverySectionWithoutScrollingTabs() {

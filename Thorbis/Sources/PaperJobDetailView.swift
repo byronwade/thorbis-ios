@@ -1771,10 +1771,10 @@ struct JobDetailView: View {
                                     message: "Build one from the price book.")
                 }
                 if !jobEstimates.isEmpty || !unavailable.isEmpty {
-                    JobPanel {
+                    VStack(alignment: .leading, spacing: 10) {
                         ForEach(jobEstimates) { estimate in
                             NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId).thorbisBackButton() } label: {
-                                JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true).onWell()
+                                JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true).asJobEstimateCard()
                             }
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("job-estimate-\(estimate.id)")
@@ -1782,7 +1782,7 @@ struct JobDetailView: View {
                         }
                         ForEach(unavailable, id: \.self) { id in
                             JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
-                                           status: "unavailable", amount: nil, fresh: false).onWell()
+                                           status: "unavailable", amount: nil, fresh: false).asJobEstimateCard()
                                 // A container keeps the id on the card itself; without one it lands on each text.
                                 .accessibilityElement(children: .contain)
                                 .accessibilityIdentifier("job-estimate-unavailable-\(id)")
