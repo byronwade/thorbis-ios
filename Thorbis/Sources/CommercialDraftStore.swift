@@ -46,6 +46,7 @@ struct CommercialDraftScope: Codable, Hashable {
     private let directory: URL
     private let removeItem: (URL) throws -> Void
     private let writeItem: (Data, URL) throws -> Void
+    private let readItem: (URL) throws -> Data
     private var owners: [CommercialDraftScope: UUID] = [:]
     private var coordinatedDrafts: [CommercialDraftScope: (owner: UUID, fd: Int32)] = [:]
 
@@ -56,11 +57,12 @@ struct CommercialDraftScope: Codable, Hashable {
     }
 
     init(directory: URL? = nil, removeItem: ((URL) throws -> Void)? = nil,
-         writeItem: ((Data, URL) throws -> Void)? = nil) {
+         writeItem: ((Data, URL) throws -> Void)? = nil, readItem: ((URL) throws -> Data)? = nil) {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("CommercialDrafts", isDirectory: true)
         self.removeItem = removeItem ?? { try FileManager.default.removeItem(at: $0) }
         self.writeItem = writeItem ?? { data, url in try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
+        self.readItem = readItem ?? { try Data(contentsOf: $0) }
     }
 
     /// One editor per scope in this app process prevents two windows silently replacing each
@@ -183,7 +185,7 @@ struct CommercialDraftScope: Codable, Hashable {
         Self.trace("load \(scope.kind) exists=\(FileManager.default.fileExists(atPath: url.path))")
         #endif
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let bytes = try Data(contentsOf: url)
+        let bytes = try readItem(url)
         let envelope = try JSONDecoder().decode(Envelope<Value>.self, from: bytes)
         guard envelope.version == 1, envelope.scope == scope else { throw CocoaError(.fileReadCorruptFile) }
         return (envelope.value, bytes)

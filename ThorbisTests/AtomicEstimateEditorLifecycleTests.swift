@@ -26,10 +26,10 @@ import XCTest
         let owner = UUID(), editor = lifecycle(store, owner: owner)
         try editor.open(); try editor.save(draft); fail = true
         XCTAssertThrowsError(try editor.close(preserving: draft))
-        XCTAssertEqual(editor.state, .saveFailed)
+        XCTAssertEqual(editor.state, .writeUncertain)
         XCTAssertTrue(store.isCoordinatedOwner(scope: scope, owner: owner))
         XCTAssertFalse(try CommercialDraftStore(directory: root).acquireCoordinatedDraft(scope: scope, owner: UUID()))
-        fail = false; try editor.close(preserving: draft)
+        fail = false; try editor.reconcileUncertainWrite(); try editor.close(preserving: draft)
         XCTAssertEqual(editor.state, .closed)
         XCTAssertFalse(store.isOwned(scope: scope, owner: owner))
         XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Repair")
@@ -152,5 +152,41 @@ import XCTest
         XCTAssertEqual(editor.state, .saveFailed)
         XCTAssertThrowsError(try editor.close(preserving: draft))
         XCTAssertEqual(try other.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Newer work")
+    }
+    func testWrittenDraftCanBeRecognizedAfterReadbackFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        var failNextRead = false
+        let store = CommercialDraftStore(directory: root, writeItem: { data, url in
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]); failNextRead = true
+        }, readItem: { url in
+            if failNextRead { failNextRead = false; throw CocoaError(.fileReadUnknown) }
+            return try Data(contentsOf: url)
+        })
+        let editor = lifecycle(store); try editor.open()
+        XCTAssertThrowsError(try editor.save(draft))
+        XCTAssertEqual(editor.state, .writeUncertain)
+        XCTAssertThrowsError(try editor.close(preserving: draft))
+        try editor.reconcileUncertainWrite()
+        XCTAssertEqual(editor.state, .editable)
+        XCTAssertEqual(try store.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Repair")
+    }
+    func testUncertainWriteNeverOverwritesANewerDraft() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        var failNextRead = false
+        let store = CommercialDraftStore(directory: root, writeItem: { data, url in
+            try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]); failNextRead = true
+        }, readItem: { url in
+            if failNextRead { failNextRead = false; throw CocoaError(.fileReadUnknown) }
+            return try Data(contentsOf: url)
+        })
+        let editor = lifecycle(store); try editor.open(); XCTAssertThrowsError(try editor.save(draft))
+        let other = CommercialDraftStore(directory: root)
+        let newer = CommercialNewEstimateDraft(customerID: actor, title: "Newer", lines: [], uncertain: false,
+            created: nil, requiresLocationVerification: false, requiresManualReview: false,
+            requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        try other.save(newer, scope: scope)
+        XCTAssertThrowsError(try editor.reconcileUncertainWrite())
+        XCTAssertEqual(editor.state, .writeUncertain)
+        XCTAssertEqual(try other.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Newer")
     }
 }

@@ -4,12 +4,13 @@ import Foundation
 /// send implementation. The editor must still prove its live authority, guard
 /// every exit and coordinate all other writers before this may be wired.
 @MainActor final class AtomicEstimateEditorLifecycle {
-    enum State: Equatable { case notOpen, needsRestore, editable, saveFailed, stageUncertain, attemptPending, closed }
+    enum State: Equatable { case notOpen, needsRestore, editable, saveFailed, writeUncertain, stageUncertain, attemptPending, closed }
     enum Failure: Error { case invalidState, unavailable }
     private(set) var state: State = .notOpen
     private(set) var recoveredDraft: CommercialNewEstimateDraft?
     private var recoveredBytes: Data?
     private var sourceSnapshot: Data?
+    private var pendingWrite: Data?
     private let store: CommercialDraftStore
     private let journal: AtomicEstimateAttemptJournal
     private let draftScope: CommercialDraftScope
@@ -77,19 +78,34 @@ import Foundation
 
     func save(_ draft: CommercialNewEstimateDraft) throws {
         guard state == .editable || state == .saveFailed, draft.customerID.lowercased() == customerID.lowercased() else { throw Failure.invalidState }
+        var attemptedWrite = false
         do {
             let current = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope)
             guard current?.bytes == sourceSnapshot else { throw Failure.unavailable }
+            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+            let intended = try encoder.encode(draft)
+            pendingWrite = intended
+            attemptedWrite = true
             try store.saveCoordinatedDraft(draft, scope: draftScope, owner: owner)
             guard let saved = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope) else { throw Failure.unavailable }
-            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
-            guard try encoder.encode(saved.value) == encoder.encode(draft) else { throw Failure.unavailable }
+            guard try encoder.encode(saved.value) == intended else { throw Failure.unavailable }
             sourceSnapshot = saved.bytes
+            pendingWrite = nil
             state = .editable
         } catch {
-            state = .saveFailed
+            state = attemptedWrite ? .writeUncertain : .saveFailed
             throw error
         }
+    }
+
+    /// No write is issued here. Only a currently readable exact intended draft
+    /// resolves an ambiguous local write; anything else remains held for review.
+    func reconcileUncertainWrite() throws {
+        guard state == .writeUncertain, let intended = pendingWrite,
+              let current = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope) else { throw Failure.unavailable }
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        guard try encoder.encode(current.value) == intended else { throw Failure.unavailable }
+        sourceSnapshot = current.bytes; pendingWrite = nil; state = .editable
     }
 
     /// The caller must keep the editor visible and retain its in-memory draft
