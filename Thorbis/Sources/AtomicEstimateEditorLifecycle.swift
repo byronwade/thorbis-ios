@@ -9,6 +9,7 @@ import Foundation
     private(set) var state: State = .notOpen
     private(set) var recoveredDraft: CommercialNewEstimateDraft?
     private var recoveredBytes: Data?
+    private var sourceSnapshot: Data?
     private let store: CommercialDraftStore
     private let journal: AtomicEstimateAttemptJournal
     private let draftScope: CommercialDraftScope
@@ -34,7 +35,9 @@ import Foundation
               draftScope.document.lowercased() == "job:\(jobID.lowercased())|customer:\(customerID.lowercased())|location:\(locationID?.lowercased() ?? "")" else { throw Failure.invalidState }
         guard try store.acquireCoordinatedDraft(scope: draftScope, owner: owner) else { throw Failure.unavailable }
         do {
-            let existing = try store.load(CommercialNewEstimateDraft.self, scope: draftScope)
+            let loaded = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope)
+            let existing = loaded?.value
+            sourceSnapshot = loaded?.bytes
             if let existing {
                 guard existing.customerID.lowercased() == customerID.lowercased() else { throw Failure.unavailable }
                 // Codable can decode a structurally invalid saved line (for
@@ -75,7 +78,13 @@ import Foundation
     func save(_ draft: CommercialNewEstimateDraft) throws {
         guard state == .editable || state == .saveFailed, draft.customerID.lowercased() == customerID.lowercased() else { throw Failure.invalidState }
         do {
+            let current = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope)
+            guard current?.bytes == sourceSnapshot else { throw Failure.unavailable }
             try store.saveCoordinatedDraft(draft, scope: draftScope, owner: owner)
+            guard let saved = try store.loadVersioned(CommercialNewEstimateDraft.self, scope: draftScope) else { throw Failure.unavailable }
+            let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+            guard try encoder.encode(saved.value) == encoder.encode(draft) else { throw Failure.unavailable }
+            sourceSnapshot = saved.bytes
             state = .editable
         } catch {
             state = .saveFailed

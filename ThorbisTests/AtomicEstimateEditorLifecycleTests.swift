@@ -140,4 +140,17 @@ import XCTest
         XCTAssertEqual(editor.state, .editable)
         try editor.close(preserving: incomplete)
     }
+    func testExternalChangeBlocksStaleSaveAndCloseWithoutOverwriting() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommercialDraftStore(directory: root), other = CommercialDraftStore(directory: root), editor = lifecycle(store)
+        try editor.open(); try editor.save(draft)
+        let newer = CommercialNewEstimateDraft(customerID: actor, title: "Newer work", lines: [], uncertain: false,
+            created: nil, requiresLocationVerification: false, requiresManualReview: false,
+            requiresGroupDisclosure: false, acceptedGroupLoss: false)
+        try other.save(newer, scope: scope)
+        XCTAssertThrowsError(try editor.save(draft))
+        XCTAssertEqual(editor.state, .saveFailed)
+        XCTAssertThrowsError(try editor.close(preserving: draft))
+        XCTAssertEqual(try other.load(CommercialNewEstimateDraft.self, scope: scope)?.title, "Newer work")
+    }
 }

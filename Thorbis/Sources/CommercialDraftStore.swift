@@ -172,14 +172,21 @@ struct CommercialDraftScope: Codable, Hashable {
     }
 
     func load<Value: Codable>(_ type: Value.Type, scope: CommercialDraftScope) throws -> Value? {
+        try loadVersioned(type, scope: scope)?.value
+    }
+
+    /// Exact encoded bytes and decoded value from one read, for detecting
+    /// changes before a held editor writes. This is not a cross-process CAS.
+    func loadVersioned<Value: Codable>(_ type: Value.Type, scope: CommercialDraftScope) throws -> (value: Value, bytes: Data)? {
         let url = try file(for: scope)
         #if DEBUG
         Self.trace("load \(scope.kind) exists=\(FileManager.default.fileExists(atPath: url.path))")
         #endif
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let envelope = try JSONDecoder().decode(Envelope<Value>.self, from: Data(contentsOf: url))
+        let bytes = try Data(contentsOf: url)
+        let envelope = try JSONDecoder().decode(Envelope<Value>.self, from: bytes)
         guard envelope.version == 1, envelope.scope == scope else { throw CocoaError(.fileReadCorruptFile) }
-        return envelope.value
+        return (envelope.value, bytes)
     }
 
     func remove(scope: CommercialDraftScope) throws {
