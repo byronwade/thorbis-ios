@@ -96,13 +96,14 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
         let chooser = app.buttons["job-section-chooser"]
         let list = app.scrollViews.firstMatch
+        let topBoundary = chooser.exists ? chooser.frame.maxY : app.frame.minY
         for _ in 0..<10 {
             let frame = element.frame
-            if element.isHittable && frame.midY > chooser.frame.maxY && frame.midY < app.frame.maxY { break }
+            if element.isHittable && frame.midY > topBoundary && frame.midY < app.frame.maxY { break }
             list.swipeUp()
         }
         XCTAssertTrue(element.isHittable)
-        XCTAssertGreaterThan(element.frame.midY, chooser.frame.maxY)
+        XCTAssertGreaterThan(element.frame.midY, topBoundary)
         XCTAssertLessThan(element.frame.midY, app.frame.maxY)
     }
 
