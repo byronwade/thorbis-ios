@@ -67,4 +67,38 @@ import XCTest
         XCTAssertEqual(try store.read(scope: scope, id: ids[0]), draft)
     }
 
+    func testDiscardRequiresExactContentAndPreventsRetryResurrection() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory)
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let other = Scope(actor: "a", organization: "two", origin: scope.origin, job: scope.job)
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        try store.install(draft, scope: scope, id: id)
+        XCTAssertThrowsError(try store.discard(.init(title: "Different", lines: []), scope: scope, id: id))
+        XCTAssertThrowsError(try store.discard(draft, scope: other, id: id))
+        XCTAssertEqual(try store.read(scope: scope, id: id), draft)
+        try store.discard(draft, scope: scope, id: id)
+        XCTAssertEqual(try store.list(scope: scope), [])
+        XCTAssertThrowsError(try store.install(draft, scope: scope, id: id))
+        try store.discard(draft, scope: scope, id: id)
+    }
+    func testUnconfirmedRemovalStaysHeldAndCanRetry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let scope = Scope(actor: "a", organization: "one", origin: "https://example.test", job: "j")
+        let draft = Draft(title: "Unfinished", lines: ["Details"]), id = UUID()
+        var fail = true
+        let store = EstimateRecoveryCopyStore<Scope, Draft>(directory: directory, removeItem: { url in
+            if fail { throw CocoaError(.fileWriteNoPermission) }
+            try FileManager.default.removeItem(at: url)
+        })
+        try store.install(draft, scope: scope, id: id)
+        XCTAssertThrowsError(try store.discard(draft, scope: scope, id: id))
+        XCTAssertThrowsError(try store.install(draft, scope: scope, id: id))
+        fail = false
+        try store.discard(draft, scope: scope, id: id)
+        XCTAssertEqual(try store.list(scope: scope), [])
+    }
+
 }
