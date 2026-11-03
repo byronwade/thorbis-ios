@@ -2,6 +2,11 @@ import XCTest
 @testable import Thorbis
 
 final class EstimateCreationRecoveryTests: XCTestCase {
+    func testHeldAtomicOperationCannotEditOrFallBackEvenWhenOldEstimateIDExists() {
+        let held = EstimateCreationRecovery(isSaving: false, savedEstimateID: "saved", createOutcomeUncertain: false, atomicOperationPending: true)
+        XCTAssertFalse(held.canEdit)
+        XCTAssertFalse(held.mayProceed(validDraft: true))
+    }
     func testUnknownLinkOutcomeCanRetrySameKnownEstimateAfterVerification() {
         let recovered = EstimateCreationRecovery(isSaving: false, savedEstimateID: "saved", createOutcomeUncertain: true)
         XCTAssertTrue(recovered.mayProceed(validDraft: true))

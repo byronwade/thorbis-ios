@@ -102,13 +102,16 @@ struct CommercialNewEstimateDraft: Codable {
     let requiresManualReview: Bool
     let requiresGroupDisclosure: Bool
     let acceptedGroupLoss: Bool
+    /// Reserved for the gated atomic path; old drafts decode with no operation.
+    let atomicOperation: AtomicEstimateCommand?
     init(customerID: String, title: String, lines: [EstimateRevisionLineDraft], uncertain: Bool,
          created: EstimateRecord?, requiresLocationVerification: Bool, requiresManualReview: Bool,
-         requiresGroupDisclosure: Bool, acceptedGroupLoss: Bool) {
+         requiresGroupDisclosure: Bool, acceptedGroupLoss: Bool, atomicOperation: AtomicEstimateCommand? = nil) {
         self.customerID = customerID; self.title = title; draftLines = lines.map(EstimateDraftLine.init)
         self.uncertain = uncertain; self.created = created
         self.requiresLocationVerification = requiresLocationVerification; self.requiresManualReview = requiresManualReview
         self.requiresGroupDisclosure = requiresGroupDisclosure; self.acceptedGroupLoss = acceptedGroupLoss
+        self.atomicOperation = atomicOperation
     }
     func lines() throws -> [EstimateRevisionLineDraft] { try draftLines.map { try $0.line() } }
 }

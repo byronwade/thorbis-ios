@@ -6,11 +6,13 @@ struct EstimateCreationRecovery {
     let isSaving: Bool
     let savedEstimateID: String?
     let createOutcomeUncertain: Bool
+    let atomicOperationPending: Bool
 
-    init(isSaving: Bool, savedEstimateID: String?, createOutcomeUncertain: Bool = false) {
+    init(isSaving: Bool, savedEstimateID: String?, createOutcomeUncertain: Bool = false, atomicOperationPending: Bool = false) {
         self.isSaving = isSaving
         self.savedEstimateID = savedEstimateID
         self.createOutcomeUncertain = createOutcomeUncertain
+        self.atomicOperationPending = atomicOperationPending
     }
 
     /// These client/server input or authorization rejections are definitive; other responses
@@ -20,7 +22,7 @@ struct EstimateCreationRecovery {
         return [400, 403, 404, 409, 413, 422].contains(status)
     }
 
-    var canEdit: Bool { !isSaving && savedEstimateID == nil }
+    var canEdit: Bool { !isSaving && savedEstimateID == nil && !atomicOperationPending }
 
     /// Verify the create response against the submitted scope and money, allowing the server
     /// to add line IDs, capture timestamps and original price-book snapshot metadata.
@@ -73,7 +75,7 @@ struct EstimateCreationRecovery {
     }
 
     func mayProceed(validDraft: Bool) -> Bool {
-        !isSaving && (savedEstimateID != nil || (!createOutcomeUncertain && validDraft))
+        !isSaving && !atomicOperationPending && (savedEstimateID != nil || (!createOutcomeUncertain && validDraft))
     }
 }
 
