@@ -9,6 +9,61 @@ final class CustomerJobCompilationTests: XCTestCase {
     private let jobB = uid(2)
     private let author = uid(5)
 
+    func testLiveOnlyCustomerHistoryDoesNotFallBackToSavedCopyAfterNetworkFailure() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, page([])), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "customer-history-test-\(UUID().uuidString)"
+        _ = try await client.fieldCustomerHistory(customer)
+        try await waitForSavedHistory(client)
+        client.invalidateRequests()
+        do {
+            _ = try await SavedCopies.$liveOnly.withValue(true) { try await client.fieldCustomerHistory(customer) }
+            XCTFail("A fresh-only read must not return a saved copy after a network failure")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.detail, "No connection. Check your signal and try again.")
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "The fresh read must reach the network")
+    }
+
+    func testOrdinaryCustomerHistoryCanStillUseSavedCopyOffline() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, page([])), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "customer-history-test-\(UUID().uuidString)"
+        _ = try await client.fieldCustomerHistory(customer)
+        try await waitForSavedHistory(client)
+        client.invalidateRequests()
+        client.knownOffline = true
+        let saved = try await client.fieldCustomerHistory(customer)
+        XCTAssertTrue(saved.items.isEmpty)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "Known offline reads should use the saved response directly")
+    }
+
+    func testOrdinaryCustomerHistoryCanUseSavedCopyAfterNetworkFailure() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, page([])), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "customer-history-test-\(UUID().uuidString)"
+        _ = try await client.fieldCustomerHistory(customer)
+        try await waitForSavedHistory(client)
+        client.invalidateRequests()
+        let saved = try await client.fieldCustomerHistory(customer)
+        XCTAssertTrue(saved.items.isEmpty)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "An ordinary failed network read may use its saved response")
+    }
+
+    func testLiveOnlyCustomerHistoryBypassesURLSessionCache() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, page([]))]), baseURL: "https://app.thorbis.com")
+        _ = try await SavedCopies.$liveOnly.withValue(true) { try await client.fieldCustomerHistory(customer) }
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+    }
+
+    private func waitForSavedHistory(_ client: APIClient) async throws {
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/customers/\(customer)/history", query: [URLQueryItem(name: "limit", value: "50")])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key), "The first live response must be saved before testing offline fallback")
+    }
+
     func testTwoJobsCompileToThirtyFiveAndStayGrouped() async throws {
         let replies = fixture(photosA: 15, photosB: 20, notesA: 15, notesB: 20, documentsA: 15, documentsB: 20, estimatesA: 15, estimatesB: 20, invoicesA: 15, invoicesB: 20, historyA: 15, historyB: 20)
         let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
