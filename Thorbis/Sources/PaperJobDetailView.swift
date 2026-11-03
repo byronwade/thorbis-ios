@@ -28,6 +28,17 @@ struct JobDetailView: View {
     @EnvironmentObject private var pendingMedia: PendingMediaStore
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
+    @StateObject private var officeStore = JobOfficeOfflineStore.shared
+    @State private var officeSnapshot: JobOfficeOfflineStore.Snapshot?
+    @State private var officeSnapshotScope: JobOfficeOfflineScope?
+    @State private var officeUnavailableScope: JobOfficeOfflineScope?
+    @State private var officeNeedsConnection = false
+    @State private var officeGeneralUnavailable = false
+    #if DEBUG
+    @State private var previewOfficeCachePrepared = false
+    @State private var previewOfficeDenialRecorded = false
+    @State private var previewSecondJob = false
+    #endif
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
     @State private var customerPaymentInvoiceID: String?
     @State private var documentInvoiceID: String?
@@ -319,6 +330,19 @@ struct JobDetailView: View {
         } }
         // v2: assigning a tech is a modal (one task), not a pushed page.
         .sheet(isPresented: $showAssign, onDismiss: { Task { await load() } }) { SheetSurface { JobAssignmentView(jobID: jobId) } }
+        #if DEBUG
+        .sheet(isPresented: $previewSecondJob) {
+            NavigationStack {
+                JobDetailView(jobId: jobId)
+                    .toolbar {
+                        Button("Close sample job") {
+                            PaperPreviewProtocol.takeOfficeJobOffline()
+                            previewSecondJob = false
+                        }
+                    }
+            }
+        }
+        #endif
         .task {
             #if DEBUG
             // Screenshot-only: the job's modals open over the job (job-assign, --paper-preview-pause).
@@ -392,6 +416,18 @@ struct JobDetailView: View {
             }
             #endif
         }
+        .onReceive(officeStore.$revision.dropFirst()) { _ in
+            guard let scope = jobOfficeScope(),
+                  let current = officeStore.offline(scope: scope, authorized: true) else {
+                officeSnapshot = nil
+                officeSnapshotScope = nil
+                return
+            }
+            officeSnapshot = current
+            officeSnapshotScope = scope
+            officeUnavailableScope = nil
+        }
+        .onChange(of: api.requestGeneration) { _, _ in Task { await load() } }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
@@ -1196,6 +1232,17 @@ struct JobDetailView: View {
     private func overviewContent(_ job: JobRecord) -> some View {
         // OnSite.dc.html sets its blocks 18pt apart; Job.dc.html 22.
         VStack(alignment: .leading, spacing: isOnSite ? 18 : 22) {
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-office-denial-test") &&
+                !ProcessInfo.processInfo.arguments.contains("--paper-preview-office-job-offline") {
+                Button("Deny sample job access") {
+                    Task { await prepareOfficeDenialFixture(job) }
+                }
+                Button("Open another sample view") { previewSecondJob = true }
+                if previewOfficeCachePrepared { Text("Sample job cache prepared").accessibilityIdentifier("office-test-cache-prepared") }
+                if previewOfficeDenialRecorded { Text("Sample job denial recorded").accessibilityIdentifier("office-test-denial-recorded") }
+            }
+            #endif
             if isOnSite {
                 toolkit(job).id("job-toolkit")
                 wrapUpPanel(job).id("job-wrap-up")
@@ -1239,10 +1286,35 @@ struct JobDetailView: View {
         }
     }
 
+    #if DEBUG
+    private func prepareOfficeDenialFixture(_ sampleJob: JobRecord) async {
+        guard let origin = api.normalizedOrigin, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id,
+              let encoded = try? JSONEncoder().encode(sampleJob) else { return }
+        let savedScope = SavedCopies.scope(actorID: actor, organizationID: organization)
+        api.savedCopyScope = savedScope
+        let key = SavedCopies.key(origin: origin, path: "/v1/jobs/\(jobId)", query: [])
+        SavedCopyStore.shared.write(encoded, scope: savedScope, key: key)
+        for _ in 0..<100 {
+            if let data = SavedCopyStore.shared.read(scope: savedScope, key: key)?.data,
+               let cached = try? JSONDecoder().decode(JobRecord.self, from: data),
+               cached.notes?.contains("Final instruction: confirm the gate is closed") == true {
+                previewOfficeCachePrepared = true
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard previewOfficeCachePrepared else { return }
+        PaperPreviewProtocol.denyOfficeJob()
+        await load()
+    }
+    #endif
+
     /// Who the job is for (with membership and the account at a glance, opening their profile),
     /// then why the office sent the visit, and the pause reason when it's paused.
     private func customerPanel(_ job: JobRecord) -> some View {
-        let officeNote = job.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let office = officeSnapshotScope == jobOfficeScope() ? officeSnapshot?.job : nil
+        let officeNote = office?.notes?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         // v2: no "Customer" label; the name and avatar already say whose job it is.
         return VStack(alignment: .leading, spacing: 6) {
         JobPanel {
@@ -1285,18 +1357,13 @@ struct JobDetailView: View {
                 .padding(.horizontal, 16).padding(.vertical, 12)
                 .accessibilityElement(children: .combine)
             }
-            if !officeNote.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("From the office").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
-                    Text(officeNote)
-                        .font(Theme.font(15)).foregroundStyle(Theme.foreground).lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                        .accessibilityLabel("From the office: \(officeNote)")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16).padding(.vertical, 12)
+            if officeGeneralUnavailable || (officeUnavailableScope != nil && officeUnavailableScope == jobOfficeScope()) {
+                Text(officeNeedsConnection ? "Connect to verify job details." : "Couldn't verify job details. Pull to refresh.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+            } else if let office, !officeNote.isEmpty {
+                JobOfficeInstructions(job: office, text: officeNote, readAllowed: true)
             }
         }
         // A container, so the link inside keeps its own `job-customer-link` identifier.
@@ -2510,42 +2577,157 @@ struct JobDetailView: View {
         }
         await invoicePaymentModel?.load()
     }
+    private func jobOfficeScope() -> JobOfficeOfflineScope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id,
+              session.can("job.view", feature: "jobs"), let origin = api.normalizedOrigin,
+              let policy = session.policyVersion, let authority = session.authorityGeneration else { return nil }
+        return JobOfficeOfflineScope(actor: actor, organization: organization, origin: origin, job: jobId,
+                                     policyVersion: policy, authorityGeneration: authority,
+                                     session: session.generation, authority: session.authorityRevision,
+                                     api: api.requestGeneration)
+    }
+
     private func load() async {
-        let generation = session.generation
-        let authorityRevision = session.authorityRevision
-        let policyVersion = session.policyVersion
+        guard !Task.isCancelled else { return }
+        guard let scope = jobOfficeScope() else {
+            officeSnapshot = nil; officeSnapshotScope = nil; officeUnavailableScope = nil
+            officeGeneralUnavailable = true; officeNeedsConnection = false
+            await loadGeneralWithoutOffice()
+            return
+        }
+        officeGeneralUnavailable = false
+        officeSnapshot = nil
+        officeSnapshotScope = nil
+        officeUnavailableScope = nil
+        let ticket: UUID
+        do { ticket = try officeStore.beginLive(scope: scope) }
+        catch {
+            guard jobOfficeScope() == scope else { return }
+            officeUnavailableScope = scope; officeNeedsConnection = false
+            await loadGeneralWithoutOffice()
+            return
+        }
+        let loadedJob: JobRecord
         do {
-            let loadedJob = try await api.fieldJob(jobId)
-            guard session.generation == generation, session.authorityRevision == authorityRevision,
-                  session.policyVersion == policyVersion else { return }
-            guard loadedJob.id == jobId, loadedJob.organizationId == session.activeOrganization?.id else {
-                throw Problem(title: "Job could not be verified", status: nil, detail: nil)
+            let verified = try await SavedCopies.$liveOnly.withValue(true) {
+                try await api.fieldJob(jobId, requireFresh: true)
             }
-            job = loadedJob
-            // Record before the follow-up requests below, while the identity is known to match.
-            RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
-                                      subtitle: "JOB-\(loadedJob.id.suffix(4).uppercased()) · \(store.customerName(loadedJob.customerId))")
-            let locationContext = customerContext(loadedJob)
-            if locationContext == nil || locationsContext != locationContext {
-                locations = []
-                locationsContext = nil
-                locationsFailed = false
+            guard jobOfficeScope() == scope, !Task.isCancelled else { return }
+            do {
+                guard try officeStore.pendingStatus(scope: scope, ticket: ticket) else { return }
+            } catch {
+                guard jobOfficeScope() == scope, !Task.isCancelled else { return }
+                officeUnavailableScope = scope; officeNeedsConnection = false
+                await loadGeneralWithoutOffice(forceFresh: true)
+                return
             }
-            if locationContext != nil { await loadLocations(loadedJob) }
-            if let locationContext, contactsContext != locationContext || !contactsLoaded { await loadContacts(loadedJob) }
-            outbox.learn(loadedJob)
-            JobDetailCache.save(loadedJob)
+            let snapshot: JobOfficeOfflineStore.Snapshot
+            do {
+                guard let completed = try officeStore.completeLive(scope: scope, ticket: ticket, job: verified,
+                                                                   stillAuthorized: true) else { return }
+                snapshot = completed
+            } catch {
+                // The job was verified, but the office note could not be safely
+                // stored. Keep the general job usable without exposing the note.
+                guard jobOfficeScope() == scope, !Task.isCancelled else { return }
+                officeUnavailableScope = scope; officeNeedsConnection = false
+                await presentGeneralJob(verified) { jobOfficeScope() == scope }
+                return
+            }
+            officeSnapshot = snapshot; officeSnapshotScope = scope
+            loadedJob = verified
+        } catch is CancellationError {
+            return
+        } catch {
+            guard jobOfficeScope() == scope, !Task.isCancelled else { return }
+            if let problem = error as? Problem, let status = problem.status, [401, 403, 404].contains(status) {
+                do {
+                    try officeStore.deny(scope: scope)
+                    #if DEBUG
+                    if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-office-denial-test") {
+                        previewOfficeDenialRecorded = true
+                    }
+                    #endif
+                } catch { }
+                officeSnapshot = nil; officeSnapshotScope = nil
+                self.error = error.localizedDescription
+            } else if error.isConnectivityFailure {
+                if let snapshot = try? officeStore.restoreAfterConnectivityFailure(scope: scope, ticket: ticket,
+                                                                                    stillAuthorized: true) {
+                    officeSnapshot = snapshot; officeSnapshotScope = scope
+                } else if officeStore.isPending(scope: scope, ticket: ticket) {
+                    officeUnavailableScope = scope; officeNeedsConnection = true
+                }
+                guard officeStore.isPending(scope: scope, ticket: ticket) || officeSnapshotScope == scope else { return }
+                if job == nil { job = officeSnapshot?.job ?? JobDetailCache.job(jobId) ?? listRecord() }
+                if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
+                if job != nil { self.error = nil; return }
+                self.error = error.localizedDescription
+            } else {
+                guard officeStore.isPending(scope: scope, ticket: ticket) else { return }
+                officeUnavailableScope = scope; officeNeedsConnection = false
+                self.error = error.localizedDescription
+            }
+            return
+        }
+        await presentGeneralJob(loadedJob) { jobOfficeScope() == scope }
+    }
+
+    /// If the office store cannot establish a scope, keep the existing general
+    /// job path available while the office instructions remain hidden.
+    private func loadGeneralWithoutOffice(forceFresh: Bool = false) async {
+        guard session.phase == .ready, session.user != nil, session.can("job.view", feature: "jobs") else { return }
+        let generation = session.generation
+        let authority = session.authorityRevision
+        let apiGeneration = api.requestGeneration
+        let origin = api.normalizedOrigin
+        let organization = session.activeOrganization?.id
+        func current() -> Bool {
+            session.generation == generation && session.authorityRevision == authority &&
+                api.requestGeneration == apiGeneration && api.normalizedOrigin == origin &&
+                session.activeOrganization?.id == organization
+        }
+        do {
+            let loaded = try await SavedCopies.$liveOnly.withValue(forceFresh || SavedCopies.liveOnly) {
+                try await api.fieldJob(jobId, requireFresh: forceFresh)
+            }
+            await presentGeneralJob(loaded, current: current)
+        } catch is CancellationError { } catch {
+            guard current() else { return }
+            if error.isConnectivityFailure {
+                if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
+                if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
+                if job != nil { self.error = nil; return }
+            }
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func presentGeneralJob(_ loaded: JobRecord, current: () -> Bool) async {
+        guard current(), loaded.id == jobId, loaded.organizationId == session.activeOrganization?.id else { return }
+        job = loaded
+        RecentItems.shared.record(.job, id: loaded.id, title: loaded.title,
+                                  subtitle: "JOB-\(loaded.id.suffix(4).uppercased()) · \(store.customerName(loaded.customerId))")
+        let context = customerContext(loaded)
+        if context == nil || locationsContext != context {
+            locations = []; locationsContext = nil; locationsFailed = false
+        }
+        if context != nil { await loadLocations(loaded) }
+        if let context, contactsContext != context || !contactsLoaded { await loadContacts(loaded) }
+        guard current() else { return }
+        outbox.learn(loaded)
+        JobDetailCache.save(loaded)
+        do {
             let loadedNotes = try await api.fieldNotes(jobId)
-            guard session.generation == generation else { return }
+            guard current() else { return }
             notes = loadedNotes
             JobDetailCache.save(notes: loadedNotes, jobID: jobId)
             error = nil
             await loadBrief()
-        } catch is CancellationError {} catch {
-            guard session.generation == generation else { return }
+        } catch is CancellationError { } catch {
+            guard current() else { return }
             if error.isConnectivityFailure {
-                // No signal: the last copy of this job, or what the schedule already knows.
-                if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
                 if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
                 if job != nil { self.error = nil; return }
             }

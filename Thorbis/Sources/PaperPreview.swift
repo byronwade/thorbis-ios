@@ -656,6 +656,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var priceBookViewRevoked = false
         var documentEstimateViewRevoked = false
         var jobMediaViewRevoked = false
+        var officeJobDenied = false
+        var officeJobOffline = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
@@ -664,6 +666,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
+        scenario.lock.withLock { scenario.officeJobDenied = false; scenario.officeJobOffline = false }
         scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
@@ -676,6 +679,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
+    static func denyOfficeJob() { scenario.lock.withLock { scenario.officeJobDenied = true } }
+    static func takeOfficeJobOffline() { scenario.lock.withLock { scenario.officeJobOffline = true } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
     static func switchSavedWorkWorkspace() {
@@ -728,6 +733,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        if (ProcessInfo.processInfo.arguments.contains("--paper-preview-office-job-offline") ||
+            Self.scenario.lock.withLock({ Self.scenario.officeJobOffline })),
+           request.httpMethod == "GET", url.path == "/v1/jobs/\(PaperPreview.jobID)" {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return
+        }
         // Keep the second catalog page pending to exercise honest partial search states.
         if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
@@ -796,6 +806,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ Self.scenario.setupPaymentReads += 1; return Self.scenario.setupPaymentReads == 1 }) {
             status = 503
             payload = ["status": 503, "title": "Sample setup status unavailable"]
+        } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-office-denial-test"),
+                  url.path == "/v1/jobs/\(PaperPreview.jobID)", request.httpMethod == "GET",
+                  Self.scenario.lock.withLock({ Self.scenario.officeJobDenied }) {
+            status = 403
+            payload = ["status": 403, "title": "Sample job access denied"]
         } else if Self.legacyInvoiceRead(url.path) {
             status = 404
             payload = ["status": 404, "title": "Preview legacy job invoice route"]
@@ -1683,6 +1698,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.isJobScreenPreview || PaperPreview.screen == "customer-jobs",
            let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
             listed[index]["locationId"] = PaperPreview.homeLocationID
+            if arguments.contains("--paper-preview-long-office-note") {
+                listed[index]["notes"] = "Inspect the upstairs system before entering the attic. The customer reports warm air in every room and a loud noise near the outdoor unit.\n\nCheck the breaker, capacitor, wiring, and refrigerant lines. Call the customer before starting additional work.\n\nFinal instruction: confirm the gate is closed when leaving."
+            }
             // A dispatched job's moves as the live server lists them (build 125's status sheet), so
             // the job screen's status popover and ••• show every allowed move.
             if PaperPreview.isJobScreenPreview, listed[index]["status"] as? String == "dispatched" {

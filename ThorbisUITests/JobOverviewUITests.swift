@@ -2,6 +2,117 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testOfficeStorageFailureKeepsGeneralJobVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "--paper-preview-office-completion-failure"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 25), "A verified job stays available if the office note cannot be stored")
+        XCTAssertTrue(app.buttons["job-customer-view"].exists)
+        XCTAssertFalse(app.buttons["job-office-note-more"].exists)
+        XCTAssertTrue(app.staticTexts["Couldn't verify job details. Pull to refresh."].exists)
+    }
+
+    func testOfficePrecommitReadFailureKeepsGeneralJobVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "--paper-preview-office-precommit-read-failure"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 25), "A fresh general job read remains available if office verification storage fails")
+        XCTAssertTrue(app.buttons["job-customer-view"].exists)
+        XCTAssertFalse(app.buttons["job-office-note-more"].exists)
+        XCTAssertTrue(app.staticTexts["Couldn't verify job details. Pull to refresh."].exists)
+    }
+    func testDenialInSecondViewRetiresFirstViewBeforeOfflineReopen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "--paper-preview-office-denial-test"]
+        app.launch()
+        XCTAssertTrue(app.buttons["job-office-note-more"].waitForExistence(timeout: 25))
+        let another = app.buttons["Open another sample view"]
+        reveal(another, in: app)
+        XCTAssertTrue(another.isHittable)
+        another.tap()
+        XCTAssertTrue(app.buttons["Close sample job"].waitForExistence(timeout: 10))
+        let denialButtons = app.buttons.matching(identifier: "Deny sample job access")
+        XCTAssertTrue(denialButtons.firstMatch.waitForExistence(timeout: 5))
+        let deny = denialButtons.element(boundBy: max(0, denialButtons.count - 1))
+        reveal(deny, in: app)
+        XCTAssertTrue(deny.isHittable)
+        deny.tap()
+        XCTAssertTrue(app.staticTexts["office-test-cache-prepared"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["office-test-denial-recorded"].waitForExistence(timeout: 10))
+        app.buttons["Close sample job"].tap()
+        XCTAssertTrue(app.buttons["Open another sample view"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["job-office-note-more"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final instruction: confirm the gate is closed")).firstMatch.exists)
+    }
+    func testDeniedJobDoesNotRestoreOfficeNoteAfterReopenOffline() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "--paper-preview-office-denial-test"]
+        app.launch()
+        let more = app.buttons["job-office-note-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 25))
+        let deny = app.buttons["Deny sample job access"]
+        reveal(deny, in: app)
+        XCTAssertTrue(deny.isHittable)
+        deny.tap()
+        XCTAssertTrue(app.staticTexts["office-test-cache-prepared"].waitForExistence(timeout: 5), "The test needs a real saved job copy before denying access")
+        XCTAssertTrue(app.staticTexts["office-test-denial-recorded"].waitForExistence(timeout: 10), "The server denial must be recorded before relaunch")
+        XCTAssertTrue(more.waitForNonExistence(timeout: 10))
+        app.terminate()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "--paper-preview-office-denial-test", "--paper-preview-office-job-offline"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.buttons["job-office-note-more"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final instruction: confirm the gate is closed")).firstMatch.exists)
+    }
+    func testLongOfficeInstructionsOpenFullReaderAndReturnToJob() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note"]
+        app.launch()
+        let more = app.buttons["job-office-note-more"]
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 20))
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        reveal(more, in: app)
+        XCTAssertTrue(more.isHittable)
+        XCTAssertGreaterThanOrEqual(more.frame.height, 44)
+        capture(app, name: "Job office instructions preview")
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Office instructions"].waitForExistence(timeout: 5))
+        let full = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final instruction: confirm the gate is closed when leaving.")).firstMatch
+        XCTAssertTrue(full.waitForExistence(timeout: 5))
+        capture(app, name: "Job office instructions reader")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["job-customer-view"].waitForExistence(timeout: 5))
+    }
+
+    func testShortOfficeInstructionsStayVisibleWithoutDisclosure() {
+        let app = preview("job")
+        let customer = app.buttons["job-customer-view"]
+        XCTAssertTrue(customer.waitForExistence(timeout: 20))
+        reveal(customer, in: app)
+        let text = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Upstairs zone blowing warm air since Sunday")).firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["job-office-note-more"].exists)
+    }
+
+    func testLongOfficeInstructionsReaderWorksAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-thorbis.appearance", "dark"]
+        app.launch()
+        let more = app.buttons["job-office-note-more"]
+        XCTAssertTrue(more.waitForExistence(timeout: 25))
+        reveal(more, in: app)
+        XCTAssertTrue(more.isHittable)
+        XCTAssertGreaterThanOrEqual(more.frame.height, 44)
+        capture(app, name: "Job office instructions preview, largest text")
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Office instructions"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Done"].exists)
+        capture(app, name: "Job office instructions reader, largest text")
+    }
     /// iPad: the job is the detail column's first screen (picked from the list beside it, so nothing
     /// to go back to). A screen pushed from it — the customer — offers the same Back circle, which
     /// returns to the job, and a swipe in from the detail column's own leading edge (beside the
