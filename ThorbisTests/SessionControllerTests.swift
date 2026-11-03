@@ -4,6 +4,77 @@ import Combine
 
 @MainActor
 final class SessionControllerTests: XCTestCase {
+    private final class DroppingSnapshotStore: SessionSnapshotStoring {
+        func load() -> SessionSnapshot? { nil }
+        func save(_ snapshot: SessionSnapshot) { }
+        func clear() { }
+    }
+
+    func testJobOfficeAuthorityRequiresPersistedSessionSnapshot() async {
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)]), baseURL: "https://app.thorbis.com")
+        let session = SessionController(api: api, defaults: isolatedDefaults(), snapshots: DroppingSnapshotStore())
+        await session.restore()
+        XCTAssertTrue(session.can("job.view", feature: "jobs"))
+        XCTAssertNil(session.verifiedPersistedJobOfficeAuthority(), "An unpersisted live session cannot authorize a cross-relaunch office cache")
+    }
+
+    func testJobOfficeAuthorityMatchesPersistedSessionAndExpires() async throws {
+        let snapshots = MemorySessionSnapshotStore()
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)]), baseURL: "https://app.thorbis.com")
+        let session = SessionController(api: api, defaults: isolatedDefaults(), snapshots: snapshots)
+        await session.restore()
+        let authority = try XCTUnwrap(session.verifiedPersistedJobOfficeAuthority())
+        XCTAssertEqual(authority.actor, actor)
+        XCTAssertEqual(authority.organization, first)
+        XCTAssertEqual(authority.origin, "https://app.thorbis.com")
+        XCTAssertEqual(authority.policyVersion, 1)
+        XCTAssertEqual(authority.authorityGeneration, "fixture-generation")
+        let persisted = try XCTUnwrap(snapshots.load())
+        XCTAssertEqual(authority.deadline, min(persisted.sessionDeadline, persisted.authorityDeadline ?? persisted.sessionDeadline))
+        var mismatched = persisted
+        mismatched.authorityGeneration = "older-authority"
+        snapshots.save(mismatched)
+        XCTAssertNil(session.verifiedPersistedJobOfficeAuthority(), "An older persisted authority cannot authorize the current session")
+        let expired = SessionSnapshot(user: persisted.user, organization: persisted.organization,
+                                      organizations: persisted.organizations, capabilities: persisted.capabilities,
+                                      features: persisted.features, policyVersion: persisted.policyVersion,
+                                      sessionDeadline: Date().addingTimeInterval(-1), authorityDeadline: persisted.authorityDeadline,
+                                      authorityGeneration: persisted.authorityGeneration, authorityOrigin: persisted.authorityOrigin)
+        snapshots.save(expired)
+        XCTAssertNil(session.verifiedPersistedJobOfficeAuthority(), "An expired persisted session cannot authorize the office cache")
+        let reduced = SessionSnapshot(user: persisted.user, organization: persisted.organization,
+                                      organizations: persisted.organizations, capabilities: ["customer.view"],
+                                      features: persisted.features, policyVersion: persisted.policyVersion,
+                                      sessionDeadline: persisted.sessionDeadline, authorityDeadline: persisted.authorityDeadline,
+                                      authorityGeneration: persisted.authorityGeneration, authorityOrigin: persisted.authorityOrigin)
+        snapshots.save(reduced)
+        XCTAssertNil(session.verifiedPersistedJobOfficeAuthority(), "Persisted capabilities must match the current grant")
+        let earlierExpiry = Date().addingTimeInterval(60)
+        let shorter = SessionSnapshot(user: persisted.user, organization: persisted.organization,
+                                      organizations: persisted.organizations, capabilities: persisted.capabilities,
+                                      features: persisted.features, policyVersion: persisted.policyVersion,
+                                      sessionDeadline: persisted.sessionDeadline, authorityDeadline: earlierExpiry,
+                                      authorityGeneration: persisted.authorityGeneration, authorityOrigin: persisted.authorityOrigin)
+        snapshots.save(shorter)
+        XCTAssertEqual(session.verifiedPersistedJobOfficeAuthority()?.deadline, earlierExpiry)
+        snapshots.save(persisted)
+        api.baseURL = "https://other.example.com"
+        XCTAssertNil(session.verifiedPersistedJobOfficeAuthority(), "A changed origin cannot reuse saved authority")
+    }
+
+    func testJobOfficeAuthoritySurvivesColdOfflineSessionRestore() async throws {
+        let snapshots = MemorySessionSnapshotStore()
+        let firstAPI = APIClient(session: URLProtocolFixture.session([.init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)]), baseURL: "https://app.thorbis.com")
+        let firstSession = SessionController(api: firstAPI, defaults: isolatedDefaults(), snapshots: snapshots)
+        await firstSession.restore()
+        let original = try XCTUnwrap(firstSession.verifiedPersistedJobOfficeAuthority())
+        let secondAPI = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        let secondSession = SessionController(api: secondAPI, defaults: isolatedDefaults(), snapshots: snapshots)
+        await secondSession.restore()
+        XCTAssertTrue(secondSession.isOffline)
+        XCTAssertNotEqual(firstSession.generation, secondSession.generation)
+        XCTAssertEqual(secondSession.verifiedPersistedJobOfficeAuthority(), original)
+    }
     private let actor = "019f0000-0000-7000-8000-000000000011"
     private let first = "019f0000-0000-7000-8000-000000000001"
     private let second = "019f0000-0000-7000-8000-000000000002"

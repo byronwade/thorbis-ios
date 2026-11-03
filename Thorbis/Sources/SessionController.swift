@@ -19,6 +19,15 @@ struct FeatureDecision: Codable, Equatable {
     let reason: String?
 }
 
+struct PersistedJobOfficeAuthority: Hashable {
+    let actor: String
+    let organization: String
+    let origin: String
+    let policyVersion: Int
+    let authorityGeneration: String
+    let deadline: Date
+}
+
 private struct SessionPayload: Decodable {
     struct Session: Decodable {
         let userId: String?
@@ -59,6 +68,25 @@ private struct SessionValidationError: LocalizedError {
 /// old generation before network work, so late responses cannot republish old authority.
 @MainActor
 final class SessionController: ObservableObject {
+    /// Re-read outside view rendering, immediately before and after an office
+    /// cache operation. A successful session snapshot save is not assumed.
+    func verifiedPersistedJobOfficeAuthority() -> PersistedJobOfficeAuthority? {
+        guard can("job.view", feature: "jobs"), let actor = user?.id,
+              let organization = activeOrganization?.id, let currentDeadline = sessionDeadline,
+              let origin = authorityOrigin, origin == api.normalizedOrigin,
+              let policyVersion, policyVersion > 0, let authorityGeneration, !authorityGeneration.isEmpty,
+              let saved = snapshots.load(), saved.user.id == actor, saved.organization.id == organization,
+              saved.authorityOrigin == origin, saved.policyVersion == policyVersion,
+              saved.authorityGeneration == authorityGeneration,
+              Set(saved.capabilities) == capabilities, saved.features == features else { return nil }
+        let currentExpiry = min(currentDeadline, authorityDeadline ?? currentDeadline)
+        let savedExpiry = min(saved.sessionDeadline, saved.authorityDeadline ?? saved.sessionDeadline)
+        let deadline = min(currentExpiry, savedExpiry)
+        guard Date() < deadline else { return nil }
+        return PersistedJobOfficeAuthority(actor: actor, organization: organization, origin: origin,
+                                           policyVersion: policyVersion, authorityGeneration: authorityGeneration,
+                                           deadline: deadline)
+    }
     private static let explicitSignOutKey = "thorbis.session.explicitlySignedOut"
     enum Phase: Equatable {
         case restoring
