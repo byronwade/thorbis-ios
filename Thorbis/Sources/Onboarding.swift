@@ -314,10 +314,12 @@ struct WorkspaceGateView: View {
 struct CreateCompanyForm: View {
     let firstCompany: Bool
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
     @State private var name = ""
     @State private var busy = false
     @State private var error: String?
     @State private var confirmSignOut = false
+    @State private var createdCompany: (id: String, actor: String, origin: String)?
     @FocusState private var focused: Bool
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -346,6 +348,7 @@ struct CreateCompanyForm: View {
                     .textInputAutocapitalization(.words)
                     .submitLabel(.done)
                     .focused($focused)
+                    .disabled(createdCompany != nil)
                     .onSubmit { Task { await create() } }
                     .onChange(of: name) { _, _ in error = nil }
                     .authField().padding(.top, 8)
@@ -381,7 +384,7 @@ struct CreateCompanyForm: View {
             Button { Task { await create() } } label: {
                 HStack(spacing: 8) {
                     if busy { ProgressView().tint(Theme.onInk) }
-                    Text("Create company")
+                    Text(createdCompany == nil ? "Create company" : "Open company")
                 }
                 .inkCommit()
             }
@@ -408,13 +411,32 @@ struct CreateCompanyForm: View {
 
     private func create() async {
         guard !busy else { return }
+        if let createdCompany {
+            guard session.user?.id == createdCompany.actor, api.normalizedOrigin == createdCompany.origin else {
+                error = "This company was created under another account or server. Sign back in there to open it."
+                return
+            }
+            busy = true
+            defer { busy = false }
+            if await session.selectOrganization(id: createdCompany.id) { error = nil }
+            else { error = "The company was created, but it could not be opened. \(session.error ?? "Try opening it again.")" }
+            return
+        }
         guard !trimmed.isEmpty else { error = "Add your company’s name, like Wade Plumbing & Heating."; focused = true; return }
         guard trimmed.count <= 120 else { error = "Use 120 characters or fewer."; return }
         busy = true
         defer { busy = false }
         error = nil
         do {
-            try await session.createCompany(name: trimmed)
+            guard let actor = session.user?.id, let origin = api.normalizedOrigin else {
+                error = "Sign in again before creating a company."
+                return
+            }
+            let result = try await session.createCompany(name: trimmed)
+            if !result.opened {
+                createdCompany = (result.id, actor, origin)
+                error = "The company was created, but it could not be opened. \(session.error ?? "Try opening it again.")"
+            }
         } catch is CancellationError {
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? "The company was not created. Try again."

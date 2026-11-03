@@ -418,6 +418,7 @@ struct MoreView: View {
     @EnvironmentObject var api: APIClient
     @State private var showSettings = false
     @State private var editing = false
+    @State private var switchWorkspaceFailed = false
 
     private var pinned: [MenuItem] { layout.visibleTabs(session) }
 
@@ -486,6 +487,11 @@ struct MoreView: View {
         }
         .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
+        .alert("Couldn't change company", isPresented: $switchWorkspaceFailed) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(session.error ?? "Try changing companies again.")
+        }
         .sheet(isPresented: $showSettings) { SheetSurface { SettingsView() } }
         .sheet(isPresented: $editing) {
             AppMenuEditor { editing = false }
@@ -527,7 +533,7 @@ struct MoreView: View {
             let current = organization.id == session.activeOrganization?.id
             return ThorbisMenuItem(organization.name, isSelected: current) {
                 guard !current else { return }
-                Task { await session.selectOrganization(id: organization.id) }
+                Task { if !(await session.selectOrganization(id: organization.id)) { switchWorkspaceFailed = true } }
             }
         }
     }

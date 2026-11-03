@@ -20,3 +20,11 @@ The candidate now registers job-estimate editors with a process-local main-actor
 The standalone coordinator check is `swiftc Thorbis/Sources/EstimateEditorLifecycle.swift scripts/estimate-editor-lifecycle-check.swift -o /tmp/thorbis-editor-lifecycle-check && /tmp/thorbis-editor-lifecycle-check`. It tests the coordinator callbacks only, including a changed safety result between checks; it does not exercise the real session, editor closures, async network calls, or SwiftUI lifecycle. Swift frontend parsing is not typechecking.
 
 Still held: independently verify closure lifetime and exact editor state, all session and workspace transition entry points, device-unbind effects when the second check fails, error visibility in menu switches, forced invalidation during in-flight create/link, memory retirement and privacy at sign-out, protected-copy recovery and deletion, cross-process writers, and process death. No app build or simulator tests were run for this change.
+
+## Device unbind and company-creation follow-up
+
+The real unbind callback posts `/v1/devices/unregister`. If the second preservation check fails, this candidate requests push re-registration only while the captured actor, organization, origin, generation and unexpired authority remain current. Re-registration is best effort and is not proof the device was rebound. If identity changes during unbind, the transition aborts without asking to rebind the old identity.
+
+The workspace menus now show a failure alert. After a successful company-create response followed by a failed switch, the form keeps that returned company ID with the originating actor and server and offers a switch-only retry. This is process/view-local: destroying the form or process loses that retry state. A lost or malformed create response can still represent a committed creation, and this change does not establish create idempotency or prevent duplicates in that case.
+
+Four focused `SessionControllerTests` were added for failed post-unbind sign-out, failed post-unbind switching, identity loss during unbind, and one create followed by switch-only retry. They are unrun until simulator access is coordinated. The app and these tests have only been syntax-parsed, not typechecked or executed. Real push delivery, every workspace entry point, SwiftUI alert behavior, and company-form loss remain unqualified.

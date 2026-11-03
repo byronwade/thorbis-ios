@@ -37,6 +37,86 @@ final class SessionControllerTests: XCTestCase {
         return (SessionController(api: api, defaults: isolatedDefaults()), api)
     }
 
+    func testAbortedSignOutAfterUnbindRequestsRebindForUnchangedIdentity() async {
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)
+        ])
+        await session.restore()
+        let owner = UUID()
+        var safe = true
+        var rebinds = 0
+        EstimateEditorLifecycle.shared.register(owner: owner, busy: { false }, preserve: { safe }, forced: {})
+        defer { EstimateEditorLifecycle.shared.unregister(owner: owner) }
+        session.onWillUnbindDevice = { safe = false }
+        session.onAbortedDeviceUnbind = { rebinds += 1 }
+
+        let signedOut = await session.signOut()
+        XCTAssertFalse(signedOut)
+        XCTAssertEqual(rebinds, 1)
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(session.activeOrganization?.id, first)
+    }
+
+    func testAbortedWorkspaceChangeAfterUnbindRequestsRebind() async {
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)
+        ])
+        await session.restore()
+        let owner = UUID()
+        var safe = true
+        var rebinds = 0
+        EstimateEditorLifecycle.shared.register(owner: owner, busy: { false }, preserve: { safe }, forced: {})
+        defer { EstimateEditorLifecycle.shared.unregister(owner: owner) }
+        session.onWillUnbindDevice = { safe = false }
+        session.onAbortedDeviceUnbind = { rebinds += 1 }
+
+        let changed = await session.selectOrganization(id: first)
+        XCTAssertFalse(changed)
+        XCTAssertEqual(rebinds, 1)
+        XCTAssertEqual(session.activeOrganization?.id, first)
+    }
+
+    func testCreatedCompanyCanRetrySwitchWithoutAnotherCreate() async throws {
+        let secondSession = activeSession.replacingOccurrences(of: first, with: second)
+        let secondCatalog = catalog.replacingOccurrences(of: first, with: second)
+        let secondFeatures = features.replacingOccurrences(of: first, with: second)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, "{\"id\":\"\(second)\",\"name\":\"New company\"}"),
+            .init(200, "{}"), .init(200, secondSession), .init(200, secondCatalog), .init(200, secondFeatures)
+        ])
+        await session.restore()
+        let owner = UUID()
+        var safe = false
+        EstimateEditorLifecycle.shared.register(owner: owner, busy: { false }, preserve: { safe }, forced: {})
+        defer { EstimateEditorLifecycle.shared.unregister(owner: owner) }
+        let result = try await session.createCompany(name: "New company")
+        XCTAssertEqual(result.id, second)
+        XCTAssertFalse(result.opened)
+        safe = true
+        let changed = await session.selectOrganization(id: result.id)
+        XCTAssertTrue(changed)
+        XCTAssertEqual(session.activeOrganization?.id, second)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == "/api/auth/organization/create" }.count, 1)
+    }
+
+    #if DEBUG
+    func testSessionLossDuringUnbindDoesNotRebindOldIdentity() async {
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features)
+        ])
+        await session.restore()
+        var rebinds = 0
+        session.onWillUnbindDevice = { session.previewForce(.failed) }
+        session.onAbortedDeviceUnbind = { rebinds += 1 }
+
+        let signedOut = await session.signOut()
+        XCTAssertFalse(signedOut)
+        XCTAssertEqual(rebinds, 0)
+        XCTAssertEqual(session.phase, .failed)
+    }
+    #endif
+
     func testExtendedTextNeedsFreshEnabledResponseFromSameWorkspace() async {
         let timestamp = ISO8601DateFormatter().string(from: Date())
         let ready = """

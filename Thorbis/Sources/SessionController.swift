@@ -105,6 +105,8 @@ final class SessionController: ObservableObject {
     var onSignedOut: (() -> Void)?
     /// Awaited before sign-out or a workspace switch, while the session still authorizes requests.
     var onWillUnbindDevice: (() async -> Void)?
+    /// Re-register after an intentional transition is aborted while the same identity is current.
+    var onAbortedDeviceUnbind: (() -> Void)?
 
     /// Whether the workspace has a feature on, independent of a capability.
     func isFeatureOn(_ feature: String) -> Bool {
@@ -322,17 +324,24 @@ final class SessionController: ObservableObject {
     /// Creates a company the signed-in account owns (Better Auth `POST /api/auth/organization/create`,
     /// which makes the creator its owner), then opens it like any other workspace.
     /// Throws so the form can keep what was typed and say why.
-    func createCompany(name: String) async throws {
+    func createCompany(name: String) async throws -> (id: String, opened: Bool) {
         guard !signingOut, user != nil else { throw Problem(title: nil, status: nil, detail: "Sign in again to create a company.") }
+        let originalGeneration = generation
+        let originalActor = user?.id
+        let originalOrigin = api.normalizedOrigin
         struct NewCompany: Encodable { let name: String; let slug: String }
         let created: SessionOrganization = try await api.send(
             "POST", "/api/auth/organization/create",
             body: NewCompany(name: name, slug: CompanySlug.make(from: name)), authed: false
         )
         guard !created.id.isEmpty else { throw Problem(title: nil, status: nil, detail: "The company was not created. Try again.") }
+        guard generation == originalGeneration, user?.id == originalActor, api.normalizedOrigin == originalOrigin else {
+            return (created.id, false)
+        }
         if !organizations.contains(where: { $0.id == created.id }) { organizations.append(created) }
         startBusinessSetup = true
-        await selectOrganization(id: created.id)
+        let opened = await selectOrganization(id: created.id)
+        return (created.id, opened)
     }
 
     @discardableResult func selectOrganization(id: String) async -> Bool {
@@ -349,9 +358,18 @@ final class SessionController: ObservableObject {
             return false
         }
         let knownOrganizations = organizations
+        let transitionGeneration = generation
+        let transitionActor = user?.id
+        let transitionOrganization = activeOrganization?.id
+        let transitionOrigin = api.normalizedOrigin
         // Notifications for the old workspace stop before the switch.
         await onWillUnbindDevice?()
+        guard generation == transitionGeneration, user?.id == transitionActor,
+              activeOrganization?.id == transitionOrganization, api.normalizedOrigin == transitionOrigin else { return false }
         guard lifecycle.prepareTransition() else {
+            if phase == .ready, transitionActor != nil, transitionOrganization != nil,
+               let sessionDeadline, Date() < sessionDeadline,
+               authorityDeadline.map({ Date() < $0 }) ?? true { onAbortedDeviceUnbind?() }
             error = "Finish saving the open estimate before changing workspaces."
             return false
         }
@@ -384,8 +402,17 @@ final class SessionController: ObservableObject {
             error = "Finish saving the open estimate before signing out."
             return false
         }
+        let transitionGeneration = generation
+        let transitionActor = user?.id
+        let transitionOrganization = activeOrganization?.id
+        let transitionOrigin = api.normalizedOrigin
         await onWillUnbindDevice?()
+        guard generation == transitionGeneration, user?.id == transitionActor,
+              activeOrganization?.id == transitionOrganization, api.normalizedOrigin == transitionOrigin else { return false }
         guard lifecycle.prepareTransition() else {
+            if phase == .ready, transitionActor != nil, transitionOrganization != nil,
+               let sessionDeadline, Date() < sessionDeadline,
+               authorityDeadline.map({ Date() < $0 }) ?? true { onAbortedDeviceUnbind?() }
             error = "Finish saving the open estimate before signing out."
             return false
         }

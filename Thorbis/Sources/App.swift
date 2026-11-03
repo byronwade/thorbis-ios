@@ -107,6 +107,7 @@ struct ThorbisApp: App {
         JobStepIntentRunner.configure(api: api, session: session, outbox: outbox, store: store)
         PushNotifications.shared.start(api: api, store: store)
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
+        session.onAbortedDeviceUnbind = { PushNotifications.shared.identityChanged(signedIn: true) }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
         #if DEBUG

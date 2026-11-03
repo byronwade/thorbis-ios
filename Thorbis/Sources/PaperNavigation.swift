@@ -52,6 +52,7 @@ struct RootView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
     @State private var showSettings = false
+    @State private var switchWorkspaceFailed = false
     @State private var schedulePath = NavigationPath()
     @State private var jobsPath = NavigationPath()
     @State private var customersPath = NavigationPath()
@@ -80,6 +81,11 @@ struct RootView: View {
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
+        .alert("Couldn't change company", isPresented: $switchWorkspaceFailed) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(session.error ?? "Try changing companies again.")
+        }
         // The owner's company-wide pinned places and menu, when one has been saved.
         .task(id: session.activeOrganization?.id) {
             guard session.activeOrganization != nil else { return }
@@ -462,7 +468,7 @@ struct RootView: View {
             return ThorbisMenuItem(organization.name, icon: "building.2", isSelected: current) {
                 guard !current else { return }
                 closeDrawer()
-                Task { await session.selectOrganization(id: organization.id) }
+                Task { if !(await session.selectOrganization(id: organization.id)) { switchWorkspaceFailed = true } }
             }
         }
         // Saved work left the drawer's list; the gear wears its dot and opens the review.
