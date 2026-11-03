@@ -1,0 +1,14 @@
+# Price book progressive first results
+
+The technician opens the estimate or invoice item picker and needs an item while the catalog is loading. The API's current collection endpoint supplies cursor pages but no equivalent ranked fuzzy-search contract. Downloading every page remains necessary for the current complete offline catalog and whole-book fuzzy/frecency search; this change must not be called server-side search or demand loading.
+
+When there is no complete saved snapshot, publish arriving pages in the current actor/session/API scope while fetching the remaining pages. Explicitly identify partial results, counts and failures in the picker. Never write partial data as the complete offline snapshot. If a complete snapshot exists, continue displaying it until a replacement has completely loaded. Cancel or discard results after an organization, session or API generation change. Keep the existing local fuzzy ranking, selection, favorites and retry paths.
+
+Acceptance: a gated second-page test proves the first page is usable before the later page returns; interrupted load cannot overwrite a complete cache or pretend to be complete; stale requests never publish into another scope; UI labels incomplete results and retry accurately. Run focused catalog/search and picker tests with representative paging; verify visible partial/error states, accessibility and release behavior before claiming completion. A bounded server search needs an authorized, tenant-scoped ranked query, stable cursor/snapshot semantics and a contract matching local fuzzy matching, filters and pricing; partial online results cannot replace the offline snapshot.
+
+## Evidence
+
+- The first-page regression failed on the base implementation: the catalog was empty while the second response was held. With this change, the gated response test passes and proves partial pages are not written as a complete cache.
+- The focused run on iPhone 17 Pro simulator passed 29 catalog/search tests and two picker tests, including selecting a loaded item, incomplete search messaging and searching the later page after completion. The screenshot run passed the partial picker test with retained images: [loaded](pricebook-partial-loading.png), [search](pricebook-partial-search.png).
+- An initial UI run failed because it inherited an earlier preview's complete sample cache; the explicit DEBUG-only partial fixture now clears only that fixed sample cache before starting. The corrected run passed. No production cache is cleared by that fixture.
+- The existing complete-cache retention and scope-switch regression tests passed. No device profiling, iPad, VoiceOver or true bounded server-side search has been verified; every catalog page still loads in the background to retain the existing complete offline search behavior.

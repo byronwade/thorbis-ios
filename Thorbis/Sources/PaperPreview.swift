@@ -289,6 +289,13 @@ enum PaperPreview {
         return PreviewRefundIntentStore.shared
     }
     @MainActor static func api() -> APIClient {
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"),
+           let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            // Isolate this preview from an earlier preview's complete sample snapshot.
+            let sample = cache.appendingPathComponent("PriceBook", isDirectory: true)
+                .appendingPathComponent("\(organizationID.lowercased()).json")
+            try? FileManager.default.removeItem(at: sample)
+        }
         if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-many") {
             UserDefaults.standard.removeObject(forKey: "priceBookUsage.\(organizationID)")
         }
@@ -707,6 +714,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        // Keep the second catalog page pending to exercise honest partial search states.
+        if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
+           let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }),
+           query.contains(where: { $0.name == "cursor" }) {
+            return
+        }
         // Left unanswered on purpose: the screen keeps showing what it draws while it waits.
         if PaperPreview.enabled, let held = PaperPreview.heldPath, url.path == held { return }
         // `--paper-preview-payment-timeout`: recording a payment times out, so Collect payment shows its pending state.
@@ -1271,7 +1286,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                         "items": items, "nextCursor": later ? NSNull() : cursor, "planId": "paper-preview", "viewId": NSNull()] as [String: Any]
             }
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
-               ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages"),
+               (ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-pages") ||
+                ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial")),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
                 let cursor = "00000000-0000-4000-8000-000000009988"
                 let later = queryItems.first(where: { $0.name == "cursor" })?.value == cursor

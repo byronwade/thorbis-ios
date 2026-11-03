@@ -374,12 +374,15 @@ final class PriceBookCatalog: ObservableObject {
     @Published private(set) var items: [PriceBookListItem] = []
     @Published private(set) var index = PriceBookSearchIndex(items: [])
     @Published private(set) var loading = false
+    /// True when the visible snapshot has more server pages that have not loaded.
+    @Published private(set) var isPartial = false
     @Published private(set) var error: String?
     @Published private(set) var usage: [String: PriceBookUsage] = [:]
     /// Local stars (this device only).
     @Published private(set) var favorites: Set<String> = []
     private(set) var organizationID: String?
     private var lastRefresh: Date?
+    private var hasCompleteSnapshot = false
     private(set) var context: PriceBookCatalogContext?
     private var loadingRequest: (context: PriceBookCatalogContext, apiGeneration: UUID, id: UUID, task: Task<Void, Never>)?
 
@@ -391,7 +394,10 @@ final class PriceBookCatalog: ObservableObject {
         if context != requested {
             context = requested
             self.organizationID = organizationID
-            apply(organizationID.flatMap(Self.readCache) ?? [])
+            let cached = organizationID.flatMap(Self.readCache)
+            hasCompleteSnapshot = cached != nil
+            isPartial = false
+            apply(cached ?? [])
             usage = organizationID.map { PriceBookUsageStore(organizationID: $0).load() } ?? [:]
             favorites = organizationID.map { PriceBookFavoritesStore(organizationID: $0).load() } ?? []
             lastRefresh = nil
@@ -437,6 +443,8 @@ final class PriceBookCatalog: ObservableObject {
             var seen = Set<String>()
             var cursor: String?
             var pages = 0
+            // Never replace a useful complete offline snapshot with a partial refresh.
+            let exposePages = !hasCompleteSnapshot
             repeat {
                 guard current() else { return }
                 let page = try await api.priceBookItems(limit: 200, cursor: cursor)
@@ -444,13 +452,19 @@ final class PriceBookCatalog: ObservableObject {
                 for item in page.items where seen.insert(item.id).inserted { all.append(item) }
                 cursor = page.nextCursor
                 pages += 1
+                if exposePages, cursor != nil {
+                    isPartial = true
+                    apply(all)
+                }
             } while cursor != nil && pages < Self.maximumPages
             guard current() else { return }
             guard cursor == nil else {
                 throw Problem(title: "Couldn't load the whole price book", status: nil,
                               detail: "Refresh the catalog before using items that are missing.")
             }
+            isPartial = false
             apply(all)
+            hasCompleteSnapshot = true
             lastRefresh = Date()
             error = nil
             Self.writeCache(all, organizationID: organizationID)
@@ -528,6 +542,8 @@ final class PriceBookCatalog: ObservableObject {
         loadingRequest = nil
         error = nil
         loading = false
+        isPartial = false
+        hasCompleteSnapshot = false
         usage = [:]
         favorites = []
         apply([])
