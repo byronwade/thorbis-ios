@@ -1,0 +1,9 @@
+# Job invoice disclosure evidence
+
+Tested app and UI-test source: `63f5e48a74a76e9ba3af1de65b50754f8ac0cfa9`, based on release `7ed34709`. The only subsequent commit adds this evidence.
+
+On the iPhone 17 Pro simulator (iOS 26.3.1), the signed focused run exited successfully with five UI tests and no failures. It covered independently opening and closing both invoices' items, accessible item quantities and prices, a tap on an exposed part of a partially clipped disclosure without opening collection, largest Dynamic Type reachability, opening the intended invoice, and returning customer payment to that invoice's staff collection. The result bundle is `/private/tmp/thorbis-invoice-disclosure-final.xcresult`; the log is `/private/tmp/thorbis-invoice-disclosure-final.log`.
+
+The normal-text image is an attachment from that exact run. The largest-text image was captured during the preceding run at `221ac55`; production source was identical, while the later commit improved the test's scrolling helper. Both show the Paper preview fixture, not live customer data. The large-text image shows collapsed items and the scrolling state; the exact-source passing test establishes that the control can be reached and opened.
+
+The earlier baseline red result (`/private/tmp/thorbis-invoice-disclosure-red2.xcresult`) failed because the disclosure did not exist. During development the original safe-area bar visibly covered the bottom of the control; the final layout reserves separate space for Money's anchored action. At standard sizes, expanded item descriptions retain the previous two-line limit; opening the invoice remains the path to full details. This change does not implement the requested long-description drawer. VoiceOver, iPad, real-device behavior and fresh-to-stale transition were not tested in this run.
