@@ -97,6 +97,9 @@ struct InvoiceLineEditorView: View {
               session.can("invoice.edit", feature: "invoicing") else { return }
         if !didRecoverDraft && verifiedScope == expected { return }
         guard !session.isOffline else { return }
+        #if DEBUG
+        if didRecoverDraft && EstimateRecoveryPreview.invoiceVerificationHeldEnabled { EstimateRecoveryPreview.shared.armFirstInvoiceVerification() }
+        #endif
         let attempt = UUID(); accessAttempt = attempt
         var latestRecord: InvoiceRecord?
         let allowed = await CommercialDraftAccess.verify(expectedScope: expected, currentScope: { session.isOffline ? nil : currentScope },
@@ -266,6 +269,25 @@ struct InvoiceLineEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             #if DEBUG
+            if EstimateRecoveryPreview.invoiceVerificationHeldEnabled {
+                ThorbisToolbarItem(placement: .principal) {
+                    HStack {
+                        TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                            Text("Reads")
+                                .accessibilityIdentifier("invoice-verification-requests")
+                                .accessibilityValue("\(EstimateRecoveryPreview.shared.invoiceVerificationReadCount):\(EstimateRecoveryPreview.shared.reloadHoldState)")
+                        }
+                        Button("Refresh") { Task { await session.revalidate() } }
+                            .accessibilityIdentifier("invoice-verification-refresh")
+                        Button("Access") {
+                            PaperPreviewProtocol.toggleInvoiceAccess()
+                            Task { await session.revalidate() }
+                        }.accessibilityIdentifier("invoice-verification-toggle-resource")
+                        Button("Release") { EstimateRecoveryPreview.shared.release() }
+                            .accessibilityIdentifier("invoice-verification-release")
+                    }
+                }
+            }
             if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-check-workspace") || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-confirm-workspace-interruption")) {
                 ThorbisToolbarItem(placement: .principal) {
                     TimelineView(.periodic(from: .now, by: 0.2)) { _ in

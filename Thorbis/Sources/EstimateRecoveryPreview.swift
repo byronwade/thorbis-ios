@@ -15,6 +15,8 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     private var holdNextReload = false
     private var invoiceRevisionIncrement = 1
     private var denyInvoiceRead = false
+    private var invoiceVerificationArmed = false
+    private var invoiceVerificationReads = 0
     private var estimateRevisionIncrement = 1
     private var denyEstimateRead = false
     private var savedEstimate: [String: Any]?
@@ -49,6 +51,9 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     static var invoiceFinalReadHeldEnabled: Bool {
         PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-final-read-held")
     }
+    static var invoiceVerificationHeldEnabled: Bool {
+        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-verification-held")
+    }
     static var invoiceDeliveryKey: String? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "--commercial-draft-test-id"),
@@ -60,6 +65,13 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     func armHeldReload() { lock.withLock { holdNextReload = true } }
     func advanceInvoiceRevision() { lock.withLock { invoiceRevisionIncrement += 1 } }
     func denyNextInvoiceRead() { lock.withLock { denyInvoiceRead = true } }
+    func armFirstInvoiceVerification() {
+        lock.withLock {
+            guard !invoiceVerificationArmed else { return }
+            invoiceVerificationArmed = true; holdNextReload = true
+        }
+    }
+    var invoiceVerificationReadCount: Int { lock.withLock { invoiceVerificationReads } }
     func advanceEstimateRevision() { lock.withLock { estimateRevisionIncrement += 1 } }
     func denyNextEstimateRead() { lock.withLock { denyEstimateRead = true } }
 
@@ -82,17 +94,19 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     }
 
     func reply(for request: URLRequest) -> Reply? {
-        if (Self.invoiceHeldReloadEnabled || Self.invoiceNewerRevisionEnabled), request.httpMethod == "GET",
+        if (Self.invoiceHeldReloadEnabled || Self.invoiceNewerRevisionEnabled || Self.invoiceVerificationHeldEnabled), request.httpMethod == "GET",
            request.url?.path == "/v1/invoices/\(PaperPreview.invoice.id)" {
-            let denied = lock.withLock { let value = denyInvoiceRead; denyInvoiceRead = false; return value }
-            if denied { return Reply(status: 403, payload: ["status": 403, "title": "Sample access denied"]) }
+            let denied = lock.withLock { invoiceVerificationReads += 1; let value = denyInvoiceRead; denyInvoiceRead = false; return value }
+            if denied || (Self.invoiceVerificationHeldEnabled && PaperPreviewProtocol.sampleInvoiceAccessDenied) {
+                return Reply(status: 403, payload: ["status": 403, "title": "Sample access denied"])
+            }
             let (shouldHold, revisionIncrement) = lock.withLock {
                 let value = holdNextReload; holdNextReload = false; return (value, invoiceRevisionIncrement)
             }
             guard let data = try? JSONEncoder().encode(PaperPreview.invoice),
                   var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
-            object["linesRevision"] = PaperPreview.invoice.linesRevision + revisionIncrement
-            return Reply(status: 200, payload: object, hold: (Self.invoiceHeldReloadEnabled || Self.invoiceFinalReadHeldEnabled) && shouldHold)
+            object["linesRevision"] = PaperPreview.invoice.linesRevision + (Self.invoiceVerificationHeldEnabled ? 0 : revisionIncrement)
+            return Reply(status: 200, payload: object, hold: (Self.invoiceHeldReloadEnabled || Self.invoiceFinalReadHeldEnabled || Self.invoiceVerificationHeldEnabled) && shouldHold)
         }
         if (Self.heldReloadEnabled || Self.newerRevisionEnabled), request.httpMethod == "GET",
            request.url?.path == "/v1/estimates/\(PaperPreview.estimate.id)" {

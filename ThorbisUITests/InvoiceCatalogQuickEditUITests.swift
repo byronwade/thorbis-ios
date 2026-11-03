@@ -324,6 +324,36 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertEqual(switched.value as? String, "switched")
     }
 
+    func testCanceledInvoiceVerificationCannotRetireReplacement() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+            "--commercial-draft-test-id", UUID().uuidString, "--paper-preview-invoice-toggle-access"]
+        saveSampleInvoiceDraft(app)
+        app.launchArguments.append("--paper-preview-invoice-verification-held")
+        app.launch()
+        let state = app.staticTexts["invoice-verification-requests"]
+        XCTAssertTrue(state.waitForExistence(timeout: 20))
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":waiting"), evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        let initialCount = Int((state.value as? String ?? "").components(separatedBy: ":").first ?? "") ?? 0
+        app.buttons["invoice-verification-refresh"].tap()
+        expectation(for: NSPredicate { object, _ in
+            guard let element = object as? XCUIElement, let value = element.value as? String,
+                  value.hasSuffix(":waiting"), let count = Int(value.components(separatedBy: ":").first ?? "") else { return false }
+            return count > initialCount
+        }, evaluatedWith: state)
+        waitForExpectations(timeout: 20)
+        assertSampleInvoiceQuantity(app, "2")
+        app.buttons["invoice-verification-release"].tap()
+        expectation(for: NSPredicate(format: "value ENDSWITH %@", ":idle"), evaluatedWith: state)
+        waitForExpectations(timeout: 10)
+        assertSampleInvoiceQuantity(app, "2")
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--paper-preview-invoice-verification-held" }
+        app.launch(); assertSampleInvoiceQuantity(app, "2")
+    }
+
     private func assertInvoiceFreshReadProtectsDraft(_ flag: String) {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",

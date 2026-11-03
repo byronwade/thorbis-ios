@@ -657,6 +657,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static func toggleInvoiceAccess() {
         scenario.lock.withLock { scenario.invoiceAccessDenied.toggle() }
     }
+    static var sampleInvoiceAccessDenied: Bool { scenario.lock.withLock { scenario.invoiceAccessDenied } }
     static func toggleInvoiceEditing() { scenario.lock.withLock { scenario.invoiceEditingRevoked.toggle() } }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
