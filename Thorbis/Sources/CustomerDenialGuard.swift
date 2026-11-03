@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import CryptoKit
 import Security
 import Darwin
@@ -156,7 +157,8 @@ final class CustomerQuarantineLease {
     }
 }
 
-@MainActor final class CustomerQuarantine {
+@MainActor final class CustomerQuarantine: ObservableObject {
+    @Published private(set) var revision = UUID()
     /// All production access must use this coordinator and the same app-group
     /// lock path. A second process that cannot take the lease fails closed.
     private static var sharedFactory: CustomerQuarantineFactory?
@@ -186,11 +188,25 @@ final class CustomerQuarantineLease {
     #endif
     private func read(_ scope: CustomerQuarantineScope) throws -> CustomerQuarantineState? {
         do { return try store.read(scope) }
-        catch { storageFailures.insert(scope); throw error }
+        catch {
+            if storageFailures.insert(scope).inserted {
+                Task { @MainActor [weak self] in self?.revision = UUID() }
+            }
+            throw error
+        }
     }
     private func write(_ state: CustomerQuarantineState, for scope: CustomerQuarantineScope) throws {
-        do { try store.write(state, for: scope) }
-        catch { storageFailures.insert(scope); throw error }
+        do { try store.write(state, for: scope); revision = UUID() }
+        catch { if storageFailures.insert(scope).inserted { revision = UUID() }; throw error }
+    }
+    // Previously published values must also be retired when another owner
+    // records a denial or rotates this customer's cache generation.
+    func allowsPublishedValue(_ ticket: CustomerQuarantineTicket) -> Bool {
+        guard let state = try? read(ticket.scope), !state.denied,
+              state.denialEpoch == ticket.denialEpoch, state.cacheEpoch == ticket.cacheEpoch,
+              state.authorityFingerprint == ticket.authorityFingerprint,
+              Date() < ticket.authorityDeadline, !storageFailures.contains(ticket.scope) else { return false }
+        return true
     }
     #if DEBUG
     func begin(_ scope: CustomerQuarantineScope) throws -> CustomerQuarantineTicket {

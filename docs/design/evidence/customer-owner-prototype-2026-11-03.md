@@ -1,0 +1,10 @@
+# Customer guarded owner experiment — held
+
+This isolated prototype is not wired to a production customer screen and must not be released. It uses injected evidence and test-only transport task locals, which do not yet control APIClient. A complete live result is not established by the existing capped customer compilation endpoint. Existing customer, Store, job and child routes remain outside this owner.
+
+The single owner publishes a precomputed snapshot, clears it on a cross-owner quarantine generation change, binds it to a supplied session token and deadline, and checks session identity in its read-only getter. A debug-only SwiftUI fixture supplies an in-memory store and synthetic results.
+
+- Swift 6 standalone harness: `swiftc -swift-version 6 -D DEBUG Thorbis/Sources/CustomerDenialGuard.swift Thorbis/Sources/CustomerGuardedReadOwner.swift scripts/customer-owner-harness.swift -o /private/tmp/customer-owner-clock-green && /private/tmp/customer-owner-clock-green`, passed. It exercises ordering, cross-owner denial, scope and authority checks, expired snapshot, interrupted scope, and storage failures. It does not prove network provenance or a real session token.
+- Xcode UI test `CustomerGuardedOwnerUITests/testCrossOwnerDenialRemovesAlreadyRenderedCustomerText` passed, log `/private/tmp/thorbis-owner-ui.log`, result bundle `/private/tmp/thorbis-owner-ui-derived/Logs/Test/Test-Thorbis-2026.11.03_10-34-37--0500.xcresult`; test source hashes `/private/tmp/thorbis-owner-ui-manifest.txt`. This is a synthetic debug fixture, not a production-screen test.
+
+Before exposure, replace the fake transport with real SavedCopies task locals, derive proof from a complete authorized server contract, bind to live session and API generation, unify all visible customer and child copies, and exercise Keychain and denial on signed devices and app extensions. The lifecycle's real foreground and significant-clock-change wiring must also be tested. Run independent review on exact final integration. Nothing here establishes offline relationship revocation or true end-to-end demand paging.

@@ -154,7 +154,9 @@ struct ThorbisApp: App {
             ZStack {
             Group {
                 #if DEBUG
-                if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
+                if ProcessInfo.processInfo.arguments.contains("--customer-guarded-owner-preview") {
+                    CustomerGuardedOwnerUIPreview()
+                } else if PaperPreview.enabled, PaperPreview.screen.hasPrefix("present-") {
                     CustomerPresentationPreview(screen: PaperPreview.screen)
                 } else if PaperPreview.enabled, PaperPreview.screen.hasPrefix("glance-") {
                     GlanceGallery(screen: PaperPreview.screen)
