@@ -223,7 +223,8 @@ struct InvoiceLineEditorView: View {
             remove: { removeLine(line.id) }, focus: $focus,
             descriptionIdentifier: "invoice-line-description-\(line.id)",
             quantityIdentifier: "invoice-line-quantity-\(line.id)",
-            priceIdentifier: "invoice-line-price-\(line.id)"
+            priceIdentifier: "invoice-line-price-\(line.id)",
+            lineActionsLeading: keyboardUp
         )
         .disabled(linesDisabled)
         .accessibilityAction(named: "Move up") { if canMoveUp { moveLine(line.id, offset: -1) } }

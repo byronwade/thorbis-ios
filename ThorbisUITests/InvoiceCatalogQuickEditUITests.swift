@@ -94,6 +94,11 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let keyboardDone = app.buttons["Done"].firstMatch
         XCTAssertTrue(keyboardDone.exists)
         XCTAssertFalse(close.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover the line's Done control")
+        let remove = app.buttons["Remove"].firstMatch
+        XCTAssertTrue(remove.isHittable, "Remove remains available while editing")
+        XCTAssertGreaterThanOrEqual(remove.frame.minX - close.frame.maxX, 20, "Separate the destructive action from Done")
+        XCTAssertFalse(remove.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover Remove")
+        XCTAssertFalse(remove.frame.intersects(app.keyboards.firstMatch.frame), "The keyboard must not cover Remove")
         let saveWhileTyping = app.buttons["Save draft"]
         if saveWhileTyping.exists && saveWhileTyping.isHittable {
             XCTAssertFalse(close.frame.intersects(saveWhileTyping.frame), "Invoice actions must not cover the line's Done control")
@@ -128,6 +133,53 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         row.tap()
         XCTAssertEqual(app.textFields["invoice-line-price-" + identity].value as? String, "12.50")
+    }
+
+    func testLargestTextCanCloseFocusedInvoiceLineAboveKeyboardDone() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let price = app.textFields["invoice-line-price-" + identity]
+        reveal(price, in: app)
+        price.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let close = app.buttons["Close line"].firstMatch
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        reveal(close, in: app)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(close.frame.intersects(keyboardDone.frame))
+        XCTAssertFalse(close.frame.intersects(app.keyboards.firstMatch.frame))
+        let remove = app.buttons["Remove"].firstMatch
+        reveal(remove, in: app)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertFalse(remove.frame.intersects(keyboardDone.frame), "Remove must clear keyboard Done at large text")
+        XCTAssertFalse(remove.frame.intersects(app.keyboards.firstMatch.frame), "Remove must clear the keyboard at large text")
+        XCTAssertGreaterThanOrEqual(remove.frame.minY - close.frame.maxY, 12, "Separate Remove from line Done at large text")
+        reveal(close, in: app)
+        XCTAssertFalse(close.frame.intersects(keyboardDone.frame))
+        close.tap()
+        XCTAssertTrue(price.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Compressor diagnostic")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testKeyboardDoneDismissesKeyboardWithoutClosingTheLine() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let price = app.textFields["invoice-line-price-" + identity]
+        reveal(price, in: app)
+        price.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let keyboardDone = app.buttons["Done"].firstMatch
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5))
+        keyboardDone.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(price.exists, "Dismissing the keyboard must keep the item open")
     }
 
     func testTypedLineBecomesACustomLineOpenForItsPrice() {
