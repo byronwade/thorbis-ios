@@ -17,6 +17,7 @@ struct NewEstimateView: View {
     @State private var originalScope: EstimateCreationScope?
     @State private var scopeCaptured = false
     @State private var draftRecoveryBlocked = false
+    @State private var jobDraftSaveGuard = JobEstimateDraftSaveGuard()
     @State private var createInFlight = false
     @State private var draftOwner = UUID()
     @State private var ownsDraft = false
@@ -150,18 +151,30 @@ struct NewEstimateView: View {
     private var needsDiscardConfirmation: Bool {
         hasDraftChanges || didRecoverDraft || wroteFreshDraft || draftRecoveryBlocked
     }
-    private func persistDraft(leavingOriginalScope: Bool = false) {
-        guard !intentionallyDiscarded, ownsDraft, didRestoreDraft, (scopeMatches || leavingOriginalScope), !draftRecoveryBlocked else { return }
-        if !didRecoverDraft && !hasDraftChanges && created == nil && !createInFlight && !createOutcomeUncertain {
-            guard wroteFreshDraft, let draftScope else { return }
-            do { try CommercialDraftStore.shared.remove(scope: draftScope); wroteFreshDraft = false }
-            catch { self.error = "The undone draft could not be removed from this phone. Try again before closing." }
-            return
+    @discardableResult private func persistDraft(leavingOriginalScope: Bool = false) -> Bool {
+        guard !intentionallyDiscarded, ownsDraft, didRestoreDraft, (scopeMatches || leavingOriginalScope), !draftRecoveryBlocked else { return false }
+        if !didRecoverDraft && !hasDraftChanges && created == nil && !createInFlight && !createOutcomeUncertain &&
+            !(jobID != nil && jobDraftSaveGuard.requiresRetry && !wroteFreshDraft) {
+            guard wroteFreshDraft, let draftScope else { return jobID == nil || !jobDraftSaveGuard.requiresRetry }
+            let remove = { try CommercialDraftStore.shared.remove(scope: draftScope) }
+            if jobID != nil {
+                guard jobDraftSaveGuard.attempt(remove) else { error = "The undone draft could not be removed from this phone. Try again before closing."; return false }
+            } else {
+                do { try remove() } catch { self.error = "The undone draft could not be removed from this phone. Try again before closing."; return false }
+            }
+            wroteFreshDraft = false; return true
         }
-        do {
-            try saveDraft(leavingOriginalScope: leavingOriginalScope)
-            if !didRecoverDraft { wroteFreshDraft = true }
-        } catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again." }
+        if jobID != nil {
+            guard jobDraftSaveGuard.attempt({ try saveDraft(leavingOriginalScope: leavingOriginalScope) }) else {
+                error = "This draft could not be saved on this phone. Keep this screen open and try again."
+                return false
+            }
+        } else {
+            do { try saveDraft(leavingOriginalScope: leavingOriginalScope) }
+            catch { self.error = "This draft could not be saved on this phone. Keep this screen open and try again."; return false }
+        }
+        if !didRecoverDraft { wroteFreshDraft = true }
+        return true
     }
     private func restoreDraft() {
         guard scopeMatches, let draftScope else { return }
@@ -230,7 +243,10 @@ struct NewEstimateView: View {
     }
     private func discardDraft() {
         guard ownsDraft, scopeMatches, let draftScope else { dismiss(); return }
-        if createOutcomeUncertain || createInFlight || heldAtomicOperation != nil { dismiss(); return }
+        if createOutcomeUncertain || createInFlight || heldAtomicOperation != nil {
+            if jobID == nil || !jobDraftSaveGuard.requiresRetry || persistDraft(leavingOriginalScope: true) { dismiss() }
+            return
+        }
         do { try CommercialDraftStore.shared.remove(scope: draftScope); intentionallyDiscarded = true; dismiss() }
         catch { self.error = "The saved draft could not be removed. Try again." }
     }
@@ -341,7 +357,12 @@ struct NewEstimateView: View {
                 }
                 #endif
                 ThorbisToolbarItem(placement: .cancellationAction) {
-                    Button(created == nil ? "Cancel" : "Close") { if created != nil { dismiss() } else if needsDiscardConfirmation { confirmDiscard = true } else { dismiss() } }.disabled(busy)
+                    Button(created == nil ? "Cancel" : "Close") {
+                        if created != nil {
+                            if jobID == nil || intentionallyDiscarded || persistDraft(leavingOriginalScope: true) { dismiss() }
+                        } else if needsDiscardConfirmation || (jobID != nil && jobDraftSaveGuard.requiresRetry) { confirmDiscard = true }
+                        else { dismiss() }
+                    }.disabled(busy)
                 }
             }
 
@@ -349,7 +370,7 @@ struct NewEstimateView: View {
 
     private var editorContainer: some View {
         editorBase
-            .discardChangesGuard(hasChanges: (created == nil && needsDiscardConfirmation) || draftRecoveryBlocked, busy: busy, isPresented: $confirmDiscard) { discardDraft() }
+            .discardChangesGuard(hasChanges: (created == nil && needsDiscardConfirmation) || draftRecoveryBlocked || (jobID != nil && jobDraftSaveGuard.requiresRetry), busy: busy, isPresented: $confirmDiscard) { discardDraft() }
             .onChange(of: title) { _, _ in persistDraft() }
             .onChange(of: customerID) { _, _ in persistDraft() }
             .onChange(of: lines) { _, _ in persistDraft() }
@@ -485,6 +506,11 @@ struct NewEstimateView: View {
                     .font(Theme.font(14)).foregroundStyle(Theme.muted)
             }
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+            if jobID != nil && jobDraftSaveGuard.requiresRetry {
+                Button("Try saving draft again") {
+                    if persistDraft(), error == "This draft could not be saved on this phone. Keep this screen open and try again." || error == "The undone draft could not be removed from this phone. Try again before closing." { error = nil }
+                }.buttonStyle(.bordered)
+            }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 28)
     }
