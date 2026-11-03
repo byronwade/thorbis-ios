@@ -15,6 +15,7 @@ struct CommercialDraftScope: Codable, Hashable {
 /// provides device-bound data protection, and the directory is excluded from backups.
 @MainActor final class CommercialDraftStore {
     #if DEBUG
+    static var previewForceSaveFailure = false
     static func trace(_ message: String) {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains("--commercial-draft-test-trace"),
@@ -79,6 +80,7 @@ struct CommercialDraftScope: Codable, Hashable {
     func save<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {
         #if DEBUG
         Self.trace("save \(scope.kind)")
+        if Self.previewForceSaveFailure { throw CocoaError(.fileWriteNoPermission) }
         #endif
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var folder = directory

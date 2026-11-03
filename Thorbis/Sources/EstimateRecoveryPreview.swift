@@ -7,6 +7,7 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     static let shared = EstimateRecoveryPreview()
     static let estimateID = "00000000-0000-4000-8000-000000008901"
     private let lock = NSLock()
+    private var events: [String] = []
     private var creates = 0
     private var links = 0
     private var estimateReads = 0
@@ -75,7 +76,16 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
     func advanceEstimateRevision() { lock.withLock { estimateRevisionIncrement += 1 } }
     func denyNextEstimateRead() { lock.withLock { denyEstimateRead = true } }
 
+    func record(_ event: String) { lock.withLock { events.append(event) } }
+    var eventTrace: String { lock.withLock { events.joined(separator: ",") } }
+
     var counts: String { lock.withLock { "creates=\(creates),links=\(links),estimateReads=\(estimateReads),jobReads=\(jobReads)" } }
+    var dismissalEvidence: String {
+        guard let savedEstimateKey else { return "unavailable" }
+        let released = UserDefaults.standard.bool(forKey: savedEstimateKey + "-released")
+        let linked = UserDefaults.standard.bool(forKey: savedEstimateKey + "-linked")
+        return "released=\(released),linked=\(linked)"
+    }
 
     func toggleJobAccess() {
         lock.withLock { denyJobAfterRefresh.toggle() }
@@ -83,7 +93,10 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
 
     func hold(_ action: @escaping @Sendable () -> Void) { lock.withLock { heldReply = action } }
     func release() {
-        let action = lock.withLock { let action = heldReply; heldReply = nil; return action }
+        let action = lock.withLock { let action = heldReply; heldReply = nil; if action != nil { events.append("held-released") }; return action }
+        if action != nil, let savedEstimateKey, ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-dismiss-held") {
+            UserDefaults.standard.set(true, forKey: savedEstimateKey + "-released")
+        }
         action?()
     }
 
@@ -125,21 +138,29 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
         guard Self.enabled, let path = request.url?.path else { return nil }
         if request.httpMethod == "GET", path == "/v1/estimates/\(Self.estimateID)" {
             return lock.withLock {
-                if request.cachePolicy == .reloadIgnoringLocalCacheData { estimateReads += 1 }
+                if request.cachePolicy == .reloadIgnoringLocalCacheData { estimateReads += 1; events.append("estimate") }
                 guard var estimate = savedEstimate else { return Reply(status: 404, payload: ["title": "Sample missing", "status": 404]) }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-deny-saved-read") {
+                    events.append("estimate-denied")
+                    return Reply(status: 403, payload: ["title": "Sample estimate access denied", "status": 403])
+                }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-changed") ||
+                    (ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-change-on-command") && estimateRevisionIncrement > 1) ||
                     (ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-changed-after-link") && links > 0) {
-                    estimate["title"] = "Changed sample estimate"
+                    estimate["title"] = ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-change-again") && estimateRevisionIncrement > 1
+                        ? "Changed again sample estimate" : "Changed sample estimate"
                 }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-normalized-dates") {
                     estimate["createdAt"] = "2026-10-29T00:00:00.000Z"
                     estimate["updatedAt"] = "2026-10-29T00:00:00.000Z"
                 }
-                return Reply(status: 200, payload: estimate)
+                let held = request.url?.query?.contains("preview_hold_initial=estimate") == true
+                if held { events.append("hold-initial-estimate") }
+                return Reply(status: 200, payload: estimate, hold: held)
             }
         }
         if request.httpMethod == "GET", path == "/v1/jobs/\(PaperPreview.jobID)" {
-            if request.cachePolicy == .reloadIgnoringLocalCacheData { lock.withLock { jobReads += 1 } }
+            if request.cachePolicy == .reloadIgnoringLocalCacheData { lock.withLock { jobReads += 1; events.append("job") } }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-deny-job") ||
                 lock.withLock({ denyJobAfterRefresh }) {
                 return Reply(status: 403, payload: ["title": "Sample job access denied", "status": 403])
@@ -150,11 +171,13 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-matching-location") {
                 job["locationId"] = "00000000-0000-4000-8000-000000009999"
             }
-            return Reply(status: 200, payload: job)
+            let held = request.url?.query?.contains("preview_hold_initial=job") == true
+            if held { record("hold-initial-job") }
+            return Reply(status: 200, payload: job, hold: held)
         }
         guard request.httpMethod == "POST" else { return nil }
         if path == "/v1/estimates" {
-            let attempt = lock.withLock { creates += 1; return creates }
+            let attempt = lock.withLock { creates += 1; events.append("create"); return creates }
             guard attempt == 1 else {
                 return Reply(status: 409, payload: ["title": "Duplicate sample creation", "status": 409])
             }
@@ -200,7 +223,10 @@ final class EstimateRecoveryPreview: @unchecked Sendable {
         }
         let expected = "/v1/jobs/\(PaperPreview.jobID)/estimates/\(Self.estimateID)/link"
         guard path == expected else { return nil }
-        let attempt = lock.withLock { links += 1; return links }
+        let attempt = lock.withLock { links += 1; events.append("link"); return links }
+        if let savedEstimateKey, ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-dismiss-held") {
+            UserDefaults.standard.set(true, forKey: savedEstimateKey + "-linked")
+        }
         let arguments = ProcessInfo.processInfo.arguments
         if attempt == 1 && !arguments.contains("--paper-preview-estimate-recovery-link-success") && !arguments.contains("--paper-preview-estimate-link-hold") {
             return Reply(status: 503, payload: ["title": "Sample connection unavailable", "status": 503])

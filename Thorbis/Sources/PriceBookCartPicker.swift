@@ -45,6 +45,14 @@ struct PriceBookCartPicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            #if DEBUG
+            if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-trace") {
+                TimelineView(.periodic(from: .now, by: 0.2)) { _ in
+                    Text("Sample picker trace").accessibilityIdentifier("estimate-picker-event-trace")
+                        .accessibilityValue(EstimateRecoveryPreview.shared.eventTrace)
+                }
+            }
+            #endif
             if typeSize.isAccessibilitySize {
                 searchHeader
             } else {
@@ -178,13 +186,27 @@ struct PriceBookCartPicker: View {
     }
 
     private func add(_ item: PriceBookListItem) {
+        #if DEBUG
+        if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-add-tapped") }
+        #endif
         guard canUsePriceBook, session.can("pricebook.view", feature: "price_book"),
               session.priceBookAuthority == context.authority,
-              catalog.isCurrent(context, api: api) else { return }
+              catalog.isCurrent(context, api: api) else {
+            #if DEBUG
+            if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-add-denied") }
+            #endif
+            return
+        }
         if let message = addItem(item) {
+            #if DEBUG
+            if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-draft-refused") }
+            #endif
             error = message
             return
         }
+        #if DEBUG
+        if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("picker-added") }
+        #endif
         error = nil
         catalog.recordUse(item.id)
         added += 1

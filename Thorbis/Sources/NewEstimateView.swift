@@ -28,6 +28,11 @@ struct NewEstimateView: View {
     @State private var accessAttempt = UUID()
     @State private var verifiedCustomerID: String?
     @State private var verifiedCreatedID: String?
+    @State private var changedSavedEstimate: EstimateRecord?
+    @State private var changedSavedEstimateScope: EstimateCreationScope?
+    @State private var showChangedSavedEstimate = false
+    @State private var confirmUseChangedSavedEstimate = false
+    @State private var changedReviewProblem: String?
     @State private var intentionallyDiscarded = false
     @State private var cleanupFailedAfterSave = false
     @State private var picker: EstimateBuilderTarget?
@@ -180,13 +185,20 @@ struct NewEstimateView: View {
         } catch { draftRecoveryBlocked = true; self.error = "Your saved draft could not be opened. It is still on this phone." }
     }
     private func verifyDraftAccess() async {
+        guard !Task.isCancelled else { return }
+        accessAttempt = UUID()
+        changedSavedEstimate = nil; changedSavedEstimateScope = nil; showChangedSavedEstimate = false; confirmUseChangedSavedEstimate = false
         guard viewVisible, ownsDraft, scopeMatches, let expected = creationScope, recoveryPermission else { return }
-        if !didRecoverDraft && verifiedScope == expected { return }
+        if !didRecoverDraft && verifiedScope == expected && verifiedCustomerID == customerID && verifiedCreatedID == created?.id { return }
         guard !session.isOffline else { return }
         let attempt = UUID(); accessAttempt = attempt
         let expectedCustomer = customerID
         let expectedCreated = created
         let expectedID = expectedCreated?.id
+        #if DEBUG
+        if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record(expectedID == nil ? "verify-new" : "verify-saved") }
+        #endif
+        var changedEstimate: EstimateRecord?
         let allowed = await CommercialDraftAccess.verify(expectedScope: expected, currentScope: {
             guard !session.isOffline, customerID == expectedCustomer, created?.id == expectedID, recoveryPermission else { return nil }
             return creationScope
@@ -208,8 +220,11 @@ struct NewEstimateView: View {
                 guard let customer, customer.id == expectedCustomer, customer.organizationId == expected.organizationID else { return false }
             }
             if let saved = expectedCreated {
-                guard let estimate, estimate.organizationId == expected.organizationID,
-                      EstimateCreationRecovery.matchesSavedEstimate(saved, latest: estimate) else { return false }
+                guard let estimate, estimate.id == saved.id, estimate.organizationId == expected.organizationID else { return false }
+                guard EstimateCreationRecovery.matchesSavedEstimate(saved, latest: estimate) else {
+                    changedEstimate = estimate
+                    return false
+                }
             }
             return true
         })
@@ -217,7 +232,13 @@ struct NewEstimateView: View {
               customerID == expectedCustomer, created?.id == expectedID else { return }
         guard allowed else {
             verifiedScope = nil
-            error = "Could not verify access to this job, customer or estimate. Your draft stays on this phone."
+            if let changedEstimate, session.can("estimate.view", feature: "estimates") {
+                changedSavedEstimate = changedEstimate
+                changedSavedEstimateScope = expected
+                error = "The saved estimate changed. Review it before deciding what to do. Your draft stays on this phone."
+            } else {
+                error = "Could not verify access to this job, customer or estimate. Your draft stays on this phone."
+            }
             return
         }
         if error == "Could not verify access to this job, customer or estimate. Your draft stays on this phone." { error = nil }
@@ -263,7 +284,12 @@ struct NewEstimateView: View {
                     ScrollView {
                         if !resourceAuthorized {
                             VStack {
-                                ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text("Connect to verify access. Your draft stays on this phone."))
+                                if changedSavedEstimate != nil && changedSavedEstimateScope == creationScope && session.can("estimate.view", feature: "estimates") {
+                                    ContentUnavailableView("The saved estimate changed", systemImage: "doc.text.magnifyingglass", description: Text("Review the saved estimate before deciding what to do. Your draft stays on this phone."))
+                                    Button("Review saved estimate") { showChangedSavedEstimate = true }.buttonStyle(.bordered)
+                                } else {
+                                    ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text(error ?? "Connect to verify access. Your draft stays on this phone."))
+                                }
                                 if scopeMatches && ownsDraft && !draftRecoveryBlocked {
                                     Button("Try again") { Task { await verifyDraftAccess() } }.buttonStyle(.bordered)
                                 }
@@ -290,8 +316,24 @@ struct NewEstimateView: View {
             .keyboardDoneButton()
             .onAppear { openDraft() }
             .task(id: draftCheckKey) { await verifyDraftAccess() }
-            .onChange(of: session.isOffline) { _, offline in if offline { accessAttempt = UUID(); if didRecoverDraft { verifiedScope = nil } } }
-            .onDisappear { viewVisible = false; accessAttempt = UUID(); if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
+            .onChange(of: session.isOffline) { _, offline in
+                if offline {
+                    accessAttempt = UUID(); changedSavedEstimate = nil; changedSavedEstimateScope = nil; showChangedSavedEstimate = false; confirmUseChangedSavedEstimate = false
+                    if didRecoverDraft { verifiedScope = nil }
+                }
+            }
+            .onChange(of: creationScope) { _, scope in
+                if changedSavedEstimateScope != scope { changedSavedEstimate = nil; changedSavedEstimateScope = nil; showChangedSavedEstimate = false; confirmUseChangedSavedEstimate = false }
+            }
+            .onDisappear { viewVisible = false; accessAttempt = UUID(); changedSavedEstimate = nil; changedSavedEstimateScope = nil; showChangedSavedEstimate = false; confirmUseChangedSavedEstimate = false; if !busy { persistDraft(leavingOriginalScope: true); releaseDraft() } }
+            .sheet(isPresented: $showChangedSavedEstimate) {
+                if let estimate = changedSavedEstimate, changedSavedEstimateScope == creationScope,
+                   session.can("estimate.view", feature: "estimates") {
+                    changedEstimateReview(estimate)
+                } else {
+                    ContentUnavailableView("Document unavailable", systemImage: "lock")
+                }
+            }
             .trackKeyboard($keyboardUp)
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
@@ -302,9 +344,25 @@ struct NewEstimateView: View {
                     ThorbisToolbarItem(placement: .principal) {
                         HStack {
                             TimelineView(.periodic(from: .now, by: 0.2)) { _ in
-                                Text("Sample requests")
-                                    .accessibilityIdentifier("estimate-recovery-request-counts")
-                                    .accessibilityValue(EstimateRecoveryPreview.shared.counts)
+                                VStack {
+                                    Text("Sample requests")
+                                        .accessibilityIdentifier("estimate-recovery-request-counts")
+                                        .accessibilityValue(EstimateRecoveryPreview.shared.counts)
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") || ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-trace") {
+                                        Text("Sample trace")
+                                            .accessibilityIdentifier("estimate-recovery-event-trace")
+                                            .accessibilityValue(EstimateRecoveryPreview.shared.eventTrace)
+                                    }
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-dismiss-held") {
+                                        Text("Sample dismissal evidence").accessibilityIdentifier("estimate-dismissal-evidence")
+                                            .accessibilityValue(EstimateRecoveryPreview.shared.dismissalEvidence)
+                                    }
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") || ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-hold-initial-estimate") || ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-hold-initial-job") {
+                                        Text("Sample hold")
+                                            .accessibilityIdentifier("estimate-recovery-hold-state")
+                                            .accessibilityValue(EstimateRecoveryPreview.shared.reloadHoldState)
+                                    }
+                                }
                             }
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-toggle-offline") {
                                 Text(session.isOffline ? "Sample offline" : "Sample online")
@@ -314,6 +372,10 @@ struct NewEstimateView: View {
                                     Task { await session.revalidate() }
                                 }.accessibilityIdentifier("estimate-recovery-toggle-network")
                             }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-change-again") {
+                                Button("Change sample estimate again") { EstimateRecoveryPreview.shared.advanceEstimateRevision() }
+                                    .accessibilityIdentifier("estimate-recovery-change-again")
+                            }
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-toggle-job") {
                                 Button("Toggle sample job access") {
                                     EstimateRecoveryPreview.shared.toggleJobAccess()
@@ -321,10 +383,30 @@ struct NewEstimateView: View {
                                 }
                                 .accessibilityIdentifier("estimate-recovery-toggle-job")
                             }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-dismiss-held") {
+                                Button("Close sample while held") {
+                                    dismiss()
+                                    Task {
+                                        try? await Task.sleep(for: .seconds(1))
+                                        EstimateRecoveryPreview.shared.release()
+                                    }
+                                }.accessibilityIdentifier("estimate-dismiss-while-held")
+                            }
+                            if !ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-dismiss-held") && (ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-hold-initial-estimate") || ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-hold-initial-job")) {
+                                Button("Refresh and release sample") {
+                                    Task {
+                                        await session.revalidate()
+                                        EstimateRecoveryPreview.shared.release()
+                                    }
+                                }.accessibilityIdentifier("estimate-release-initial-read")
+                            }
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
                                     Task {
                                         await session.revalidate()
+                                        if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-delay-release") {
+                                            try? await Task.sleep(for: .seconds(3))
+                                        }
                                         EstimateRecoveryPreview.shared.release()
                                     }
                                 }
@@ -338,6 +420,142 @@ struct NewEstimateView: View {
                 }
             }
 
+    }
+
+    private func changedEstimateReview(_ estimate: EstimateRecord) -> some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Text(estimate.title).font(Theme.font(22, weight: .medium))
+                    if let changedReviewProblem { ErrorBanner(message: changedReviewProblem) }
+                    Text("Check whether this estimate is linked to the job before continuing.").foregroundStyle(Theme.subtle)
+                    Text("Status: \(estimate.status.statusLabel)").foregroundStyle(Theme.subtle)
+                    ForEach(estimate.lines) { line in changedEstimateLine(line) }
+                    if let currency = estimate.lines.first?.unitPrice.currency,
+                       let amounts = CustomerDocumentAmounts(lines: estimate.lines, currency: currency) {
+                        Text("Line subtotal: \(money(amounts.subtotal, currency: currency))")
+                        if amounts.credits != 0 {
+                            Text("Credits and discounts: \(money(amounts.credits, currency: currency))")
+                        }
+                        Text("Line total: \(money(amounts.total, currency: currency))").font(Theme.font(17, weight: .medium))
+                    } else if !estimate.lines.isEmpty {
+                        Text("Line total unavailable. Check the saved estimate for its full breakdown.").foregroundStyle(Theme.subtle)
+                    }
+                    ForEach(estimate.options ?? []) { option in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(option.title).font(Theme.font(17, weight: .medium))
+                            if !option.description.isEmpty { Text(option.description).fixedSize(horizontal: false, vertical: true) }
+                            ForEach(option.lines) { line in changedEstimateLine(line) }
+                            Text("Option total: \(money(option.totalAmount, currency: option.currency))").foregroundStyle(Theme.subtle)
+                        }
+                    }
+                    if canUseChangedSavedEstimate(estimate) {
+                        Button("Use this saved estimate") { confirmUseChangedSavedEstimate = true }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Text("Ask your office to review this estimate before adding it to the job.").foregroundStyle(Theme.subtle)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Theme.gutter)
+            }
+            .navigationTitle("Saved estimate")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ThorbisToolbarItem(placement: .cancellationAction) { Button("Done") { showChangedSavedEstimate = false } }
+                #if DEBUG
+                if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-review-scope") {
+                    ThorbisToolbarItem(placement: .primaryAction) {
+                        Button("Revoke sample job") {
+                            EstimateRecoveryPreview.shared.toggleJobAccess()
+                            Task { await session.revalidate() }
+                        }
+                    }
+                }
+                if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-review-offline") {
+                    ThorbisToolbarItem(placement: .primaryAction) {
+                        Button("Disconnect sample") {
+                            PaperPreviewProtocol.simulateNoSignal = true
+                            Task { await session.revalidate() }
+                        }
+                    }
+                }
+                #endif
+            }
+            .thorbisConfirm("Use this saved estimate?", message: "The saved estimate changed. Use its current terms for a later retry?", isPresented: $confirmUseChangedSavedEstimate,
+                            actions: [ThorbisConfirmAction("Use saved estimate") { useChangedSavedEstimate(estimate) }])
+        }
+    }
+
+    private func canUseChangedSavedEstimate(_ latest: EstimateRecord) -> Bool {
+        guard let saved = created, let expected = changedSavedEstimateScope,
+              viewVisible, !session.isOffline, ownsDraft, creationScope == expected, scopeMatches,
+              session.can("estimate.view", feature: "estimates"), recoveryPermission,
+              saved.id == latest.id, saved.organizationId == latest.organizationId,
+              saved.customerId == latest.customerId, saved.locationId == latest.locationId,
+              saved.createdByUserId == latest.createdByUserId else { return false }
+        return true
+    }
+
+    private func useChangedSavedEstimate(_ latest: EstimateRecord) {
+        guard canUseChangedSavedEstimate(latest), changedSavedEstimate == latest,
+              let expected = changedSavedEstimateScope else {
+            showChangedSavedEstimate = false
+            error = "Your access changed. Your draft stays on this phone."
+            return
+        }
+        let previous = created
+        created = latest
+        do {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-review-save-fails") {
+                throw CocoaError(.fileWriteNoPermission)
+            }
+            #endif
+            try saveDraft()
+        } catch {
+            created = previous
+            changedReviewProblem = "The reviewed estimate could not be saved on this phone. Your original draft is still here."
+            return
+        }
+        changedReviewProblem = nil
+        createdScope = expected
+        verifiedScope = expected; verifiedCustomerID = customerID; verifiedCreatedID = latest.id
+        changedSavedEstimate = nil; changedSavedEstimateScope = nil; showChangedSavedEstimate = false; confirmUseChangedSavedEstimate = false
+        error = "Saved estimate reviewed. Retry adding it to the job when ready."
+    }
+
+    private func showChangedEstimateFromRetry(_ latest: EstimateRecord, saved: EstimateRecord, scope: EstimateCreationScope) async {
+        guard latest.id == saved.id, latest.organizationId == scope.organizationID,
+              viewVisible, !session.isOffline, creationScope == scope, recoveryPermission else { return }
+        do {
+            if let jobID {
+                let job = try await api.fieldJob(jobID, requireFresh: true)
+                guard job.id == jobID, job.organizationId == scope.organizationID,
+                      (customerID.isEmpty || job.customerId == customerID),
+                      (jobLocationID == nil || job.locationId == jobLocationID) else { return }
+            }
+            if !customerID.isEmpty {
+                let customer = try await api.fieldCustomer(customerID, requireFresh: true)
+                guard customer.id == customerID, customer.organizationId == scope.organizationID else { return }
+            }
+            guard !Task.isCancelled, viewVisible, !session.isOffline, creationScope == scope,
+                  recoveryPermission, session.can("estimate.view", feature: "estimates"), created?.id == saved.id else { return }
+            verifiedScope = nil
+            changedSavedEstimate = latest; changedSavedEstimateScope = scope
+            error = "The saved estimate changed. Review it before deciding what to do. Your draft stays on this phone."
+        } catch is CancellationError {
+        } catch {
+            guard viewVisible, creationScope == scope else { return }
+            self.error = "The job, customer or estimate could not be checked. Your draft stays on this phone."
+        }
+    }
+
+    private func changedEstimateLine(_ line: FieldLine) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(line.description).fixedSize(horizontal: false, vertical: true)
+            Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))").foregroundStyle(Theme.subtle)
+        }
     }
 
     private var editorContainer: some View {
@@ -600,6 +818,7 @@ struct NewEstimateView: View {
         busy = true
         defer { busy = false; if !viewVisible { releaseDraft() } }
         var createStarted = false
+        var newlyCreated = false
         do {
             let estimate: EstimateRecord
             if let created {
@@ -616,6 +835,7 @@ struct NewEstimateView: View {
                     guard EstimateCreationRecovery.matchesSavedEstimate(created, latest: latest),
                           latest.organizationId == scope.organizationID else {
                         error = "The saved estimate or your access changed. Check it before continuing."
+                        await showChangedEstimateFromRetry(latest, saved: created, scope: scope)
                         return
                     }
                     if let jobID {
@@ -673,6 +893,7 @@ struct NewEstimateView: View {
                 // Retain the server identity and its original scope even if the session changes
                 // while the response is in flight; never attach it under another identity.
                 created = estimate
+                newlyCreated = true
                 createdScope = scope
                 requiresLocationVerification = estimate.locationId != jobLocationID
                 let groupResult = EstimateCreationRecovery.groupResult(submitted, created: estimate)
@@ -689,7 +910,19 @@ struct NewEstimateView: View {
                     return false
                 }
                 requiresGroupDisclosure = groupResult == .missing && groupsMatter
+                #if DEBUG
+                if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-initial-save-fails") {
+                    CommercialDraftStore.previewForceSaveFailure = true
+                    EstimateRecoveryPreview.shared.record("initial-local-save-failed")
+                }
+                #endif
                 try saveDraft(leavingOriginalScope: true)
+                #if DEBUG
+                if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-recovery-delay-initial-link") {
+                    try? await Task.sleep(for: .seconds(2))
+                    EstimateRecoveryPreview.shared.record("initial-link-resumed")
+                }
+                #endif
                 guard creationScope == scope else { return }
                 if requiresManualReview {
                     error = "Estimate EST-\(estimate.id.suffix(4).uppercased()) was saved, but its details differ from your submission. Ask your office to review it."
@@ -706,7 +939,71 @@ struct NewEstimateView: View {
             }
             if let jobID {
                 guard creationScope == scope else { return }
-                guard session.can("job.edit", feature: "jobs"),
+                if newlyCreated {
+                    // The estimate may have changed after creation. Check both exact resources
+                    // before the initial link, as we do for a later retry. The server link API
+                    // does not yet offer an atomic revision precondition.
+                    do {
+                        guard viewVisible, !Task.isCancelled, !session.isOffline,
+                              session.can("estimate.view", feature: "estimates"),
+                              session.can("job.view", feature: "jobs"), session.can("job.edit", feature: "jobs") else {
+                            error = "The estimate was saved. Connect and check access before adding it to this job."
+                            return
+                        }
+                        #if DEBUG
+                        if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("initial-prelink-estimate") }
+                        #endif
+                        let latest: EstimateRecord
+                        #if DEBUG
+                        if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-hold-initial-estimate") {
+                            latest = try await api.previewHeldInitialEstimate(estimate.id)
+                        } else {
+                            latest = try await api.fieldEstimate(estimate.id, requireFresh: true)
+                        }
+                        #else
+                        latest = try await api.fieldEstimate(estimate.id, requireFresh: true)
+                        #endif
+                        #if DEBUG
+                        if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("initial-estimate-delivered") }
+                        #endif
+                        guard viewVisible, !Task.isCancelled, !session.isOffline, creationScope == scope else { return }
+                        guard EstimateCreationRecovery.matchesSavedEstimate(estimate, latest: latest),
+                              latest.organizationId == scope.organizationID else {
+                            await showChangedEstimateFromRetry(latest, saved: estimate, scope: scope)
+                            return
+                        }
+                        let job: JobRecord
+                        #if DEBUG
+                        if EstimateRecoveryPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-hold-initial-job") {
+                            job = try await api.previewHeldInitialJob(jobID)
+                        } else {
+                            job = try await api.fieldJob(jobID, requireFresh: true)
+                        }
+                        #else
+                        job = try await api.fieldJob(jobID, requireFresh: true)
+                        #endif
+                        #if DEBUG
+                        if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("initial-job-delivered") }
+                        #endif
+                        guard viewVisible, !Task.isCancelled, !session.isOffline, creationScope == scope,
+                              session.can("estimate.view", feature: "estimates"),
+                              session.can("job.view", feature: "jobs"), session.can("job.edit", feature: "jobs"),
+                              job.id == jobID, job.organizationId == scope.organizationID,
+                              job.customerId == latest.customerId, job.locationId == latest.locationId else {
+                            error = "The estimate was saved, but the job or your access changed. Check it before continuing."
+                            return
+                        }
+                    } catch {
+                        #if DEBUG
+                        if EstimateRecoveryPreview.enabled { EstimateRecoveryPreview.shared.record("initial-prelink-failed") }
+                        #endif
+                        guard viewVisible, creationScope == scope else { return }
+                        self.error = "The estimate was saved, but it could not be checked. Retry when connected."
+                        return
+                    }
+                }
+                guard viewVisible, !Task.isCancelled, !session.isOffline,
+                      creationScope == scope, session.can("job.edit", feature: "jobs"),
                       session.can("estimate.view", feature: "estimates") else {
                     error = "Your session or access changed. Ask your office to check the saved estimate in its original workspace."
                     return
