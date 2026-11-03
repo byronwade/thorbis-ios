@@ -28,6 +28,9 @@ struct InvoiceReadProvenance {
         let scope: InvoiceReadScope
         var canceled: Bool
         var denied: Bool
+        /// A read started while another request for the same job was unresolved
+        /// cannot establish authority, even if it later completes successfully.
+        let overlapped: Bool
     }
     private var pending: [UUID: Pending] = [:]
     private var latest: UUID?
@@ -35,7 +38,8 @@ struct InvoiceReadProvenance {
 
     mutating func begin(scope: InvoiceReadScope) -> InvoiceReadTicket {
         let ticket = InvoiceReadTicket(id: UUID(), scope: scope)
-        pending[ticket.id] = Pending(scope: scope, canceled: false, denied: false)
+        let overlapped = pending.values.contains { $0.scope.sameResource(as: scope) }
+        pending[ticket.id] = Pending(scope: scope, canceled: false, denied: false, overlapped: overlapped)
         latest = ticket.id
         grant = nil
         return ticket
@@ -51,7 +55,8 @@ struct InvoiceReadProvenance {
         guard let request = pending[ticket.id], request.scope == ticket.scope else { return false }
         // A canceled multi-page read may still have child requests in flight.
         // Only a definitive terminal signal or denial can retire its ticket.
-        guard !request.canceled, !request.denied, allRequestsTerminal else { return false }
+        guard !request.canceled, !request.denied, !request.overlapped, allRequestsTerminal,
+              !pending.contains(where: { $0.key != ticket.id && $0.value.scope.sameResource(as: ticket.scope) }) else { return false }
         guard latest == ticket.id, current == ticket.scope, !pages.isEmpty else { return false }
         var expected: String?
         var seen = Set<String>()
