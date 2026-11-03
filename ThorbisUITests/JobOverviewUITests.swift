@@ -2,6 +2,25 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testOfficeStorageFailureKeepsGeneralJobVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "--paper-preview-office-completion-failure"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 25), "A verified job stays available if the office note cannot be stored")
+        XCTAssertTrue(app.buttons["job-customer-view"].exists)
+        XCTAssertFalse(app.buttons["job-office-note-more"].exists)
+        XCTAssertTrue(app.staticTexts["Couldn't verify job details. Pull to refresh."].exists)
+    }
+
+    func testOfficePrecommitReadFailureKeepsGeneralJobVisible() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-long-office-note", "--paper-preview-office-precommit-read-failure"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 25), "A fresh general job read remains available if office verification storage fails")
+        XCTAssertTrue(app.buttons["job-customer-view"].exists)
+        XCTAssertFalse(app.buttons["job-office-note-more"].exists)
+        XCTAssertTrue(app.staticTexts["Couldn't verify job details. Pull to refresh."].exists)
+    }
     func testDenialInSecondViewRetiresFirstViewBeforeOfflineReopen() {
         continueAfterFailure = false
         let app = XCUIApplication()

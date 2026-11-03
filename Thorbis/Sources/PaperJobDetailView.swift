@@ -2614,8 +2614,27 @@ struct JobDetailView: View {
                 try await api.fieldJob(jobId, requireFresh: true)
             }
             guard jobOfficeScope() == scope, !Task.isCancelled else { return }
-            guard let snapshot = try officeStore.completeLive(scope: scope, ticket: ticket, job: verified,
-                                                               stillAuthorized: true) else { return }
+            do {
+                guard try officeStore.pendingStatus(scope: scope, ticket: ticket) else { return }
+            } catch {
+                guard jobOfficeScope() == scope, !Task.isCancelled else { return }
+                officeUnavailableScope = scope; officeNeedsConnection = false
+                await loadGeneralWithoutOffice(forceFresh: true)
+                return
+            }
+            let snapshot: JobOfficeOfflineStore.Snapshot
+            do {
+                guard let completed = try officeStore.completeLive(scope: scope, ticket: ticket, job: verified,
+                                                                   stillAuthorized: true) else { return }
+                snapshot = completed
+            } catch {
+                // The job was verified, but the office note could not be safely
+                // stored. Keep the general job usable without exposing the note.
+                guard jobOfficeScope() == scope, !Task.isCancelled else { return }
+                officeUnavailableScope = scope; officeNeedsConnection = false
+                await presentGeneralJob(verified) { jobOfficeScope() == scope }
+                return
+            }
             officeSnapshot = snapshot; officeSnapshotScope = scope
             loadedJob = verified
         } catch is CancellationError {
@@ -2652,45 +2671,12 @@ struct JobDetailView: View {
             }
             return
         }
-        do {
-            guard jobOfficeScope() == scope else { return }
-            job = loadedJob
-            // Record before the follow-up requests below, while the identity is known to match.
-            RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
-                                      subtitle: "JOB-\(loadedJob.id.suffix(4).uppercased()) · \(store.customerName(loadedJob.customerId))")
-            let locationContext = customerContext(loadedJob)
-            if locationContext == nil || locationsContext != locationContext {
-                locations = []
-                locationsContext = nil
-                locationsFailed = false
-            }
-            if locationContext != nil { await loadLocations(loadedJob) }
-            if let locationContext, contactsContext != locationContext || !contactsLoaded { await loadContacts(loadedJob) }
-            outbox.learn(loadedJob)
-            JobDetailCache.save(loadedJob)
-            let loadedNotes = try await api.fieldNotes(jobId)
-            guard jobOfficeScope() == scope else { return }
-            notes = loadedNotes
-            JobDetailCache.save(notes: loadedNotes, jobID: jobId)
-            error = nil
-            await loadBrief()
-        } catch is CancellationError {} catch {
-            guard jobOfficeScope() == scope else { return }
-            if error.isConnectivityFailure {
-                // No signal: the last copy of this job, or what the schedule already knows.
-                if job == nil {
-                    job = JobDetailCache.job(jobId) ?? listRecord()
-                }
-                if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
-                if job != nil { self.error = nil; return }
-            }
-            self.error = error.localizedDescription
-        }
+        await presentGeneralJob(loadedJob) { jobOfficeScope() == scope }
     }
 
     /// If the office store cannot establish a scope, keep the existing general
     /// job path available while the office instructions remain hidden.
-    private func loadGeneralWithoutOffice() async {
+    private func loadGeneralWithoutOffice(forceFresh: Bool = false) async {
         guard session.phase == .ready, session.user != nil, session.can("job.view", feature: "jobs") else { return }
         let generation = session.generation
         let authority = session.authorityRevision
@@ -2703,18 +2689,36 @@ struct JobDetailView: View {
                 session.activeOrganization?.id == organization
         }
         do {
-            let loaded = try await api.fieldJob(jobId)
-            guard current(), loaded.id == jobId, loaded.organizationId == organization else { return }
-            job = loaded
-            let context = customerContext(loaded)
-            if context == nil || locationsContext != context {
-                locations = []; locationsContext = nil; locationsFailed = false
+            let loaded = try await SavedCopies.$liveOnly.withValue(forceFresh || SavedCopies.liveOnly) {
+                try await api.fieldJob(jobId, requireFresh: forceFresh)
             }
-            if context != nil { await loadLocations(loaded) }
-            if let context, contactsContext != context || !contactsLoaded { await loadContacts(loaded) }
+            await presentGeneralJob(loaded, current: current)
+        } catch is CancellationError { } catch {
             guard current() else { return }
-            outbox.learn(loaded)
-            JobDetailCache.save(loaded)
+            if error.isConnectivityFailure {
+                if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
+                if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
+                if job != nil { self.error = nil; return }
+            }
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func presentGeneralJob(_ loaded: JobRecord, current: () -> Bool) async {
+        guard current(), loaded.id == jobId, loaded.organizationId == session.activeOrganization?.id else { return }
+        job = loaded
+        RecentItems.shared.record(.job, id: loaded.id, title: loaded.title,
+                                  subtitle: "JOB-\(loaded.id.suffix(4).uppercased()) · \(store.customerName(loaded.customerId))")
+        let context = customerContext(loaded)
+        if context == nil || locationsContext != context {
+            locations = []; locationsContext = nil; locationsFailed = false
+        }
+        if context != nil { await loadLocations(loaded) }
+        if let context, contactsContext != context || !contactsLoaded { await loadContacts(loaded) }
+        guard current() else { return }
+        outbox.learn(loaded)
+        JobDetailCache.save(loaded)
+        do {
             let loadedNotes = try await api.fieldNotes(jobId)
             guard current() else { return }
             notes = loadedNotes
@@ -2724,7 +2728,6 @@ struct JobDetailView: View {
         } catch is CancellationError { } catch {
             guard current() else { return }
             if error.isConnectivityFailure {
-                if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
                 if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
                 if job != nil { self.error = nil; return }
             }

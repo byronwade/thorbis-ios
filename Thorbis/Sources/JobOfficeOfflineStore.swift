@@ -79,6 +79,10 @@ struct JobOfficeOfflineScope: Codable, Hashable {
     }
     private func persist(_ entry: Entry) throws {
         do {
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-office-completion-failure"),
+               entry.state == .available { throw StoreError.unavailable }
+            #endif
             let path = try file(entry.scope)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             var folder = directory
@@ -127,7 +131,16 @@ struct JobOfficeOfflineScope: Codable, Hashable {
         try persist(.init(scope: scope, state: .denied, ticket: nil, snapshot: nil))
     }
     func isPending(scope: JobOfficeOfflineScope, ticket: UUID) -> Bool {
-        guard let entry = try? read(scope) else { return false }
+        (try? pendingStatus(scope: scope, ticket: ticket)) ?? false
+    }
+    func pendingStatus(scope: JobOfficeOfflineScope, ticket: UUID) throws -> Bool {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-office-precommit-read-failure") {
+            if Self.unsafeScopes.insert(scope).inserted { revision = UUID() }
+            throw StoreError.unavailable
+        }
+        #endif
+        guard let entry = try read(scope) else { return false }
         return entry.state == .pending && entry.ticket == ticket
     }
     func offline(scope: JobOfficeOfflineScope, authorized: Bool) -> Snapshot? {
