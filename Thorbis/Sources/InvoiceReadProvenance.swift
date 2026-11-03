@@ -83,8 +83,8 @@ struct InvoiceReadProvenance {
         pending[ticket.id] = request
         guard let current else { grant = nil; latest = nil; return }
         guard ticket.scope.sameResource(as: current) else { return }
-        grant = nil
-        latest = nil
+        if latest == ticket.id { latest = nil }
+        if let grant, grant.scope.sameResource(as: ticket.scope) { self.grant = nil }
     }
 
     /// Cancellation stops publication, but does not prove the transport is done.

@@ -65,6 +65,20 @@ import Foundation
         expect(state.permits(scope: scope, invoice: invoice, digest: digest), "another actor's denial does not retire the current grant")
         state.finishWithoutGrant(otherPending)
 
+        let otherJob = InvoiceReadScope(actor: actor, organization: organization, job: UUID(), customer: customer,
+                                        origin: scope.origin, session: UUID(), authority: UUID(), transport: UUID())
+        let otherJobPending = state.begin(scope: otherJob)
+        let thisJob = state.begin(scope: scope)
+        expect(state.publish(thisJob, current: scope, pages: one, invoices: [invoice: digest], allRequestsTerminal: true), "different job's pending read does not block")
+        state.deny(otherJobPending, current: otherJob)
+        expect(state.permits(scope: scope, invoice: invoice, digest: digest), "another job's denial does not retire the current grant")
+        state.finishWithoutGrant(otherJobPending)
+        let laterOtherJob = state.begin(scope: otherJob)
+        let laterThisJob = state.begin(scope: scope)
+        state.deny(laterOtherJob, current: otherJob)
+        expect(state.publish(laterThisJob, current: scope, pages: one, invoices: [invoice: digest], allRequestsTerminal: true), "another job's denial does not drop a newer ticket")
+        state.finishWithoutGrant(laterOtherJob)
+
         let changed = InvoiceReadScope(actor: actor, organization: organization, job: job, customer: customer,
                                        origin: scope.origin, session: scope.session, authority: UUID(), transport: scope.transport)
         let oldAuthority = state.begin(scope: scope)
