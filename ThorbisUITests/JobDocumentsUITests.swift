@@ -186,6 +186,28 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
     }
 
+    func testLongInvoiceItemOpensFullDescriptionWithoutHidingAmounts() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-long-document-description"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let items = app.buttons["job-invoice-items-\(invoiceA)"]
+        revealJobItem(items, in: app)
+        items.tap()
+        let line = app.descendants(matching: .any)["job-invoice-line-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        XCTAssertTrue(line.waitForExistence(timeout: 10))
+        XCTAssertTrue(line.label.contains("quantity 1"))
+        XCTAssertTrue(line.label.contains("$120.00"))
+        let more = app.buttons["job-invoice-description-more-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        revealJobItem(more, in: app)
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final invoice detail: leave the site clean.")).firstMatch.exists)
+        capture(app, "Invoice full item description")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["job-invoice-\(invoiceA)"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Collect payment"].exists)
+    }
+
     func testLargestTextKeepsInvoiceItemsReachable() {
         continueAfterFailure = false
         let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])

@@ -1,4 +1,5 @@
 import Foundation
+@testable import Thorbis
 
 final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
     final class Gate: @unchecked Sendable {
@@ -63,13 +64,14 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
     private let stateLock = NSLock()
     private var stopped = false
 
-    static func session(_ replies: [Reply]) -> URLSession {
+    static func session(_ replies: [Reply], safeInvoiceEvidence: Bool = false) -> URLSession {
         storage.lock.withLock {
             storage.replies = replies
             storage.requests = []
         }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [URLProtocolFixture.self]
+        if safeInvoiceEvidence { return APIClient.makeNoRedirectSession(configuration: config) }
         return URLSession(configuration: config)
     }
 

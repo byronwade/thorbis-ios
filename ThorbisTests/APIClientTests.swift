@@ -3,6 +3,92 @@ import XCTest
 
 @MainActor
 final class APIClientTests: XCTestCase {
+    func testInvoiceEvidenceReadBypassesLocalCacheAndLabelsNetwork() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
+        let response: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+        XCTAssertEqual(response.source, .network)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+    }
+
+    func testInvoiceEvidenceLabelsSavedCopyOnNetworkFailure() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), URLProtocolFixture.offline], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/invoices", query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests()
+        let response: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+        XCTAssertEqual(response.source, .savedCopy)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+    }
+
+    func testCanceledKnownOfflineInvoiceEvidenceDoesNotReturnSavedCopy() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/invoices", query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests()
+        client.knownOffline = true
+        let task = Task { @MainActor in
+            let response: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+            return response.source
+        }
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Canceled evidence read must not return a saved copy") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
+    func testCanceledInvoiceEvidenceNetworkFailureDoesNotReturnSavedCopy() async throws {
+        let gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}"), .init(0, gate: gate)], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "invoice-evidence-\(UUID().uuidString)"
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/invoices", query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests()
+        let task = Task { @MainActor in
+            let response: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+            return response.source
+        }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        task.cancel(); gate.release()
+        do { _ = try await task.value; XCTFail("Canceled network evidence read must not use a saved copy") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testInvoiceEvidenceRejectsPartialHTTPResponse() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(206, "{}")], safeInvoiceEvidence: true), baseURL: "https://app.thorbis.com")
+        do {
+            let _: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+            XCTFail("Partial data cannot establish full response provenance")
+        } catch let problem as Problem { XCTAssertEqual(problem.status, 206) }
+    }
+
+    func testInvoiceEvidenceRejectsAnInjectedSessionWithoutRedirectGuard() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        do {
+            let _: (value: APIClient.EmptyResponse, source: InvoiceResponseSource) = try await client.invoiceEvidenceGET("/v1/invoices")
+            XCTFail("An unverified session must not produce invoice evidence")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Invoice evidence unavailable")
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+        let _: APIClient.EmptyResponse = try await client.send("GET", "/v1/invoices")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "Existing non-evidence reads remain available")
+    }
+
     func testCookieBackedMutationsSendCanonicalOrigin() async throws {
         let paths = ["/api/auth/sign-in/email", "/api/auth/organization/set-active", "/api/auth/sign-out", "/v1/jobs"]
         let client = APIClient(session: URLProtocolFixture.session(paths.map { _ in .init(200, "{}") }), baseURL: "https://app.thorbis.com/")

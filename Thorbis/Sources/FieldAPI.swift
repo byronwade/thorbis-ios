@@ -989,6 +989,15 @@ private struct FieldPage<T: Decodable>: Decodable {
     let nextCursor: String?
 }
 
+/// Held per-page evidence. A source label does not prove current user access,
+/// job membership, safe redirects, or a complete multi-page result.
+struct InvoiceEvidencePage {
+    let items: [InvoiceRecord]
+    let cursor: String?
+    let nextCursor: String?
+    let source: InvoiceResponseSource
+}
+
 struct JobMediaPage: Decodable {
     let items: [MediaAssetRecord]
     let nextCursor: String?
@@ -1129,6 +1138,21 @@ extension APIClient {
     func linkFieldEstimate(jobID: String, estimateID: String) async throws -> JobEstimateLink {
         guard UUID(uuidString: estimateID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: estimateID) }
         return try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/estimates/\(estimateID)/link"), body: [String: String]())
+    }
+
+    /// Held, disconnected per-page readers. Ordinary invoice APIs and offline
+    /// display are unchanged until their complete integration is qualified.
+    func fieldInvoiceEvidencePage(cursor: String? = nil) async throws -> InvoiceEvidencePage {
+        let result: (value: FieldPage<InvoiceRecord>, source: InvoiceResponseSource) = try await invoiceEvidenceGET("/v1/invoices", cursor: cursor)
+        return .init(items: result.value.items, cursor: cursor, nextCursor: result.value.nextCursor, source: result.source)
+    }
+    func fieldJobInvoiceEvidencePage(_ jobID: String, cursor: String? = nil) async throws -> InvoiceEvidencePage {
+        let path = try fieldPath("/v1/jobs", id: jobID, suffix: "/invoices")
+        let result: (value: FieldPage<InvoiceRecord>, source: InvoiceResponseSource) = try await invoiceEvidenceGET(path, cursor: cursor)
+        return .init(items: result.value.items, cursor: cursor, nextCursor: result.value.nextCursor, source: result.source)
+    }
+    func fieldSingleInvoiceEvidence(_ invoiceID: String) async throws -> (value: InvoiceRecord, source: InvoiceResponseSource) {
+        try await invoiceEvidenceGET(fieldPath("/v1/invoices", id: invoiceID))
     }
 
     func fieldInvoices() async throws -> [InvoiceRecord] { try await allFieldPages("/v1/invoices") }
