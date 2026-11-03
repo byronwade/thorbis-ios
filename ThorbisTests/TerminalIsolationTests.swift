@@ -49,6 +49,15 @@ final class TerminalIsolationTests: XCTestCase {
         XCTAssertFalse(TerminalIsolation.matchesReviewedPayment(zero, server: zero, stripeAmount: 0, stripeCurrency: "usd"))
     }
 
+    func testCollectedPaymentMustKeepIdentityAndReviewedTermsWithoutTip() {
+        let reviewed = FieldMoney(amount: 12345, currency: "USD")
+        XCTAssertTrue(TerminalIsolation.matchesCollectedPayment(reviewed, server: reviewed, expectedID: "pi_1", actualID: "pi_1", stripeAmount: 12345, stripeCurrency: "usd", tip: nil))
+        XCTAssertFalse(TerminalIsolation.matchesCollectedPayment(reviewed, server: reviewed, expectedID: "pi_1", actualID: "pi_2", stripeAmount: 12345, stripeCurrency: "usd", tip: nil))
+        XCTAssertFalse(TerminalIsolation.matchesCollectedPayment(reviewed, server: reviewed, expectedID: "pi_1", actualID: nil, stripeAmount: 12345, stripeCurrency: "usd", tip: nil))
+        XCTAssertFalse(TerminalIsolation.matchesCollectedPayment(reviewed, server: reviewed, expectedID: "pi_1", actualID: "pi_1", stripeAmount: 12345, stripeCurrency: "usd", tip: 1))
+        XCTAssertFalse(TerminalIsolation.matchesCollectedPayment(reviewed, server: reviewed, expectedID: "pi_1", actualID: "pi_1", stripeAmount: 12346, stripeCurrency: "usd", tip: nil))
+    }
+
     func testResetWithoutReaderStillClearsAndClearFailurePropagates() async {
         var calls: [String] = []
         do {

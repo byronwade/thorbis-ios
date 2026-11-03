@@ -67,6 +67,15 @@ exercise a full charge or prove protection against a later change on another
 device. Server-side concurrency enforcement and end-to-end verification remain
 necessary.
 
+The current candidate also skips Stripe's tipping selection and requires the
+retrieved and collected intents to retain the server's payment-intent ID and
+reviewed amount and currency, with no nonzero tip reported. The SDK documents
+that the tip field may be absent when intent updates are disabled, so the
+configuration and physical-device behavior require qualification. A standalone
+wrong-identity check observed a failing result before the policy was added, and
+the focused simulator suite passed 13 tests. These are not controller-level
+charge tests and do not prove remote invoice changes are detected.
+
 Discovery still requires lifecycle work: the current SDK cancelable is not
 stopped when authorization changes after a reader is discovered, and an empty
 discovery update can wait indefinitely. Do not release the Terminal lease as

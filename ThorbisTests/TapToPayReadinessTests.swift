@@ -8,6 +8,12 @@ final class TapToPayReadinessTests: XCTestCase {
         XCTAssertFalse(config.isTOSAcceptancePermitted)
     }
 
+    func testCollectionDoesNotAskForTipsOrChangeTheServerIntent() throws {
+        let config = try TapToPayController.collectionConfiguration()
+        XCTAssertTrue(config.skipTipping)
+        XCTAssertFalse(config.updatePaymentIntent)
+    }
+
     func testUnqualifiedBuildOverridesAnOtherwiseEligibleWorkspaceAndPhone() {
         XCTAssertFalse(TapToPayReadiness.allows(
             buildEnabled: false, deviceSupported: true, featureEnabled: true, canCollect: true

@@ -111,14 +111,16 @@ final class TapToPayController: ObservableObject {
             guard authorized(), termsStillCurrent() else { throw CancellationError() }
             let paymentIntent = try await Terminal.shared.retrievePaymentIntent(clientSecret: intent.clientSecret)
             guard authorized(), termsStillCurrent() else { throw CancellationError() }
-            guard let stripeAmount = Int(exactly: paymentIntent.amount),
-                  TerminalIsolation.matchesReviewedPayment(reviewed, server: intent.amount,
-                      stripeAmount: stripeAmount, stripeCurrency: paymentIntent.currency) else {
+            guard Self.matchesReviewedIntent(paymentIntent, intent: intent, reviewed: reviewed) else {
                 throw Problem(title: "Payment changed", status: 409, detail: "The payment amount changed. Review the invoice before collecting payment.")
             }
             phase = .waitingForCard
-            let collected = try await Terminal.shared.collectPaymentMethod(paymentIntent)
+            let collectConfig = try Self.collectionConfiguration()
+            let collected = try await Terminal.shared.collectPaymentMethod(paymentIntent, collectConfig: collectConfig)
             guard authorized(), termsStillCurrent() else { throw CancellationError() }
+            guard Self.matchesReviewedIntent(collected, intent: intent, reviewed: reviewed) else {
+                throw Problem(title: "Payment changed", status: 409, detail: "The payment details changed. Review the invoice before collecting payment.")
+            }
             phase = .processing
             outcomeUncertain = true
             _ = try await Terminal.shared.confirmPaymentIntent(collected)
@@ -137,6 +139,16 @@ final class TapToPayController: ObservableObject {
     }
 
     func reset() { if !busy { phase = .idle } }
+
+    static func collectionConfiguration() throws -> CollectPaymentIntentConfiguration {
+        try CollectPaymentIntentConfigurationBuilder().setSkipTipping(true).setUpdatePaymentIntent(false).build()
+    }
+
+    private static func matchesReviewedIntent(_ payment: PaymentIntent, intent: CardPresentIntent, reviewed: FieldMoney) -> Bool {
+        guard let amount = Int(exactly: payment.amount) else { return false }
+        return TerminalIsolation.matchesCollectedPayment(reviewed, server: intent.amount, expectedID: intent.paymentIntentId,
+            actualID: payment.stripeId, stripeAmount: amount, stripeCurrency: payment.currency, tip: payment.amountTip)
+    }
 
     private static func message(for error: Error) -> String {
         if let problem = error as? Problem {

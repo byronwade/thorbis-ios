@@ -37,6 +37,12 @@ final class TerminalIsolation {
             stripeCurrency.uppercased() == reviewed.currency
     }
 
+    static func matchesCollectedPayment(_ reviewed: FieldMoney, server: FieldMoney, expectedID: String,
+                                        actualID: String?, stripeAmount: Int, stripeCurrency: String, tip: NSNumber?) -> Bool {
+        !expectedID.isEmpty && actualID == expectedID && (tip == nil || tip?.compare(NSNumber(value: 0)) == .orderedSame) &&
+            matchesReviewedPayment(reviewed, server: server, stripeAmount: stripeAmount, stripeCurrency: stripeCurrency)
+    }
+
     func release(_ id: UUID, uncertain: Bool) {
         guard owner == id else { return }
         if uncertain { needsReconciliation = true }
