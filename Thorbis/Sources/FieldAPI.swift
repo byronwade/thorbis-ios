@@ -1034,7 +1034,7 @@ extension APIClient {
             throw AtomicEstimateCommand.Invalid.scope
         }
         let generation = requestGeneration
-        let response: AtomicEstimateCommand.Response = try await send("POST", "/v1/commands", body: operation.batch)
+        let response: AtomicEstimateCommand.Response = try await send("POST", "/v1/commands", body: operation.batch())
         guard generation == requestGeneration, origin == normalizedOrigin else { throw CancellationError() }
         return operation.interpret(response)
     }

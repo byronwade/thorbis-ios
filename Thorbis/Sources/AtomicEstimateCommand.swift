@@ -5,7 +5,7 @@ import Foundation
 /// code may send this command until that proof and durable recovery are integrated.
 struct AtomicEstimateCommand: Codable, Equatable {
     static let productionEnabled = false
-    static let command = "jobs.createRelatedEstimate"
+    static let command = "jobs.createRelatedEstimateTargetV1"
 
     struct Money: Codable, Equatable {
         let amount: Int
@@ -72,12 +72,29 @@ struct AtomicEstimateCommand: Codable, Equatable {
             (locationID.map { UUID(uuidString: $0) != nil && $0 == $0.lowercased() } ?? true)
         }
     }
+    struct ExpectedJob: Encodable {
+        let customerId: String
+        let locationId: String?
+        private enum CodingKeys: String, CodingKey { case customerId, locationId }
+        func encode(to encoder: Encoder) throws {
+            var fields = encoder.container(keyedBy: CodingKeys.self)
+            try fields.encode(customerId, forKey: .customerId)
+            if let locationId { try fields.encode(locationId, forKey: .locationId) }
+            else { try fields.encodeNil(forKey: .locationId) }
+        }
+    }
+    struct WirePayload: Encodable {
+        let jobId: String
+        let title: String
+        let lines: [Line]
+        let expectedJob: ExpectedJob
+    }
     struct Envelope: Encodable {
         let commandId, deviceId, actorId, organizationId: String
         let policyVersion: Int
         let command: String
         let clientCreatedAt: String
-        let payload: Payload
+        let payload: WirePayload
     }
     struct Batch: Encodable { let commands: [Envelope] }
     struct Response: Decodable {
@@ -125,6 +142,8 @@ struct AtomicEstimateCommand: Codable, Equatable {
     let origin: String
     let createdAt: String
     let payload: Payload
+    /// Absent on legacy pending operations; never reinterpret them as V1.
+    let contractCommand: String?
     /// Missing on older saved operations; those remain pending for review.
     let draftTarget: DraftTarget?
 
@@ -141,13 +160,16 @@ struct AtomicEstimateCommand: Codable, Equatable {
         return .init(commandID: commandID.lowercased(), deviceID: deviceID.lowercased(),
                      actorID: actorID.lowercased(), organizationID: organizationID.lowercased(),
                      policyVersion: policyVersion, origin: origin, createdAt: createdAt,
-                     payload: .init(jobId: jobID.lowercased(), title: normalizedTitle, lines: lines),
+                     payload: .init(jobId: jobID.lowercased(), title: normalizedTitle, lines: lines), contractCommand: Self.command,
                      draftTarget: .init(customerID: draftCustomerID.lowercased(), locationID: draftLocationID?.lowercased()))
     }
-    var batch: Batch {
-        .init(commands: [.init(commandId: commandID, deviceId: deviceID, actorId: actorID,
+    func batch() throws -> Batch {
+        guard isValid, let draftTarget else { throw Invalid.scope }
+        let expected = ExpectedJob(customerId: draftTarget.customerID, locationId: draftTarget.locationID)
+        let wire = WirePayload(jobId: payload.jobId, title: payload.title, lines: payload.lines, expectedJob: expected)
+        return .init(commands: [.init(commandId: commandID, deviceId: deviceID, actorId: actorID,
                                organizationId: organizationID, policyVersion: policyVersion,
-                               command: Self.command, clientCreatedAt: createdAt, payload: payload)])
+                               command: Self.command, clientCreatedAt: createdAt, payload: wire)])
     }
     /// The server derives customer and location from the job, not this draft.
     /// A caller must obtain `job` freshly under the same current authority lease.
@@ -172,14 +194,14 @@ struct AtomicEstimateCommand: Codable, Equatable {
     }
     private var isValid: Bool {
         [commandID, deviceID, actorID, organizationID, payload.jobId].allSatisfy { UUID(uuidString: $0) != nil && $0 == $0.lowercased() } &&
-        policyVersion > 0 && Self.validOrigin(origin) && Self.validTimestamp(createdAt) && (draftTarget?.valid ?? false) &&
+        policyVersion > 0 && Self.validOrigin(origin) && Self.validTimestamp(createdAt) && contractCommand == Self.command && (draftTarget?.valid ?? false) &&
         !payload.title.isEmpty && payload.title == payload.title.trimmingCharacters(in: .whitespacesAndNewlines) && payload.title.utf16.count <= 200 &&
         (1...500).contains(payload.lines.count) && payload.lines.allSatisfy(\.valid)
     }
     /// A refusal can be a replay denied after access changed, so it cannot prove
     /// that the original write did not commit or permit a second create.
     func interpret(_ response: Response) -> Decision {
-        guard response.outcomes.count == 1, let outcome = response.outcomes.first,
+        guard isValid, response.outcomes.count == 1, let outcome = response.outcomes.first,
               outcome.commandId.lowercased() == commandID else { return .unknown }
         if outcome.status == "rejected" { return .needsReview }
         guard outcome.status == "applied" || outcome.status == "duplicate", let link = outcome.result,
