@@ -102,6 +102,30 @@ final class SessionController: ObservableObject {
         return decision.enabled && decision.released && decision.entitled
     }
 
+    /// A cached workspace feature is not enough to authorize a newer write
+    /// contract: require a fresh response from this workspace immediately before
+    /// submitting extended descriptions. Failure never changes the draft.
+    func verifyExtendedCommercialText() async -> Bool {
+        guard phase == .ready, !isOffline, let organization = activeOrganization,
+              isFeatureOn("commercial_extended_descriptions") else { return false }
+        let capturedGeneration = generation
+        let capturedRequestGeneration = api.requestGeneration
+        do {
+            let exposure: FeaturesPayload = try await api.send("GET", "/v1/features", authed: false, requireFresh: true)
+            guard phase == .ready, !isOffline, generation == capturedGeneration,
+                  api.requestGeneration == capturedRequestGeneration,
+                  activeOrganization?.id == organization.id,
+                  exposure.organizationId == organization.id,
+                  let evaluatedAt = Self.date(exposure.evaluatedAt),
+                  abs(evaluatedAt.timeIntervalSinceNow) <= 60,
+                  let decision = exposure.features["commercial_extended_descriptions"]
+            else { return false }
+            return decision.enabled && decision.released && decision.entitled
+        } catch {
+            return false
+        }
+    }
+
     private let api: APIClient
     private let defaults: UserDefaults
     private var sessionDeadline: Date?

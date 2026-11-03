@@ -2,6 +2,17 @@ import XCTest
 @testable import Thorbis
 
 final class InvoiceLineEditorTests: XCTestCase {
+    func testLongDescriptionSurvivesUnavailableCapabilityAndRetry() throws {
+        var state = InvoiceLineEditorState(invoice: try makeInvoice())
+        let text = String(repeating: "Detailed scope. ", count: 30) + "\n\nFinal checks."
+        state.lines[0].description = text
+        XCTAssertThrowsError(try state.makeRequest()) {
+            XCTAssertEqual($0 as? CommercialDescriptionPolicy.Problem, .unavailable)
+        }
+        XCTAssertEqual(state.lines[0].description, text)
+        let request = try state.makeRequest(extendedTextVerified: true)
+        XCTAssertEqual(request.lines[0].description, text)
+    }
     private let invoiceJSON = #"{"id":"00000000-0000-4000-8000-00000000000a","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","origin":"job_completion","sourceOperationKey":"completion:test","status":"draft","linesRevision":3,"amountPaid":0,"currency":"USD","lines":[{"id":"00000000-0000-4000-8000-00000000000b","description":"Repair","quantity":2,"unitPrice":{"amount":1250,"currency":"USD"},"source":{"kind":"manual"}}],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
 
     private func makeInvoice(_ lines: String? = nil, status: String = "draft") throws -> InvoiceRecord {

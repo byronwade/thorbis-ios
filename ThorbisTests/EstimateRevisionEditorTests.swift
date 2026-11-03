@@ -2,6 +2,17 @@ import XCTest
 @testable import Thorbis
 
 final class EstimateRevisionEditorTests: XCTestCase {
+    func testLongDescriptionSurvivesUnavailableCapabilityAndRetry() throws {
+        var state = EstimateRevisionEditorState(estimate: try makeEstimate())
+        let text = String(repeating: "Detailed scope. ", count: 30) + "\n\nFinal checks."
+        state.lines[0].description = text
+        XCTAssertThrowsError(try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true)) {
+            XCTAssertEqual($0 as? CommercialDescriptionPolicy.Problem, .unavailable)
+        }
+        XCTAssertEqual(state.lines[0].description, text)
+        let request = try state.makeRequest(optionsFeatureEnabled: true, canDiscount: true, extendedTextVerified: true)
+        XCTAssertEqual(request.lines[0].description, text)
+    }
     private let estimateID = "00000000-0000-4000-8000-000000000008"
     private let optionID = "00000000-0000-4000-8000-000000000010"
 

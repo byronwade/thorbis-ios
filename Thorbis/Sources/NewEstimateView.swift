@@ -78,8 +78,10 @@ struct NewEstimateView: View {
 
     var valid: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !customerID.isEmpty && !lines.isEmpty &&
+        CommercialDescriptionPolicy.problem(lines.map(\.description), kind: .estimate,
+            capabilityVerified: session.isFeatureOn("commercial_extended_descriptions") && !session.isOffline) == nil &&
         lines.allSatisfy { line in
-            line.estimateDescriptionProblem == nil &&
+            line.estimateDescriptionProblem(allowExtended: session.isFeatureOn("commercial_extended_descriptions") && !session.isOffline) == nil &&
             (Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)).map { (1...100_000).contains($0) } ?? false) &&
             MoneyInput.cents(line.unitPrice) != nil
         }
@@ -307,8 +309,9 @@ struct NewEstimateView: View {
     private func refreshDescriptionProblem() {
         if lines.contains(where: { $0.estimateDescriptionProblem == .priceBookOriginalTooLong }) {
             descriptionProblem = "A price book item's original description is too long for an estimate. Ask your office to update it, then add it again."
-        } else if lines.contains(where: { $0.estimateDescriptionProblem == .tooLong }) {
-            descriptionProblem = "Item descriptions can be up to 200 characters; some symbols count as more than one. Your text is still here; shorten it before saving."
+        } else if let problem = CommercialDescriptionPolicy.problem(lines.map(\.description), kind: .estimate,
+            capabilityVerified: session.isFeatureOn("commercial_extended_descriptions") && !session.isOffline) {
+            descriptionProblem = problem.localizedDescription
         } else {
             descriptionProblem = nil
         }
@@ -326,10 +329,15 @@ struct NewEstimateView: View {
             refreshDescriptionProblem()
             expandedLine = longLine.id
             revealProblem += 1
-        } else if let longLine = lines.first(where: { $0.estimateDescriptionProblem == .tooLong }) {
+        } else if let longLine = lines.first(where: { $0.estimateDescriptionProblem(allowExtended: session.isFeatureOn("commercial_extended_descriptions") && !session.isOffline) == .tooLong }) {
             linesProblem = nil
             refreshDescriptionProblem()
             expandedLine = longLine.id
+            revealProblem += 1
+        } else if CommercialDescriptionPolicy.problem(lines.map(\.description), kind: .estimate,
+            capabilityVerified: session.isFeatureOn("commercial_extended_descriptions") && !session.isOffline) != nil {
+            linesProblem = nil
+            refreshDescriptionProblem()
             revealProblem += 1
         } else {
             linesProblem = valid || titleProblem != nil || customerProblem != nil ? nil
@@ -356,8 +364,11 @@ struct NewEstimateView: View {
     }
 
     private func save() async {
-        guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss),
-              recovery.mayProceed(validDraft: valid) else { return }
+        guard !requiresManualReview, (!requiresGroupDisclosure || acceptedGroupLoss) else { return }
+        guard recovery.mayProceed(validDraft: valid) else {
+            if created == nil && !valid { _ = showProblems() }
+            return
+        }
         guard let scope = creationScope else {
             error = "Your session changed. Check your workspace before continuing."
             return
@@ -409,6 +420,20 @@ struct NewEstimateView: View {
                 guard session.can("estimate.create", feature: "estimates") else {
                     error = "Your role can't create estimates. Ask your office."
                     return
+                }
+                let descriptions = lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
+                if CommercialDescriptionPolicy.isExtended(descriptions, kind: .estimate) {
+                    guard await session.verifyExtendedCommercialText(),
+                          creationScope?.sameIdentityAndTransport(as: scope) == true else {
+                        throw CommercialDescriptionPolicy.Problem.unavailable
+                    }
+                    let currentDescriptions = lines.map { $0.description.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    if let problem = CommercialDescriptionPolicy.problem(currentDescriptions, kind: .estimate, capabilityVerified: true) {
+                        throw problem
+                    }
+                    guard valid, session.can("estimate.create", feature: "estimates") else {
+                        throw CommercialDescriptionPolicy.Problem.unavailable
+                    }
                 }
                 let submitted = creationRequest()
                 createStarted = true
