@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 /// A local draft belongs to the authenticated person, workspace, server and paper it came from.
@@ -78,6 +79,36 @@ struct CommercialDraftScope: Codable, Hashable {
         encoder.outputFormatting = .sortedKeys
         let digest = SHA256.hash(data: try encoder.encode(scope)).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent(digest + ".json")
+    }
+
+    /// Stable per-attempt lock file. Never unlink it: another process may hold
+    /// the inode. Callers may not await or acquire a second lock in `body`.
+    func withAttemptLock<T>(scope: CommercialDraftScope, _ body: () throws -> T) throws -> T {
+        guard scope.kind == "atomic-estimate-attempt" else { throw CocoaError(.fileWriteNoPermission) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let lock = try file(for: scope).deletingPathExtension().appendingPathExtension("lock")
+        let fd = open(lock.path, O_CREAT | O_RDWR | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { _ = flock(fd, LOCK_UN) }
+        return try body()
+    }
+
+    /// Caller holds the attempt lock. A hard-link install refuses to replace
+    /// any existing record even if a non-cooperating process races the check.
+    func createAttempt<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {
+        guard scope.kind == "atomic-estimate-attempt" else { throw CocoaError(.fileWriteNoPermission) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var folder = directory; var resources = URLResourceValues(); resources.isExcludedFromBackup = true
+        try folder.setResourceValues(resources)
+        let data = try JSONEncoder().encode(Envelope(version: 1, scope: scope, value: value))
+        let temporary = directory.appendingPathComponent(".attempt-\(UUID().uuidString).tmp")
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        try writeItem(data, temporary)
+        guard link(temporary.path, try file(for: scope).path) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
     }
 
     func save<Value: Codable>(_ value: Value, scope: CommercialDraftScope) throws {

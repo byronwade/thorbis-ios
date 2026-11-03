@@ -120,4 +120,16 @@ import XCTest
             XCTAssertNil(try journal.recover(actorID: actor, organizationID: org, origin: origin, jobID: job))
         }
     }
+    func testAttemptLockExcludesAnotherStoreAndCreateOnlyNeverReplaces() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let first = CommercialDraftStore(directory: root), second = CommercialDraftStore(directory: root)
+        let key = CommercialDraftScope(actor: actor, organization: org, origin: origin, kind: "atomic-estimate-attempt", document: job)
+        try first.withAttemptLock(scope: key) {
+            XCTAssertThrowsError(try second.withAttemptLock(scope: key) { XCTFail("contending lock entered") })
+            try first.createAttempt("first", scope: key)
+            XCTAssertThrowsError(try first.createAttempt("second", scope: key))
+            XCTAssertEqual(try first.load(String.self, scope: key), "first")
+        }
+        XCTAssertEqual(try second.withAttemptLock(scope: key) { try second.load(String.self, scope: key) }, "first")
+    }
 }
