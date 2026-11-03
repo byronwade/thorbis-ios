@@ -17,7 +17,7 @@ enum ReleaseNotes {
             date: "2026-11-02",
             highlights: [
                 .init(symbol: "text.alignleft", title: "Add longer item details",
-                      detail: "When available, add paragraphs to estimate and invoice items without losing your edits."),
+                      detail: "When available, add paragraphs to estimate and invoice items."),
             ]
         ),
         ReleaseNote(
