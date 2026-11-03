@@ -470,6 +470,7 @@ func jobShortMoney(_ cents: Int, currency: String) -> String {
 struct JobInvoiceLineRows: View {
     let lines: [FieldLine]
     let currency: String
+    var invoiceID: String? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     static func amount(_ line: FieldLine) -> Int? {
@@ -499,6 +500,7 @@ struct JobInvoiceLineRows: View {
             .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(line.description), quantity \(line.quantity)\(amount.map { ", \($0)" } ?? "")")
+            .accessibilityIdentifier(invoiceID.map { "job-invoice-line-\($0)-\(line.id)" } ?? "")
         }
     }
 }

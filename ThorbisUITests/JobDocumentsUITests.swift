@@ -95,15 +95,22 @@ final class JobDocumentsUITests: XCTestCase {
     private func revealJobItem(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
         let chooser = app.buttons["job-section-chooser"]
+        let moneyTab = app.buttons["job-section-money"]
+        let footer = app.buttons["Collect payment"]
         let list = app.scrollViews.firstMatch
+        let topBoundary = chooser.exists ? chooser.frame.maxY : (moneyTab.exists ? moneyTab.frame.maxY : app.frame.minY)
+        let bottomBoundary = !chooser.exists && footer.exists ? footer.frame.minY : app.frame.maxY
         for _ in 0..<10 {
             let frame = element.frame
-            if element.isHittable && frame.midY > chooser.frame.maxY && frame.midY < app.frame.maxY { break }
-            list.swipeUp()
+            if element.isHittable && frame.minY >= topBoundary && frame.maxY <= bottomBoundary { break }
+            let down = frame.minY < topBoundary
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.4 : 0.6))
+            let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.6 : 0.4))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
         XCTAssertTrue(element.isHittable)
-        XCTAssertGreaterThan(element.frame.midY, chooser.frame.maxY)
-        XCTAssertLessThan(element.frame.midY, app.frame.maxY)
+        XCTAssertGreaterThanOrEqual(element.frame.minY, topBoundary)
+        XCTAssertLessThanOrEqual(element.frame.maxY, bottomBoundary)
     }
 
     func testNarrowJobSectionsCanReachEverySectionWithoutScrollingTabs() {
@@ -147,6 +154,77 @@ final class JobDocumentsUITests: XCTestCase {
         deposit.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2241")).firstMatch.exists)
+    }
+
+    func testInvoiceItemsCanBeOpenedIndependentlyWithoutHidingInvoiceActions() {
+        continueAfterFailure = false
+        let app = preview()
+        thorbisStableButton(app, "job-section-money").tap()
+        let first = app.buttons["job-invoice-items-\(invoiceA)"]
+        let second = app.buttons["job-invoice-items-\(depositA)"]
+        let firstLine = app.descendants(matching: .any)["job-invoice-line-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        let secondLine = app.descendants(matching: .any)["job-invoice-line-\(depositA)-00000000-0000-4000-8000-000000009101"]
+        revealJobItem(first, in: app)
+        XCTAssertFalse(firstLine.exists, "Invoice items should start collapsed")
+        XCTAssertFalse(secondLine.exists)
+        first.tap()
+        XCTAssertTrue(firstLine.waitForExistence(timeout: 5))
+        XCTAssertTrue(firstLine.label.contains("Compressor diagnostic"))
+        XCTAssertTrue(firstLine.label.contains("quantity 1"))
+        XCTAssertTrue(firstLine.label.contains("$120.00"))
+        XCTAssertFalse(secondLine.exists, "Opening one invoice must not expand another")
+        revealJobItem(second, in: app)
+        second.tap()
+        XCTAssertTrue(secondLine.waitForExistence(timeout: 5))
+        revealJobItem(first, in: app)
+        first.tap()
+        XCTAssertFalse(firstLine.exists)
+        XCTAssertTrue(secondLine.exists, "Closing one invoice must not close another")
+        let invoice = app.buttons["job-invoice-\(depositA)"]
+        revealJobItem(invoice, in: app)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testLargestTextKeepsInvoiceItemsReachable() {
+        continueAfterFailure = false
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15))
+        chooser.tap()
+        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
+        XCTAssertTrue(money.waitForExistence(timeout: 5))
+        money.tap()
+        let items = app.buttons["job-invoice-items-\(invoiceA)"]
+        revealJobItem(items, in: app)
+        XCTAssertGreaterThanOrEqual(items.frame.height, 44)
+        XCTAssertTrue(items.label.contains("INV-2209"))
+        items.tap()
+        let line = app.descendants(matching: .any)["job-invoice-line-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        XCTAssertTrue(line.label.contains("Compressor diagnostic"))
+        let invoice = app.buttons["job-invoice-\(depositA)"]
+        revealJobItem(invoice, in: app)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "INV-2240")).firstMatch.waitForExistence(timeout: 5))
+    }
+
+    func testPartlyVisibleInvoiceDisclosureDoesNotOpenPayment() {
+        continueAfterFailure = false
+        let app = preview()
+        thorbisStableButton(app, "job-section-money").tap()
+        let disclosure = app.buttons["job-invoice-items-\(invoiceA)"]
+        let footer = app.buttons["Collect payment"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        XCTAssertTrue(footer.waitForExistence(timeout: 10))
+        XCTAssertLessThan(disclosure.frame.minY, footer.frame.minY)
+        XCTAssertGreaterThan(disclosure.frame.maxY, footer.frame.minY, "Fixture must exercise a partially obscured control")
+        let point = disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+            .withOffset(CGVector(dx: 40, dy: 8))
+        point.tap()
+        let line = app.descendants(matching: .any)["job-invoice-line-\(invoiceA)-00000000-0000-4000-8000-000000009101"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
     }
 
     func testCommercialHandoffListsOnlyThisJobsEstimatesAndInvoices() {
