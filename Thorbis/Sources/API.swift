@@ -428,8 +428,9 @@ final class APIClient: ObservableObject {
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
-        var req = URLRequest(url: url, cachePolicy: requireFresh ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
-        if requireFresh { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
+        let freshRead = requireFresh || (SavedCopies.liveOnly && method.uppercased() == "GET")
+        var req = URLRequest(url: url, cachePolicy: freshRead ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
+        if freshRead { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
         req.httpMethod = method
         let isGET = method.uppercased() == "GET"
         if !isGET, !["HEAD", "OPTIONS"].contains(method.uppercased()) {
@@ -450,7 +451,7 @@ final class APIClient: ObservableObject {
         let copyScope = savedCopyScope
         let keptKey = isJSONRead && copyScope != nil && SavedCopies.isKept(path, query: pageQuery) ? readKey : nil
         func savedCopy() -> DataResponse? {
-            guard let copyScope, let keptKey, generation == requestGeneration, savedCopyScope == copyScope,
+            guard !SavedCopies.liveOnly, let copyScope, let keptKey, generation == requestGeneration, savedCopyScope == copyScope,
                   let copy = SavedCopyStore.shared.read(scope: copyScope, key: keptKey) else { return nil }
             if savedCopyPaths[path] != copy.savedAt { savedCopyPaths[path] = copy.savedAt }
             PerfProbe.request(method, path, note: "saved copy")
