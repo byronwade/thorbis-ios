@@ -85,6 +85,8 @@ final class InvoiceGatewayPagerTests: XCTestCase {
         await pager.start(customer: "Smith", isCurrent: { true })
         let opened = await pager.authorizedInvoice(id: a, isCurrent: { true })
         XCTAssertNil(opened)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.header("Cache-Control"), "no-cache")
         XCTAssertTrue(pager.items.isEmpty, "A denied resource must retire stale search rows")
     }
 
