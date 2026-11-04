@@ -42,6 +42,8 @@ final class CustomerPhotoHandoffUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: secondLabel, object: image)], timeout: 10), .completed)
         app.buttons["Previous"].tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Photo 1 of 2"), object: image)], timeout: 10), .completed)
+        image.swipeLeft()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: secondLabel, object: image)], timeout: 10), .completed)
         app.buttons["customer-mode-owner-exit"].tap()
         XCTAssertTrue(present.waitForExistence(timeout: 10))
     }
