@@ -34,4 +34,13 @@ final class StartupDestinationUITests: XCTestCase {
         let app = launch(["--startup-fixture-link"])
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
     }
+    func testPendingShortcutWinsDuringAdaptiveSwitch() {
+        let app = launch()
+        XCTAssertTrue(root(app, "startup-phone-customers").waitForExistence(timeout: 30))
+        app.buttons["Test shortcut and switch"].tap()
+        XCTAssertTrue(root(app, "startup-tablet-Schedule").waitForExistence(timeout: 10))
+        app.buttons["Test switch width"].tap()
+        XCTAssertTrue(root(app, "startup-phone-schedule").waitForExistence(timeout: 10))
+    }
+
 }
