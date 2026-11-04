@@ -1,6 +1,12 @@
 import Foundation
 import Darwin
 
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--probe-uncertain-sync" {
+    let childFence = InvoiceReadFence(directory: URL(fileURLWithPath: CommandLine.arguments[2]))
+    let childScope = InvoiceReadFence.Scope(actor: "018f0000-0000-7000-8000-000000000001", organization: "018f0000-0000-7000-8000-000000000002", origin: "https://example.invalid", invoice: "018f0000-0000-7000-8000-000000000009", resource: "invoice")
+    exit(childFence.cacheAllowed(childScope, payload: Data("verified response".utf8)) ? 2 : 0)
+}
+
 if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--crash-after-begin" {
     let childFence = InvoiceReadFence(directory: URL(fileURLWithPath: CommandLine.arguments[2]))
     let childScope = InvoiceReadFence.Scope(actor: "018f0000-0000-7000-8000-000000000001", organization: "018f0000-0000-7000-8000-000000000002", origin: "https://example.invalid", invoice: "018f0000-0000-7000-8000-000000000005", resource: "invoice")
@@ -56,10 +62,41 @@ let dir = FileManager.default.temporaryDirectory.appendingPathComponent("invoice
 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: dir) }
 let fence = InvoiceReadFence(directory: dir)
+// The old implementation exposed a renamed clean ledger even when its final
+// directory sync failed. A separate instance models a fresh process observing it.
+var failFinalSync = false
+var directorySyncs = 0
+let faultyFence = InvoiceReadFence(directory: dir, syncDirectory: { fd in
+    if failFinalSync {
+        directorySyncs += 1
+        if directorySyncs == 1 { return -1 }
+    }
+    return Darwin.fsync(fd)
+})
 let scope = InvoiceReadFence.Scope(actor: "018f0000-0000-7000-8000-000000000001", organization: "018f0000-0000-7000-8000-000000000002", origin: "https://example.invalid", invoice: "018f0000-0000-7000-8000-000000000003", resource: "invoice")
 func require(_ condition: @autoclosure () -> Bool, _ message: String) {
     guard condition() else { fputs("FAIL: \(message)\n", stderr); exit(1) }
 }
+let uncertain = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000009", resource: "invoice")
+let unrelated = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-00000000000c", resource: "invoice")
+let unrelatedAttempt = try fence.begin(unrelated)
+_ = try unrelatedAttempt.finish(.liveSuccess(livePayload))
+let uncertainAttempt = try faultyFence.begin(uncertain)
+failFinalSync = true
+var observedFailure = false
+do { _ = try uncertainAttempt.finish(.liveSuccess(livePayload)) } catch { observedFailure = true }
+failFinalSync = false
+require(observedFailure, "failed final directory sync must be reported")
+require(!fence.cacheAllowed(uncertain, payload: livePayload), "another process must not observe clean data after uncertain sync")
+require(fence.cacheAllowed(unrelated, payload: livePayload), "an unrelated verified offline copy remains usable")
+let uncertainChild = Process()
+uncertainChild.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+uncertainChild.arguments = ["--probe-uncertain-sync", dir.path]
+try uncertainChild.run(); uncertainChild.waitUntilExit()
+require(uncertainChild.terminationStatus == 0, "fresh process must not observe clean data after uncertain sync")
+let uncertainRecovery = try fence.begin(uncertain)
+_ = try uncertainRecovery.finish(.liveSuccess(livePayload))
+require(fence.cacheAllowed(uncertain, payload: livePayload), "fresh live verification may recover uncertain sync")
 require(!fence.cacheAllowed(scope, payload: livePayload), "unverified scope must start held")
 let initial = try fence.begin(scope)
 require(!fence.cacheAllowed(scope, payload: livePayload), "live read must hold cache")

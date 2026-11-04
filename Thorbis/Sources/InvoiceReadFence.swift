@@ -34,8 +34,12 @@ final class InvoiceReadFence {
         let payloadDigest: Data?
     }
     private let directory: URL
+    private let syncDirectory: (Int32) -> Int32
 
-    init(directory: URL) { self.directory = directory }
+    init(directory: URL, syncDirectory: @escaping (Int32) -> Int32 = { Darwin.fsync($0) }) {
+        self.directory = directory
+        self.syncDirectory = syncDirectory
+    }
 
     private func key(_ scope: Scope) throws -> String {
         guard let actor = UUID(uuidString: scope.actor), let org = UUID(uuidString: scope.organization),
@@ -79,6 +83,12 @@ final class InvoiceReadFence {
                              invoice: scope.invoice, resource: "invoice"))
     }
     private func load(_ key: String) throws -> Record? {
+        // A durable hold covers a transition whose final rename was uncertain.
+        // It is not evidence for restoring any prior grant.
+        let hold = directory.appendingPathComponent("\(key).hold").path
+        let holdFD = open(hold, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        if holdFD >= 0 { close(holdFD); return nil }
+        if errno != ENOENT { throw Failure.storage }
         let path = directory.appendingPathComponent("\(key).json").path
         let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
         if fd < 0 {
@@ -93,6 +103,16 @@ final class InvoiceReadFence {
     }
     private func persist(_ record: Record, _ key: String) throws {
         let data = try JSONEncoder().encode(record)
+        let folder = open(directory.path, O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW)
+        guard folder >= 0 else { throw Failure.storage }
+        defer { close(folder) }
+        let hold = directory.appendingPathComponent("\(key).hold").path
+        let holdFD = open(hold, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard holdFD >= 0 else { throw Failure.storage }
+        let holdSynced = fsync(holdFD) == 0
+        close(holdFD)
+        // This hold must survive a process exit before the new record is renamed.
+        guard holdSynced, fsync(folder) == 0 else { throw Failure.storage }
         let temporary = directory.appendingPathComponent(".\(UUID().uuidString).tmp").path
         let fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw Failure.storage }
@@ -111,10 +131,10 @@ final class InvoiceReadFence {
         guard written, fsync(fd) == 0 else { throw Failure.storage }
         guard rename(temporary, directory.appendingPathComponent("\(key).json").path) == 0 else { throw Failure.storage }
         renamed = true
-        let folder = open(directory.path, O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW)
-        guard folder >= 0 else { throw Failure.storage }
-        defer { close(folder) }
-        guard fsync(folder) == 0 else { throw Failure.storage }
+        guard syncDirectory(folder) == 0 else { throw Failure.storage }
+        // The new record is already durable. If removal isn't durable, a crash
+        // may restore the hold, which conservatively requires a fresh read.
+        guard unlink(hold) == 0, fsync(folder) == 0 else { throw Failure.storage }
     }
 
     func cacheAllowed(_ scope: Scope, payload: Data) -> Bool {
