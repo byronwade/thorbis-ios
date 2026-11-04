@@ -13,6 +13,9 @@ import Foundation
     func pendingAttempt(for scope: Scope) -> Retry? {
         pending[scope].map { Retry(draft: $0.draft, intentID: $0.intentID) }
     }
+    func pendingAttempts() -> [(Scope, Retry)] {
+        pending.map { (scope, attempt) in (scope, Retry(draft: attempt.draft, intentID: attempt.intentID)) }
+    }
     var hasPendingAttempts: Bool { !pending.isEmpty }
     func retireConfirmed() { confirmed.removeAll() }
 

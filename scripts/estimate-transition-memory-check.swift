@@ -28,12 +28,14 @@ struct Draft: Codable, Equatable { let text: String }
   }
   precondition(!uncertain && third.read(for: scope)?.text == "ambiguous")
   let resolved = EstimateTransitionMemory.retire(primary: third, edits: emptyEdits, attempts: retryAttempts) { id, _, _ in observed.append(id) }
-  precondition(resolved && observed.count == 2 && observed[0] == observed[1] && third.read(for: scope) == nil)
+  precondition(resolved && observed.count == 3 && observed.allSatisfy { $0 == observed[0] } && third.read(for: scope) == nil)
   let orphanAttempts = EstimateRecoveryCopyAttempts<Scope,Draft>()
   try? orphanAttempts.perform(Draft(text: "pending"), scope: other) { _, _ in throw CocoaError(.fileReadUnknown) }
   third.hold(Draft(text: "still held"), for: scope)
-  let orphan = EstimateTransitionMemory.retire(primary: third, edits: emptyEdits, attempts: orphanAttempts) { _, _, _ in }
+  let orphan = EstimateTransitionMemory.retire(primary: third, edits: emptyEdits, attempts: orphanAttempts) { _, _, _ in throw CocoaError(.fileWriteNoPermission) }
   precondition(!orphan && third.read(for: scope)?.text == "still held")
+  let recoveredOrphan = EstimateTransitionMemory.retire(primary: third, edits: emptyEdits, attempts: orphanAttempts) { _, _, _ in }
+  precondition(recoveredOrphan && third.read(for: scope) == nil)
   print("PASS: failed, ambiguous and orphan attempts retain memory; confirmed scoped copies retire it")
  }
 }

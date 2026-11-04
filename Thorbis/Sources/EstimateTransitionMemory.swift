@@ -12,6 +12,13 @@ import Foundation
         let drafts = primary.entries()
         let copyEdits = edits.entries()
         do {
+            // A prior write may have installed its copy before reporting failure.
+            // Resolve that exact ID and intent before attempting newer work.
+            for (scope, retry) in attempts.pendingAttempts() {
+                try attempts.perform(retry.draft, scope: scope, intentID: retry.intentID) { id, value in
+                    try install(id, scope, value)
+                }
+            }
             for (scope, draft) in drafts {
                 try attempts.perform(draft, scope: scope) { id, value in try install(id, scope, value) }
             }
