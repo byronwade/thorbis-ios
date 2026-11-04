@@ -48,6 +48,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     @Published private(set) var pendingRequest: FieldRecordPaymentRequest?
     /// The invoice and payments shown are the copy last saved on this phone (OF-04).
     @Published private(set) var offlineCopy = false
+    /// A confirmed access denial hides this invoice until a live read succeeds.
+    @Published private(set) var invoiceAccessDenied = false
     /// Where cash and check go when there is no signal (OF-08); set by the screen that owns this.
     weak var outbox: FieldOutbox?
     var policyVersion = 0
@@ -189,10 +191,14 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         }
         do {
             try Task.checkCancellation()
-            let loadedInvoice = try await api.fieldInvoice(invoiceID)
+            let revalidating = invoiceAccessDenied
+            let loadedInvoice = try await SavedCopies.$liveOnly.withValue(revalidating) {
+                try await api.fieldInvoice(invoiceID)
+            }
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+            if revalidating { invoiceAccessDenied = false }
             // A copy saved on this phone is never charged: card, link and Tap to Pay wait for a live
             // read. Cash and check can still be taken and record once back online (OF-04, OF-08).
             if api.savedCopyDate("/v1/invoices/\(invoiceID)") != nil {
@@ -235,7 +241,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             pendingRequest = nil
             historyComplete = false
         } catch {
-            if error.isConnectivityFailure, outbox != nil,
+            if !invoiceAccessDenied, error.isConnectivityFailure, outbox != nil,
                let cached = invoice ?? JobDetailCache.invoice(invoiceID), acceptInvoiceMutationResponse(cached) {
                 // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
                 useOfflineCopy(cached)
@@ -245,6 +251,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             // A definitive denial must not be followed by an older queued retry.
             if let status = (error as? Problem)?.status, [401, 403, 404].contains(status) {
                 definitiveDenial = true
+                invoiceAccessDenied = true
+                invoice = nil
+                payments = []
+                historyComplete = false
+                offlineCopy = false
             }
             loadError = error.localizedDescription
         }

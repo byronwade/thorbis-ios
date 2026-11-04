@@ -313,6 +313,9 @@ private struct CustomerInvoiceBookPage: View {
     @StateObject private var model: InvoicePaymentCollectionModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showPayments = false
+    #if DEBUG
+    @State private var previewDenialDelivered = false
+    #endif
 
     init(invoice: InvoiceRecord, scope: JobDocumentScope, sourceGeneration: UUID?, api: APIClient, fresh: Bool,
          canSign: Bool, canPay: Bool, active: Bool, refresh: @escaping () async -> Void,
@@ -333,6 +336,18 @@ private struct CustomerInvoiceBookPage: View {
     private var signed: Bool { invoice.customerAuthorization?.linesRevision == invoice.linesRevision }
 
     var body: some View {
+        Group {
+            if model.invoiceAccessDenied {
+                ScrollView {
+                    CustomerStateMessage(symbol: "lock", title: "This invoice is unavailable",
+                                         message: "Ask your technician to check access, or try again when connected.",
+                                         actionTitle: "Try again") { Task { await model.load() } }
+                        .padding(Theme.gutter)
+                    #if DEBUG
+                    if previewDenialDelivered { Text("Preview denial delivered").accessibilityIdentifier("invoice-preview-denial-delivered") }
+                    #endif
+                }
+            } else {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
@@ -396,6 +411,8 @@ private struct CustomerInvoiceBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
+            }
+        }
         .task(id: original) {
             #if DEBUG
             if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-reader-replacement") { return }
@@ -403,6 +420,16 @@ private struct CustomerInvoiceBookPage: View {
             await model.load()
         }
         #if DEBUG
+        .task(id: active) {
+            guard active, PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-reader-denied") else { return }
+            try? await Task.sleep(for: .seconds(10))
+            if !Task.isCancelled {
+                PaperPreviewProtocol.denyInvoiceReaderRecord()
+                await model.load()
+                previewDenialDelivered = PaperPreviewProtocol.invoiceReaderDenialsDelivered > 0
+            }
+        }
         .task(id: active) {
             guard active, PaperPreview.isJobDocumentsPreview,
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-reader-replacement") else { return }

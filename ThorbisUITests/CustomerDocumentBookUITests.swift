@@ -46,6 +46,28 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 10), "The reader returns once the job collection confirms the displayed invoice")
     }
 
+    func testInvoiceDenialClosesReaderAndHidesOldInvoice() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-long-document-description", "--paper-preview-invoice-reader-denied"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15)); app.buttons["Job actions"].tap()
+        thorbisCustomerViewMenuItem(app).tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10)); app.swipeUp(); XCTAssertTrue(invoice.isHittable); invoice.tap()
+        XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForExistence(timeout: 10))
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 5)); more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 20), .completed)
+        XCTAssertTrue(app.staticTexts["invoice-preview-denial-delivered"].waitForExistence(timeout: 5))
+        XCTAssertFalse(more.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Invoice first paragraph")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["Sign for the work"].exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay ")).firstMatch.exists)
+    }
+
     func testInvalidReplacementStillOffersDocumentRefresh() {
         continueAfterFailure = false
         let app = XCUIApplication()

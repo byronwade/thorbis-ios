@@ -6,6 +6,35 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testSavedInvoiceStillSupportsOfflineCashOutboxAfterRefresh() async throws {
+        let uniqueID = UUID().uuidString.lowercased()
+        let invoiceBody = invoice().replacingOccurrences(of: invoiceID, with: uniqueID)
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoiceBody), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "offline-invoice-" + UUID().uuidString
+        let suite = "invoice-offline-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let box = FieldOutbox(directory: directory, defaults: defaults)
+        box.bind(actorID: "00000000-0000-4000-8000-000000000004", organizationID: "00000000-0000-4000-8000-000000000002")
+        let store = InvoicePaymentIntentStore(defaults: defaults)
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: uniqueID, intentStore: store)
+        model.outbox = box; model.policyVersion = 1
+        await model.load()
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/invoices/\(uniqueID)", query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests(); client.knownOffline = true
+        await model.load()
+        XCTAssertTrue(model.offlineCopy)
+        let accepted = await model.record(amountCents: 2500, method: .cash)
+        XCTAssertTrue(accepted)
+        XCTAssertEqual(box.waitingPayments(invoiceID: uniqueID).map(\.amountCents), [2500])
+    }
+
     func testSameAmountCardFromAnotherAttemptCannotConfirmTap() async {
         let receipt = payment(idempotencyKey: "tap:\(invoiceID):00000000-0000-4000-8000-00000000000e")
         let api = APIClient(session: URLProtocolFixture.session([
@@ -193,6 +222,65 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         await older.value; await newest.value; await earlier.value
         XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "A denial must not trigger an older queued read")
         XCTAssertFalse(model.canRecordPayment)
+    }
+
+    func testDeniedPaymentHistoryAlsoRetiresInvoiceContent() async {
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice()), .init(403, #"{"title":"Denied","status":403}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await model.load()
+        XCTAssertTrue(model.invoiceAccessDenied)
+        XCTAssertNil(model.invoice)
+        XCTAssertFalse(model.canRecordPayment)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+    }
+
+    func testDeniedInvoiceCannotReappearFromOfflineCopyUntilLiveRecovery() async throws {
+        let uniqueID = UUID().uuidString.lowercased()
+        let body = invoice().replacingOccurrences(of: invoiceID, with: uniqueID)
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, body), .init(200, #"{"items":[]}"#),
+            .init(403, #"{"title":"Denied","status":403}"#), URLProtocolFixture.offline,
+            .init(200, body), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "denied-invoice-" + UUID().uuidString
+        let suite = "denied-invoice-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let box = FieldOutbox(directory: directory, defaults: defaults)
+        box.bind(actorID: "00000000-0000-4000-8000-000000000004", organizationID: "00000000-0000-4000-8000-000000000002")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: uniqueID, intentStore: InvoicePaymentIntentStore(defaults: defaults))
+        model.outbox = box
+        await model.load()
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/invoices/\(uniqueID)", query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests(); await model.load()
+        XCTAssertTrue(model.invoiceAccessDenied); XCTAssertNil(model.invoice)
+        client.knownOffline = true; await model.load()
+        XCTAssertTrue(model.invoiceAccessDenied); XCTAssertNil(model.invoice)
+        XCTAssertFalse(model.canRecordPayment)
+        client.knownOffline = false; await model.load()
+        XCTAssertFalse(model.invoiceAccessDenied); XCTAssertNotNil(model.invoice)
+    }
+
+    func testDeniedInvoiceReloadRetiresPreviouslyDisplayedInvoice() async {
+        for status in [403, 404] {
+            let client = APIClient(session: URLProtocolFixture.session([
+                .init(200, invoice()), .init(200, #"{"items":[]}"#),
+                .init(status, #"{"title":"Unavailable"}"#)
+            ]), baseURL: "https://app.thorbis.com")
+            let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+            await model.load()
+            XCTAssertNotNil(model.invoice)
+            client.invalidateRequests()
+            await model.load()
+            XCTAssertNil(model.invoice, "Denied invoice content must not stay published")
+            XCTAssertFalse(model.canRecordPayment)
+        }
     }
 
     func testCanceledWaitingLoadDoesNotStartAnotherRequest() async {

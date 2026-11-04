@@ -659,6 +659,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var estimateUnavailable = false
         var documentStatusesChanged = false
         var invoiceReaderReplacement = false
+        var invoiceReaderDenied = false
+        var invoiceReaderDenialsDelivered = 0
         var savedWorkOffline = false
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
@@ -682,6 +684,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
+    static var invoiceReaderDenialsDelivered: Int { scenario.lock.withLock { scenario.invoiceReaderDenialsDelivered } }
+    static func denyInvoiceReaderRecord() { scenario.lock.withLock { scenario.invoiceReaderDenied = true } }
     static func replaceInvoiceReaderRecord() { scenario.lock.withLock { scenario.invoiceReaderReplacement = true } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
@@ -738,6 +742,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        if PaperPreview.isJobDocumentsPreview, url.path == "/v1/invoices/00000000-0000-4000-8000-000000002209",
+           Self.scenario.lock.withLock({ Self.scenario.invoiceReaderDenied }),
+           let response = HTTPURLResponse(url: url, statusCode: 403, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+            Self.scenario.lock.withLock { Self.scenario.invoiceReaderDenialsDelivered += 1 }
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(#"{"title":"Denied","status":403}"#.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
         // Keep the second catalog page pending to exercise honest partial search states.
         if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
