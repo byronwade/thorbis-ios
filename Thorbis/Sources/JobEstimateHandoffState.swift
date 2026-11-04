@@ -576,11 +576,18 @@ extension JobEstimateHandoffPresenter {
         guard active == nil, arbiter.owner == nil else { return .superseded }
         guard session.can("job.view", feature: "jobs") else { return .unavailable }
         let generation = session.generation
+        let authorityRevision = session.authorityRevision
+        let requestGeneration = api.requestGeneration
+        let scopeRevision = api.savedCopyScopeRevision
+        let origin = api.normalizedOrigin
         let handoffRevision = arbiter.revision
         let job = try? await api.fieldJob(jobID)
-        guard arbiter.revision == handoffRevision, arbiter.owner == nil, active == nil else { return .superseded }
-        guard let job, session.generation == generation,
-              job.id == jobID, job.organizationId == session.activeOrganization?.id, job.customerId == customerID else { return .unavailable }
+        guard !Task.isCancelled, session.generation == generation,
+              session.authorityRevision == authorityRevision, session.can("job.view", feature: "jobs"),
+              api.requestGeneration == requestGeneration, api.savedCopyScopeRevision == scopeRevision,
+              api.normalizedOrigin == origin, arbiter.revision == handoffRevision,
+              arbiter.owner == nil, active == nil else { return .superseded }
+        guard let job, job.id == jobID, job.organizationId == session.activeOrganization?.id, job.customerId == customerID else { return .unavailable }
         let model = JobEstimateHandoffModel(job: job, customerName: customerName, documents: JobDocumentCollections(), api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
         present(model, start: start, details: details, onExit: onExit)
