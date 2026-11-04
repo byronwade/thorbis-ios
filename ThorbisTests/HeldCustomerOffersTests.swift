@@ -86,6 +86,10 @@ final class HeldCustomerOffersTests: XCTestCase {
             {"id":"018f0000-aaaa-7000-8000-000000000013","signerName":"\(signer)","acceptedAt":"2026-11-03T12:00:00Z","totalAmount":\(amount),"offerQuoteId":"018f0000-aaaa-7000-8000-000000000012","quoteIdentity":"\(identity)","selections":[{"offerId":"\(offerID)","quantity":\(quantity)}]}
             """.utf8))
         }
+        XCTAssertEqual(customerOfferReviewState(reviewed, matchesScope: false, confirmed: true, now: Date()), .changed)
+        XCTAssertEqual(customerOfferReviewState(reviewed, matchesScope: true, confirmed: false, now: Date()), .current)
+        XCTAssertEqual(customerOfferReviewState(reviewed, matchesScope: true, confirmed: false, now: Date(timeIntervalSince1970: 4_200_000_000)), .expired)
+        XCTAssertEqual(customerOfferReviewState(reviewed, matchesScope: true, confirmed: true, now: Date(timeIntervalSince1970: 4_200_000_000)), .approved)
         let afterExpiry = Date(timeIntervalSince1970: 4_200_000_000)
         XCTAssertFalse(customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: false))
         XCTAssertTrue(customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: true))

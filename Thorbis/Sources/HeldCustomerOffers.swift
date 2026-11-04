@@ -113,6 +113,15 @@ func customerOfferDecisionCanSubmit(_ review: CustomerOfferReview, now: Date, ha
     hasExactPriorAttempt || review.isCurrent(now: now)
 }
 
+enum CustomerOfferReviewState: Equatable { case none, current, expired, changed, approved }
+
+func customerOfferReviewState(_ review: CustomerOfferReview?, matchesScope: Bool, confirmed: Bool, now: Date) -> CustomerOfferReviewState {
+    guard let review else { return .none }
+    guard matchesScope else { return .changed }
+    if confirmed { return .approved }
+    return review.isCurrent(now: now) ? .current : .expired
+}
+
 struct CustomerSelectedAmount: Equatable {
     let currency: String
     let base: Int

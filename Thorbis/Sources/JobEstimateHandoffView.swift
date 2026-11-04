@@ -203,20 +203,25 @@ struct JobEstimateHandoffView: View {
                 }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
                 if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
-                    let quote = model.contexts[item.key]?.offerReview?.quote
+                    let state = offerReviewState(for: item)
+                    let quote = (state == .current || state == .approved) ? model.contexts[item.key]?.offerReview?.quote : nil
                     CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: lines, type: type,
-                                          rows: quote == nil ? customerAmountRows(amounts, currency: currency, invoice: false) : [],
+                                          rows: state == .none ? customerAmountRows(amounts, currency: currency, invoice: false) : [],
                                           readingAccess: descriptionAccess(for: item),
                                           descriptionContext: reference)
-                    if quote == nil && CustomerOfferCapability.isEnabled && item.revision.offers?.isEmpty == false {
+                    if state == .none && CustomerOfferCapability.isEnabled && item.revision.offers?.isEmpty == false {
                         Text("Optional work can be chosen before approval.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                     }
+                    if state == .expired {
+                        Text("This total expired. Open the estimate to review it again.")
+                            .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    } else if state == .changed {
+                        Text("This estimate changed. Ask your technician to reopen it.")
+                            .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    }
                     if let quote {
-                        if model.contexts[item.key]?.offerReview?.isCurrent(now: Date()) == false && model.contexts[item.key]?.outcome?.isApproved != true {
-                            Text("This total expired. Open the estimate to review it again.")
-                                .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-                        }
+                        if state == .approved { Text("Approved total").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
                         ForEach(quote.addOns, id: \.id) { extra in
                             HStack(alignment: .firstTextBaseline) {
                                 Text(extra.title).font(Theme.customerFont(type.body, weight: .medium))
@@ -265,19 +270,27 @@ struct JobEstimateHandoffView: View {
                   && item.revision.estimateId == item.id && item.revision.revisionNumber == item.estimate.currentRevisionNumber)
     }
 
+    private func offerReviewState(for item: JobEstimateReviewedItem) -> CustomerOfferReviewState {
+        let context = model.contexts[item.key]
+        let review = context?.offerReview
+        let matches = review.map { value in
+            model.isCurrent && (context?.link.map { link in value.matches(token: link.token,
+                revisionNumber: item.revision.revisionNumber, contentHash: link.action.contentHash,
+                optionID: item.optionID, generation: model.api.requestGeneration) } ?? false)
+        } ?? true
+        let confirmed = context?.outcome?.isApproved == true && context?.acceptedAction != nil
+        return customerOfferReviewState(review, matchesScope: matches, confirmed: confirmed, now: Date())
+    }
     private var selectedTotals: [(currency: String, amount: Int)]? {
         let amounts = model.reviewed.map { item in
             let option = item.revision.options?.first(where: { $0.id == item.optionID })
             let context = model.contexts[item.key]
             let review = context?.offerReview
-            let matches = review.map { value in
-                context?.link.map { link in value.matches(token: link.token, revisionNumber: item.revision.revisionNumber,
-                    contentHash: link.action.contentHash, optionID: item.optionID, generation: model.api.requestGeneration) } ?? false
-            } ?? true
+            let state = offerReviewState(for: item)
             return CustomerSelectedAmount(currency: option?.currency ?? item.revision.currency,
                 base: option?.totalAmount ?? item.revision.totalAmount,
                 quoteCurrency: review?.quote.currency, quoteAmount: review?.quote.totalAmount,
-                quoteUsable: matches && ((review.map { $0.isCurrent(now: Date()) } ?? true) || context?.outcome?.isApproved == true))
+                quoteUsable: state == .none || state == .current || state == .approved)
         }
         return customerSelectedTotals(amounts)
     }
