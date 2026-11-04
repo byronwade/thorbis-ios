@@ -346,7 +346,8 @@ struct JobCloseoutView: View {
                     if closeout.requirements.isEmpty && checks.isEmpty {
                         Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                     }
-                    if !unassociatedPendingPayments.isEmpty || !unassociatedRecordedInvoiceIDs.isEmpty {
+                    if closeout.unmet.contains(where: { $0.kind == "payment_or_unpaid_disposition" && $0.outcome == "blocked" }),
+                       !unassociatedPendingPayments.isEmpty || !unassociatedRecordedInvoiceIDs.isEmpty {
                         PaperGroupHeader(title: "Payments to check").padding(.top, 18)
                         Text("Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet.")
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)
