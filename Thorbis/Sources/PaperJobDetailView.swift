@@ -2445,11 +2445,15 @@ struct JobDetailView: View {
             return
         }
         let generation = session.generation
+        let authority = session.authorityRevision
         let published = await documents.loadInvoices(scope: scope, api: api) {
-            session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
+            session.generation == generation && session.authorityRevision == authority &&
+                session.can("job.view", feature: "jobs") && session.can("invoice.view", feature: "invoicing") &&
+                session.activeOrganization?.id == scope.organizationID &&
                 self.job?.id == scope.jobID && self.job?.customerId == scope.customerID
         }
-        guard session.generation == generation, published else { return }
+        guard session.generation == generation, session.authorityRevision == authority,
+              session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"), published else { return }
         if let selectedInvoice {
             selectedInvoiceID = selectedInvoice.id
             await loadInvoicePayments(for: selectedInvoice)
