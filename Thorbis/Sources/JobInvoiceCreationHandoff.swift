@@ -13,12 +13,12 @@ enum JobInvoiceCreationHandoff {
         refresh: () async -> Void
     ) async throws -> Value? {
         let value = try await create()
-        guard isCurrent() else { return nil }
+        guard !Task.isCancelled, isCurrent() else { return nil }
         try verify(value)
         guard canView() else { withoutView(); return nil }
         prepareRefresh(value)
         await refresh()
-        guard isCurrent(), canView() else { return nil }
+        guard !Task.isCancelled, isCurrent(), canView() else { return nil }
         return value
     }
 }

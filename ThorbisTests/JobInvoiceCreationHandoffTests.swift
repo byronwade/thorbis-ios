@@ -48,6 +48,21 @@ final class JobInvoiceCreationHandoffTests: XCTestCase {
         XCTAssertNil(result)
     }
 
+    func testCancellationDuringRefreshPreventsNavigation() async throws {
+        let gate = Gate()
+        let task = Task {
+            try await JobInvoiceCreationHandoff.run(
+                create: { "invoice" }, isCurrent: { true }, verify: { _ in },
+                canView: { true }, withoutView: {}, prepareRefresh: { _ in },
+                refresh: { await gate.wait() })
+        }
+        while gate.continuation == nil { await Task.yield() }
+        task.cancel()
+        gate.release()
+        let result = try await task.value
+        XCTAssertNil(result)
+    }
+
     func testCreateWithoutViewReportsSuccessWithoutOpeningOrRefreshing() async throws {
         var reported = false
         var prepared = false
