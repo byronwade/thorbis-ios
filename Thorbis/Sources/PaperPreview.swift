@@ -177,6 +177,13 @@ enum PaperPreview {
             "amount": ["amount": 5_000, "currency": "USD"], "method": "cash", "status": "recorded",
             "idempotencyKey": "paper-preview-job-cash", "recordedAt": "2026-10-28T13:00:00Z",
             "netAmount": ["amount": 5_000, "currency": "USD"]])
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-payments-many") {
+            let firstCash = changed(cash, ["amount": ["amount": 2_500, "currency": "USD"],
+                                           "netAmount": ["amount": 2_500, "currency": "USD"]])
+            let secondCash = changed(firstCash, ["id": "00000000-0000-4000-8000-000000002252",
+                                                 "idempotencyKey": "paper-preview-job-cash-second"])
+            return [card, firstCash, secondCash]
+        }
         return [card, cash]
     }
     private static func changed<T: Codable>(_ value: T, _ fields: [String: Any]) -> T {
@@ -645,6 +652,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
         var setupPaymentReads = 0
+        var documentHistoryRestored = false
         var invoiceReads = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
@@ -664,7 +672,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -673,6 +681,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
+    static func restoreDocumentHistory() { scenario.lock.withLock { scenario.documentHistoryRestored = true } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
@@ -776,6 +785,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ !Self.scenario.reviewConnectionRestored }) {
             status = 503
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
+        } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-job-history-fail-once"),
+                  url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments",
+                  Self.scenario.lock.withLock({ !Self.scenario.documentHistoryRestored }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample payment history unavailable"]
         } else if PaperPreview.isJobDocumentsPreview,
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-deposit-history-failure"),
                   url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments" {
@@ -967,8 +982,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances") { return ["items": []] }
                 var payment = jsonObject(PaperPreview.refundPayment) as! [String: Any]
                 payment["invoiceId"] = invoices[1].id
-                payment["amount"] = ["amount": 34000, "currency": "USD"]
-                payment["netAmount"] = ["amount": 34000, "currency": "USD"]
+                let staleHistory = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-history-mismatch-once") &&
+                    scenario.lock.withLock { !scenario.documentHistoryRestored }
+                let received = staleHistory ? 33000 : 34000
+                payment["amount"] = ["amount": received, "currency": "USD"]
+                payment["netAmount"] = ["amount": received, "currency": "USD"]
                 return ["items": [payment]]
             }
         }
