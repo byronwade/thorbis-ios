@@ -457,6 +457,48 @@ final class JobDocumentsSafetyUITests: XCTestCase {
     private let invoice = "00000000-0000-4000-8000-000000002209"
     private let second = "00000000-0000-4000-8000-000000002240"
 
+    func testOpenCollectionClosesWhenSavedScopeChangesAwayAndBack() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--paper-preview-payment-scope-aba"], screen: "job-invoice")
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 15))
+        collect.tap()
+        let sheet = app.navigationBars["Collect payment"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: sheet)
+        waitForExpectations(timeout: 15)
+    }
+
+    func testUnchangedRevalidationPreservesPaymentAmount() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--paper-preview-payment-revalidate"], screen: "job-invoice")
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 15)); collect.tap()
+        let cash = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Cash")).firstMatch
+        XCTAssertTrue(cash.waitForExistence(timeout: 10)); cash.tap()
+        let amount = app.textFields["Amount to collect in dollars"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 5)); amount.tap()
+        let current = (amount.value as? String) ?? ""
+        amount.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + "12.34")
+        if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+        let revalidate = app.buttons["preview-payment-revalidate"]
+        XCTAssertTrue(revalidate.waitForExistence(timeout: 5)); revalidate.tap()
+        XCTAssertTrue(app.buttons["preview-payment-revalidated"].waitForExistence(timeout: 10))
+        XCTAssertTrue(amount.exists)
+        XCTAssertEqual(amount.value as? String, "12.34")
+        XCTAssertTrue(app.navigationBars["Collect payment"].exists)
+    }
+
+    func testRevokedPaymentPermissionClosesCollection() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--paper-preview-payment-revalidate", "--paper-preview-payment-revoke"], screen: "job-invoice")
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 15)); collect.tap()
+        let sheet = app.navigationBars["Collect payment"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        let revalidate = app.buttons["preview-payment-revalidate"]
+        XCTAssertTrue(revalidate.waitForExistence(timeout: 5)); revalidate.tap()
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: sheet)
+        waitForExpectations(timeout: 15)
+    }
+
     func testPartialReadRequiresRefreshBeforeBuildingAnotherEstimate() {
         let app = launch(["--paper-preview-job-documents-partial"])
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't load all estimates")).firstMatch.waitForExistence(timeout: 15))

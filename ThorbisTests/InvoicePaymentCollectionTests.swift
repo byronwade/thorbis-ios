@@ -1,10 +1,23 @@
 import XCTest
+import Combine
 @testable import Thorbis
 
 @MainActor
 final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
+
+    func testSavedCopyScopeRevisionPublishesAwayAndBackChanges() {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        var revisions: [UUID] = []
+        let observation = client.$savedCopyScopeRevision.dropFirst().sink { revisions.append($0) }
+        client.savedCopyScope = "scope-A"
+        client.savedCopyScope = "scope-B"
+        client.savedCopyScope = "scope-A"
+        XCTAssertEqual(revisions.count, 3)
+        XCTAssertEqual(Set(revisions).count, 3)
+        withExtendedLifetime(observation) {}
+    }
 
     func testSavedInvoiceSourceSurvivesConcurrentLiveInvoiceResponse() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
@@ -513,6 +526,21 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         let result = await model.record(amountCents: 10_001, method: .cash)
         XCTAssertFalse(result)
         XCTAssertTrue(model.paymentError?.contains("greater than the invoice balance") == true)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.method == "POST" }.count, 0)
+    }
+
+    func testDeniedInvoiceRefreshStopsNewPaymentAttempts() async {
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice()), .init(200, #"{"items":[]}"#),
+            .init(403, #"{"title":"Forbidden","status":403}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await model.load()
+        XCTAssertTrue(model.canRecordPayment)
+        await model.load()
+        XCTAssertFalse(model.canRecordPayment)
+        let result = await model.record(amountCents: 2500, method: .cash)
+        XCTAssertFalse(result)
         XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.method == "POST" }.count, 0)
     }
 
