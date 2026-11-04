@@ -495,8 +495,23 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(sheet.waitForExistence(timeout: 10))
         let revalidate = app.buttons["preview-payment-revalidate"]
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5)); revalidate.tap()
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: sheet)
-        waitForExpectations(timeout: 15)
+        // Verify that the job screen is usable and payment controls are no longer reachable
+        // after revalidation, independently of the sheet navigation-bar query.
+        let handoff = app.buttons["Show customer"]
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: handoff)], timeout: 20)
+        if result != .completed {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Payment revocation accessibility hierarchy"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+        XCTAssertEqual(result, .completed)
+        XCTAssertFalse(app.buttons["Create payment link"].isHittable)
+        XCTAssertFalse(app.buttons["Collect payment"].isHittable)
+        XCTAssertFalse(app.buttons["Cash"].isHittable)
+        XCTAssertFalse(app.buttons["Check"].isHittable)
+        XCTAssertFalse(app.buttons["Other"].isHittable)
+        XCTAssertFalse(app.textFields["Amount to collect in dollars"].isHittable)
     }
 
     func testPartialReadRequiresRefreshBeforeBuildingAnotherEstimate() {

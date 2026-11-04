@@ -58,6 +58,7 @@ struct JobDetailView: View {
     @State private var invoicePaymentLoads = JobInvoicePaymentLoads()
     @State private var paymentRoute: JobInvoicePaymentRoute?
     @State private var activityFilter = "All"
+    @State private var activityFilterBeforePhotos = "All"
     #if DEBUG
     @State private var previewPaymentRevalidated = false
     #endif
@@ -133,8 +134,8 @@ struct JobDetailView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    /// Overview for the visit, Money for its estimates and invoices, Activity for notes, status and photos.
-    private let tabs = ["Overview", "Money", "Activity"]
+    /// Photos reuse Activity's job-scoped media view, but have their own direct section.
+    private let tabs = ["Overview", "Money", "Activity", "Photos"]
     private let activityFilters = ["All", "Notes", "Status", "Estimates", "Photos"]
     private var showsPhotos: Bool { selectedTab == "Activity" && activityFilter == "Photos" }
 
@@ -467,7 +468,8 @@ struct JobDetailView: View {
                 Task { await loadMediaCount(); await loadCloseout() }
             }
         }
-        .onChange(of: activityFilter) { previous, _ in
+        .onChange(of: activityFilter) { previous, current in
+            if current == "Photos", previous != "Photos" { activityFilterBeforePhotos = previous }
             if previous == "Photos" { Task { await loadMediaCount() } }
         }
         .onChange(of: selectedInvoiceID) { _, selectedID in
@@ -1012,6 +1014,7 @@ struct JobDetailView: View {
         case "Money":
             guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
             return "Money · \(jobShortMoney(balance, currency: "USD"))"
+        case "Photos": return "Photos"
         default:
             let count = activityCount(job)
             return count > 0 ? "Activity · \(count)" : "Activity"
@@ -1030,15 +1033,27 @@ struct JobDetailView: View {
         }
     }
 
-    /// The job's three sections as Linear text tabs; a menu at accessibility sizes.
+    private var shownJobSection: String { showsPhotos ? "Photos" : selectedTab }
+
+    private func selectJobSection(_ section: String) {
+        if section == "Photos" {
+            if activityFilter != "Photos" { activityFilterBeforePhotos = activityFilter }
+            openPhotos()
+        } else {
+            if section == "Activity", activityFilter == "Photos" { activityFilter = activityFilterBeforePhotos }
+            withMotion(.snappy) { selectedTab = section }
+        }
+    }
+
+    /// Job sections as Linear text tabs; a menu at accessibility sizes.
     private func tabBar(_ job: JobRecord) -> some View {
         Group {
             if typeSize.isAccessibilitySize {
                 ThorbisMenu(items: tabs.map { tab in
-                    ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == selectedTab) { selectedTab = tab }
-                }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(selectedTab, job: job))") {
+                    ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == shownJobSection) { selectJobSection(tab) }
+                }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(shownJobSection, job: job))") {
                     HStack(spacing: 12) {
-                        Text(sectionLabel(selectedTab, job: job)).font(Theme.font(15, weight: .medium))
+                        Text(sectionLabel(shownJobSection, job: job)).font(Theme.font(15, weight: .medium))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.up.chevron.down")
@@ -1054,7 +1069,7 @@ struct JobDetailView: View {
                 .accessibilityIdentifier("job-section-chooser")
             } else {
                 JobSectionControl(options: tabs.map { ($0, sectionLabel($0, job: job), spokenSectionLabel($0, job: job)) },
-                                  selection: $selectedTab)
+                                  selection: Binding(get: { shownJobSection }, set: { selectJobSection($0) }))
                     .padding(.horizontal, Theme.gutter - 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

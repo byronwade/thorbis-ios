@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-04-job-photos-section",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "photo.on.rectangle", title: "Open job photos directly",
+                      detail: "Go straight to a job's photos from its section bar."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-04-job-payment-selection",
             date: "2026-11-04",
             highlights: [
