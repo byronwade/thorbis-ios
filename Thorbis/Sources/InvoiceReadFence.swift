@@ -15,6 +15,7 @@ final class InvoiceReadFence {
         let resource: String
     }
     enum Outcome { case liveSuccess, connectivityFailure, denied }
+    enum Completion: Equatable { case committed, held, denied }
     enum Failure: Error { case invalidScope, storage, contended, alreadyFinished }
     private struct Record: Codable {
         let version: Int
@@ -161,7 +162,7 @@ final class InvoiceReadFence {
         // later read to erase a denial we can no longer observe. The future
         // transport owner must finish every attempt to avoid this availability
         // cost; this primitive remains unwired until that lifecycle is proven.
-        func finish(_ outcome: Outcome) throws {
+        func finish(_ outcome: Outcome) throws -> Completion {
             mutex.lock(); defer { mutex.unlock() }
             guard transport >= 0 else { throw Failure.alreadyFinished }
             let fd = transport
@@ -172,15 +173,15 @@ final class InvoiceReadFence {
                     try fence.persist(Record(version: 1, phase: "denied", epoch: UUID().uuidString,
                                              eligible: false, priorClean: false, priorEpoch: nil, parentEpoch: nil), key)
                 }
-                return
+                return .denied
             }
-            // The exclusive transport lease has stayed held since before the request.
-            try fence.withScopeMetadata(key, parent: parent) {
+            // A normal return is not an authorization merely because a ledger transition committed.
+            return try fence.withScopeMetadata(key, parent: parent) {
                 guard let record = try fence.load(key), record.phase == "pending", record.epoch == epoch,
-                      record.eligible else { return }
+                      record.eligible else { return .held }
                 if let parent {
                     guard let invoice = try fence.load(parent), invoice.phase == "clean",
-                          invoice.epoch == record.parentEpoch else { return }
+                          invoice.epoch == record.parentEpoch else { return .held }
                 }
                 let canRestore: Bool
                 switch outcome {
@@ -188,12 +189,18 @@ final class InvoiceReadFence {
                 case .connectivityFailure: canRestore = record.priorClean
                 case .denied: canRestore = false
                 }
-                if canRestore {
-                    let cleanEpoch = outcome == .connectivityFailure ? (record.priorEpoch ?? UUID().uuidString) : UUID().uuidString
-                    try fence.persist(Record(version: 1, phase: "clean", epoch: cleanEpoch,
-                                             eligible: false, priorClean: false, priorEpoch: nil,
-                                             parentEpoch: record.parentEpoch), key)
+                guard canRestore else { return .held }
+                let cleanEpoch: String
+                if outcome == .connectivityFailure {
+                    guard let previous = record.priorEpoch, UUID(uuidString: previous) != nil else { return .held }
+                    cleanEpoch = previous
+                } else {
+                    cleanEpoch = UUID().uuidString
                 }
+                try fence.persist(Record(version: 1, phase: "clean", epoch: cleanEpoch,
+                                         eligible: false, priorClean: false, priorEpoch: nil,
+                                         parentEpoch: record.parentEpoch), key)
+                return .committed
             }
         }
     }
