@@ -183,6 +183,9 @@ struct CustomerEstimatePresentation: View {
     }
     private var approvedAmountText: String? {
         if let offerReview {
+            guard offerAuthorityCurrent, let link, let revision = flow.issuedRevision,
+                  offerReview.matches(token: link.token, revisionNumber: revision.revisionNumber, contentHash: link.action.contentHash,
+                    optionID: flow.selectedOptionID, generation: api.requestGeneration) else { return nil }
             let acceptance = handoff?.acceptedAction?.acceptance ?? standaloneAcceptedOffer
             let signer = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
             return offerReview.verifiedAcceptedAmount(acceptance, signerName: signer).map { money($0, currency: offerReview.quote.currency) }
