@@ -373,7 +373,7 @@ enum PaperPreview {
                 let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
                 JobDetailCache.save(invoice: old)
             }
-            let legacy = ["legacy", "legacy-recorded", "noaccess", "no-payments", "offline", "satisfied"].contains(scenario)
+            let legacy = ["legacy", "legacy-revoke", "legacy-recorded", "noaccess", "no-payments", "offline", "satisfied"].contains(scenario)
             let recorded = ["recorded", "legacy-recorded", "noaccess", "no-payments", "satisfied"].contains(scenario)
             let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: legacy ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
             if recorded {

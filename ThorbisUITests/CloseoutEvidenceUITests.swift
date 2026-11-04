@@ -64,6 +64,18 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["00000000-0000-4000-8000-000000002209"].exists)
     }
 
+    func testEditingPermissionLossMakesOpenSavedWorkReadOnly() {
+        let app = launch("legacy-revoke")
+        app.buttons["Review saved work"].tap()
+        XCTAssertTrue(app.buttons["saved-work-sync"].waitForExistence(timeout: 10))
+        app.buttons["Sample controls"].tap()
+        let revoke = app.buttons["Revoke sample editing shortly"]
+        XCTAssertTrue(revoke.waitForExistence(timeout: 10))
+        revoke.tap()
+        XCTAssertTrue(app.staticTexts["You can review saved work. Your current access doesn't allow retrying or discarding changes."].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["saved-work-sync"].isEnabled)
+    }
+
     func testOfflineSavedWorkCannotSyncUntilReconnected() {
         let app = launch("offline")
         let review = app.buttons["Review saved work"]
@@ -97,6 +109,9 @@ final class CloseoutEvidenceUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-closeout"]
+        if scenario == "legacy-revoke" {
+            app.launchArguments += ["--paper-preview-saved-work-session", UUID().uuidString, "--paper-preview-saved-work-controls"]
+        }
         app.launchEnvironment["THORBIS_CLOSEOUT_TEST"] = scenario
         app.launch()
         XCTAssertTrue(app.staticTexts[scenario == "satisfied" ? "Payment recorded" : "Payment is due"].waitForExistence(timeout: 20))
