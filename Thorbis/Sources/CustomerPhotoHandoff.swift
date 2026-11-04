@@ -90,6 +90,7 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
     }
 
     private func load() async {
+        guard !Task.isCancelled else { return }
         guard isCurrent, selection.selectedIDs.indices.contains(index) else { message = "These photos are no longer available. Please hand the device back to your technician."; return }
         let current = UUID(); loadID = current; loading = true; message = nil
         do {
