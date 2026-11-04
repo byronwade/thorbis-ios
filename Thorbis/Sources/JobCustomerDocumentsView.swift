@@ -447,10 +447,9 @@ private struct CustomerJobReadOnlyPaper: View {
                             ForEach(options) { option in
                                 Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
                                 if !option.description.isEmpty { Text(option.description).font(Theme.customerFont(type.body)) }
-                                CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: option.lines, type: type, rows: [CustomerAmountRow(label: "Option total", amount: money(option.totalAmount, currency: option.currency), emphasis: true)])
+                                estimateLines(option.lines, currency: option.currency, type: type, expectedTotal: option.totalAmount)
                             }
-                        } else { lines(estimate.lines, currency: estimate.lines.first?.unitPrice.currency ?? "USD", type: type) }
+                        } else { estimateLines(estimate.lines, currency: estimate.lines.first?.unitPrice.currency ?? "USD", type: type) }
                     } else if let invoice {
                         Text("Invoice").font(Theme.customerFont(type.heading, weight: .medium))
                         CustomerStatusWord(status: invoice.status, type: type)
@@ -467,6 +466,20 @@ private struct CustomerJobReadOnlyPaper: View {
     @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, type: CustomerType) -> some View {
         CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: lines, type: type, rows: paperLinesTotal(lines).map { [CustomerAmountRow(label: "Total", amount: money($0, currency: currency), emphasis: true)] } ?? [])
+    }
+
+    @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, type: CustomerType, expectedTotal: Int? = nil) -> some View {
+        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
+           expectedTotal.map({ $0 == amounts.total }) != false,
+           let projected = customerEstimateProjection(lines, currency: currency) {
+            CustomerIncludedLabel(type: type)
+            CustomerIncludedLines(lines: projected, type: type, rows: expectedTotal.map {
+                [CustomerAmountRow(label: "Option total", amount: money($0, currency: currency), emphasis: true)]
+            } ?? customerAmountRows(amounts, currency: currency, invoice: false))
+        } else {
+            Text("These amounts couldn't be verified. Hand the device back to your technician.")
+                .font(Theme.customerFont(type.body))
+        }
     }
 }
 

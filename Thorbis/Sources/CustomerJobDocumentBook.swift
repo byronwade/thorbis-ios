@@ -278,9 +278,10 @@ private struct CustomerEstimateBookPage: View {
     }
 
     @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, descriptionContext: String) -> some View {
-        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
+        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
+           let projected = customerEstimateProjection(lines, currency: currency) {
             CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess, descriptionContext: descriptionContext)
+                    CustomerIncludedLines(lines: projected, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess, descriptionContext: descriptionContext)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                 .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
