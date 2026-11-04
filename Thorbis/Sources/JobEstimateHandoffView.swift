@@ -32,6 +32,12 @@ private struct CustomerHandoffEstimateDetails: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-details-mutation") {
+                    Button("Replace sample revision shortly") { previewChange(revise: true) }
+                    Button("Remove sample estimate shortly") { previewChange(revise: false) }
+                }
+                #endif
                 if !current {
                     CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
                                          message: "Hand the device back to your technician to reopen this estimate.")
@@ -70,6 +76,17 @@ private struct CustomerHandoffEstimateDetails: View {
         .accessibilityIdentifier("handoff-estimate-details")
         .task { await load() }
     }
+
+    #if DEBUG
+    private func previewChange(revise: Bool) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+            if revise { JobEstimateHandoffPreview.shared.reviseFirst() }
+            else { JobEstimateHandoffPreview.shared.removeFirst() }
+            await model.refresh()
+        }
+    }
+    #endif
 
     @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, total: Int, context: String) -> some View {
         if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == total,
