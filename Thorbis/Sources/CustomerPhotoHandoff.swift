@@ -122,15 +122,25 @@ struct CustomerPhotoHandoffView: View {
                         })
                 } else if let message = owner.message {
                     Text(message).font(Theme.customerFont(17)).multilineTextAlignment(.center)
-                    if owner.isCurrent { Button("Try again") { Task { await owner.load() } }.font(Theme.customerFont(17)) }
+                    if owner.isCurrent {
+                        Button("Try again") { Task { await owner.load() } }
+                            .font(Theme.customerFont(CustomerModeStyle.body))
+                            .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
+                    }
                 }
                 Spacer(minLength: 0)
                 HStack {
-                    Button("Previous") { owner.index -= 1 }.disabled(owner.index == 0)
+                    Button("Previous") { owner.index -= 1 }
+                        .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
+                        .disabled(owner.index == 0)
                     Spacer()
-                    Button("Next") { owner.index += 1 }.disabled(owner.index + 1 >= owner.selection.selectedIDs.count)
-                }.font(Theme.customerFont(17)).frame(minHeight: CustomerModeStyle.target)
-                Button("Done") { owner.clear(); handBack() }.font(Theme.customerFont(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
+                    Button("Next") { owner.index += 1 }
+                        .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
+                        .disabled(owner.index + 1 >= owner.selection.selectedIDs.count)
+                }.font(Theme.customerFont(CustomerModeStyle.body))
+                Button("Done") { owner.clear(); handBack() }
+                    .font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
+                    .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
             }
             .padding(24)
             .task(id: owner.index) {
