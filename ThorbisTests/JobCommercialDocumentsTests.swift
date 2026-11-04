@@ -4,6 +4,20 @@ import XCTest
 @MainActor
 final class JobCommercialDocumentsTests: XCTestCase {
     private func id(_ value: Int) -> String { String(format: "00000000-0000-4000-8000-%012d", value) }
+    func testEstimateCreationExplainsChangedAvailabilityWithoutBlockingCreateOnlyRole() {
+        XCTAssertNil(JobEstimateCreation.unavailableMessage(canCreate: true, canView: false,
+            estimatesLoaded: false, estimatesComplete: false, jobVerified: true))
+        XCTAssertTrue(JobEstimateCreation.unavailableMessage(canCreate: true, canView: true,
+            estimatesLoaded: false, estimatesComplete: false, jobVerified: true)?.contains("still loading") == true)
+        XCTAssertTrue(JobEstimateCreation.unavailableMessage(canCreate: true, canView: true,
+            estimatesLoaded: true, estimatesComplete: false, jobVerified: true)?.contains("fully loaded") == true)
+        XCTAssertNotNil(JobEstimateCreation.unavailableMessage(canCreate: false, canView: true,
+            estimatesLoaded: true, estimatesComplete: true, jobVerified: true))
+        XCTAssertNotNil(JobEstimateCreation.unavailableMessage(canCreate: true, canView: true,
+            estimatesLoaded: true, estimatesComplete: true, jobVerified: false))
+        XCTAssertNil(JobEstimateCreation.unavailableMessage(canCreate: true, canView: true,
+            estimatesLoaded: true, estimatesComplete: true, jobVerified: true))
+    }
     private func scope(job: Int = 100, origin: Int? = nil) -> JobDocumentScope {
         .init(jobID: id(job), organizationID: id(1), customerID: id(2), originEstimateID: origin.map(id))
     }

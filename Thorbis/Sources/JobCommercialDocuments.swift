@@ -82,6 +82,17 @@ enum JobEstimateCreation {
     static func canOpen(canCreate: Bool, canView: Bool, estimatesComplete: Bool) -> Bool {
         canCreate && (!canView || estimatesComplete)
     }
+
+    static func unavailableMessage(canCreate: Bool, canView: Bool, estimatesLoaded: Bool,
+                                   estimatesComplete: Bool, jobVerified: Bool) -> String? {
+        guard canCreate else { return "Your access changed. Ask your office for estimate access." }
+        if canView && !estimatesComplete {
+            return estimatesLoaded ? "Estimates couldn't be fully loaded. Refresh this job and try again."
+                : "Estimates are still loading. Try again in a moment."
+        }
+        guard jobVerified else { return "This job couldn't be verified. Refresh it and try again." }
+        return nil
+    }
 }
 
 struct JobEstimateSummary {

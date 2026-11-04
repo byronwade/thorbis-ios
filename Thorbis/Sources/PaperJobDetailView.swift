@@ -2386,18 +2386,13 @@ struct JobDetailView: View {
         #if DEBUG
         CommercialDraftStore.trace("buildEstimate canBuild=\(canBuildEstimate) hasJob=\(job != nil) scope=\(job.map { scope(for: $0) != nil } ?? false) estimatesComplete=\(estimateRead?.isComplete == true)")
         #endif
-        guard session.can("estimate.create", feature: "estimates") else {
-            estimateCreationMessage = "Your access changed. Ask your office for estimate access."
-            return
-        }
-        if session.can("estimate.view", feature: "estimates"), estimateRead?.isComplete != true {
-            estimateCreationMessage = estimateRead == nil
-                ? "Estimates are still loading. Try again in a moment."
-                : "Estimates couldn't be fully loaded. Refresh this job and try again."
-            return
-        }
-        guard let job, scope(for: job) != nil else {
-            estimateCreationMessage = "This job couldn't be verified. Refresh it and try again."
+        if let issue = JobEstimateCreation.unavailableMessage(
+            canCreate: session.can("estimate.create", feature: "estimates"),
+            canView: session.can("estimate.view", feature: "estimates"),
+            estimatesLoaded: estimateRead != nil, estimatesComplete: estimateRead?.isComplete == true,
+            jobVerified: job.map { scope(for: $0) != nil } ?? false
+        ) {
+            estimateCreationMessage = issue
             return
         }
         showNewEstimate = true
