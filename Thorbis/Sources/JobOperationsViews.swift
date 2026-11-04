@@ -179,6 +179,8 @@ struct JobCloseoutView: View {
     @State private var confirmCancel = false
     @State private var invoiceID: String?
     @State private var openInvoiceID: String?
+    @State private var recoveryInvoiceID: String?
+    @State private var savedWorkScope: SavedWorkScope?
     @State private var openBilling = false
     @State private var unpaidReasonCode = "customer_will_pay_later"
     @State private var unpaidReason = ""
@@ -221,6 +223,16 @@ struct JobCloseoutView: View {
     }
     /// Photos of this job still on this phone (`PendingMediaStore`).
     private var waitingPhotos: Int { pendingMedia.items.filter { $0.jobID == jobID && $0.kind == "photo" }.count }
+    private var unassociatedPendingPayments: [OutboxEntry.PaymentPayload] {
+        outbox.pending.compactMap { entry in
+            guard case .payment(let payment) = entry.action, payment.jobId == nil else { return nil }
+            return payment
+        }
+    }
+    private var unassociatedRecordedInvoiceIDs: [String] {
+        Array(Set(outbox.recordedPayments.filter { $0.jobId == nil }.map(\.invoiceId))).sorted()
+    }
+
     /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
     /// last seen. A partial payment leaves the requirement (and the unpaid disposition) showing.
     private var waitingPaymentsCoverBalance: Bool {
@@ -334,6 +346,31 @@ struct JobCloseoutView: View {
                     if closeout.requirements.isEmpty && checks.isEmpty {
                         Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                     }
+                    if !unassociatedPendingPayments.isEmpty || !unassociatedRecordedInvoiceIDs.isEmpty {
+                        PaperGroupHeader(title: "Payments to check").padding(.top, 18)
+                        Text("Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet.")
+                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !unassociatedPendingPayments.isEmpty {
+                            Text("Connect and sync saved work to send waiting payments.")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            if SavedWorkScope.capture(session: session, api: api, media: pendingMedia, outbox: outbox) != nil {
+                                Button("Review saved work") {
+                                    savedWorkScope = SavedWorkScope.capture(session: session, api: api, media: pendingMedia, outbox: outbox)
+                                }.frame(minHeight: 44).buttonStyle(PressStyle())
+                            }
+                        }
+                        if !unassociatedRecordedInvoiceIDs.isEmpty {
+                            Text("Connect and open each invoice to refresh payments already sent.")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            if session.can("invoice.view", feature: "invoicing") {
+                                ForEach(unassociatedRecordedInvoiceIDs, id: \.self) { id in
+                                    Button("Open invoice \(id.suffix(4).uppercased())") { recoveryInvoiceID = id }
+                                        .frame(minHeight: 44).buttonStyle(PressStyle())
+                                }
+                            }
+                        }
+                    }
                     if mayRecordUnpaidDisposition && !isCompleted {
                         PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
                         ThorbisSelect(options: [
@@ -410,6 +447,11 @@ struct JobCloseoutView: View {
         // Collecting from the checklist comes back here once it's paid, ready to complete.
         .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0, returnsWhenPaid: true).onDisappear { Task { await load() } } }
         .thorbisDestination(isPresented: $openBilling) { BillingSchedulesView() }
+        .thorbisDestination(item: $recoveryInvoiceID) { InvoiceDetailView(id: $0).onDisappear { Task { await load() } } }
+        .sheet(item: $savedWorkScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
+        .onChange(of: savedWorkScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
+            if !valid { savedWorkScope = nil }
+        }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
