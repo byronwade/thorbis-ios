@@ -179,6 +179,7 @@ struct JobCloseoutView: View {
     @State private var confirmCancel = false
     @State private var invoiceID: String?
     @State private var openInvoiceID: String?
+    @State private var savedWorkScope: SavedWorkScope?
     @State private var openBilling = false
     @State private var unpaidReasonCode = "customer_will_pay_later"
     @State private var unpaidReason = ""
@@ -221,31 +222,59 @@ struct JobCloseoutView: View {
     }
     /// Photos of this job still on this phone (`PendingMediaStore`).
     private var waitingPhotos: Int { pendingMedia.items.filter { $0.jobID == jobID && $0.kind == "photo" }.count }
+    private var unassociatedPendingPayments: [OutboxEntry.PaymentPayload] {
+        outbox.pending.compactMap { entry in
+            guard case .payment(let payment) = entry.action, payment.jobId == nil else { return nil }
+            return payment
+        }
+    }
+    private var canRefreshRecordedPayments: Bool {
+        session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
+    }
+    private var unassociatedRecordedPayments: [OutboxEntry.PaymentPayload] {
+        outbox.recordedPayments.filter { $0.jobId == nil }
+    }
+    private var recordedInvoiceIDsToRefresh: [String] {
+        Array(Set(outbox.recordedPayments.filter { $0.jobId == nil || $0.jobId == jobID }.map(\.invoiceId))).sorted()
+    }
+
     /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
     /// last seen. A partial payment leaves the requirement (and the unpaid disposition) showing.
     private var waitingPaymentsCoverBalance: Bool {
-        // The job's invoice list, plus any invoice this phone took cash on for the job; the single
-        // invoice copy is newer when a payment was recorded on the invoice screen.
-        let listed = JobDetailCache.invoices(jobID) ?? []
+        // Include the job's invoice list and invoices with payments on this phone. Independent
+        // cached copies have no proven ordering, so disagreements leave coverage unknown.
+        guard let job, let organizationID = session.activeOrganization?.id, let actorID = session.user?.id,
+              job.id == jobID, job.organizationId == organizationID else { return false }
+        let unassociated = outbox.pending.compactMap { entry -> OutboxEntry.PaymentPayload? in
+            if case .payment(let payload) = entry.action { return payload }
+            return nil
+        } + outbox.recordedPayments
+        let listed = JobDetailCache.invoices(jobID)
+        guard !CloseoutInvoiceEvidence.hasUnassociatedPayments(unassociated.map(\.jobId)) else { return false }
         let paidHere = (outbox.pending.compactMap { entry -> String? in
             if case .payment(let payment) = entry.action, payment.jobId == jobID { payment.invoiceId } else { nil }
         } + outbox.recordedPayments.filter { $0.jobId == jobID }.map(\.invoiceId))
-            .filter { id in !listed.contains { $0.id == id } }
-        let invoices = listed.map { JobDetailCache.invoice($0.id) ?? $0 }
-            + Set(paidHere).compactMap { JobDetailCache.invoice($0) }
-        let owing = invoices.filter { $0.status == "issued" }.compactMap { invoice -> (String, Int)? in
-            let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-            let due = total - invoice.amountPaid
-            return due > 0 ? (invoice.id, due) : nil
+        guard let invoices = CloseoutInvoiceEvidence.resolve(
+            listed: listed, paidHere: paidHere, id: { $0.id }, cached: JobDetailCache.invoice,
+            equivalent: { $0 == $1 }, valid: { $0.jobId == jobID && $0.organizationId == organizationID && $0.customerId == job.customerId }
+        ) else { return false }
+        var owing: [(String, Int)] = []
+        for invoice in invoices where invoice.status == "issued" {
+            guard invoice.currency == "USD",
+                  let amounts = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency,
+                                                        amountPaid: invoice.amountPaid) else { return false }
+            if amounts.due > 0 { owing.append((invoice.id, amounts.due)) }
         }
         return !owing.isEmpty && owing.allSatisfy { id, due in
-            let queued = outbox.waitingPayments(invoiceID: id, replayableOnly: true).reduce(0) { $0 + $1.amountCents }
-            // Recorded from the queue but newer than this phone's saved copy of the invoice.
-            let saved = Set((JobDetailCache.payments(id) ?? []).map(\.idempotencyKey))
-            let recorded = outbox.recordedPayments
-                .filter { $0.invoiceId == id && !saved.contains($0.idempotencyKey) }
-                .reduce(0) { $0 + $1.amountCents }
-            return queued + recorded >= due
+            let payments = outbox.pending.compactMap { entry -> CloseoutInvoiceEvidence.PendingPayment? in
+                guard case .payment(let payload) = entry.action, payload.invoiceId == id else { return nil }
+                return .init(actorID: entry.actorId, organizationID: entry.organizationId, jobID: payload.jobId,
+                             invoiceID: payload.invoiceId, method: payload.method, amount: payload.amountCents)
+            }
+            guard let pending = CloseoutInvoiceEvidence.pendingAmounts(payments, actorID: actorID,
+                organizationID: organizationID, jobID: jobID, invoiceID: id) else { return false }
+            return CloseoutInvoiceEvidence.covers(due: due, pending: pending,
+                recorded: outbox.recordedPayments.filter { $0.invoiceId == id }.map(\.amountCents))
         }
     }
     private var canComplete: Bool {
@@ -321,6 +350,41 @@ struct JobCloseoutView: View {
                     }
                     if closeout.requirements.isEmpty && checks.isEmpty {
                         Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                    }
+                    if closeout.unmet.contains(where: { $0.kind == "payment_or_unpaid_disposition" && $0.outcome == "blocked" }),
+                       !unassociatedPendingPayments.isEmpty || !recordedInvoiceIDsToRefresh.isEmpty {
+                        PaperGroupHeader(title: "Payments to check").padding(.top, 18)
+                        if !unassociatedPendingPayments.isEmpty || !unassociatedRecordedPayments.isEmpty {
+                            Text("Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet.")
+                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if !unassociatedPendingPayments.isEmpty {
+                            Text(session.can("job.edit", feature: "jobs") && session.can("invoice.payment.create", feature: "payments")
+                                 ? "Connect and sync saved work to send waiting payments."
+                                 : "Ask your office to restore your access to sync payments on this phone.")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            if SavedWorkScope.capture(session: session, api: api, media: pendingMedia, outbox: outbox) != nil {
+                                Button("Review saved work") {
+                                    savedWorkScope = SavedWorkScope.capture(session: session, api: api, media: pendingMedia, outbox: outbox)
+                                }.frame(minHeight: 44).buttonStyle(PressStyle())
+                            }
+                        }
+                        if !recordedInvoiceIDsToRefresh.isEmpty {
+                            if canRefreshRecordedPayments {
+                                Text("Sent payments may still be updating. Connect, then search these invoice IDs in Invoices on this phone to refresh them.")
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                                ForEach(recordedInvoiceIDsToRefresh, id: \.self) { id in
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Invoice \(id.suffix(4).uppercased())").font(Theme.font(15, weight: .medium))
+                                        Text(id).font(Theme.monoFont(12)).textSelection(.enabled)
+                                    }.frame(minHeight: 44, alignment: .leading)
+                                }
+                            } else {
+                                Text("Ask your office to enable your invoice and payment access, then refresh those invoices on this phone.")
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            }
+                        }
                     }
                     if mayRecordUnpaidDisposition && !isCompleted {
                         PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
@@ -398,6 +462,10 @@ struct JobCloseoutView: View {
         // Collecting from the checklist comes back here once it's paid, ready to complete.
         .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0, returnsWhenPaid: true).onDisappear { Task { await load() } } }
         .thorbisDestination(isPresented: $openBilling) { BillingSchedulesView() }
+        .sheet(item: $savedWorkScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
+        .onChange(of: savedWorkScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
+            if !valid { savedWorkScope = nil }
+        }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
