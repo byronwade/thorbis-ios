@@ -76,11 +76,7 @@ struct RootView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            #if DEBUG
-            navigation(wide: startupFixture ? startupFixtureWide : usesTabletLayout(width: geometry.size.width))
-            #else
-            navigation(wide: usesTabletLayout(width: geometry.size.width))
-            #endif
+            navigation(wide: resolvedLayoutWidth(geometry.size.width))
                 .background(Theme.canvas)
         }
         #if DEBUG
@@ -187,6 +183,13 @@ struct RootView: View {
     }
 
     @Environment(\.horizontalSizeClass) private var sizeClass
+
+    private func resolvedLayoutWidth(_ width: CGFloat) -> Bool {
+        #if DEBUG
+        if startupFixture { return startupFixtureWide }
+        #endif
+        return usesTabletLayout(width: width)
+    }
 
     /// Regular width on an iPad, and room for a list beside a detail. Below that the phone layout.
     private func usesTabletLayout(width: CGFloat) -> Bool {
