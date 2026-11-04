@@ -143,6 +143,64 @@ final class JobEstimateHandoffUITests: XCTestCase {
         thorbisStableButton(app, "handoff-submit-approval").tap()
         XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15))
     }
+    func testCustomerCanReadEstimateBeforeSelectingIt() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        thorbisShowCustomerDoor(app).tap()
+        let selected = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        visible(app, details)
+        details.tap()
+        let more = app.buttons["Show more, Estimate EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        visible(app, more)
+        more.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        app.buttons["Done"].tap()
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        XCTAssertTrue((selected.value as? String)?.hasPrefix("Not selected,") == true)
+        XCTAssertTrue(app.buttons["Review selected (0)"].exists)
+    }
+    func testPreselectionDetailsHidePrivateMaterialsWithoutSelecting() {
+        let app = open(["--paper-preview-handoff-hidden-material", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        thorbisShowCustomerDoor(app).tap()
+        let selected = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        visible(app, details)
+        details.tap()
+        XCTAssertTrue(app.staticTexts["Materials"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Private material detail"].exists)
+        XCTAssertTrue(app.staticTexts["$190.00"].exists)
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(selected.waitForExistence(timeout: 5))
+        XCTAssertTrue((selected.value as? String)?.hasPrefix("Not selected,") == true)
+    }
+    func testPreselectionDetailsAndDescriptionCloseOnSessionLoss() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-slow-invalidation"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        thorbisShowCustomerDoor(app).tap()
+        let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        toggleSampleControls(app)
+        app.buttons["End sample session shortly"].tap()
+        toggleSampleControls(app)
+        visible(app, details)
+        details.tap()
+        let more = app.buttons["Show more, Estimate EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        visible(app, more)
+        more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.navigationBars["Description"])
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 30), .completed)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.exists)
+    }
     func testSelectedEstimateLongDescriptionOpensReadOnlyAndReturnsToReview() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
