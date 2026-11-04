@@ -665,6 +665,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var priceBookViewRevoked = false
         var documentEstimateViewRevoked = false
         var jobMediaViewRevoked = false
+        var photoHandoffReads: [String: Int] = [:]
         var priceBookReads = 0
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
@@ -673,7 +674,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.photoHandoffReads = [:]; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -1202,7 +1203,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
            path.hasPrefix("/v1/media/"), !path.hasSuffix("/download") {
             let mediaID = String(path.dropFirst("/v1/media/".count))
             guard ["00000000-0000-4000-8000-000000009301", "00000000-0000-4000-8000-000000009302", "00000000-0000-4000-8000-000000009303"].contains(mediaID) else { return NSNull() }
-            return ["id": mediaID, "jobId": PaperPreview.jobID, "kind": "photo", "uploadState": "stored", "archived": false]
+            let read = scenario.lock.withLock { () -> Int in
+                scenario.photoHandoffReads[mediaID, default: 0] += 1
+                return scenario.photoHandoffReads[mediaID, default: 0]
+            }
+            let archived = ProcessInfo.processInfo.arguments.contains("--paper-preview-photo-archived-after-download") && read >= 3
+            return ["id": mediaID, "jobId": PaperPreview.jobID, "kind": "photo", "uploadState": "stored", "archived": archived]
         }
         switch path {
         case "/api/auth/get-session":

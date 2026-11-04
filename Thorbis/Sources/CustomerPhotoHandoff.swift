@@ -93,7 +93,7 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
         } catch {
             guard current == loadID else { return }
             image = nil; loading = false
-            message = isCurrent ? "Couldn’t load this photo. Check your connection and try again." : "These photos are no longer available. Please hand the device back to your technician."
+            message = isCurrent ? "Couldn’t load this photo. Try again or hand the device back to your technician." : "These photos are no longer available. Please hand the device back to your technician."
         }
     }
 }

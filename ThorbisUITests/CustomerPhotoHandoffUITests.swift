@@ -2,6 +2,21 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoHandoffUITests: XCTestCase {
+    func testArchivedDuringDownloadIsNotShownToCustomer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-photo-handoff", "--paper-preview-photo-archived-after-download"]
+        app.launch()
+        let select = app.buttons["Select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
+        let photo = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009301"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 10)); photo.tap()
+        app.buttons["job-media-show-customer"].tap()
+        XCTAssertTrue(app.staticTexts["Couldn’t load this photo. Try again or hand the device back to your technician."].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.images["customer-photo-image"].exists)
+        XCTAssertFalse(app.buttons["Share"].isHittable)
+    }
+
     func testSelectedPhotosStayInCustomerModeUntilAuthenticatedHandBack() {
         continueAfterFailure = false
         let app = XCUIApplication()
