@@ -1161,7 +1161,7 @@ struct InvoicePaymentCollectionSheet: View {
 
     private func charge() async {
         let tapToPay = tapToPayController
-        await tapToPay.charge(api: api) { [model] intent in
+        await tapToPay.charge(api: api, session: session) { [model] intent in
             await model.load()
             return model.hasRecordedCardPresentPayment(intent)
         }

@@ -4,7 +4,7 @@ enum TerminalOwnershipError: Error { case occupied }
 
 /// One owner of the process-wide SDK; legacy and bound paths cannot mix.
 @MainActor final class TerminalOwnership {
-    private enum Mode { case unclaimed, legacy, bound }
+    private enum Mode { case unclaimed, legacy, boundReserved, bound }
     private var mode: Mode = .unclaimed
     private var ownsSDK = false
     private var legacyCollectionActive = false
@@ -16,18 +16,24 @@ enum TerminalOwnershipError: Error { case occupied }
         self.initialize = initialize
     }
 
-    var legacyAvailable: Bool { mode != .bound }
+    var legacyAvailable: Bool { mode == .unclaimed || mode == .legacy }
 
     func beginLegacyCollection() -> Bool {
-        guard mode != .bound, !legacyCollectionActive else { return false }
+        guard legacyAvailable, !legacyCollectionActive else { return false }
         legacyCollectionActive = true
         return true
     }
 
     func endLegacyCollection() { legacyCollectionActive = false }
 
+    func preflightBound() throws {
+        guard mode != .legacy, !legacyCollectionActive else { throw TerminalOwnershipError.occupied }
+        try verifyOwnership()
+        if mode == .unclaimed { mode = .boundReserved }
+    }
+
     func claimLegacy(_ install: () -> Void) throws {
-        guard mode != .bound else { throw TerminalOwnershipError.occupied }
+        guard legacyAvailable else { throw TerminalOwnershipError.occupied }
         try verifyOwnership()
         mode = .legacy
         install()

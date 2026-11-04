@@ -58,6 +58,7 @@ private struct TerminalCallbackBox<Value>: @unchecked Sendable {
     var legacyAvailable: Bool { owner.legacyAvailable }
     func beginLegacyCollection() -> Bool { owner.beginLegacyCollection() }
     func endLegacyCollection() { owner.endLegacyCollection() }
+    func preflightBound() throws { try owner.preflightBound() }
 
     func claimLegacy(_ fetch: @escaping @MainActor () async throws -> String) throws {
         try owner.claimLegacy { provider.fetch = fetch }

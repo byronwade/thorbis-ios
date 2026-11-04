@@ -49,6 +49,9 @@ final class TapToPayController: ObservableObject {
     // Legacy tokens have no durable attempt binding. Keep this entry closed
     // even if a build flag is changed, until the bound flow replaces it.
     private static let legacyCollectionQualified = false
+    // The bound flow is wired for qualification only; it lacks durable
+    // reconciliation and must not be enabled in a shipping build.
+    private static let boundCollectionQualified = false
 
     static var buildEnabled: Bool { TapToPayReadiness.buildEnabled }
 
@@ -73,8 +76,12 @@ final class TapToPayController: ObservableObject {
 
     /// Runs one charge for the invoice balance. `refresh` reloads the invoice's payments and
     /// returns true only once this intent's webhook-settled payment shows up.
-    func charge(api: APIClient, refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
+    func charge(api: APIClient, session: SessionController? = nil, refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
         guard !busy else { return }
+        if Self.boundCollectionQualified {
+            await chargeBound(api: api, session: session, refresh: refresh)
+            return
+        }
         guard Self.buildEnabled, Self.legacyCollectionQualified, Self.deviceSupported else {
             phase = .unavailable
             return
@@ -115,6 +122,87 @@ final class TapToPayController: ObservableObject {
             phase = .idle
         } catch {
             phase = .failed(Self.message(for: error))
+        }
+    }
+
+    private func chargeBound(api: APIClient, session: SessionController?, refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
+        guard Self.buildEnabled, Self.boundCollectionQualified, Self.deviceSupported,
+              let session, session.phase == .ready, session.can("invoice.payment.create", feature: "payments"),
+              session.isFeatureOn(Self.feature), let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let scope = api.savedCopyScope else {
+            phase = .unavailable
+            return
+        }
+        do { try StripeBoundTerminalEnvironment.shared.preflightBound() }
+        catch { phase = .failed("Another card payment is already in progress."); return }
+        let generation = api.requestGeneration
+        let scopeRevision = api.savedCopyScopeRevision
+        let sessionGeneration = session.generation
+        let authorityRevision = session.authorityRevision
+        let origin = api.baseURL
+        let authority = BoundTapAuthority(actorID: actor, organizationID: organization, sessionGeneration: sessionGeneration,
+                                          authorityRevision: authorityRevision, apiGeneration: generation, origin: origin, permitted: true)
+        let current: @MainActor () -> Bool = {
+            let now = BoundTapAuthority(actorID: session.user?.id ?? "", organizationID: session.activeOrganization?.id ?? "",
+                                        sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                                        apiGeneration: api.requestGeneration, origin: api.baseURL,
+                                        permitted: session.phase == .ready && session.can("invoice.payment.create", feature: "payments") && session.isFeatureOn(Self.feature))
+            return now == authority && api.savedCopyScopeRevision == scopeRevision && api.savedCopyScope == scope
+        }
+        let recoveryStore = KeychainBoundTapRecoveryStore.shared
+        phase = .preparing
+        do {
+            _ = try await BoundTapPaymentFlow.run(enabled: Self.buildEnabled && Self.boundCollectionQualified,
+                                                   supported: Self.deviceSupported, isCurrent: current,
+                                                   create: {
+                let marker = BoundTapRecovery(origin: origin, actorID: actor, organizationID: organization,
+                                               invoiceID: self.invoiceID, attemptID: nil, paymentIntentID: nil,
+                                               amount: nil, currency: nil)
+                return try await BoundTapRecoveryManager.prepare(store: recoveryStore, marker: marker,
+                    create: { try await api.cardPresentIntent(invoiceID: self.invoiceID) }, identify: { intent, marker in
+                        var receipt = marker
+                        receipt.attemptID = intent.attemptId
+                        receipt.paymentIntentID = intent.paymentIntentId
+                        receipt.amount = intent.amount.amount
+                        receipt.currency = intent.amount.currency
+                        return receipt
+                    })
+            },
+                                                   collect: { intent in
+                let binding = TerminalAttemptBinding(invoiceID: self.invoiceID, attemptID: intent.attemptId,
+                                                     paymentIntentID: intent.paymentIntentId, locationID: intent.locationId,
+                                                     origin: origin, scope: scope, generation: generation)
+                let driver = try StripeBoundTerminalDriver(clientSecret: intent.clientSecret)
+                self.phase = .waitingForCard
+                _ = try await TerminalSessionCoordinator().collect(binding: binding, driver: driver,
+                                                                   isCurrent: current,
+                                                                   fetch: { try await api.attemptBoundTerminalToken(invoiceID: self.invoiceID, attemptID: intent.attemptId) })
+                self.phase = .recording
+                for attempt in 0..<20 {
+                    if await refresh(intent) {
+                        guard current() else { throw BoundTapFlowError.uncertain }
+                        // Payment history is not yet proven to be a fresh,
+                        // authority-bound acknowledgement. Keep the receipt
+                        // until a dedicated reconciliation path is qualified.
+                        throw BoundTapFlowError.uncertain
+                    }
+                    try await Task.sleep(nanoseconds: UInt64(min(1 + attempt, 4)) * 1_000_000_000)
+                }
+                throw BoundTapFlowError.uncertain
+            })
+            phase = .paid
+        } catch BoundTapFlowError.unavailable {
+            phase = .unavailable
+        } catch BoundTapFlowError.busy {
+            phase = .failed("Another card payment is already in progress.")
+        } catch BoundTapFlowError.retired {
+            phase = .failed("Your session changed. Open the invoice again to continue.")
+        } catch BoundTapFlowError.recoveryPending {
+            phase = .failed("A previous card payment needs to be checked before taking another.")
+        } catch BoundTapFlowError.recoveryUnavailable {
+            phase = .failed("Payment recovery is unavailable. Try again before taking a card payment.")
+        } catch {
+            phase = .failed("Payment status is not confirmed. Check this invoice before taking another payment.")
         }
     }
 

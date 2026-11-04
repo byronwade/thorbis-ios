@@ -45,4 +45,15 @@ import XCTest
         owner.endLegacyCollection()
         XCTAssertTrue(owner.beginLegacyCollection())
     }
+
+    func testBoundPreflightReservesBeforeServerAttempt() throws {
+        var initialized = false
+        let owner = TerminalOwnership(isInitialized: { initialized }, initialize: { initialized = true })
+        try owner.preflightBound()
+        XCTAssertFalse(initialized)
+        XCTAssertFalse(owner.beginLegacyCollection())
+        XCTAssertThrowsError(try owner.claimLegacy {})
+        try owner.claimBound {}
+        XCTAssertTrue(initialized)
+    }
 }
