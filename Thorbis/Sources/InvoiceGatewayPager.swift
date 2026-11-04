@@ -129,7 +129,8 @@ import Foundation
             try Task.checkCancellation()
             guard revision == requestRevision else { return nil }
             guard current(isCurrent), UUID(uuidString: invoice.id) == requested,
-                  invoice.organizationId == organizationID else {
+                  let organizationID, let expectedOrganization = UUID(uuidString: organizationID),
+                  UUID(uuidString: invoice.organizationId) == expectedOrganization else {
                 retire(); return nil
             }
             return invoice
