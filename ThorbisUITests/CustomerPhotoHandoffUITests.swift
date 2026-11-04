@@ -80,8 +80,17 @@ final class CustomerPhotoHandoffUITests: XCTestCase {
         let first = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009301"]
         let second = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009302"]
         XCTAssertTrue(first.waitForExistence(timeout: 10)); first.tap()
-        XCTAssertTrue(second.waitForExistence(timeout: 10)); second.tap()
+        let selected = NSPredicate(format: "value ENDSWITH %@", "Selected")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: selected, object: first)], timeout: 5), .completed)
+        XCTAssertTrue(second.waitForExistence(timeout: 10))
+        // Move the second row clear of the persistent selection bar before tapping it.
+        app.scrollViews.firstMatch.swipeUp()
+        XCTAssertTrue(second.isHittable)
         let present = app.buttons["job-media-show-customer"]
+        XCTAssertLessThan(second.frame.maxY, present.frame.minY, "The tile must be clear of the bottom selection action")
+        second.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: selected, object: second)], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["2 chosen"].waitForExistence(timeout: 5))
         XCTAssertTrue(present.waitForExistence(timeout: 5)); present.tap()
         let image = app.images["customer-photo-image"]
         XCTAssertTrue(image.waitForExistence(timeout: 20))
