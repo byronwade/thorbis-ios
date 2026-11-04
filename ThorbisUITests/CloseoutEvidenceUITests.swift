@@ -37,6 +37,48 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Waiting to sync"].exists)
     }
 
+    func testLegacyPendingPaymentOpensSavedWorkReview() {
+        let app = launch("legacy")
+        let review = app.buttons["Review saved work"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        review.tap()
+        XCTAssertTrue(app.buttons["saved-work-sync"].waitForExistence(timeout: 10))
+    }
+
+    func testLegacyRecordedPaymentOpensItsInvoice() {
+        let app = launch("legacy-recorded")
+        let invoice = app.buttons["Open invoice 00002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
+    }
+
+    func testUnavailableInvoicePermissionExplainsHowToRecover() {
+        let app = launch("noaccess")
+        XCTAssertTrue(app.staticTexts["Ask your office to restore your invoice access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Open invoice 00002209"].exists)
+    }
+
+    func testInvoicePermissionLossClosesOpenRecoveryRoute() {
+        let app = launch("revoke")
+        let invoice = app.buttons["Open invoice 00002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Ask your office to restore your invoice access, then refresh those invoices on this phone."].waitForExistence(timeout: 20))
+    }
+
+    func testOfflineSavedWorkCannotSyncUntilReconnected() {
+        let app = launch("offline")
+        let review = app.buttons["Review saved work"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        review.tap()
+        let sync = app.buttons["saved-work-sync"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 10))
+        XCTAssertFalse(sync.isEnabled)
+        XCTAssertTrue(app.staticTexts["Offline · work stays saved on this phone"].exists)
+    }
+
     private func launch(_ scenario: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()

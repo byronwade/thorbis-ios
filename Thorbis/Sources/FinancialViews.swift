@@ -712,6 +712,13 @@ struct InvoiceDetailView: View {
             record = nil
             await load()
             #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "revoke" {
+                try? await Task.sleep(for: .seconds(6))
+                if !Task.isCancelled {
+                    PaperPreviewProtocol.revokeCloseoutInvoiceView()
+                    await session.revalidate()
+                }
+            }
             if PaperPreview.enabled, PaperPreview.screen == "invoice-payment" {
                 showCollectPayment = paymentModel?.canRecordPayment == true
             }

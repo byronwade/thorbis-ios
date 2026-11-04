@@ -373,14 +373,16 @@ enum PaperPreview {
                 let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
                 JobDetailCache.save(invoice: old)
             }
-            let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: scenario == "legacy" ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
-            if scenario == "recorded" {
+            let legacy = ["legacy", "legacy-recorded", "noaccess", "revoke", "offline"].contains(scenario)
+            let recorded = ["recorded", "legacy-recorded", "noaccess", "revoke"].contains(scenario)
+            let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: legacy ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
+            if recorded {
                 let file = folder.appendingPathComponent("\(actorID)_\(organizationID).recorded")
                 try! JSONEncoder().encode([payment]).write(to: file)
             }
             let box = FieldOutbox(directory: root, defaults: defaults())
             box.bind(actorID: actorID, organizationID: organizationID)
-            if scenario != "recorded" { box.enqueue(.payment(payment), policyVersion: 1) }
+            if !recorded { box.enqueue(.payment(payment), policyVersion: 1) }
             if scenario == "missing" {
                 box.enqueue(.payment(.init(invoiceId: "00000000-0000-4000-8000-000000000099", jobId: jobID, amountCents: 100, method: "cash", idempotencyKey: "preview-missing")), policyVersion: 1)
             }
@@ -686,6 +688,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var savedWorkEditingRevoked = false
         var priceBookViewRevoked = false
         var documentEstimateViewRevoked = false
+        var closeoutInvoiceViewRevoked = false
         var jobMediaViewRevoked = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
@@ -706,6 +709,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
+    static func revokeCloseoutInvoiceView() { scenario.lock.withLock { scenario.closeoutInvoiceViewRevoked = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
@@ -1218,6 +1222,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "noaccess" || scenario.lock.withLock({ scenario.closeoutInvoiceViewRevoked }) {
+                capabilities.removeAll { $0 == "invoice.view" }
+            }
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }

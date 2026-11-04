@@ -443,7 +443,15 @@ struct JobCloseoutView: View {
                 .background(Theme.background)
             }
         }
-        .task { await load() }
+        .task {
+            await load()
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "offline" {
+                PaperPreviewProtocol.simulateNoSignal = true
+                await session.revalidate()
+            }
+            #endif
+        }
         .refreshable { await load() }
         // Queued confirmations landed: show the server's checklist instead of the waiting marks.
         .onChange(of: outbox.syncGeneration) { _, _ in Task { await load() } }
