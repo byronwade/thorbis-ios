@@ -154,6 +154,50 @@ final class InvoiceReadFence {
         }
     }
 
+    // Held-only prototype. Every reader and network request must cooperate.
+    // The synchronous publisher must not reenter this fence. The caller must
+    // remove all displayed copies before it explicitly retires the lease.
+    func present(_ scope: Scope, payload: Data, publish: () -> Void) throws -> Presentation? {
+        let key = try key(scope)
+        let parent = try parentKey(scope)
+        var fds: [Int32] = []
+        var handedOff = false
+        defer {
+            if !handedOff {
+                for fd in fds.reversed() { _ = flock(fd, LOCK_UN); close(fd) }
+            }
+        }
+        for lockKey in [parent, key].compactMap({ $0 }) {
+            let fd = try lockFile("\(lockKey).meta.lock")
+            guard flock(fd, LOCK_EX | LOCK_NB) == 0 else { close(fd); throw Failure.contended }
+            fds.append(fd)
+        }
+        guard let record = try load(key), record.phase == "clean",
+              record.payloadDigest == Data(SHA256.hash(data: payload)) else { return nil }
+        if let parent {
+            guard let invoice = try load(parent), invoice.phase == "clean",
+                  record.parentEpoch == invoice.epoch else { return nil }
+        }
+        publish()
+        handedOff = true
+        return Presentation(fds: fds)
+    }
+
+    final class Presentation {
+        private var fds: [Int32]
+        private let mutex = NSLock()
+        fileprivate init(fds: [Int32]) { self.fds = fds }
+        // An abandoned lease intentionally retains descriptors until process exit;
+        // releasing them automatically would leave uncleared UI unprotected.
+        func retire(clear: () -> Void) {
+            mutex.lock(); defer { mutex.unlock() }
+            guard !fds.isEmpty else { return }
+            clear()
+            for fd in fds.reversed() { _ = flock(fd, LOCK_UN); close(fd) }
+            fds.removeAll()
+        }
+    }
+
     func begin(_ scope: Scope) throws -> Attempt {
         let key = try key(scope)
         let parent = try parentKey(scope)

@@ -38,8 +38,17 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--crash-duri
     let data = Data("after crash".utf8)
     let attempt = try childFence.begin(childScope)
     guard case let .committed(receipt) = try attempt.finish(.liveSuccess(data)) else { exit(2) }
-    _ = try childFence.withCacheWrite(childScope, receipt: receipt, payload: data) { _ in Darwin._exit(0) }
+    _ = try childFence.withCacheWrite(childScope, receipt: receipt, payload: data) { bytes in
+        try bytes.write(to: URL(fileURLWithPath: CommandLine.arguments[2]).appendingPathComponent("cached-document-test"), options: .atomic)
+        Darwin._exit(0)
+    }
     exit(3)
+}
+
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--probe-parent-presentation" {
+    let childFence = InvoiceReadFence(directory: URL(fileURLWithPath: CommandLine.arguments[2]))
+    let childScope = InvoiceReadFence.Scope(actor: "018f0000-0000-7000-8000-000000000001", organization: "018f0000-0000-7000-8000-000000000002", origin: "https://example.invalid", invoice: "018f0000-0000-7000-8000-000000000006", resource: "invoice")
+    do { _ = try childFence.begin(childScope); exit(2) } catch { exit(0) }
 }
 
 let livePayload = Data("verified response".utf8)
@@ -186,6 +195,19 @@ require(!fence.cacheAllowed(sharedHistory, payload: livePayload), "invoice recov
 let verifiedHistory = try fence.begin(sharedHistory)
 _ = try verifiedHistory.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(sharedHistory, payload: livePayload), "history needs its own fresh verification")
+var historyVisible = false
+let wrongHistory = try fence.present(sharedHistory, payload: Data("not history".utf8)) { historyVisible = true }
+require(wrongHistory == nil && !historyVisible, "wrong history bytes cannot be displayed")
+let historyPresentation = try fence.present(sharedHistory, payload: livePayload) { historyVisible = true }
+require(historyPresentation != nil && historyVisible, "current history has a presentation lease")
+let parentProbe = Process()
+parentProbe.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+parentProbe.arguments = ["--probe-parent-presentation", dir.path]
+try parentProbe.run()
+parentProbe.waitUntilExit()
+require(parentProbe.terminationStatus == 0, "history presentation blocks parent invoice preflight")
+historyPresentation!.retire { historyVisible = false }
+require(!historyVisible, "history is cleared before its parent lease is released")
 let historyBeforeChange = try fence.begin(sharedHistory)
 let oldHistoryReceipt = receipt(try historyBeforeChange.finish(.liveSuccess(livePayload)))
 let parentNewEpoch = try fence.begin(sharedScope)
@@ -222,6 +244,28 @@ require(!fence.cacheAllowed(scope, payload: livePayload), "offline retry cannot 
 let onlineRetry = try fence.begin(scope)
 _ = try onlineRetry.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(scope, payload: livePayload), "new live read may recover a held scope")
+let presentationInitial = try fence.begin(publicationRaceScope)
+_ = try presentationInitial.finish(.liveSuccess(livePayload))
+var displayed = false
+let presentation = try fence.present(publicationRaceScope, payload: livePayload) { displayed = true }
+require(presentation != nil && displayed, "validated content is published with a lease")
+let presentationContender = Process()
+presentationContender.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+presentationContender.arguments = ["--probe-publication-lock", dir.path]
+try presentationContender.run()
+presentationContender.waitUntilExit()
+require(presentationContender.terminationStatus == 0, "cross-process refresh cannot start while content is displayed")
+presentation!.retire { displayed = false }
+let presentationDenial = Process()
+presentationDenial.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+presentationDenial.arguments = ["--deny-publication-race", dir.path]
+try presentationDenial.run()
+presentationDenial.waitUntilExit()
+require(presentationDenial.terminationStatus == 0, "denial can proceed after retirement")
+require(!displayed, "content is cleared before the denial request begins")
+var stalePresented = false
+let deniedPresentation = try fence.present(publicationRaceScope, payload: livePayload) { stalePresented = true }
+require(deniedPresentation == nil && !stalePresented, "denied content cannot be presented")
 // An old installed payload must not become readable just because a newer
 // live response was authorized before its bytes reached the cache.
 let versionedScope = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000008", resource: "invoice")
@@ -261,6 +305,7 @@ try cacheCrash.run()
 cacheCrash.waitUntilExit()
 require(cacheCrash.terminationStatus == 0, "child exited during cache publication")
 let afterCrash = try Data(contentsOf: cachedFile)
+require(afterCrash == Data("after crash".utf8), "child replaced bytes before exit")
 require(!fence.cacheAllowed(versionedScope, payload: afterCrash), "interrupted cache write leaves old bytes held")
 let missingDir = dir.appendingPathComponent("missing-marker")
 let missingFence = InvoiceReadFence(directory: missingDir)
