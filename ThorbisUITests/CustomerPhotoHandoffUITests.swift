@@ -2,6 +2,23 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoHandoffUITests: XCTestCase {
+    func testFailedPreparationKeepsSelectionAndCanRetry() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-photo-handoff", "--paper-preview-photo-offline-once"]
+        app.launch()
+        let select = app.buttons["Select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
+        let photo = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009301"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 10)); photo.tap()
+        let present = app.buttons["job-media-show-customer"]
+        present.tap()
+        XCTAssertTrue(app.staticTexts["Couldn’t verify every selected photo. Check your connection, refresh this job and try again."].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.images["customer-photo-image"].exists)
+        XCTAssertTrue(present.isHittable); present.tap()
+        XCTAssertTrue(app.images["customer-photo-image"].waitForExistence(timeout: 20))
+    }
+
     func testArchivedDuringDownloadIsNotShownToCustomer() {
         continueAfterFailure = false
         let app = XCUIApplication()

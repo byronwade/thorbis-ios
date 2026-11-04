@@ -814,6 +814,7 @@ struct JobMediaView: View {
             return
         }
         busy = true
+        error = nil
         let request = UUID()
         customerPhotoRequest = request
         defer { busy = false }
