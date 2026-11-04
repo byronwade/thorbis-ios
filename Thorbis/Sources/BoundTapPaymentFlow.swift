@@ -9,14 +9,16 @@ enum BoundTapPreflightError: Error { case recoveryPending, recoveryUnavailable }
 @MainActor enum BoundTapPaymentFlow {
     private static var busy = false
     private static var uncertain = false
+    private static var uncertainLease: BoundTapLease?
 
     #if DEBUG
-    static func resetForTests() { busy = false; uncertain = false }
+    static func resetForTests() { uncertainLease?.close(); uncertainLease = nil; busy = false; uncertain = false }
     #endif
 
     static func run<Attempt, Result>(
         enabled: Bool,
         supported: Bool,
+        lease: @MainActor () throws -> BoundTapLease,
         isCurrent: @escaping @MainActor () -> Bool,
         create: @MainActor () async throws -> Attempt,
         collect: @MainActor (Attempt) async throws -> Result
@@ -27,18 +29,28 @@ enum BoundTapPreflightError: Error { case recoveryPending, recoveryUnavailable }
         guard isCurrent(), !Task.isCancelled else { throw BoundTapFlowError.retired }
         busy = true
         defer { busy = false }
+        let held: BoundTapLease
+        do { held = try lease() }
+        catch BoundTapProcessLeaseError.busy { throw BoundTapFlowError.busy }
+        catch { throw BoundTapFlowError.recoveryUnavailable }
         do {
             let attempt = try await create()
             guard isCurrent(), !Task.isCancelled else { throw BoundTapFlowError.retired }
             let result = try await collect(attempt)
             guard isCurrent(), !Task.isCancelled else { throw BoundTapFlowError.retired }
+            held.close()
             return result
         } catch BoundTapPreflightError.recoveryPending {
+            held.close()
             throw BoundTapFlowError.recoveryPending
         } catch BoundTapPreflightError.recoveryUnavailable {
+            held.close()
             throw BoundTapFlowError.recoveryUnavailable
         } catch {
             uncertain = true
+            // An SDK callback can outlive task cancellation. Do not allow a
+            // different process to collect until this process exits.
+            uncertainLease = held
             throw BoundTapFlowError.uncertain
         }
     }

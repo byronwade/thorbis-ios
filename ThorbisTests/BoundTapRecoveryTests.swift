@@ -5,6 +5,7 @@ import XCTest
     var value: BoundTapRecovery?
     var saves = 0
     var failOnSave: Int?
+    var failRemove = false
     func load() throws -> BoundTapRecovery? { value }
     func create(_ recovery: BoundTapRecovery) throws -> Bool {
         if value != nil { return false }
@@ -16,7 +17,7 @@ import XCTest
         if saves == failOnSave { throw CancellationError() }
         value = recovery
     }
-    func remove() throws { value = nil }
+    func remove() throws { if failRemove { throw CancellationError() }; value = nil }
 }
 
 @MainActor final class BoundTapRecoveryTests: XCTestCase {
@@ -66,5 +67,29 @@ import XCTest
             XCTFail("Expected outstanding receipt")
         } catch {}
         XCTAssertFalse(created)
+    }
+
+    func testReleaseRequiresEvidenceCurrentAuthorityNoSDKAndMatchingReceipt() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let lease = try BoundTapProcessLease.acquire(path: dir.path)
+        defer { lease.close() }
+        let store = FakeBoundRecoveryStore(), expected = identify(marker())
+        store.value = expected
+        XCTAssertEqual(try BoundTapGuardedRelease.apply(enabled: false, verified: true, sdkInitialized: false, current: { true }, lease: lease, store: store, expected: expected), .settledNeedsReview)
+        XCTAssertEqual(try BoundTapGuardedRelease.apply(enabled: true, verified: true, sdkInitialized: true, current: { true }, lease: lease, store: store, expected: expected), .restartRequired)
+        XCTAssertEqual(try BoundTapGuardedRelease.apply(enabled: true, verified: false, sdkInitialized: false, current: { true }, lease: lease, store: store, expected: expected), .pending)
+        XCTAssertEqual(try BoundTapGuardedRelease.apply(enabled: true, verified: true, sdkInitialized: false, current: { false }, lease: lease, store: store, expected: expected), .pending)
+        XCTAssertEqual(store.value, expected)
+        store.value = marker()
+        XCTAssertEqual(try BoundTapGuardedRelease.apply(enabled: true, verified: true, sdkInitialized: false, current: { true }, lease: lease, store: store, expected: expected), .restartRequired)
+        store.value = expected
+        store.failRemove = true
+        XCTAssertThrowsError(try BoundTapGuardedRelease.apply(enabled: true, verified: true, sdkInitialized: false, current: { true }, lease: lease, store: store, expected: expected))
+        XCTAssertEqual(store.value, expected)
+        store.failRemove = false
+        XCTAssertEqual(try BoundTapGuardedRelease.apply(enabled: true, verified: true, sdkInitialized: false, current: { true }, lease: lease, store: store, expected: expected), .confirmed)
+        XCTAssertNil(store.value)
     }
 }

@@ -1,5 +1,7 @@
 import Foundation
 
+enum BoundTapRecoveryResult: Equatable { case confirmed, pending, settledNeedsReview, otherAccount, unknownAttempt, restartRequired }
+
 /// Contains no Stripe token or client secret. A nil attempt means the create
 /// request may have reached the server but no response was observed.
 struct BoundTapRecovery: Codable, Equatable {
@@ -39,5 +41,17 @@ struct BoundTapRecovery: Codable, Equatable {
               let currency = receipt.currency, !currency.isEmpty else { throw BoundTapFlowError.uncertain }
         try store.save(receipt)
         return attempt
+    }
+}
+
+@MainActor enum BoundTapGuardedRelease {
+    static func apply(enabled: Bool, verified: Bool, sdkInitialized: Bool,
+                      current: () -> Bool, lease: BoundTapProcessLease,
+                      store: BoundTapRecoveryStoring, expected: BoundTapRecovery) throws -> BoundTapRecoveryResult {
+        guard verified, current() else { return .pending }
+        guard enabled else { return .settledNeedsReview }
+        guard !sdkInitialized, lease.isHeld, current(), try store.load() == expected else { return .restartRequired }
+        try store.remove()
+        return .confirmed
     }
 }

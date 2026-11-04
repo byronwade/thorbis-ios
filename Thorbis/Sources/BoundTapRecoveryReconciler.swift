@@ -1,6 +1,5 @@
 import Foundation
-
-enum BoundTapRecoveryResult: Equatable { case confirmed, pending, settledNeedsReview, otherAccount, unknownAttempt, restartRequired }
+@preconcurrency import StripeTerminal
 
 private struct BoundTapSettlementRequest: Encodable { let paymentIntentId: String }
 private struct BoundTapSettlementResponse: Decodable {
@@ -13,7 +12,18 @@ private struct BoundTapSettlementResponse: Decodable {
 /// Read-only qualification seam. It never collects a card or clears a receipt.
 /// A matching payment row alone is not authoritative Stripe settlement proof.
 @MainActor enum BoundTapRecoveryReconciler {
+    // This cannot be enabled until the server contract, Keychain access
+    // group, reader lifetime and process-coordination tests are qualified.
+    private static let releaseQualified = false
+
     static func check(api: APIClient, session: SessionController, store: BoundTapRecoveryStoring) async throws -> BoundTapRecoveryResult {
+        guard let container = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.thorbis.field") else {
+            throw BoundTapFlowError.recoveryUnavailable
+        }
+        let lease: BoundTapProcessLease
+        do { lease = try BoundTapProcessLease.acquire(path: container.path) }
+        catch BoundTapProcessLeaseError.busy { return .restartRequired }
+        defer { lease.close() }
         guard let receipt = try store.load() else { return .pending }
         guard let attemptID = receipt.attemptID, UUID(uuidString: attemptID) != nil, let intentID = receipt.paymentIntentID,
               let expectedAmount = receipt.amount, let currency = receipt.currency else { return .unknownAttempt }
@@ -64,9 +74,10 @@ private struct BoundTapSettlementResponse: Decodable {
         guard BoundTapReconciliation.matches(receipt: receipt, snapshot: snapshot),
               snapshot.records.contains(where: { $0.id == paymentID && $0.idempotencyKey == "tap:\(receipt.invoiceID):\(attemptID)" }),
               current(), try store.load() == receipt else { return .pending }
-        // Settlement matches, but safe cross-process receipt clearance is not
-        // qualified. Keep the receipt and ask the office to finish recovery.
-        return .settledNeedsReview
+        // This process must not own an SDK whose late callbacks can outlive
+        // cancellation. The cross-process lease excludes cooperating writers.
+        return try BoundTapGuardedRelease.apply(enabled: releaseQualified, verified: true,
+            sdkInitialized: Terminal.isInitialized(), current: current, lease: lease, store: store, expected: receipt)
     }
 
     private static func fresh(_ value: APIReadProvenance, path: String, generation: UUID, origin: String,

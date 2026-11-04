@@ -131,7 +131,8 @@ final class TapToPayController: ObservableObject {
               let session, session.phase == .ready, session.can("invoice.payment.create", feature: "payments"),
               session.isFeatureOn(Self.feature), let actor = session.user?.id,
               let organization = session.activeOrganization?.id, let scope = api.savedCopyScope,
-              let origin = api.normalizedOrigin else {
+              let origin = api.normalizedOrigin,
+              let sharedContainer = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.thorbis.field") else {
             phase = .unavailable
             return
         }
@@ -154,7 +155,9 @@ final class TapToPayController: ObservableObject {
         phase = .preparing
         do {
             _ = try await BoundTapPaymentFlow.run(enabled: Self.buildEnabled && Self.boundCollectionQualified,
-                                                   supported: Self.deviceSupported, isCurrent: current,
+                                                   supported: Self.deviceSupported,
+                                                   lease: { try BoundTapProcessLease.acquire(path: sharedContainer.path) },
+                                                   isCurrent: current,
                                                    create: {
                 let marker = BoundTapRecovery(origin: origin, actorID: actor, organizationID: organization,
                                                invoiceID: self.invoiceID, attemptID: nil, paymentIntentID: nil,
