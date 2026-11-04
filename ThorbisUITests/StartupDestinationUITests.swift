@@ -52,4 +52,18 @@ final class StartupDestinationUITests: XCTestCase {
         XCTAssertTrue(root(app, "startup-tablet-Home").waitForExistence(timeout: 10))
     }
 
+    func testSettingsCanChangeTheStartScreen() {
+        let app = launch()
+        XCTAssertTrue(root(app, "startup-phone-customers").waitForExistence(timeout: 30))
+        app.buttons["Test settings"].tap()
+        let setting = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Open app to")).firstMatch
+        for _ in 0..<5 where !setting.isHittable { app.swipeUp() }
+        XCTAssertTrue(setting.waitForExistence(timeout: 10))
+        setting.tap()
+        let choice = app.buttons["Jobs"]
+        XCTAssertTrue(choice.waitForExistence(timeout: 10))
+        choice.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Open app to", "Jobs")).firstMatch.waitForExistence(timeout: 10))
+    }
+
 }
