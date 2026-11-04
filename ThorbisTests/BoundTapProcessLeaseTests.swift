@@ -1,6 +1,9 @@
 import Foundation
 import XCTest
 @testable import Thorbis
+#if os(macOS)
+import Darwin
+#endif
 
 final class BoundTapProcessLeaseTests: XCTestCase {
     func testSecondLeaseIsExcludedUntilFirstCloses() throws {
@@ -37,6 +40,11 @@ final class BoundTapProcessLeaseTests: XCTestCase {
         process.standardOutput = pipe
         try process.run()
         defer { if process.isRunning { process.terminate(); process.waitUntilExit() } }
+        var watched = pollfd(fd: pipe.fileHandleForReading.fileDescriptor, events: Int16(POLLIN), revents: 0)
+        guard Darwin.poll(&watched, 1, 5_000) > 0 else {
+            XCTFail("Child did not acquire the directory lease")
+            return
+        }
         XCTAssertEqual(try pipe.fileHandleForReading.read(upToCount: 1), Data("R".utf8))
         XCTAssertThrowsError(try BoundTapProcessLease.acquire(path: path))
         process.terminate()
