@@ -373,8 +373,8 @@ enum PaperPreview {
                 let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
                 JobDetailCache.save(invoice: old)
             }
-            let legacy = ["legacy", "legacy-recorded", "noaccess", "revoke", "offline"].contains(scenario)
-            let recorded = ["recorded", "legacy-recorded", "noaccess", "revoke"].contains(scenario)
+            let legacy = ["legacy", "legacy-recorded", "noaccess", "revoke", "offline", "satisfied"].contains(scenario)
+            let recorded = ["recorded", "legacy-recorded", "noaccess", "revoke", "satisfied"].contains(scenario)
             let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: legacy ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
             if recorded {
                 let file = folder.appendingPathComponent("\(actorID)_\(organizationID).recorded")
@@ -933,10 +933,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let photos: [String: Any] = ["requirement": "photos", "kind": "photos", "outcome": "satisfied",
                                          "detail": "2 of 2 photos added", "nextAction": NSNull(), "commercialSource": NSNull()]
             if ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil {
-                let payment: [String: Any] = ["requirement": "payment", "kind": "payment_or_unpaid_disposition", "outcome": "blocked", "detail": "Payment is due", "nextAction": "collect_payment", "commercialSource": "invoice"]
+                let satisfied = ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "satisfied"
+                let payment: [String: Any] = ["requirement": "payment", "kind": "payment_or_unpaid_disposition", "outcome": satisfied ? "satisfied" : "blocked", "detail": satisfied ? "Payment recorded" : "Payment is due", "nextAction": "collect_payment", "commercialSource": "invoice"]
                 return ["policy": ["organizationId": org, "requireNotes": false, "requiredPhotoCount": 0, "requiredChecks": [], "updatedByUserId": NSNull(), "updatedAt": NSNull()],
                         "facts": ["noteCount": 0, "photoCount": 0, "acknowledgedCheckKeys": [], "authorizationTarget": target],
-                        "acknowledged": [], "requirements": [payment], "unmet": [payment], "completable": false]
+                        "acknowledged": [], "requirements": [payment], "unmet": satisfied ? [] : [payment], "completable": satisfied]
             }
             let notes: [String: Any] = ["requirement": "notes", "kind": "notes", "outcome": "blocked",
                                         "detail": "Add a note about the work", "nextAction": "Add a note", "commercialSource": NSNull()]

@@ -79,13 +79,20 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Offline · work stays saved on this phone"].exists)
     }
 
+    func testSatisfiedServerPaymentDoesNotShowRecoveryWarning() {
+        let app = launch("satisfied")
+        XCTAssertTrue(app.staticTexts["1 of 1"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Payments to check"].exists)
+        XCTAssertFalse(app.buttons["Open invoice 00002209"].exists)
+    }
+
     private func launch(_ scenario: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-closeout"]
         app.launchEnvironment["THORBIS_CLOSEOUT_TEST"] = scenario
         app.launch()
-        XCTAssertTrue(app.staticTexts["Payment is due"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts[scenario == "satisfied" ? "Payment recorded" : "Payment is due"].waitForExistence(timeout: 20))
         return app
     }
 }
