@@ -63,6 +63,7 @@ struct JobDetailView: View {
     private var estimatesLoaded: Bool { estimateRead != nil }
     private var estimatesFailed: Bool { estimateRead?.isComplete == false }
     @State private var showNewEstimate = false
+    @State private var estimateCreationMessage: String?
     @State private var committed = 0
     /// Set when the person opens a wrap-up row; the next drop in rows left plays a light tap.
     @State private var wrapUpTapArmed = false
@@ -274,6 +275,14 @@ struct JobDetailView: View {
         .toolbar { toolbarActions }
         .toolbar(.hidden, for: .tabBar)
         .deviceHandoffs($handoff)
+        .alert("Can't open estimate", isPresented: Binding(
+            get: { estimateCreationMessage != nil },
+            set: { if !$0 { estimateCreationMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { estimateCreationMessage = nil }
+        } message: {
+            Text(estimateCreationMessage ?? "Try again.")
+        }
         .sheet(item: $shareJob) { TextShareSheet(text: $0.text).presentationDetents([.medium, .large]) }
         .sensoryFeedback(.success, trigger: committed)
         // A light tap as a wrap-up row the person opened turns done (phase 4). Armed by opening a
@@ -2377,7 +2386,20 @@ struct JobDetailView: View {
         #if DEBUG
         CommercialDraftStore.trace("buildEstimate canBuild=\(canBuildEstimate) hasJob=\(job != nil) scope=\(job.map { scope(for: $0) != nil } ?? false) estimatesComplete=\(estimateRead?.isComplete == true)")
         #endif
-        guard canBuildEstimate, let job, scope(for: job) != nil else { return }
+        guard session.can("estimate.create", feature: "estimates") else {
+            estimateCreationMessage = "Your access changed. Ask your office for estimate access."
+            return
+        }
+        if session.can("estimate.view", feature: "estimates"), estimateRead?.isComplete != true {
+            estimateCreationMessage = estimateRead == nil
+                ? "Estimates are still loading. Try again in a moment."
+                : "Estimates couldn't be fully loaded. Refresh this job and try again."
+            return
+        }
+        guard let job, scope(for: job) != nil else {
+            estimateCreationMessage = "This job couldn't be verified. Refresh it and try again."
+            return
+        }
         showNewEstimate = true
     }
 
