@@ -6,4 +6,5 @@ import Foundation
     func hold(_ draft: Draft, for scope: Scope) { held[scope] = draft }
     func read(for scope: Scope) -> Draft? { held[scope] }
     func clear(for scope: Scope) { held.removeValue(forKey: scope) }
+    func entries() -> [(Scope, Draft)] { held.map { ($0.key, $0.value) } }
 }

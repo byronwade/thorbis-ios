@@ -382,8 +382,8 @@ final class SessionController: ObservableObject {
         let lifecycle = EstimateEditorLifecycle.shared
         guard lifecycle.beginTransition() else { error = "Wait for the current account change to finish."; return false }
         defer { lifecycle.endTransition() }
-        guard lifecycle.prepareTransition() else {
-            error = "Finish saving the open estimate before changing workspaces."
+        guard lifecycle.prepareTransition(), CommercialDraftStore.retireEstimateRecoveryMemory() else {
+            error = "A draft on this phone could not be saved. Open its job and try again before changing workspaces."
             return false
         }
         let knownOrganizations = organizations
@@ -395,11 +395,11 @@ final class SessionController: ObservableObject {
         await onWillUnbindDevice?()
         guard generation == transitionGeneration, user?.id == transitionActor,
               activeOrganization?.id == transitionOrganization, api.normalizedOrigin == transitionOrigin else { return false }
-        guard lifecycle.prepareTransition() else {
+        guard lifecycle.prepareTransition(), CommercialDraftStore.retireEstimateRecoveryMemory() else {
             if phase == .ready, transitionActor != nil, transitionOrganization != nil,
                let sessionDeadline, Date() < sessionDeadline,
                authorityDeadline.map({ Date() < $0 }) ?? true { onAbortedDeviceUnbind?() }
-            error = "Finish saving the open estimate before changing workspaces."
+            error = "A draft on this phone could not be saved. Open its job and try again before changing workspaces."
             return false
         }
         snapshots.clear()
@@ -427,8 +427,8 @@ final class SessionController: ObservableObject {
         defer { lifecycle.endTransition() }
         signingOut = true
         defer { signingOut = false }
-        guard lifecycle.prepareTransition() else {
-            error = "Finish saving the open estimate before signing out."
+        guard lifecycle.prepareTransition(), CommercialDraftStore.retireEstimateRecoveryMemory() else {
+            error = "A draft on this phone could not be saved. Open its job and try again before signing out."
             return false
         }
         let transitionGeneration = generation
@@ -438,11 +438,11 @@ final class SessionController: ObservableObject {
         await onWillUnbindDevice?()
         guard generation == transitionGeneration, user?.id == transitionActor,
               activeOrganization?.id == transitionOrganization, api.normalizedOrigin == transitionOrigin else { return false }
-        guard lifecycle.prepareTransition() else {
+        guard lifecycle.prepareTransition(), CommercialDraftStore.retireEstimateRecoveryMemory() else {
             if phase == .ready, transitionActor != nil, transitionOrganization != nil,
                let sessionDeadline, Date() < sessionDeadline,
                authorityDeadline.map({ Date() < $0 }) ?? true { onAbortedDeviceUnbind?() }
-            error = "Finish saving the open estimate before signing out."
+            error = "A draft on this phone could not be saved. Open its job and try again before signing out."
             return false
         }
         defaults.set(true, forKey: Self.explicitSignOutKey)

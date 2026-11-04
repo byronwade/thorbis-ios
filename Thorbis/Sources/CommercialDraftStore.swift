@@ -79,6 +79,13 @@ struct CommercialDraftScope: Codable, Hashable {
         return EstimateRecoveryCopyStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("EstimateRecoveryCopies", isDirectory: true))
     }()
+    /// Retire volatile recovery only after every original-scope copy is confirmed.
+    static func retireEstimateRecoveryMemory() -> Bool {
+        EstimateTransitionMemory.retire(primary: unpersistedEstimates, edits: recoveryCopyEdits,
+            attempts: estimateRecoveryCopyAttempts) { id, scope, draft in
+                try estimateRecoveryCopies.install(draft, scope: scope, id: id)
+            }
+    }
     private let directory: URL
     private let removeItem: (URL) throws -> Void
     private let writeItem: (Data, URL) throws -> Void

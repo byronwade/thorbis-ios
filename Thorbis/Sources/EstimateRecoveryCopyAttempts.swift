@@ -13,6 +13,8 @@ import Foundation
     func pendingAttempt(for scope: Scope) -> Retry? {
         pending[scope].map { Retry(draft: $0.draft, intentID: $0.intentID) }
     }
+    var hasPendingAttempts: Bool { !pending.isEmpty }
+    func retireConfirmed() { confirmed.removeAll() }
 
     func perform(_ draft: Draft, scope: Scope, intentID: UUID? = nil, operation: (UUID, Draft) throws -> Void) throws {
         let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys

@@ -27,6 +27,7 @@ struct NewEstimateView: View {
     @State private var editingRecoveryCopyID: UUID?
     @State private var editingRecoverySessionID: UUID?
     @State private var jobDraftSaveGuard = JobEstimateDraftSaveGuard()
+    @State private var transitionCheckpoint: Data?
     @State private var createInFlight = false
     @State private var draftOwner = UUID()
     @State private var ownsDraft = false
@@ -125,11 +126,15 @@ struct NewEstimateView: View {
         if jobID != nil {
             EstimateEditorLifecycle.shared.register(owner: draftOwner, busy: { busy }, preserve: {
                 guard !recoveryChoicePending, recoveryPreview == nil else { return false }
-                if persistDraft(leavingOriginalScope: true) { return true }
+                if persistDraft(leavingOriginalScope: true), let bytes = draftCheckpoint() {
+                    transitionCheckpoint = bytes
+                    return true
+                }
                 preserveUnpersistedDraft()
                 return false
             }, forced: {
                 guard !recoveryChoicePending, recoveryPreview == nil else { return }
+                if EstimateEditorLifecycle.shared.transitioning && !busy && matchesTransitionCheckpoint { return }
                 if busy || !persistDraft(leavingOriginalScope: true) { preserveUnpersistedDraft() }
             })
         }
@@ -160,6 +165,14 @@ struct NewEstimateView: View {
             uncertain: uncertain ?? (createInFlight || createOutcomeUncertain), created: created,
             requiresLocationVerification: requiresLocationVerification, requiresManualReview: requiresManualReview,
             requiresGroupDisclosure: requiresGroupDisclosure, acceptedGroupLoss: acceptedGroupLoss)
+    }
+    private func draftCheckpoint() -> Data? {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        return try? encoder.encode(currentDraft())
+    }
+    private var matchesTransitionCheckpoint: Bool {
+        guard let transitionCheckpoint, let current = draftCheckpoint() else { return false }
+        return transitionCheckpoint == current
     }
     @discardableResult private func holdUnpersistedDraft(_ draft: CommercialNewEstimateDraft) -> Bool {
         guard jobID != nil, ownsDraft, didRestoreDraft, !draftRecoveryBlocked, !intentionallyDiscarded, let draftScope else { return false }
@@ -378,7 +391,9 @@ struct NewEstimateView: View {
             .onDisappear {
                 viewVisible = false; accessAttempt = UUID()
                 if !busy {
-                    if !recoveryChoicePending && recoveryPreview == nil && !persistDraft(leavingOriginalScope: true) { preserveUnpersistedDraft() }
+                    if !recoveryChoicePending && recoveryPreview == nil &&
+                        !(!scopeMatches && matchesTransitionCheckpoint) &&
+                        !persistDraft(leavingOriginalScope: true) { preserveUnpersistedDraft() }
                     releaseDraft()
                 }
             }
