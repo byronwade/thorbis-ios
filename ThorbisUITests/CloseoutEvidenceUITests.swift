@@ -47,21 +47,21 @@ final class CloseoutEvidenceUITests: XCTestCase {
 
     func testLegacyRecordedPaymentIdentifiesInvoiceWithoutOpeningRoute() {
         let app = launch("legacy-recorded")
-        XCTAssertTrue(app.staticTexts["Invoice 00002209"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Connect, then open these invoices from Invoices on this phone to refresh payments already sent."].exists)
-        XCTAssertFalse(app.buttons["Open invoice 00002209"].exists)
+        XCTAssertTrue(app.staticTexts["Invoice 2209"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["00000000-0000-4000-8000-000000002209"].exists)
+        XCTAssertTrue(app.staticTexts["Connect, then search these invoice IDs in Invoices on this phone to refresh payments already sent."].exists)
     }
 
     func testUnavailableInvoicePermissionExplainsHowToRecover() {
         let app = launch("noaccess")
         XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Invoice 00002209"].exists)
+        XCTAssertFalse(app.staticTexts["00000000-0000-4000-8000-000000002209"].exists)
     }
 
     func testUnavailablePaymentFeatureExplainsHowToRecover() {
         let app = launch("no-payments")
         XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Invoice 00002209"].exists)
+        XCTAssertFalse(app.staticTexts["00000000-0000-4000-8000-000000002209"].exists)
     }
 
     func testOfflineSavedWorkCannotSyncUntilReconnected() {
@@ -79,6 +79,18 @@ final class CloseoutEvidenceUITests: XCTestCase {
         let app = launch("satisfied")
         XCTAssertTrue(app.staticTexts["1 of 1"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Payments to check"].exists)
+    }
+
+    func testInvoicesCanBeFoundByFullID() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoices"]
+        app.launch()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 15))
+        search.tap()
+        search.typeText("00000000-0000-4000-8000-000000002209")
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["No invoices."].exists)
     }
 
     private func launch(_ scenario: String) -> XCUIApplication {
