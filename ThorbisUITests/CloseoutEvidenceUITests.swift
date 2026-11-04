@@ -66,11 +66,17 @@ final class CloseoutEvidenceUITests: XCTestCase {
 
     func testMissingSavedWorkEditAccessExplainsRecovery() {
         let app = launch("noedit")
-        XCTAssertTrue(app.staticTexts["Ask your office to restore your access to sync saved work on this phone."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Ask your office to restore your access to sync payments on this phone."].waitForExistence(timeout: 10))
         app.buttons["Review saved work"].tap()
         let sync = app.buttons["saved-work-sync"]
         XCTAssertTrue(sync.waitForExistence(timeout: 10))
         XCTAssertFalse(sync.isEnabled)
+    }
+
+    func testMissingPaymentPermissionExplainsRecovery() {
+        let app = launch("no-payment-permission")
+        XCTAssertTrue(app.staticTexts["Ask your office to restore your access to sync payments on this phone."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Connect and sync saved work to send waiting payments."].exists)
     }
 
     func testEditingPermissionLossMakesOpenSavedWorkReadOnly() {

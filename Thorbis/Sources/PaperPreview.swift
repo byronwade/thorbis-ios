@@ -373,7 +373,7 @@ enum PaperPreview {
                 let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
                 JobDetailCache.save(invoice: old)
             }
-            let legacy = ["legacy", "legacy-revoke", "legacy-recorded", "noaccess", "no-payments", "noedit", "offline", "satisfied"].contains(scenario)
+            let legacy = ["legacy", "legacy-revoke", "legacy-recorded", "noaccess", "no-payments", "no-payment-permission", "noedit", "offline", "satisfied"].contains(scenario)
             let recorded = ["recorded", "legacy-recorded", "noaccess", "no-payments", "satisfied"].contains(scenario)
             let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: legacy ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
             if recorded {
@@ -1227,7 +1227,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
-            if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
+            if PaperPreview.isPaymentCollectionPreview || (ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil && ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != "no-payment-permission") { capabilities.append("invoice.payment.create") }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
             if PaperPreview.screen == "job-onsite" { capabilities += ["job.complete", "invoice.create"] }
