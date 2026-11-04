@@ -320,9 +320,10 @@ final class Store: ObservableObject {
     }
     private var handledScheduleRequest = 0
     /// Roots can be recreated at a new width. A shortcut is handled once across both layouts.
-    func consumeScheduleRequest() -> Bool {
+    func consumeScheduleRequest(session: UUID) -> Bool {
         guard requestedSchedule > handledScheduleRequest else { return false }
         handledScheduleRequest = requestedSchedule
+        rememberRoot("schedule", session: session)
         return true
     }
     /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.
