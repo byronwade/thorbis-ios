@@ -1,0 +1,9 @@
+# Terminal attempt binding plan
+
+**Goal:** Ensure an iPhone reader and its connection token cannot cross a payment attempt, merchant, account environment, workspace, or API session.
+
+**Authority:** The server owns the invoice, durable attempt, connected merchant and environment. Client-visible provider-account identity is prohibited. A connection token must be issued against an authorized, still-open attempt using its server-pinned merchant, and echo only the attempt identifier and Terminal location. A missing or inconsistent binding fails closed. Existing Tap to Pay distribution gate remains disabled.
+
+**Reader lifecycle:** Across all collection controllers, serialize setup through one owner. Before switching binding, disconnect the existing reader, clear Stripe's cached credentials, set the invoice/attempt-bound token provider, and connect using the intent's server location. Validate token attempt and location before returning the secret. Hold exclusive ownership across retrieve, collect and confirm; never swap the token provider during an active collection. Failed disconnect, credential clear, scope/session retirement or missing backend binding prevents further work. Preserve uncertain-attempt recovery rather than creating a new attempt.
+
+**Verification:** Reproduce old-reader reuse with a fake driver. Cover account A→B, same/different location, test/live distinction via server-pinned attempt, overlapping controllers, token/intent mismatch, disconnect or clear failure, cancellation and tenant/session change. Server tests prove cross-invoice, expired, revoked, rerouted and wrong-attempt denial without emitting account identity. Real reader and distribution entitlement are separate qualifications. Until both server contract and client flow are integrated and verified, this work is held and must not claim Tap to Pay readiness.
