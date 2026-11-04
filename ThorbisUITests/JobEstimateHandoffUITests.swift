@@ -207,6 +207,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: drawer)
         XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 30), .completed)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.exists)
+        if control == "Replace sample revision shortly" {
+            XCTAssertTrue(app.staticTexts["Updated sample revision scope"].waitForExistence(timeout: 10))
+        }
     }
     func testPreselectionDetailsAndDescriptionCloseOnSessionLoss() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-slow-invalidation"])
