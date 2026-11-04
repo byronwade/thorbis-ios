@@ -7,6 +7,7 @@ private struct CustomerHandoffEstimateDetails: View {
     private let authority: UUID
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var revision: CustomerIssuedEstimateRevision?
+    @State private var accepted: CustomerApprovedEstimateScope?
     @State private var loading = false
     @State private var error: String?
 
@@ -19,11 +20,12 @@ private struct CustomerHandoffEstimateDetails: View {
     private var type: CustomerType { CustomerType(sizeClass) }
     private var current: Bool { model.detailsCurrent(record, authority: authority) }
     private var revisionMatches: Bool {
-        guard let revision else { return false }
-        return revision.matchesDetails(for: record)
+        if let revision { return revision.matchesDetails(for: record) }
+        if let accepted { return accepted.matches(record) }
+        return false
     }
     private var access: DocumentDescriptionAccess {
-        .init(identity: .estimate(scope: model.scope, record: record, issued: revision),
+        .init(identity: record.status == "approved" ? .approvedEstimate(scope: model.scope, record: record, accepted: accepted) : .estimate(scope: model.scope, record: record, issued: revision),
               organizationID: model.scope.organizationID, capability: "estimate.view", feature: "estimates",
               sourceGeneration: model.session.generation, fresh: current && revisionMatches,
               active: current && revisionMatches, scopeValid: current && revisionMatches)
@@ -41,6 +43,11 @@ private struct CustomerHandoffEstimateDetails: View {
                 if !current {
                     CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
                                          message: "Hand the device back to your technician to reopen this estimate.")
+                } else if let accepted, revisionMatches {
+                    Text(accepted.title).font(Theme.customerFont(type.heading, weight: .medium))
+                    Text("Approved work").font(Theme.customerFont(type.body, weight: .medium))
+                    lines(accepted.lines, currency: accepted.currency, total: accepted.totalAmount,
+                          context: "Estimate EST-\(record.id.suffix(4).uppercased())")
                 } else if let revision, revisionMatches {
                     Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
@@ -60,7 +67,7 @@ private struct CustomerHandoffEstimateDetails: View {
                         lines(revision.lines, currency: revision.currency, total: revision.totalAmount,
                               context: "Estimate EST-\(record.id.suffix(4).uppercased())")
                     }
-                } else if revision != nil {
+                } else if revision != nil || accepted != nil {
                     CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
                                          message: "Hand the device back to your technician to reopen this estimate.")
                 } else if let error {
@@ -102,12 +109,18 @@ private struct CustomerHandoffEstimateDetails: View {
 
     private func load() async {
         guard current, !loading else { return }
-        loading = true; revision = nil; error = nil
+        loading = true; revision = nil; accepted = nil; error = nil
         defer { loading = false }
         do {
-            let issued = try await model.issuedDetails(record, authority: authority)
-            guard current, !Task.isCancelled else { return }
-            revision = issued
+            if record.status == "approved" {
+                let result = try await model.approvedDetails(record, authority: authority)
+                guard current, !Task.isCancelled else { return }
+                accepted = result
+            } else {
+                let issued = try await model.issuedDetails(record, authority: authority)
+                guard current, !Task.isCancelled else { return }
+                revision = issued
+            }
         } catch is CancellationError {} catch {
             guard current else { return }
             self.error = error.customerSentence(.openEstimate)

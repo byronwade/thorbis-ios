@@ -132,3 +132,48 @@ extension APIClient {
         guard generation == requestGeneration, currentAuthority() else { throw CancellationError() }
     }
 }
+
+/// The server's already projected, accepted scope; never inferred from quoted packages.
+struct CustomerApprovedEstimateScope: Decodable, Equatable {
+    let estimateId: String
+    let organizationId: String
+    let customerId: String
+    let locationId: String?
+    let revisionId: String
+    let revisionNumber: Int
+    let title: String
+    let lines: [FieldLine]
+    let totalAmount: Int
+    let currency: String
+
+    func matches(_ record: EstimateRecord) -> Bool {
+        guard record.status == "approved", UUID(uuidString: revisionId) != nil,
+              estimateId == record.id, organizationId == record.organizationId,
+              customerId == record.customerId, locationId == record.locationId,
+              revisionNumber == record.currentRevisionNumber,
+              lines.allSatisfy({ $0.source == nil && $0.group == nil && $0.showToCustomer == nil }),
+              let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == totalAmount else { return false }
+        return true
+    }
+}
+
+@MainActor
+extension APIClient {
+    func customerApprovedEstimateScope(for expected: EstimateRecord, currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerApprovedEstimateScope {
+        let generation = requestGeneration
+        try Task.checkCancellation()
+        guard currentAuthority(), let number = expected.currentRevisionNumber, number > 0 else { throw CancellationError() }
+        let current = try await liveFieldEstimate(expected.id)
+        try Task.checkCancellation()
+        guard generation == requestGeneration, currentAuthority(), current.id == expected.id,
+              current.organizationId == expected.organizationId, current.customerId == expected.customerId,
+              current.locationId == expected.locationId, current.status == "approved", current.currentRevisionNumber == number else {
+            throw CancellationError()
+        }
+        let path = try financialPath("/v1/estimates", id: expected.id, suffix: "/revisions/\(number)/customer-approved-scope")
+        let scope: CustomerApprovedEstimateScope = try await send("GET", path, requireFresh: true)
+        try Task.checkCancellation()
+        guard generation == requestGeneration, currentAuthority(), scope.matches(expected) else { throw CancellationError() }
+        return scope
+    }
+}

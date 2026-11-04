@@ -165,6 +165,13 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         for id in ids {
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }
             if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" { return .init(status:200,payload:revision(id)) }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/1/customer-approved-scope", status(id) == "approved" {
+                return .init(status: 200, payload: ["estimateId": id, "organizationId": org, "customerId": PaperPreview.customerID,
+                    "revisionId": id.replacingOccurrences(of: "0081", with: "0091"), "revisionNumber": 1,
+                    "title": title(id), "currency": "USD", "totalAmount": amount(id),
+                    "lines": [["id": id, "description": "Accepted sample work", "quantity": 1,
+                               "unitPrice": ["amount": amount(id), "currency": "USD"]]]])
+            }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
             if method == "POST", path == "/v1/estimates/\(id)/action-tokens" { return .init(status:200,payload:["token":"sample-\(id)"]) }
             if method == "GET", path == "/v1/public/document-actions/sample-\(id)" { return .init(status:200,payload:action(id)) }

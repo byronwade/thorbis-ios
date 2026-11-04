@@ -378,7 +378,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     /// Reading one estimate never selects it or prepares an approval.
     func detailsCurrent(_ record: EstimateRecord, authority: UUID) -> Bool {
         isCurrent && session.authorityRevision == authority && complete && freshIDs.contains(record.id)
-            && record.status == "sent" && records.contains(record)
+            && (record.status == "sent" || record.status == "approved") && records.contains(record)
             && scope.contains(record, requestedID: record.id)
     }
 
@@ -407,6 +407,23 @@ final class JobEstimateHandoffModel: ObservableObject {
             throw Problem(title: "This job's estimates changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
         return revision
+    }
+    func approvedDetails(_ record: EstimateRecord, authority: UUID) async throws -> CustomerApprovedEstimateScope {
+        func current() -> Bool { detailsCurrent(record, authority: authority) && record.status == "approved" && !Task.isCancelled }
+        guard current() else { throw CancellationError() }
+        let fresh = try await api.liveFieldJob(scope.jobID)
+        guard current(), sameJob(fresh) else { throw CancellationError() }
+        let links = try await api.liveFieldJobEstimateLinks(scope.jobID)
+        guard current(), links.allSatisfy({ $0.jobId == scope.jobID }),
+              links.contains(where: { $0.estimateId == record.id }) || fresh.estimateId == record.id else { throw CancellationError() }
+        let accepted = try await api.customerApprovedEstimateScope(for: record, currentAuthority: current)
+        guard current() else { throw CancellationError() }
+        let verifiedJob = try await api.liveFieldJob(scope.jobID)
+        guard current(), sameJob(verifiedJob) else { throw CancellationError() }
+        let verifiedLinks = try await api.liveFieldJobEstimateLinks(scope.jobID)
+        guard current(), verifiedLinks.allSatisfy({ $0.jobId == scope.jobID }),
+              verifiedLinks.contains(where: { $0.estimateId == record.id }) || verifiedJob.estimateId == record.id else { throw CancellationError() }
+        return accepted
     }
     func verifyMembership(_ item: JobEstimateReviewedItem) async throws {
         guard isCurrent, approvalAllowed(item) else { throw CancellationError() }

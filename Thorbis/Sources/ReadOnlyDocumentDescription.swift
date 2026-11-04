@@ -3,6 +3,7 @@ import SwiftUI
 /// The complete displayed document, including its job scope and issued revision.
 enum DocumentDescriptionIdentity: Equatable {
     case estimate(scope: JobDocumentScope, record: EstimateRecord, issued: CustomerIssuedEstimateRevision?)
+    case approvedEstimate(scope: JobDocumentScope, record: EstimateRecord, accepted: CustomerApprovedEstimateScope?)
     case invoice(scope: JobDocumentScope, record: InvoiceRecord)
 }
 
