@@ -189,7 +189,7 @@ private final class TokenProvider: NSObject, ConnectionTokenProvider, @unchecked
 }
 
 /// Discovery reports readers through a delegate; the first one (this iPhone) is all Tap to Pay needs.
-private final class Discovery: NSObject, DiscoveryDelegate, @unchecked Sendable {
+final class Discovery: NSObject, DiscoveryDelegate, @unchecked Sendable {
     private var continuation: CheckedContinuation<Reader, Error>?
     private var cancelable: Cancelable?
 
@@ -222,7 +222,7 @@ private struct Unchecked<Value>: @unchecked Sendable {
 }
 
 /// Apple's Tap to Pay sheet shows its own prompts; these callbacks only cover setup updates.
-private final class ReaderEvents: NSObject, TapToPayReaderDelegate, @unchecked Sendable {
+final class ReaderEvents: NSObject, TapToPayReaderDelegate, @unchecked Sendable {
     static let shared = ReaderEvents()
     func tapToPayReader(_ reader: Reader, didStartInstallingUpdate update: ReaderSoftwareUpdate, cancelable: Cancelable?) {}
     func tapToPayReader(_ reader: Reader, didReportReaderSoftwareUpdateProgress progress: Float) {}
