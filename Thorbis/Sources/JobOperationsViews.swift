@@ -355,9 +355,9 @@ struct JobCloseoutView: View {
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                         if !unassociatedPendingPayments.isEmpty {
-                            Text(session.can("job.edit", feature: "jobs")
+                            Text(session.can("job.edit", feature: "jobs") && session.can("invoice.payment.create", feature: "payments")
                                  ? "Connect and sync saved work to send waiting payments."
-                                 : "Ask your office to restore your access to sync saved work on this phone.")
+                                 : "Ask your office to restore your access to sync payments on this phone.")
                                 .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                             if SavedWorkScope.capture(session: session, api: api, media: pendingMedia, outbox: outbox) != nil {
                                 Button("Review saved work") {
