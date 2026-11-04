@@ -32,4 +32,12 @@ final class PublicEstimateMoneyUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "can’t verify the estimate amount")).firstMatch.exists)
     }
 
+    func testPlainApprovalShowsAmountProblemAndStaysDisabled() {
+        let app = open(["--paper-preview-public-estimate-discount", "--paper-preview-public-estimate-unsupported-currency"])
+        let approval = app.buttons["public-estimate-approve"]
+        XCTAssertTrue(approval.waitForExistence(timeout: 15))
+        XCTAssertFalse(approval.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "can’t verify the estimate amount")).firstMatch.exists)
+    }
+
 }

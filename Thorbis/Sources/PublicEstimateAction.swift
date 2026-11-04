@@ -56,15 +56,16 @@ struct PublicEstimateAction: Decodable, Equatable {
         return (scopeLines ?? []).allSatisfy { PublicEstimateMoney.lineTotal(quantity: $0.quantity, unitPrice: $0.unitPrice) != nil }
     }
 
-    var canApprovePlainly: Bool {
-        amountsAvailableForApproval
-            && status == .sent
+    var plainApprovalOffered: Bool {
+        status == .sent
             && nonce != nil
             && allowedActions.contains("approve")
             && approvalWithoutSignatureAllowed == true
             && options?.isEmpty != false
             && scopeLines?.isEmpty == false
     }
+
+    var canApprovePlainly: Bool { plainApprovalOffered && amountsAvailableForApproval }
 
     var signingOffered: Bool {
         status == .sent
