@@ -1,5 +1,28 @@
 import Foundation
 
+/// Describes how this particular response was obtained; it is not an authorization proof.
+struct APIReadProvenance: Equatable, Sendable {
+    enum Source: Equatable, Sendable {
+        case urlSession(cacheBypassed: Bool)
+        case recentResponse
+        case savedCopy(Date)
+    }
+    let origin: String
+    /// Existing saved-copy namespace, not a collision-free identity or resource grant.
+    let savedCopyScope: String?
+    let savedCopyScopeRevision: UUID
+    let generation: UUID
+    let path: String
+    let cursor: String?
+    let source: Source
+}
+
+struct APIRead<Value> {
+    let value: Value
+    let provenance: APIReadProvenance
+}
+extension APIRead: Sendable where Value: Sendable {}
+
 struct Customer: Codable, Identifiable, Hashable {
     let id: String
     let name: String
@@ -97,7 +120,10 @@ final class APIClient: ObservableObject {
 
     /// The verified actor and workspace whose saved copies this client reads and writes; nil
     /// while signed out, which turns saved copies off entirely.
-    var savedCopyScope: String?
+    private(set) var savedCopyScopeRevision = UUID()
+    var savedCopyScope: String? {
+        didSet { if savedCopyScope != oldValue { savedCopyScopeRevision = UUID() } }
+    }
     /// Set while the session knows there is no signal: kept reads answer from the phone at once
     /// instead of waiting on a request that cannot finish.
     var knownOffline = false
@@ -243,6 +269,11 @@ final class APIClient: ObservableObject {
         let response = try await sendData(method, path, body: Optional<String>.none, queryItems: queryItems,
                                           cursor: cursor, authed: authed, requireFresh: requireFresh)
         return try decodeResponse(response)
+    }
+
+    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil) async throws -> APIRead<T> {
+        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor)
+        return APIRead(value: try decodeResponse(response), provenance: response.provenance)
     }
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
@@ -413,6 +444,7 @@ final class APIClient: ObservableObject {
         let data: Data
         let status: Int
         let contentType: String?
+        let provenance: APIReadProvenance
     }
 
     private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
@@ -442,20 +474,31 @@ final class APIClient: ObservableObject {
         let isJSONRead = isGET && authed && body == nil && accept == "application/json" && !requireFresh
         let readKey = isJSONRead ? SavedCopies.key(origin: requestOrigin, path: path, query: requestQueryItems) : nil
         let epoch = mutationEpoch
+        let copyScope = savedCopyScope
+        let copyScopeRevision = savedCopyScopeRevision
+        func provenance(_ source: APIReadProvenance.Source) -> APIReadProvenance {
+            APIReadProvenance(origin: requestOrigin, savedCopyScope: copyScope, savedCopyScopeRevision: copyScopeRevision, generation: generation,
+                              path: path, cursor: cursor, source: source)
+        }
         let reuseKey = readKey.flatMap { Self.reusesRecentRead(path, query: requestQueryItems) ? $0 : nil }
         if let reuseKey, !SavedCopies.liveOnly, let recent = recentReads[reuseKey], recent.epoch == epoch,
            recent.generation == generation, Date().timeIntervalSince(recent.at) < Self.recentReadWindow {
             PerfProbe.request(method, path, note: "reused")
-            return recent.response
+            let original = recent.response.provenance
+            let reused = APIReadProvenance(origin: original.origin, savedCopyScope: original.savedCopyScope, savedCopyScopeRevision: original.savedCopyScopeRevision,
+                                           generation: original.generation, path: original.path,
+                                           cursor: original.cursor, source: .recentResponse)
+            return DataResponse(data: recent.response.data, status: recent.response.status,
+                                contentType: recent.response.contentType, provenance: reused)
         }
-        let copyScope = savedCopyScope
         let keptKey = isJSONRead && copyScope != nil && SavedCopies.isKept(path, query: pageQuery) ? readKey : nil
         func savedCopy() -> DataResponse? {
             guard !SavedCopies.liveOnly, let copyScope, let keptKey, generation == requestGeneration, savedCopyScope == copyScope,
                   let copy = SavedCopyStore.shared.read(scope: copyScope, key: keptKey) else { return nil }
             if savedCopyPaths[path] != copy.savedAt { savedCopyPaths[path] = copy.savedAt }
             PerfProbe.request(method, path, note: "saved copy")
-            return DataResponse(data: copy.data, status: 200, contentType: "application/json")
+            return DataResponse(data: copy.data, status: 200, contentType: "application/json",
+                                provenance: provenance(.savedCopy(copy.savedAt)))
         }
         if keptKey != nil, knownOffline, !SavedCopies.liveOnly, let copy = savedCopy() { return copy }
         if let copyScope, let keptKey, SavedCopyStore.shared.exists(scope: copyScope, key: keptKey) {
@@ -516,7 +559,8 @@ final class APIClient: ObservableObject {
             }
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
-        let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"))
+        let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"),
+                                    provenance: provenance(.urlSession(cacheBypassed: freshRead)))
         if let reuseKey, mutationEpoch == epoch {
             recentReads[reuseKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
             if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }

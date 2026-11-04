@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-04-payment-history-workspace",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "arrow.triangle.2.circlepath", title: "Keep payment history together",
+                      detail: "Payment history refresh stops if the saved workspace changes."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-04-estimate-details-before-selection",
             date: "2026-11-04",
             highlights: [

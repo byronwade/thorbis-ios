@@ -6,6 +6,124 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testSavedInvoiceSourceSurvivesConcurrentLiveInvoiceResponse() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice()), .init(200, invoice(amountPaid: 2500), gate: gate)
+        ]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "invoice-provenance-" + UUID().uuidString
+        let path = "/v1/invoices/\(invoiceID)"
+        _ = try await client.fieldInvoice(invoiceID)
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
+        client.invalidateRequests()
+        let live = Task { try await client.fieldInvoiceWithProvenance(invoiceID) }
+        await waitForRequests(2)
+        client.knownOffline = true
+        let saved = try await client.fieldInvoiceWithProvenance(invoiceID)
+        XCTAssertEqual(saved.value.amountPaid, 0)
+        XCTAssertNotNil(client.savedCopyDate(path))
+        gate.release()
+        let fresh = try await live.value
+        XCTAssertEqual(fresh.value.amountPaid, 2500)
+        guard case .savedCopy = saved.provenance.source else { return XCTFail("The saved response must retain its own source") }
+        XCTAssertEqual(fresh.provenance.source, .urlSession(cacheBypassed: false))
+        XCTAssertEqual(saved.provenance.savedCopyScope, scope)
+        XCTAssertEqual(saved.provenance.path, path)
+        XCTAssertEqual(saved.provenance.origin, "https://app.thorbis.com")
+        XCTAssertEqual(saved.provenance.generation, fresh.provenance.generation)
+    }
+
+    func testPaymentHistoryProvenanceCoversEachFreshPage() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, #"{"items":[],"nextCursor":"next"}"#), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let scope = "history-provenance-" + UUID().uuidString
+        client.savedCopyScope = scope
+        let result = try await SavedCopies.$liveOnly.withValue(true) { try await client.fieldPaymentsWithProvenance(invoiceID) }
+        XCTAssertTrue(result.payments.isEmpty)
+        XCTAssertEqual(result.pages.count, 2)
+        XCTAssertEqual(result.pages.map(\.cursor), [nil, "next"])
+        XCTAssertTrue(result.pages.allSatisfy { $0.source == .urlSession(cacheBypassed: true) && $0.savedCopyScope == scope })
+        XCTAssertTrue(URLProtocolFixture.recorded.allSatisfy { $0.cachePolicy == .reloadIgnoringLocalCacheData && $0.header("Cache-Control") == "no-cache" })
+    }
+
+    func testPaymentHistoryStopsBeforeNextPageWhenSavedScopeChanges() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, #"{"items":[],"nextCursor":"next"}"#, gate: gate),
+            .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "history-original-" + UUID().uuidString
+        let originalGeneration = client.requestGeneration
+        var rejected = false
+        let pending = Task { @MainActor in
+            do { _ = try await client.fieldPaymentsWithProvenance(invoiceID) }
+            catch is CancellationError { rejected = true }
+            catch { XCTFail("Unexpected error: \(error)") }
+        }
+        await waitForRequests(1)
+        client.savedCopyScope = "history-replacement-" + UUID().uuidString
+        XCTAssertEqual(client.requestGeneration, originalGeneration)
+        gate.release()
+        await pending.value
+        XCTAssertTrue(rejected, "History must not combine pages from different saved-copy scopes")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "A retired scope must not begin the next page")
+    }
+
+    func testPaymentHistoryDoesNotPublishDelayedFinalPageAfterScopeChanges() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, #"{"items":[],"nextCursor":"next"}"#),
+            .init(200, #"{"items":[]}"#, gate: gate)
+        ]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "history-before-" + UUID().uuidString
+        var rejected = false
+        let pending = Task { @MainActor in
+            do { _ = try await client.fieldPaymentsWithProvenance(invoiceID) }
+            catch is CancellationError { rejected = true }
+            catch { XCTFail("Unexpected error: \(error)") }
+        }
+        await waitForRequests(2)
+        client.savedCopyScope = "history-after-" + UUID().uuidString
+        gate.release(); await pending.value
+        XCTAssertTrue(rejected, "A final page from a retired scope must not be published")
+    }
+
+    func testPaymentHistoryRejectsScopeAwayAndBackDuringPage() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, #"{"items":[],"nextCursor":"next"}"#, gate: gate), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let original = "history-aba-" + UUID().uuidString
+        client.savedCopyScope = original
+        let originalGeneration = client.requestGeneration
+        var rejected = false
+        let pending = Task { @MainActor in
+            do { _ = try await client.fieldPaymentsWithProvenance(invoiceID) }
+            catch is CancellationError { rejected = true }
+            catch { XCTFail("Unexpected error: \(error)") }
+        }
+        await waitForRequests(1)
+        client.savedCopyScope = "history-other-" + UUID().uuidString
+        client.savedCopyScope = original
+        XCTAssertEqual(client.requestGeneration, originalGeneration)
+        gate.release(); await pending.value
+        XCTAssertTrue(rejected)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
+    func testInvoiceProvenanceDoesNotCallProtocolCacheBypassLiveAuthorization() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice())]), baseURL: "https://app.thorbis.com")
+        let result = try await client.fieldInvoiceWithProvenance(invoiceID)
+        XCTAssertEqual(result.provenance.source, .urlSession(cacheBypassed: false))
+        XCTAssertEqual(result.value.id, invoiceID)
+    }
+
     func testSameAmountCardFromAnotherAttemptCannotConfirmTap() async {
         let receipt = payment(idempotencyKey: "tap:\(invoiceID):00000000-0000-4000-8000-00000000000e")
         let api = APIClient(session: URLProtocolFixture.session([
