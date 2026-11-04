@@ -47,6 +47,9 @@ struct PublicEstimateAction: Decodable, Equatable {
         let signerName: String
         let acceptedAt: String
         let totalAmount: Double
+        let offerQuoteId: String?
+        let quoteIdentity: String?
+        let selections: [CustomerOfferSelection]?
     }
 
     var canApprovePlainly: Bool {
@@ -235,6 +238,9 @@ final class PublicEstimateActionModel: ObservableObject {
             return contentHash == action.contentHash
                 && consentVersion == action.consentVersion
                 && action.canApprove(signerName: signerName, consent: consent, selectedOptionID: optionID)
+        case let .approveOffer(_, _, contentHash, signerName, consentVersion, consent, optionID, _, _, _):
+            return contentHash == action.contentHash && consentVersion == action.consentVersion
+                && action.canApprove(signerName: signerName, consent: consent, selectedOptionID: optionID)
         case .approvePlainly:
             return action.canApprovePlainly
         case .decline:
@@ -247,6 +253,7 @@ final class PublicEstimateActionModel: ObservableObject {
     private static func matchesCurrentRevision(_ decision: PublicEstimateActionDecision, action: PublicEstimateAction) -> Bool {
         switch decision {
         case let .approve(revision, nonce, _, _, _, _, _),
+             let .approveOffer(revision, nonce, _, _, _, _, _, _, _, _),
              let .approvePlainly(revision, nonce),
              let .decline(revision, nonce),
              let .requestChanges(revision, nonce, _):
@@ -270,13 +277,16 @@ enum PublicEstimateActionDecision: Equatable {
         consent: Bool,
         optionID: String?
     )
+    case approveOffer(revisionNumber: Int, nonce: String, contentHash: String, signerName: String,
+                      consentVersion: String, consent: Bool, optionID: String?, offerQuoteID: String,
+                      quoteIdentity: String, selections: [CustomerOfferSelection])
     case approvePlainly(revisionNumber: Int, nonce: String)
     case decline(revisionNumber: Int, nonce: String)
     case requestChanges(revisionNumber: Int, nonce: String, message: String?)
 
     var endpoint: String {
         switch self {
-        case .approve, .approvePlainly: "approve"
+        case .approve, .approveOffer, .approvePlainly: "approve"
         case .decline: "decline"
         case .requestChanges: "request-changes"
         }
@@ -284,7 +294,7 @@ enum PublicEstimateActionDecision: Equatable {
 
     var resultingStatus: PublicEstimateAction.Status {
         switch self {
-        case .approve, .approvePlainly: .approved
+        case .approve, .approveOffer, .approvePlainly: .approved
         case .decline: .declined
         case .requestChanges: .changesRequested
         }
@@ -302,6 +312,11 @@ enum PublicEstimateActionDecision: Equatable {
                 consentVersion: consentVersion,
                 consent: consent
             )
+        case let .approveOffer(revisionNumber, nonce, contentHash, signerName, consentVersion, consent, optionID, offerQuoteID, quoteIdentity, selections):
+            return PublicEstimateDecisionBody(revisionNumber: revisionNumber, nonce: nonce, contentHash: contentHash,
+                optionId: optionID, signerName: signerName.trimmingCharacters(in: .whitespacesAndNewlines),
+                consentVersion: consentVersion, consent: consent, offerQuoteId: offerQuoteID,
+                quoteIdentity: quoteIdentity, selections: selections)
         case let .approvePlainly(revisionNumber, nonce), let .decline(revisionNumber, nonce):
             return PublicEstimateDecisionBody(revisionNumber: revisionNumber, nonce: nonce)
         case let .requestChanges(revisionNumber, nonce, message):
@@ -320,6 +335,9 @@ struct PublicEstimateDecisionBody: Encodable {
     var signerName: String? = nil
     var consentVersion: String? = nil
     var consent: Bool? = nil
+    var offerQuoteId: String? = nil
+    var quoteIdentity: String? = nil
+    var selections: [CustomerOfferSelection]? = nil
 }
 
 enum PublicEstimateActionLink {

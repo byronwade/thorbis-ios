@@ -110,6 +110,7 @@ struct CustomerEstimatePresentation: View {
     let returnToDocuments: (() -> Void)?
     /// True when the company offers financing; the lender decides per amount (CP-13, CP-14).
     let financing: Bool
+    let offerCapabilityEnabled: Bool
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -125,6 +126,8 @@ struct CustomerEstimatePresentation: View {
     @State private var signedName = ""
     @State private var offer = FinancingOffer.off
     @State private var showTerms = false
+    @State private var showOfferShop = false
+    @State private var standaloneOfferReview: CustomerOfferReview?
     @State private var isMember = false
     @State private var openingReview = false
     @State private var openingError: String?
@@ -135,11 +138,12 @@ struct CustomerEstimatePresentation: View {
     private var actionBusy: Bool { busy || handoff?.running == true }
 
     init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil,
-         financing: Bool = false,
+         financing: Bool = false, offerCapabilityEnabled: Bool = CustomerOfferCapability.isEnabled,
          handoff: CustomerEstimateHandoffContext? = nil, returnToDocuments: (() -> Void)? = nil,
          onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
         self.jobID = jobID
         self.financing = financing
+        self.offerCapabilityEnabled = offerCapabilityEnabled
         self.customerName = customerName
         self.onApproved = onApproved
         self.onDone = onDone
@@ -157,7 +161,12 @@ struct CustomerEstimatePresentation: View {
     private var type: CustomerType { CustomerType(sizeClass) }
     /// The proven drawn-signature approval needs a job and a single scope; options go through
     /// the customer action, which records the chosen option with the typed name.
-    private var drawnApproval: Bool { jobID != nil && !flow.hasOptions }
+    private var requiresOffers: Bool { offerCapabilityEnabled && flow.issuedRevision?.offers?.isEmpty == false }
+    private var offerReview: CustomerOfferReview? {
+        get { handoff?.offerReview ?? standaloneOfferReview }
+        nonmutating set { if let handoff { handoff.offerReview = newValue } else { standaloneOfferReview = newValue } }
+    }
+    private var drawnApproval: Bool { jobID != nil && !flow.hasOptions && !requiresOffers }
     private var showsBackCircle: Bool {
         handoff == nil && returnToDocuments == nil && flow.hasOptions && flow.step == .review && reviewReady && !actionBusy
     }
@@ -218,6 +227,20 @@ struct CustomerEstimatePresentation: View {
         }
         .animation(.easeOut(duration: 0.2), value: flow.step)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
+        .sheet(isPresented: $showOfferShop) {
+            if let link, let revision = flow.issuedRevision {
+                HeldCustomerOfferShop(token: link.token, revisionNumber: revision.revisionNumber,
+                    contentHash: link.action.contentHash, optionID: flow.selectedOptionID,
+                    currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) { quote, selections in
+                    offerReview = CustomerOfferReview(quote: quote, selections: selections)
+                    strokes = []; uploadedSignature = nil; showOfferShop = false
+                }
+            }
+        }
+        .onChange(of: flow.selectedOptionID) { _, _ in
+            offerReview = nil; strokes = []; uploadedSignature = nil
+        }
+
         .task { await loadOffer() }
         .task { isMember = await api.customerIsMember(flow.estimate.customerId) }
         .toolbar {
@@ -334,7 +357,27 @@ struct CustomerEstimatePresentation: View {
                    title: flow.choiceName, summary: flow.hasOptions ? flow.selectedOption?.description : nil)
             CustomerIncludedLines(lines: customerEstimateLines(flow.lines), type: type,
                                   rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
-                                      + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
+                                      + ((requiresOffers && offerReview != nil) ? [] : (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? [])))
+            if requiresOffers {
+                if let offerReview {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Optional work").font(Theme.customerFont(type.heading, weight: .medium))
+                        ForEach(offerReview.quote.addOns, id: \.id) { item in
+                            Text(item.title).font(Theme.customerFont(type.body, weight: .medium))
+                            Text(item.description).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                            ForEach(Array(item.lines.enumerated()), id: \.offset) { _, line in
+                                Text(line.description).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                            }
+                            Text(money(item.totalAmount, currency: offerReview.quote.currency)).font(Theme.customerFont(type.body))
+                        }
+                        Text("Total \(money(offerReview.quote.totalAmount, currency: offerReview.quote.currency))")
+                            .font(Theme.customerFont(type.heading, weight: .medium))
+                    }
+                }
+                Button(offerReview == nil ? "Choose optional work" : "Change optional work") { Task { await openOfferShop() } }
+                    .frame(minHeight: type.target)
+                    .disabled(actionBusy || handoff?.signature != nil)
+            }
             if let total = flow.total, let example = offer.example(for: total) {
                 CustomerFinancingLine(example: example, type: type)
                 seeTerms
@@ -344,7 +387,7 @@ struct CustomerEstimatePresentation: View {
 
     private var signScreen: some View {
         VStack(alignment: .leading, spacing: 18) {
-            header(eyebrow: "\(flow.choiceName) · \(flow.totalText)", title: "Sign to approve")
+            header(eyebrow: "\(flow.choiceName) · \(offerReview.map { money($0.quote.totalAmount, currency: $0.quote.currency) } ?? flow.totalText)", title: "Sign to approve")
             Text(consentText ?? "By signing, I approve \"\(flow.choiceName)\" for \(flow.totalText) as shown.")
                 .font(Theme.customerFont(type.body))
                 .fixedSize(horizontal: false, vertical: true)
@@ -457,7 +500,7 @@ struct CustomerEstimatePresentation: View {
                     }
                 }
             case .review:
-                CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
+                CustomerPresentationCommit(title: offerReview.map { "Approve and sign · \(money($0.quote.totalAmount, currency: $0.quote.currency))" } ?? flow.approveTitle, compactTitle: offerReview.map { "Approve · \(money($0.quote.totalAmount, currency: $0.quote.currency))" } ?? flow.approveShortTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
                     .accessibilityIdentifier("customer-estimate-approve")
                 if let error { hint(error, danger: true) }
                 // PresentDetail.dc.html: "See other options" is the quiet action right under the commit.
@@ -471,7 +514,7 @@ struct CustomerEstimatePresentation: View {
                 }
             case .sign:
                 let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes))
-                CustomerPresentationCommit(title: flow.signTitle, enabled: reason == nil || handoff?.signature != nil, busy: actionBusy, type: type) {
+                CustomerPresentationCommit(title: offerReview.map { "Approve \(money($0.quote.totalAmount, currency: $0.quote.currency))" } ?? flow.signTitle, enabled: reason == nil || handoff?.signature != nil, busy: actionBusy, type: type) {
                     if let handoff { handoff.run { await approve() } } else { Task { await approve() } }
                 }
                 .accessibilityIdentifier(handoff == nil ? "customer-estimate-submit-approval" : "handoff-submit-approval")
@@ -597,8 +640,28 @@ struct CustomerEstimatePresentation: View {
         }
     }
 
+    private func openOfferShop() async {
+        guard requiresOffers, reviewReady, handoff?.signature == nil, !actionBusy, let revision = flow.issuedRevision else { return }
+        let generation = api.requestGeneration
+        busy = true
+        defer { busy = false }
+        do {
+            let opened: (token: String, action: PublicEstimateAction)
+            if let link { opened = link }
+            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) }
+            try Task.checkCancellation()
+            guard generation == api.requestGeneration, handoff?.current() != false, handoff?.canApprove() != false else { return }
+            link = opened
+            showOfferShop = true
+        } catch is CancellationError {} catch { self.error = error.customerSentence(.openEstimate) }
+    }
+
     private func startSigning() async {
         error = nil
+        if requiresOffers && offerReview == nil { await openOfferShop(); return }
+        if requiresOffers, let offerReview, !offerReview.isCurrent(now: Date()), handoff?.submissionStarted != true {
+            self.offerReview = nil; error = "This total expired. Please review it again."; return
+        }
         guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady, let revision = flow.issuedRevision else {
             openingError = "Ask your technician to reopen the current estimate."
             reviewGeneration = nil
@@ -664,9 +727,19 @@ struct CustomerEstimatePresentation: View {
                 try Task.checkCancellation()
                 guard generation == api.requestGeneration else { return }
                 guard handoff?.current() != false, handoff?.canApprove() != false else { return }
-                let decision = handoff?.publicDecision ?? PublicEstimateActionDecision.approve(
-                    revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
-                    signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID)
+                let newDecision: PublicEstimateActionDecision
+                if requiresOffers {
+                    guard let offerReview, offerReview.isCurrent(now: Date()) || handoff?.submissionStarted == true else {
+                        error = "This total expired. Please review it again."; return
+                    }
+                    newDecision = .approveOffer(revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
+                        signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID,
+                        offerQuoteID: offerReview.quote.id, quoteIdentity: offerReview.quote.quoteIdentity, selections: offerReview.selections)
+                } else {
+                    newDecision = .approve(revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
+                        signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID)
+                }
+                let decision = handoff?.publicDecision ?? newDecision
                 handoff?.publicDecision = decision
                 handoff?.submissionStarted = true; handoff?.retryVerified = false
                 let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)

@@ -14,6 +14,8 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let options: [FieldEstimateOption]?
     let totalAmount: Int
     let currency: String
+    var offers: [IssuedOfferMarker]? = nil
+    struct IssuedOfferMarker: Decodable, Equatable {}
 
     func validate(for expected: EstimateRecord) throws {
         guard UUID(uuidString: id) != nil,

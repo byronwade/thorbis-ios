@@ -63,6 +63,7 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
     var uploadedMediaID: String?
     var link: (token: String, action: PublicEstimateAction)?
     var publicDecision: PublicEstimateActionDecision?
+    var offerReview: CustomerOfferReview?
     @Published private(set) var acceptedAction: PublicEstimateAction?
     var continueTitle = "Continue"
     var checkOutcome: @MainActor () async -> Void = {}
@@ -103,11 +104,25 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
               record.id == reviewed.id, record.organizationId == reviewed.estimate.organizationId,
               record.customerId == reviewed.estimate.customerId, record.locationId == reviewed.estimate.locationId,
               record.currentRevisionNumber == reviewed.revision.revisionNumber, record.status == "approved" else { return nil }
-        if reviewed.optionID != nil { return acceptedAction?.acceptance?.signerName }
+        if reviewed.optionID != nil || offerReview != nil { return acceptedAction?.acceptance?.signerName }
         return record.approvalSignature?.signerName
     }
     /// Acceptance comes from the already bound token, never from the frozen requested choice alone.
     func retainAcceptedAction(_ action: PublicEstimateAction) -> Bool {
+        if let offerReview {
+            guard current(), let link, action.kind == "estimate", action.status == .approved,
+                  action.revisionNumber == reviewed.revision.revisionNumber,
+                  action.contentHash == link.action.contentHash, action.title == reviewed.revision.title,
+                  action.currency == offerReview.quote.currency, let acceptance = action.acceptance,
+                  acceptance.optionId?.lowercased() == reviewed.optionID?.lowercased(),
+                  acceptance.offerQuoteId?.lowercased() == offerReview.quote.id.lowercased(),
+                  acceptance.quoteIdentity == offerReview.quote.quoteIdentity,
+                  acceptance.selections?.sorted(by: { $0.offerId.lowercased() < $1.offerId.lowercased() }) == offerReview.selections,
+                  Int(exactly: acceptance.totalAmount) == offerReview.quote.totalAmount,
+                  let signature, acceptance.signerName == signature.signerName else { return false }
+            acceptedAction = action
+            return true
+        }
         guard current(), let link, let optionID = reviewed.optionID,
               action.kind == "estimate", action.status == .approved,
               action.revisionNumber == reviewed.revision.revisionNumber,
@@ -135,7 +150,7 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
     }
     func retire() {
         task?.cancel(); task = nil; running = false
-        signature = nil; uploadedMediaID = nil; link = nil; publicDecision = nil; acceptedAction = nil; initialSignerName = ""
+        signature = nil; uploadedMediaID = nil; link = nil; publicDecision = nil; offerReview = nil; acceptedAction = nil; initialSignerName = ""
         backToReview = {}; checkOutcome = {}; recoverPreparation = {}; validate = {}; confirmed = { _ in .unknown }; publicConfirmed = { _ in .unknown }; changed = {}
     }
 }
@@ -397,7 +412,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             guard scope.contains(record, requestedID: item.id), record.locationId == item.estimate.locationId,
                   record.currentRevisionNumber == item.revision.revisionNumber, record.status == "approved" else { return .unknown }
             if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
-            if item.optionID != nil, contexts[item.key]?.acceptedAction == nil { return .unknown }
+            if (item.optionID != nil || contexts[item.key]?.offerReview != nil), contexts[item.key]?.acceptedAction == nil { return .unknown }
             return .approved(record)
         } catch { return .unknown }
     }
@@ -432,7 +447,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             let record = try await api.liveFieldEstimate(item.id)
             guard isCurrent, scope.contains(record, requestedID: item.id), record.locationId == item.estimate.locationId else { return }
             if record.status == "approved" {
-                context.report(item.optionID == nil ? await confirm(item, record: record) : await confirmPublic(item, record: record)); return
+                context.report(item.optionID == nil && context.offerReview == nil ? await confirm(item, record: record) : await confirmPublic(item, record: record)); return
             }
             guard record.status == "sent", record.currentRevisionNumber == item.revision.revisionNumber else {
                 context.report(.needsReview("This estimate changed. Review its current terms with your technician.")); return
