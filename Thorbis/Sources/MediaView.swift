@@ -333,6 +333,8 @@ struct JobMediaView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { customerPhotoRequest = UUID() }
         }
+        .onChange(of: picked) { _, _ in customerPhotoRequest = UUID() }
+        .onChange(of: filter) { _, _ in customerPhotoRequest = UUID() }
         .onDisappear { customerPhotoRequest = UUID() }
         .onChange(of: readScope) { _, _ in
             customerPhotoRequest = UUID()
@@ -818,7 +820,11 @@ struct JobMediaView: View {
             try selection.validatePageMembership(ids: storedPhotos.map(\.id), jobID: scope.job, organizationID: scope.organization)
             guard let owner = CustomerPhotoHandoff(selection: selection, api: api, session: session) else { throw CustomerPhotoSelection.Invalid.scope }
             try await owner.prepare()
-            guard customerPhotoRequest == request, scenePhase == .active, owner.isCurrent, readScope == scope, sourceScope == scope, !Task.isCancelled else { throw CustomerPhotoSelection.Invalid.scope }
+            guard customerPhotoRequest == request, scenePhase == .active, owner.isCurrent,
+                  readScope == scope, sourceScope == scope, picked == Set(selection.selectedIDs),
+                  Set(pickedRecords.map(\.id)) == picked, !Task.isCancelled else {
+                throw CustomerPhotoSelection.Invalid.scope
+            }
             customerPhotos = owner
         } catch {
             self.error = "Couldn’t verify every selected photo. Check your connection, refresh this job and try again."
