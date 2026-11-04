@@ -2,6 +2,23 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoHandoffUITests: XCTestCase {
+    func testViewOnlyTechnicianCanShowPhotosWithoutEditActions() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-photo-handoff", "--paper-preview-job-media-view-only"]
+        app.launch()
+        let select = app.buttons["Select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
+        let photo = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009301"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 10)); photo.tap()
+        XCTAssertFalse(app.buttons["Before"].isHittable)
+        XCTAssertFalse(app.buttons["After"].isHittable)
+        XCTAssertFalse(app.buttons["job-media-remove-picked"].isHittable)
+        XCTAssertFalse(app.buttons["Share"].isHittable)
+        app.buttons["job-media-show-customer"].tap()
+        XCTAssertTrue(app.images["customer-photo-image"].waitForExistence(timeout: 20))
+    }
+
     func testFailedPreparationKeepsSelectionAndCanRetry() {
         continueAfterFailure = false
         let app = XCUIApplication()

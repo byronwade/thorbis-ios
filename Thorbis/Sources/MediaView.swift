@@ -405,7 +405,7 @@ struct JobMediaView: View {
             ThorbisMenuItem("Untagged photos", icon: "tag.slash", subtitle: "\(allPhotos.filter { mediaStageWord($0.tags) == nil }.count) loaded",
                             isSelected: filter == .untagged) { filter = .untagged },
         ]
-        if canAdd && !storedPhotos.isEmpty {
+        if readScope != nil && !storedPhotos.isEmpty {
             items.append(ThorbisMenuItem("Select photos", icon: "checkmark.circle") { startSelecting() })
         }
         if !befores.isEmpty && !afters.isEmpty {
@@ -546,7 +546,7 @@ struct JobMediaView: View {
             Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).monospacedDigit()
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
-            if first && canAdd && !storedPhotos.isEmpty {
+            if first && readScope != nil && !storedPhotos.isEmpty {
                 Button(selecting ? "Done" : "Select") { if selecting { endSelecting() } else { startSelecting() } }
                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .padding(.horizontal, 14).frame(minHeight: 44)
@@ -762,6 +762,7 @@ struct JobMediaView: View {
                 .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
                 .disabled(count == 0 || busy)
                 .accessibilityIdentifier("job-media-show-customer")
+            if canAdd {
             HStack(spacing: 8) {
                 MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
                 MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
@@ -771,6 +772,7 @@ struct JobMediaView: View {
                     .accessibilityIdentifier("job-media-remove-picked")
             }
             .disabled(count == 0 || busy)
+            }
             if busy { ProgressView().frame(height: 20) }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
@@ -874,7 +876,7 @@ struct JobMediaView: View {
     }
 
     private func retag(_ record: MediaAssetRecord, _ stage: MediaStage) async {
-        guard let scope = readScope, sourceScope == scope else { return }
+        guard let scope = readScope, sourceScope == scope, canAdd else { return }
         do {
             let updated = try await api.tagFieldMedia(record.id, tags: MediaStageTags.applying(stage, to: record.tags), caption: record.caption)
             guard readScope == scope, sourceScope == scope, updated.id == record.id, records.contains(where: { $0.id == record.id }),
@@ -890,7 +892,7 @@ struct JobMediaView: View {
 
     private func retagPicked(_ stage: MediaStage) async {
         let chosen = pickedRecords
-        guard !chosen.isEmpty, !busy else { return }
+        guard canAdd, !chosen.isEmpty, !busy else { return }
         busy = true
         defer { busy = false }
         for record in chosen {
@@ -934,7 +936,7 @@ struct JobMediaView: View {
     /// Downloads the picked photos and opens the share sheet; the copies are deleted afterwards.
     private func sharePicked() async {
         let chosen = pickedRecords
-        guard !chosen.isEmpty, !busy else { return }
+        guard canAdd, !chosen.isEmpty, !busy else { return }
         busy = true
         defer { busy = false }
         var urls: [URL] = []
