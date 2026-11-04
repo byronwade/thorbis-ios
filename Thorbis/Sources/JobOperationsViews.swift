@@ -361,13 +361,16 @@ struct JobCloseoutView: View {
                             }
                         }
                         if !unassociatedRecordedInvoiceIDs.isEmpty {
-                            Text("Connect and open each invoice to refresh payments already sent.")
-                                .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                             if session.can("invoice.view", feature: "invoicing") {
+                                Text("Connect and open each invoice to refresh payments already sent.")
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                                 ForEach(unassociatedRecordedInvoiceIDs, id: \.self) { id in
-                                    Button("Open invoice \(id.suffix(4).uppercased())") { recoveryInvoiceID = id }
+                                    Button("Open invoice \(id.suffix(8).uppercased())") { recoveryInvoiceID = id }
                                         .frame(minHeight: 44).buttonStyle(PressStyle())
                                 }
+                            } else {
+                                Text("Ask someone with invoice access to refresh the payments already sent.")
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                             }
                         }
                     }
@@ -452,6 +455,10 @@ struct JobCloseoutView: View {
         .onChange(of: savedWorkScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
             if !valid { savedWorkScope = nil }
         }
+        .onChange(of: session.authorityRevision) { _, _ in
+            if !session.can("invoice.view", feature: "invoicing") { recoveryInvoiceID = nil }
+        }
+        .onChange(of: session.generation) { _, _ in recoveryInvoiceID = nil }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
