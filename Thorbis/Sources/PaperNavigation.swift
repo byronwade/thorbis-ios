@@ -91,6 +91,10 @@ struct RootView: View {
                 HStack {
                     Button("Test switch width") { startupFixtureWide.toggle() }
                     Button("Test schedule shortcut") { store.requestedSchedule += 1 }
+                    Button("Test shortcut and switch") {
+                        store.requestedSchedule += 1
+                        startupFixtureWide.toggle()
+                    }
                     if !startupFixtureWide { Button("Test open jobs") { primaryTab = .jobs } }
                 }.font(.caption).padding(4).background(Color.yellow)
             }
