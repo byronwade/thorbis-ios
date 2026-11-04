@@ -67,6 +67,14 @@ final class InvoiceGatewayPagerTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 5)
     }
 
+    func testSavedCopyIdentityChangeImmediatelyRetiresVisibleRows() async {
+        let (api, _, pager) = await prepare([.init(200, #"{"items":[\#(item(a))]}"#)])
+        await pager.start(customer: "Smith", isCurrent: { true })
+        XCTAssertEqual(pager.items.count, 1)
+        api.savedCopyScope = nil
+        XCTAssertTrue(pager.items.isEmpty)
+    }
+
     func testAuthorityRefreshImmediatelyRetiresVisibleRows() async {
         let revoked = #"{"authority":{"actorId":"019f0000-0000-7000-8000-000000000011","organizationId":"019f0000-0000-7000-8000-000000000001","policyVersion":1,"generation":"fixture"},"capabilities":["customer.view"],"resources":[],"views":[]}"#
         let (_, session, pager) = await prepare([

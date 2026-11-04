@@ -97,7 +97,7 @@ final class APIClient: ObservableObject {
 
     /// The verified actor and workspace whose saved copies this client reads and writes; nil
     /// while signed out, which turns saved copies off entirely.
-    var savedCopyScope: String?
+    @Published var savedCopyScope: String?
     /// Set while the session knows there is no signal: kept reads answer from the phone at once
     /// instead of waiting on a request that cannot finish.
     var knownOffline = false

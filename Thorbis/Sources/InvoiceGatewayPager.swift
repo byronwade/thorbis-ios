@@ -36,6 +36,7 @@ import Foundation
         session.$activeOrganization.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
         api.$requestGeneration.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
         api.$baseURL.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
+        api.$savedCopyScope.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
     }
 
     static func customerQuery(_ value: String) -> String {
