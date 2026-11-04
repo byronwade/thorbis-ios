@@ -55,8 +55,6 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private let api: APIClient
     private let invoiceID: String
     private let expectedJobScope: JobDocumentScope?
-    private let protectDeniedAccess: Bool
-    private var accessDenied = false
     private let intentStore: InvoicePaymentIntentStore
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
@@ -65,12 +63,10 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
          makeIdempotencyKey: @escaping () -> String = { UUID().uuidString.lowercased() },
-         expectedJobScope: JobDocumentScope? = nil,
-         protectDeniedAccess: Bool = false) {
+         expectedJobScope: JobDocumentScope? = nil) {
         self.api = api
         self.invoiceID = invoiceID
         self.expectedJobScope = expectedJobScope
-        self.protectDeniedAccess = protectDeniedAccess
         self.intentStore = intentStore
         self.makeIdempotencyKey = makeIdempotencyKey
     }
@@ -171,17 +167,10 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         defer { isLoading = false }
         do {
             try Task.checkCancellation()
-            let revalidating = protectDeniedAccess && accessDenied
-            let loadedInvoice = try await SavedCopies.$liveOnly.withValue(revalidating) { try await api.fieldInvoice(invoiceID) }
+            let loadedInvoice = try await api.fieldInvoice(invoiceID)
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
-            if revalidating {
-                guard loadedInvoice.id == invoiceID, expectedJobScope?.contains(loadedInvoice) != false else {
-                    throw Problem(title: "This invoice couldn't be verified. Refresh the job before continuing.", status: nil, detail: nil)
-                }
-            } else {
-                guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
-            }
+            guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
             // A copy saved on this phone is never charged: card, link and Tap to Pay wait for a live
             // read. Cash and check can still be taken and record once back online (OF-04, OF-08).
             if api.savedCopyDate("/v1/invoices/\(invoiceID)") != nil {
@@ -193,21 +182,16 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                 return
             }
             offlineCopy = false
-            if !revalidating { JobDetailCache.save(invoice: loadedInvoice) }
+            JobDetailCache.save(invoice: loadedInvoice)
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
             try Task.checkCancellation()
-            let loadedPayments = try await SavedCopies.$liveOnly.withValue(revalidating) { try await api.fieldPayments(invoiceID) }
+            let loadedPayments = try await api.fieldPayments(invoiceID)
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard validHistory(loadedPayments, for: loadedInvoice) else {
                 throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
-            }
-            if revalidating {
-                accessDenied = false
-                guard acceptInvoiceMutationResponse(loadedInvoice) else { accessDenied = true; return }
-                JobDetailCache.save(invoice: loadedInvoice)
             }
             payments = loadedPayments
             JobDetailCache.save(payments: loadedPayments, invoiceID: invoiceID)
@@ -227,18 +211,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             pendingRequest = nil
             historyComplete = false
         } catch {
-            if !accessDenied, error.isConnectivityFailure, outbox != nil,
+            if error.isConnectivityFailure, outbox != nil,
                let cached = invoice ?? JobDetailCache.invoice(invoiceID), acceptInvoiceMutationResponse(cached) {
                 // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
                 useOfflineCopy(cached)
                 return
-            }
-            if protectDeniedAccess, let status = (error as? Problem)?.status, [401, 403, 404].contains(status) {
-                accessDenied = true
-                invoice = nil
-                payments = []
-                historyComplete = false
-                offlineCopy = false
             }
             loadError = error.localizedDescription
         }
@@ -291,7 +268,6 @@ final class InvoicePaymentCollectionModel: ObservableObject {
 
     @discardableResult
     func acceptInvoiceMutationResponse(_ updated: InvoiceRecord) -> Bool {
-        guard !protectDeniedAccess || !accessDenied else { return false }
         guard updated.id == invoiceID, expectedJobScope?.contains(updated) != false else {
             invoice = nil
             payments = []
