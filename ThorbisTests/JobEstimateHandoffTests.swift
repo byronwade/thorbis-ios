@@ -285,6 +285,33 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testDelayedPhotoPreparationCannotPresentAfterLegacyHandoff() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let photos = CustomerPhotoPresenter(arbiter: arbiter)
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: [a])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        let revision = try XCTUnwrap(photos.availableRevision)
+        var continuation: CheckedContinuation<Void, Never>?
+        let task = Task { @MainActor in
+            _ = try await CustomerPhotoPreparation.prepare(selection: selection, isCurrent: { owner.isCurrent },
+                loadJob: { (self.jobID, self.org) }, loadAsset: { id in
+                    await withCheckedContinuation { continuation = $0 }
+                    return CustomerPhotoMetadata(id: id, jobId: self.jobID, kind: "photo", uploadState: "stored", archived: false)
+                })
+            return photos.present(owner, expectedRevision: revision)
+        }
+        for _ in 0..<100 where continuation == nil { try await Task.sleep(for: .milliseconds(10)) }
+        guard let continuation else { task.cancel(); XCTFail("Preparation did not reach the gated read"); return }
+        let lease = try XCTUnwrap(documents.claimLegacy())
+        documents.releaseLegacy(lease)
+        continuation.resume()
+        let presented = try await task.value
+        XCTAssertFalse(presented)
+        XCTAssertNil(photos.active)
+    }
+
     func testCancelledOrInvalidatedDocumentPreparationCannotFallBack() async throws {
         for cancel in [false, true] {
             let gate = URLProtocolFixture.Gate()
