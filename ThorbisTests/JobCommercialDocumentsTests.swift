@@ -32,14 +32,62 @@ final class JobCommercialDocumentsTests: XCTestCase {
         let first = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
         await first.load()
         let route = try XCTUnwrap(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
-                                                              selected: first.invoice, loadedID: id(50), model: first, scope: scope()))
+                                                              selected: first.invoice, loadedID: id(50), model: first, scope: scope(), authorityToken: ["session-A"]))
         let second = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
         await second.load()
         XCTAssertTrue(second.canRecordPayment)
         XCTAssertEqual(route.invoice.id, id(50))
+        XCTAssertEqual(route.authorityToken, ["session-A"])
         XCTAssertTrue(route.model === first, "The presented sheet must not switch to a newly selected model")
+        XCTAssertTrue(route.belongs(to: scope()))
+        XCTAssertTrue(route.belongs(to: scope(origin: 55)), "A changed estimate does not change the invoice's job or customer")
+        XCTAssertFalse(route.belongs(to: scope(job: 101)), "A changed job must retire the payment sheet")
+        XCTAssertFalse(route.belongs(to: .init(jobID: id(100), organizationID: id(1), customerID: id(4))),
+                       "A changed customer must retire the payment sheet")
         XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(51),
                                                   selected: second.invoice, loadedID: id(51), model: second, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                  selected: first.invoice, loadedID: id(50), model: second, scope: scope()),
+                     "A stale ID marker cannot disguise a model for another invoice")
+    }
+
+    func testOverlappingLoadsForSameInvoiceWaitForTheExistingRead() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, #"{"items":[]}"#)])
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let loads = JobInvoicePaymentLoads()
+        let first = Task { await loads.load(model) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        var secondFinished = false
+        let second = Task { await loads.load(model); secondFinished = true }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(secondFinished, "The collect action must await the existing load")
+        gate.release(); await first.value; await second.value
+        XCTAssertTrue(secondFinished)
+        XCTAssertTrue(model.canRecordPayment)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "Coalesced loads request one invoice and its history")
+    }
+
+    func testInvoiceLoadCoordinatorWaitsForFirstModelAfterAnotherModelStarts() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, invoice(51)),
+                          .init(200, #"{"items":[]}"#), .init(200, #"{"items":[]}"#)])
+        let firstModel = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let secondModel = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        let loads = JobInvoicePaymentLoads()
+        let first = Task { await loads.load(firstModel) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        await loads.load(secondModel)
+        XCTAssertTrue(secondModel.canRecordPayment)
+        var repeatedFinished = false
+        let repeated = Task { await loads.load(firstModel); repeatedFinished = true }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(repeatedFinished, "Returning to an in-flight model must await that model's original read")
+        gate.release(); await first.value; await repeated.value
+        XCTAssertTrue(firstModel.canRecordPayment)
+        XCTAssertTrue(repeatedFinished)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 4)
     }
 
     func testDelayedInvoiceReadCannotOpenTheNewSelectionForTheOldRequest() async throws {

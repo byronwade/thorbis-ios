@@ -55,6 +55,7 @@ struct JobDetailView: View {
     @State private var selectedInvoiceID: String?
     @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
     @State private var loadedInvoiceModelID: String?
+    @State private var invoicePaymentLoads = JobInvoicePaymentLoads()
     @State private var paymentRoute: JobInvoicePaymentRoute?
     @State private var activityFilter = "All"
     @State private var showSchedule = false
@@ -133,6 +134,17 @@ struct JobDetailView: View {
     private let tabs = ["Overview", "Money", "Activity"]
     private let activityFilters = ["All", "Notes", "Status", "Estimates", "Photos"]
     private var showsPhotos: Bool { selectedTab == "Activity" && activityFilter == "Photos" }
+
+    /// Changes here invalidate a presented payment without depending on the
+    /// estimate link, which can change independently of the invoice's job.
+    private var paymentAuthorityToken: [String] {
+        [session.generation.uuidString, session.authorityRevision.uuidString,
+         api.requestGeneration.uuidString, api.normalizedOrigin ?? "", job?.id ?? "",
+         job?.organizationId ?? "", job?.customerId ?? "",
+         String(session.can("job.view", feature: "jobs")),
+         String(session.can("invoice.view", feature: "invoicing")),
+         String(session.can("invoice.payment.create", feature: "payments"))]
+    }
 
     private var liveActivityKey: String {
         guard let job else { return "" }
@@ -434,16 +446,7 @@ struct JobDetailView: View {
             contactsLoaded = false
             contactsFailed = false
         }
-        .onChange(of: session.authorityRevision) { _, _ in paymentRoute = nil }
-        .onChange(of: session.can("invoice.payment.create", feature: "payments")) { _, allowed in
-            if !allowed { paymentRoute = nil }
-        }
-        .onChange(of: session.can("invoice.view", feature: "invoicing")) { _, allowed in
-            if !allowed { paymentRoute = nil }
-        }
-        .onChange(of: session.can("job.view", feature: "jobs")) { _, allowed in
-            if !allowed { paymentRoute = nil }
-        }
+        .onChange(of: paymentAuthorityToken) { _, _ in paymentRoute = nil }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
@@ -507,10 +510,17 @@ struct JobDetailView: View {
         } }
         // A payment changes the balance the next step reads, wherever it was collected from.
         .sheet(item: $paymentRoute, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { route in
+            paymentSheet(route)
+        }
+    }
+
+    @ViewBuilder private func paymentSheet(_ route: JobInvoicePaymentRoute) -> some View {
+        if route.authorityToken == paymentAuthorityToken,
+           let job, let scope = scope(for: job), route.belongs(to: scope),
+           session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
+           session.can("invoice.payment.create", feature: "payments") {
             InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice)
-                .thorbisSheetSurface()
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .thorbisSheetSurface().presentationDetents([.large]).presentationDragIndicator(.visible)
         }
     }
 
@@ -2431,7 +2441,7 @@ struct JobDetailView: View {
                 if let invoice = invoices.first(where: { $0.id == invoiceID && expectedScope.contains($0) }) {
                     await loadInvoicePayments(for: invoice)
                 }
-                guard session.generation == generation, session.authorityRevision == authority,
+                guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
                       api.requestGeneration == apiGeneration, api.normalizedOrigin == origin,
                       let currentJob = self.job, scope(for: currentJob) == expectedScope else { return }
                 if !presentPayment(for: invoiceID) { withMotion(.snappy) { selectedTab = "Money" } }
@@ -2542,7 +2552,7 @@ struct JobDetailView: View {
               let invoice = invoices.first(where: { $0.id == requestedID }) else { return }
         selectedInvoiceID = requestedID
         await loadInvoicePayments(for: invoice)
-        guard session.generation == generation, session.authorityRevision == authority,
+        guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
               api.requestGeneration == apiGeneration, api.normalizedOrigin == origin else { return }
         presentPayment(for: requestedID)
     }
@@ -2556,7 +2566,8 @@ struct JobDetailView: View {
               let job, let scope = scope(for: job), invoiceRead?.scope == scope,
               let route = JobInvoicePaymentRoute.make(requestedID: requestedID, selectedID: selectedInvoiceID,
                                                        selected: selectedInvoice, loadedID: loadedInvoiceModelID,
-                                                       model: invoicePaymentModel, scope: scope) else { return false }
+                                                       model: invoicePaymentModel, scope: scope,
+                                                       authorityToken: paymentAuthorityToken) else { return false }
         paymentRoute = route
         return true
     }
@@ -2570,7 +2581,7 @@ struct JobDetailView: View {
             invoicePaymentModel?.outbox = outbox
             invoicePaymentModel?.policyVersion = session.policyVersion ?? 0
         }
-        await invoicePaymentModel?.load()
+        if let model = invoicePaymentModel { await invoicePaymentLoads.load(model) }
     }
     private func load() async {
         let generation = session.generation
