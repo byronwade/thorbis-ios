@@ -58,4 +58,14 @@ final class StartupDestinationTests: XCTestCase {
         XCTAssertTrue(store.consumeStartupSelection(session: UUID()))
     }
 
+    @MainActor func testRememberedRootIsSharedOnlyWithinSession() {
+        let store = Store()
+        let session = UUID()
+        store.rememberRoot("customers", session: session)
+        XCTAssertEqual(store.rememberedRoot(session: session), "customers")
+        XCTAssertNil(store.rememberedRoot(session: UUID()))
+        store.rememberRoot("local-fleet", session: session)
+        XCTAssertEqual(store.rememberedRoot(session: session), "local-fleet")
+    }
+
 }

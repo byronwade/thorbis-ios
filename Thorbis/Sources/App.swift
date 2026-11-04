@@ -303,6 +303,15 @@ final class Store: ObservableObject {
         didSet { if requestedSchedule > 0 { openedForRecord = true } }
     }
     private var startupSelectionSession: UUID?
+    private var activeRootSession: UUID?
+    private var activeRoot: String?
+    func rememberedRoot(session: UUID) -> String? {
+        activeRootSession == session ? activeRoot : nil
+    }
+    func rememberRoot(_ root: String, session: UUID) {
+        activeRootSession = session
+        activeRoot = root
+    }
     /// Both adaptive shells share a single startup decision for this session.
     func consumeStartupSelection(session: UUID) -> Bool {
         guard startupSelectionSession != session else { return false }
