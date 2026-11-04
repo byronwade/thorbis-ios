@@ -8,6 +8,73 @@ final class JobDocumentsUITests: XCTestCase {
     private let estimateA = "00000000-0000-4000-8000-000000002218"
     private let addonA = "00000000-0000-4000-8000-000000002238"
 
+    func testMoneySectionJumpsReachInvoicesAndEstimates() {
+        continueAfterFailure = false
+        let app = preview()
+        thorbisStableButton(app, "job-section-money").tap()
+        let invoices = app.buttons["job-money-jump-invoices"]
+        XCTAssertTrue(invoices.waitForExistence(timeout: 15))
+        XCTAssertEqual(invoices.label, "Invoices")
+        invoices.tap()
+        let invoice = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        XCTAssertTrue(invoice.isHittable)
+        app.swipeDown()
+        let estimates = app.buttons["job-money-jump-estimates"]
+        for _ in 0..<6 where !estimates.isHittable { app.swipeDown() }
+        XCTAssertTrue(estimates.isHittable)
+        estimates.tap()
+        let estimate = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 5))
+        XCTAssertTrue(estimate.isHittable)
+    }
+
+    func testMoneyJumpKeepsTheChosenInvoiceForCollection() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let jump = app.buttons["job-money-jump-invoices"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 15))
+        jump.tap()
+        let invoice = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        app.scrollClearOfFoot(invoice)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["INV-2209"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let estimates = app.buttons["job-money-jump-estimates"]
+        for _ in 0..<8 where !estimates.isHittable { app.swipeDown() }
+        XCTAssertTrue(estimates.isHittable)
+        estimates.tap()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 10))
+        collect.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 5))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+    }
+
+    func testMoneyJumpsRemainReachableAtLargestText() {
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15))
+        chooser.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch.tap()
+        let jump = app.buttons["job-money-jump-invoices"]
+        for _ in 0..<8 where !jump.isHittable { app.swipeUp() }
+        XCTAssertTrue(jump.isHittable)
+        XCTAssertGreaterThanOrEqual(jump.frame.height, 44)
+        jump.tap()
+        let invoice = app.buttons["job-invoice-\(depositA)"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "Money jump largest text hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        capture(app, "Money jump largest text")
+        XCTAssertTrue(invoice.isHittable)
+    }
+
     func testTechnicianEstimateCardsKeepBothDocumentsOpenable() {
         continueAfterFailure = false
         let app = preview()
