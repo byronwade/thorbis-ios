@@ -32,6 +32,7 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--probe-publ
     do { _ = try childFence.begin(childScope); exit(2) } catch { exit(0) }
 }
 
+let livePayload = Data("verified response".utf8)
 let dir = FileManager.default.temporaryDirectory.appendingPathComponent("invoice-fence-\(UUID().uuidString)")
 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: dir) }
@@ -43,7 +44,7 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String) {
 require(!fence.cacheAllowed(scope), "unverified scope must start held")
 let initial = try fence.begin(scope)
 require(!fence.cacheAllowed(scope), "live read must hold cache")
-let initialResult = try initial.finish(.liveSuccess)
+let initialResult = try initial.finish(.liveSuccess(livePayload))
 if case .committed = initialResult {} else { require(false, "complete live success must explicitly commit") }
 func receipt(_ completion: InvoiceReadFence.Completion) -> InvoiceReadFence.Receipt {
     guard case let .committed(receipt) = completion else { fatalError("expected committed result") }
@@ -51,7 +52,8 @@ func receipt(_ completion: InvoiceReadFence.Completion) -> InvoiceReadFence.Rece
 }
 require(fence.cacheAllowed(scope), "isolated complete live success can authorize cache")
 let failed = try fence.begin(scope)
-_ = try failed.finish(.connectivityFailure)
+let offlineCompletion = try failed.finish(.connectivityFailure)
+require(offlineCompletion == .restored, "connectivity restoration must not issue a live-write receipt")
 require(fence.cacheAllowed(scope), "isolated connectivity failure can restore prior grant")
 let first = try fence.begin(scope)
 var refusedOverlap = false
@@ -61,11 +63,11 @@ let denialResult = try first.finish(.denied)
 require(denialResult == .denied, "denial must be explicit")
 require(!fence.cacheAllowed(scope), "denial must hold the saved copy")
 let fresh = try fence.begin(scope)
-_ = try fresh.finish(.liveSuccess)
+_ = try fresh.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(scope), "new isolated live read may recover")
 let crashScope = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000005", resource: "invoice")
 let crashInitial = try fence.begin(crashScope)
-_ = try crashInitial.finish(.liveSuccess)
+_ = try crashInitial.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(crashScope), "crash setup must be authorized")
 let child = Process()
 child.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
@@ -78,14 +80,14 @@ let crashRecover = try fence.begin(crashScope)
 _ = try crashRecover.finish(.connectivityFailure)
 require(!fence.cacheAllowed(crashScope), "offline after crash cannot recover old grant")
 let crashLive = try fence.begin(crashScope)
-_ = try crashLive.finish(.liveSuccess)
+_ = try crashLive.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(crashScope), "fresh live read can recover after crash")
 let sharedScope = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000006", resource: "invoice")
 let sharedHistory = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: sharedScope.invoice, resource: "history")
 let initialInvoice = try fence.begin(sharedScope)
-_ = try initialInvoice.finish(.liveSuccess)
+_ = try initialInvoice.finish(.liveSuccess(livePayload))
 let initialHistory = try fence.begin(sharedHistory)
-_ = try initialHistory.finish(.liveSuccess)
+_ = try initialHistory.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(sharedHistory), "history starts authorized under its invoice")
 let parentOffline = try fence.begin(sharedScope)
 _ = try parentOffline.finish(.connectivityFailure)
@@ -121,7 +123,7 @@ require(!fence.cacheAllowed(sharedHistory), "invoice denial must also hold its h
 // different process has retired the resource.
 let publicationRaceScope = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000007", resource: "invoice")
 let publicationInitial = try fence.begin(publicationRaceScope)
-let oldReceipt = receipt(try publicationInitial.finish(.liveSuccess))
+let oldReceipt = receipt(try publicationInitial.finish(.liveSuccess(livePayload)))
 require(fence.cacheAllowed(publicationRaceScope), "publication setup starts clean")
 let denialProcess = Process()
 denialProcess.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
@@ -130,22 +132,30 @@ try denialProcess.run()
 denialProcess.waitUntilExit()
 require(denialProcess.terminationStatus == 0, "independent process denied invoice")
 var publishedStale = false
-_ = try fence.withCacheWrite(publicationRaceScope, receipt: oldReceipt) { publishedStale = true }
+_ = try fence.withCacheWrite(publicationRaceScope, receipt: oldReceipt, payload: livePayload) { _ in publishedStale = true }
 require(!publishedStale, "a stale authorization must not publish after cross-process denial")
 let newerRecovery = try fence.begin(publicationRaceScope)
-_ = try newerRecovery.finish(.liveSuccess)
+_ = try newerRecovery.finish(.liveSuccess(livePayload))
 var delayedOldWrite = false
-_ = try fence.withCacheWrite(publicationRaceScope, receipt: oldReceipt) { delayedOldWrite = true }
+_ = try fence.withCacheWrite(publicationRaceScope, receipt: oldReceipt, payload: livePayload) { _ in delayedOldWrite = true }
 require(!delayedOldWrite, "old response must not publish under the newer authorization epoch")
 let resetRace = try fence.begin(publicationRaceScope)
 _ = try resetRace.finish(.denied)
 let writeRecovery = try fence.begin(publicationRaceScope)
-let currentReceipt = receipt(try writeRecovery.finish(.liveSuccess))
+let currentReceipt = receipt(try writeRecovery.finish(.liveSuccess(livePayload)))
 var wrongScopeWrite = false
-_ = try fence.withCacheWrite(scope, receipt: currentReceipt) { wrongScopeWrite = true }
+_ = try fence.withCacheWrite(scope, receipt: currentReceipt, payload: livePayload) { _ in wrongScopeWrite = true }
 require(!wrongScopeWrite, "receipt cannot authorize a different invoice")
+let alteredPayload = Data("different response".utf8)
+var wroteAltered = false
+_ = try fence.withCacheWrite(publicationRaceScope, receipt: currentReceipt, payload: alteredPayload) { _ in
+    _ = alteredPayload
+    wroteAltered = true
+}
+require(!wroteAltered, "a receipt must not authorize different response bytes")
 var publishedFresh = false
-let wrote = try fence.withCacheWrite(publicationRaceScope, receipt: currentReceipt) {
+let wrote = try fence.withCacheWrite(publicationRaceScope, receipt: currentReceipt, payload: livePayload) { bytes in
+    require(bytes == livePayload, "writer receives exact verified bytes")
     let contender = Process()
     contender.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
     contender.arguments = ["--probe-publication-lock", dir.path]
@@ -157,36 +167,36 @@ let wrote = try fence.withCacheWrite(publicationRaceScope, receipt: currentRecei
 require(wrote && publishedFresh, "current clean scope can publish")
 enum InjectedWriteError: Error { case failed }
 var threwWrite = false
-do { _ = try fence.withCacheWrite(publicationRaceScope, receipt: currentReceipt) { throw InjectedWriteError.failed } } catch { threwWrite = true }
+do { _ = try fence.withCacheWrite(publicationRaceScope, receipt: currentReceipt, payload: livePayload) { _ in throw InjectedWriteError.failed } } catch { threwWrite = true }
 require(threwWrite, "cache failure must reach caller")
 require(!fence.cacheAllowed(publicationRaceScope), "failed cache write leaves a durable hold")
 let restoredInvoice = try fence.begin(sharedScope)
-_ = try restoredInvoice.finish(.liveSuccess)
+_ = try restoredInvoice.finish(.liveSuccess(livePayload))
 require(!fence.cacheAllowed(sharedHistory), "invoice recovery must not restore old history")
 let verifiedHistory = try fence.begin(sharedHistory)
-_ = try verifiedHistory.finish(.liveSuccess)
+_ = try verifiedHistory.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(sharedHistory), "history needs its own fresh verification")
 let historyBeforeChange = try fence.begin(sharedHistory)
-let oldHistoryReceipt = receipt(try historyBeforeChange.finish(.liveSuccess))
+let oldHistoryReceipt = receipt(try historyBeforeChange.finish(.liveSuccess(livePayload)))
 let parentNewEpoch = try fence.begin(sharedScope)
-_ = try parentNewEpoch.finish(.liveSuccess)
+_ = try parentNewEpoch.finish(.liveSuccess(livePayload))
 let historyAfterChange = try fence.begin(sharedHistory)
-_ = try historyAfterChange.finish(.liveSuccess)
+_ = try historyAfterChange.finish(.liveSuccess(livePayload))
 var delayedHistoryWrite = false
-_ = try fence.withCacheWrite(sharedHistory, receipt: oldHistoryReceipt) { delayedHistoryWrite = true }
+_ = try fence.withCacheWrite(sharedHistory, receipt: oldHistoryReceipt, payload: livePayload) { _ in delayedHistoryWrite = true }
 require(!delayedHistoryWrite, "old history cannot publish after parent and history epochs change")
 let pendingHistory = try fence.begin(sharedHistory)
 let denyingParent = try fence.begin(sharedScope)
 _ = try denyingParent.finish(.denied)
-let deniedParentResult = try pendingHistory.finish(.liveSuccess)
+let deniedParentResult = try pendingHistory.finish(.liveSuccess(livePayload))
 require(deniedParentResult == .held, "parent denial must return an explicit held result")
 require(!fence.cacheAllowed(sharedHistory), "parent denial must prevent history publication")
 let parentRecovery = try fence.begin(sharedScope)
-_ = try parentRecovery.finish(.liveSuccess)
+_ = try parentRecovery.finish(.liveSuccess(livePayload))
 let pendingChangedHistory = try fence.begin(sharedHistory)
 let changedParent = try fence.begin(sharedScope)
-_ = try changedParent.finish(.liveSuccess)
-let changedParentResult = try pendingChangedHistory.finish(.liveSuccess)
+_ = try changedParent.finish(.liveSuccess(livePayload))
+let changedParentResult = try pendingChangedHistory.finish(.liveSuccess(livePayload))
 require(changedParentResult == .held, "parent epoch change must return an explicit held result")
 require(!fence.cacheAllowed(sharedHistory), "changed parent must prevent old history publication")
 let failedDeny = try fence.begin(scope)
@@ -200,7 +210,7 @@ let offlineRetry = try fence.begin(scope)
 _ = try offlineRetry.finish(.connectivityFailure)
 require(!fence.cacheAllowed(scope), "offline retry cannot undo failed denial")
 let onlineRetry = try fence.begin(scope)
-_ = try onlineRetry.finish(.liveSuccess)
+_ = try onlineRetry.finish(.liveSuccess(livePayload))
 require(fence.cacheAllowed(scope), "new live read may recover a held scope")
 let missingDir = dir.appendingPathComponent("missing-marker")
 let missingFence = InvoiceReadFence(directory: missingDir)
@@ -208,7 +218,7 @@ let missingAttempt = try missingFence.begin(scope)
 let marker = try FileManager.default.contentsOfDirectory(at: missingDir, includingPropertiesForKeys: nil).first { $0.pathExtension == "json" }
 require(marker != nil, "pending marker exists")
 try FileManager.default.removeItem(at: marker!)
-let missingResult = try missingAttempt.finish(.liveSuccess)
+let missingResult = try missingAttempt.finish(.liveSuccess(livePayload))
 require(missingResult == .held, "missing pending marker must not report authorization")
 require(!missingFence.cacheAllowed(scope), "missing marker cannot authorize a cache")
 let abandonedScope = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000004", resource: "invoice")

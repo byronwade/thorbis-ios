@@ -14,13 +14,14 @@ final class InvoiceReadFence {
         /// "invoice" and "history" are distinct authority decisions.
         let resource: String
     }
-    enum Outcome { case liveSuccess, connectivityFailure, denied }
+    enum Outcome { case liveSuccess(Data), connectivityFailure, denied }
     struct Receipt: Equatable {
         fileprivate let key: String
         fileprivate let epoch: String
         fileprivate let parentEpoch: String?
+        fileprivate let payloadDigest: Data
     }
-    enum Completion: Equatable { case committed(Receipt), held, denied }
+    enum Completion: Equatable { case committed(Receipt), restored, held, denied }
     enum Failure: Error { case invalidScope, storage, contended, alreadyFinished }
     private struct Record: Codable {
         let version: Int
@@ -131,7 +132,8 @@ final class InvoiceReadFence {
     // Held prototype: `write` must be synchronous and durably commit an atomic
     // replacement, and must not reenter the fence. This serializes it against
     // preflight in cooperating processes. It does not manage visible UI state.
-    func withCacheWrite(_ scope: Scope, receipt: Receipt, write: () throws -> Void) throws -> Bool {
+    func withCacheWrite(_ scope: Scope, receipt: Receipt, payload: Data, write: (Data) throws -> Void) throws -> Bool {
+        guard Data(SHA256.hash(data: payload)) == receipt.payloadDigest else { return false }
         let key = try key(scope)
         let parent = try parentKey(scope)
         return try withScopeMetadata(key, parent: parent) {
@@ -144,7 +146,7 @@ final class InvoiceReadFence {
             try persist(Record(version: 1, phase: "pending", epoch: UUID().uuidString,
                                eligible: false, priorClean: false, priorEpoch: nil,
                                parentEpoch: record.parentEpoch), key)
-            try write()
+            try write(payload)
             try persist(record, key)
             return true
         }
@@ -218,7 +220,7 @@ final class InvoiceReadFence {
                 }
                 guard canRestore else { return .held }
                 let cleanEpoch: String
-                if outcome == .connectivityFailure {
+                if case .connectivityFailure = outcome {
                     guard let previous = record.priorEpoch, UUID(uuidString: previous) != nil else { return .held }
                     cleanEpoch = previous
                 } else {
@@ -227,7 +229,9 @@ final class InvoiceReadFence {
                 try fence.persist(Record(version: 1, phase: "clean", epoch: cleanEpoch,
                                          eligible: false, priorClean: false, priorEpoch: nil,
                                          parentEpoch: record.parentEpoch), key)
-                return .committed(Receipt(key: key, epoch: cleanEpoch, parentEpoch: record.parentEpoch))
+                guard case let .liveSuccess(payload) = outcome else { return .restored }
+                return .committed(Receipt(key: key, epoch: cleanEpoch, parentEpoch: record.parentEpoch,
+                                          payloadDigest: Data(SHA256.hash(data: payload))))
             }
         }
     }
