@@ -285,6 +285,27 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testDelayedDocumentHandoffIsSupersededEvenAfterPhotoHandBack() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready([.init(200, jobJSON, gate: gate)])
+        let arbiter = CustomerHandoffArbiter()
+        let presenter = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+            customerName: "Sample", start: .estimates, api: model.api, session: model.session, onExit: { _ in }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+        XCTAssertTrue(arbiter.claim(.photos))
+        arbiter.release(.photos)
+        gate.release()
+        let result = await task.value
+        XCTAssertEqual(result, .superseded)
+        XCTAssertNil(presenter.active)
+        XCTAssertNil(arbiter.owner)
+    }
+
     func testResultAttributionUsesCanonicalSignerInsteadOfRetainedInput() async throws {
         let model = try await ready([.init(200, jobJSON), .init(200, membership([a])), .init(200, record(a)), .init(200, record(a)), .init(200, revision(a))])
         await model.refresh(); model.setSelected(a, selected: true); await model.reviewSelected()

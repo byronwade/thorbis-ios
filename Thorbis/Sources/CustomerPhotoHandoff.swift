@@ -5,9 +5,15 @@ import ImageIO
 /// reveal staff UI while a device is in customer hands.
 @MainActor
 final class CustomerPhotoPresenter: ObservableObject {
+    private let arbiter: CustomerHandoffArbiter
+    init(arbiter: CustomerHandoffArbiter = CustomerHandoffArbiter()) { self.arbiter = arbiter }
     @Published private(set) var active: CustomerPhotoHandoff?
-    func present(_ owner: CustomerPhotoHandoff) { guard active == nil else { return }; active = owner }
-    func authenticatedExit() { active?.clear(); active = nil }
+    func present(_ owner: CustomerPhotoHandoff) -> Bool {
+        guard active == nil, owner.isCurrent, arbiter.claim(.photos) else { return false }
+        active = owner
+        return true
+    }
+    func authenticatedExit() { active?.clear(); active = nil; arbiter.release(.photos) }
 }
 
 /// A temporary selection, kept only in memory and scoped to the current staff authority.

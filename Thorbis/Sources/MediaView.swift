@@ -828,8 +828,7 @@ struct JobMediaView: View {
                   Set(pickedRecords.map(\.id)) == picked, !Task.isCancelled else {
                 throw CustomerPhotoSelection.Invalid.scope
             }
-            guard estimateHandoff.active == nil, photoHandoff.active == nil else { throw CustomerPhotoSelection.Invalid.scope }
-            photoHandoff.present(owner)
+            guard estimateHandoff.active == nil, photoHandoff.present(owner) else { throw CustomerPhotoSelection.Invalid.scope }
         } catch {
             self.error = "Couldn’t verify every selected photo. Check your connection, refresh this job and try again."
         }

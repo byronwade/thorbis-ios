@@ -17,10 +17,13 @@ struct ThorbisApp: App {
     @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
     @State private var lastSavedCopyCheck = Date.distantPast
-    @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
-    @StateObject private var photoHandoff = CustomerPhotoPresenter()
+    @StateObject private var estimateHandoff: JobEstimateHandoffPresenter
+    @StateObject private var photoHandoff: CustomerPhotoPresenter
 
     init() {
+        let handoffArbiter = CustomerHandoffArbiter()
+        _estimateHandoff = StateObject(wrappedValue: JobEstimateHandoffPresenter(arbiter: handoffArbiter))
+        _photoHandoff = StateObject(wrappedValue: CustomerPhotoPresenter(arbiter: handoffArbiter))
         // Popovers put the keyboard away before opening; they need to know whether it is up.
         ThorbisKeyboard.watch()
         #if DEBUG

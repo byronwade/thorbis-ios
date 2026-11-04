@@ -352,8 +352,9 @@ struct EstimateDetailView: View {
                 customerModeClosed()
             }
             busy = false
-            if opened { return }
+            if opened != .unavailable { return }
         }
+        guard !customerView.photoHandoffActive else { return }
         showToCustomer = true
     }
 
@@ -756,8 +757,9 @@ struct InvoiceDetailView: View {
                 showCollectPayment = true
             }
             busy = false
-            if opened { return }
+            if opened != .unavailable { return }
         }
+        guard !customerView.photoHandoffActive else { return }
         showToCustomer = true
     }
 
