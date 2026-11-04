@@ -24,3 +24,5 @@ Further held source changes bind a review to token, paper hash, revision, option
 A follow-up preserves an exact previously submitted in-memory decision for retry after quote expiry; fresh decisions still require an unexpired quote. This matches the held server's replay distinction but is only covered by the Foundation state harness so far. There is no status-check UI or process-relaunch recovery, so do not treat this as complete uncertain-outcome handling.
 
 Paper reference inspected: Thorbis Mobile Q6N-0, token hash `2803f4aa`; the held shop adopts the existing native customer commit and secondary button, a scrollable action area for accessibility sizes, and a read-only full description sheet. This is an unrendered adaptation, not evidence of visual parity or accessible interaction.
+
+An additional held source pass normalizes the signer consistently with server acceptance, checks sheet return against the still-current token/revision/option, and shows invalid discovery as an error rather than leaving a spinner. Stale quote responses are discarded. These paths are syntax-parsed only and remain awaiting the native lifecycle and authorization tests.

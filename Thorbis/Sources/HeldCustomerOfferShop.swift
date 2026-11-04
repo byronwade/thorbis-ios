@@ -172,7 +172,11 @@ struct HeldCustomerOfferShop: View {
         do {
             let response = try await api.heldAvailableOffers(token: token, revisionNumber: cart.revisionNumber,
                 optionID: cart.optionID, currentAuthority: currentAuthority)
-            guard generation == api.requestGeneration, currentAuthority(), cart.install(response, ticket: ticket) else { return }
+            guard generation == api.requestGeneration, currentAuthority(), ticket == cart.ticket else { return }
+            guard cart.install(response, ticket: ticket) else {
+                self.error = "These options changed. Ask your technician to reopen the estimate."
+                return
+            }
             if !loaded, let initialReview {
                 for selection in initialReview.selections {
                     guard cart.setQuantity(selection.quantity, for: selection.offerId) else {
@@ -192,7 +196,8 @@ struct HeldCustomerOfferShop: View {
         do {
             let response = try await api.heldOfferQuote(token: token, revisionNumber: cart.revisionNumber,
                 optionID: cart.optionID, selections: cart.selections, currentAuthority: currentAuthority)
-            guard generation == api.requestGeneration, currentAuthority(), cart.install(response, ticket: ticket, now: Date()) else {
+            guard generation == api.requestGeneration, currentAuthority(), ticket == cart.ticket else { return }
+            guard cart.install(response, ticket: ticket, now: Date()) else {
                 error = "The estimate changed. Ask your technician to reopen it."
                 return
             }

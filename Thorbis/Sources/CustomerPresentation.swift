@@ -237,7 +237,9 @@ struct CustomerEstimatePresentation: View {
                     currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }, initialReview: offerReview,
                     onSelectionChange: { offerReview = nil; strokes = []; uploadedSignature = nil }) { quote, selections in
                     guard let generation = reviewGeneration, generation == api.requestGeneration,
-                          handoff?.current() != false, handoff?.canApprove() != false else { return }
+                          handoff?.current() != false, handoff?.canApprove() != false,
+                          quote.base.id?.lowercased() == flow.selectedOptionID?.lowercased(),
+                          self.link?.token == link.token, flow.issuedRevision == revision else { return }
                     offerReview = CustomerOfferReview(quote: quote, selections: selections, token: link.token,
                         revisionNumber: revision.revisionNumber, contentHash: link.action.contentHash,
                         optionID: flow.selectedOptionID, generation: generation)
@@ -719,7 +721,8 @@ struct CustomerEstimatePresentation: View {
 
     private func approve() async {
         guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
-        let signer = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let enteredName = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let signer = requiresOffers ? enteredName.precomposedStringWithCanonicalMapping : enteredName
         guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) || handoff?.signature != nil else { return }
         guard handoff?.current() != false, handoff?.canApprove() != false else { return }
         busy = true
