@@ -58,6 +58,13 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
 
     func clear() { loadID = UUID(); image = nil; loading = false }
 
+    func move(to newIndex: Int) {
+        guard selection.selectedIDs.indices.contains(newIndex), newIndex != index else { return }
+        clear()
+        message = nil
+        index = newIndex
+    }
+
     func load() async {
         clear()
         guard isCurrent, selection.selectedIDs.indices.contains(index) else { message = "These photos are no longer available. Please hand the device back to your technician."; return }
@@ -117,8 +124,8 @@ struct CustomerPhotoHandoffView: View {
                     Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Photo \(owner.index + 1) of \(owner.selection.selectedIDs.count)").accessibilityIdentifier("customer-photo-image")
                         .gesture(DragGesture(minimumDistance: 35).onEnded { gesture in
                             guard abs(gesture.translation.width) > abs(gesture.translation.height) else { return }
-                            if gesture.translation.width < -50, owner.index + 1 < owner.selection.selectedIDs.count { owner.index += 1 }
-                            if gesture.translation.width > 50, owner.index > 0 { owner.index -= 1 }
+                            if gesture.translation.width < -50, owner.index + 1 < owner.selection.selectedIDs.count { owner.move(to: owner.index + 1) }
+                            if gesture.translation.width > 50, owner.index > 0 { owner.move(to: owner.index - 1) }
                         })
                 } else if let message = owner.message {
                     Text(message).font(Theme.customerFont(17)).multilineTextAlignment(.center)
@@ -130,11 +137,11 @@ struct CustomerPhotoHandoffView: View {
                 }
                 Spacer(minLength: 0)
                 HStack {
-                    Button("Previous") { owner.index -= 1 }
+                    Button("Previous") { owner.move(to: owner.index - 1) }
                         .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
                         .disabled(owner.index == 0)
                     Spacer()
-                    Button("Next") { owner.index += 1 }
+                    Button("Next") { owner.move(to: owner.index + 1) }
                         .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
                         .disabled(owner.index + 1 >= owner.selection.selectedIDs.count)
                 }.font(Theme.customerFont(CustomerModeStyle.body))
