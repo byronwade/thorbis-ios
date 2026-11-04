@@ -360,7 +360,8 @@ struct EstimateDetailView: View {
     /// On a job, the estimate opens in that job's Customer view, so the customer can also see the
     /// job's other estimates, invoices and their own details. Without a job it stays a single document.
     private func presentToCustomer(expectedAttempt: CustomerHandoffAttempt? = nil) async {
-        guard let record, expectedAttempt.map({ customerView.isCurrent($0, api: api, session: session) }) ?? true else { return }
+        guard let record, record.organizationId == session.activeOrganization?.id,
+              expectedAttempt.map({ customerView.isCurrent($0, api: api, session: session) }) ?? true else { return }
         if let jobID {
             busy = true
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
@@ -767,7 +768,7 @@ struct InvoiceDetailView: View {
     /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
     /// the job's other documents. Without a verified job it stays a single document.
     private func presentToCustomer() async {
-        guard let record else { return }
+        guard let record, record.organizationId == session.activeOrganization?.id else { return }
         if let jobID = record.jobId, expectedJobScope.map({ $0.contains(record) }) != false {
             busy = true
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
