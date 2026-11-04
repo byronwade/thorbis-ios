@@ -17,7 +17,7 @@ enum ReleaseNotes {
             date: "2026-11-03",
             highlights: [
                 .init(symbol: "arrow.turn.up.right", title: "Keep your place",
-                      detail: "Links and search open on the right screen when you switch layouts or workspaces."),
+                      detail: "Links and search open more reliably when your layout changes."),
             ]
         ),
         ReleaseNote(
