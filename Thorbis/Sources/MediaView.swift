@@ -763,15 +763,15 @@ struct JobMediaView: View {
                 .disabled(count == 0 || busy)
                 .accessibilityIdentifier("job-media-show-customer")
             if canAdd {
-            HStack(spacing: 8) {
-                MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
-                MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
-                MenuOrCircle(symbol: "tag.slash", label: "No stage") { Task { await retagPicked(.other) } }
-                MenuOrCircle(symbol: "square.and.arrow.up", label: "Share") { Task { await sharePicked() } }
-                MenuOrCircle(symbol: "trash", label: "Remove") { confirmBulkArchive = true }
-                    .accessibilityIdentifier("job-media-remove-picked")
-            }
-            .disabled(count == 0 || busy)
+                HStack(spacing: 8) {
+                    MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
+                    MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
+                    MenuOrCircle(symbol: "tag.slash", label: "No stage") { Task { await retagPicked(.other) } }
+                    MenuOrCircle(symbol: "square.and.arrow.up", label: "Share") { Task { await sharePicked() } }
+                    MenuOrCircle(symbol: "trash", label: "Remove") { confirmBulkArchive = true }
+                        .accessibilityIdentifier("job-media-remove-picked")
+                }
+                .disabled(count == 0 || busy)
             }
             if busy { ProgressView().frame(height: 20) }
         }
