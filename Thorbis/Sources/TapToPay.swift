@@ -52,6 +52,7 @@ final class TapToPayController: ObservableObject {
     // The bound flow is wired for qualification only; it lacks durable
     // reconciliation and must not be enabled in a shipping build.
     private static let boundCollectionQualified = false
+    static let recoveryQualificationEnabled = false
 
     static var buildEnabled: Bool { TapToPayReadiness.buildEnabled }
 
@@ -129,7 +130,8 @@ final class TapToPayController: ObservableObject {
         guard Self.buildEnabled, Self.boundCollectionQualified, Self.deviceSupported,
               let session, session.phase == .ready, session.can("invoice.payment.create", feature: "payments"),
               session.isFeatureOn(Self.feature), let actor = session.user?.id,
-              let organization = session.activeOrganization?.id, let scope = api.savedCopyScope else {
+              let organization = session.activeOrganization?.id, let scope = api.savedCopyScope,
+              let origin = api.normalizedOrigin else {
             phase = .unavailable
             return
         }
@@ -139,13 +141,12 @@ final class TapToPayController: ObservableObject {
         let scopeRevision = api.savedCopyScopeRevision
         let sessionGeneration = session.generation
         let authorityRevision = session.authorityRevision
-        let origin = api.baseURL
         let authority = BoundTapAuthority(actorID: actor, organizationID: organization, sessionGeneration: sessionGeneration,
                                           authorityRevision: authorityRevision, apiGeneration: generation, origin: origin, permitted: true)
         let current: @MainActor () -> Bool = {
             let now = BoundTapAuthority(actorID: session.user?.id ?? "", organizationID: session.activeOrganization?.id ?? "",
                                         sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
-                                        apiGeneration: api.requestGeneration, origin: api.baseURL,
+                                        apiGeneration: api.requestGeneration, origin: api.normalizedOrigin ?? "",
                                         permitted: session.phase == .ready && session.can("invoice.payment.create", feature: "payments") && session.isFeatureOn(Self.feature))
             return now == authority && api.savedCopyScopeRevision == scopeRevision && api.savedCopyScope == scope
         }

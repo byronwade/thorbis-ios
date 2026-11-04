@@ -6,6 +6,11 @@ import XCTest
     var saves = 0
     var failOnSave: Int?
     func load() throws -> BoundTapRecovery? { value }
+    func create(_ recovery: BoundTapRecovery) throws -> Bool {
+        if value != nil { return false }
+        try save(recovery)
+        return true
+    }
     func save(_ recovery: BoundTapRecovery) throws {
         saves += 1
         if saves == failOnSave { throw CancellationError() }

@@ -272,7 +272,7 @@ extension APIClient {
         try await fieldPaymentsWithProvenance(invoiceID).payments
     }
 
-    func fieldPaymentsWithProvenance(_ invoiceID: String) async throws -> FieldPaymentHistoryRead {
+    func fieldPaymentsWithProvenance(_ invoiceID: String, requireFresh: Bool = false) async throws -> FieldPaymentHistoryRead {
         let path = try financialPath("/v1/invoices", id: invoiceID, suffix: "/payments")
         let generation = requestGeneration
         let scope = savedCopyScope
@@ -286,7 +286,7 @@ extension APIClient {
             try Task.checkCancellation()
             guard generation == requestGeneration, scope == savedCopyScope, scopeRevision == savedCopyScopeRevision,
                   origin == normalizedOrigin else { throw CancellationError() }
-            let page: APIRead<FinancialItems<FieldPaymentRecord>> = try await sendWithProvenance(path, cursor: cursor)
+            let page: APIRead<FinancialItems<FieldPaymentRecord>> = try await sendWithProvenance(path, cursor: cursor, requireFresh: requireFresh)
             try Task.checkCancellation()
             guard generation == requestGeneration, scope == savedCopyScope, scopeRevision == savedCopyScopeRevision, origin == normalizedOrigin,
                   page.provenance.generation == generation, page.provenance.savedCopyScope == scope,

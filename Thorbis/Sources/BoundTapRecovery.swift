@@ -15,6 +15,8 @@ struct BoundTapRecovery: Codable, Equatable {
 
 @MainActor protocol BoundTapRecoveryStoring {
     func load() throws -> BoundTapRecovery?
+    /// Atomic insert, returning false if another process already owns a receipt.
+    func create(_ recovery: BoundTapRecovery) throws -> Bool
     func save(_ recovery: BoundTapRecovery) throws
     func remove() throws
 }
@@ -23,12 +25,10 @@ struct BoundTapRecovery: Codable, Equatable {
     static func prepare<Attempt>(store: BoundTapRecoveryStoring, marker: BoundTapRecovery,
                                  create: @MainActor () async throws -> Attempt,
                                  identify: @MainActor (Attempt, BoundTapRecovery) throws -> BoundTapRecovery) async throws -> Attempt {
-        let existing: BoundTapRecovery?
-        do { existing = try store.load() }
+        let created: Bool
+        do { created = try store.create(marker) }
         catch { throw BoundTapPreflightError.recoveryUnavailable }
-        guard existing == nil else { throw BoundTapPreflightError.recoveryPending }
-        do { try store.save(marker) }
-        catch { throw BoundTapPreflightError.recoveryUnavailable }
+        guard created else { throw BoundTapPreflightError.recoveryPending }
         let attempt = try await create()
         let receipt = try identify(attempt, marker)
         guard receipt.origin == marker.origin, receipt.actorID == marker.actorID,

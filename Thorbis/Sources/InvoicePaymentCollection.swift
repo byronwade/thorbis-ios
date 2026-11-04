@@ -951,6 +951,9 @@ struct InvoicePaymentCollectionSheet: View {
     @State private var receiptDestination: String?
     @State private var receiptDestinationLoaded = false
     @State private var amountError: String?
+    @State private var recoveryPending = false
+    @State private var recoveryChecking = false
+    @State private var recoveryMessage: String?
     @StateObject private var tapToPayController: TapToPayController
     private var tapToPay: TapToPayController? { tapToPayController }
 
@@ -986,6 +989,14 @@ struct InvoicePaymentCollectionSheet: View {
                     // the custom amount in a sunk well with its $ inside, then the one ink commit.
                     VStack(alignment: .leading, spacing: 24) {
                         amountHero
+                        if recoveryPending {
+                            StateNote(tone: .inProgress, word: "Card payment needs checking",
+                                      message: recoveryMessage ?? "Check the previous card payment before collecting again.")
+                            Button(recoveryChecking ? "Checking…" : "Check card payment") {
+                                Task { await checkTapRecovery() }
+                            }
+                            .disabled(recoveryChecking)
+                        }
                         if hasLockedIntent || model.waitingForProjection {
                             VStack(alignment: .leading, spacing: 6) {
                                 pendingNote
@@ -1052,6 +1063,7 @@ struct InvoicePaymentCollectionSheet: View {
                             isPresented: $showRecordConfirmation,
                             actions: [ThorbisConfirmAction(primaryTitle) { Task { await recordPayment() } }])
             .task {
+                loadTapRecovery()
                 // Open on the iPhone reader when this workspace and phone can take cards in person.
                 if tapToPayAvailable && model.pendingRequest == nil && !offline && !paymentWaiting
                     && InvoiceCollectionOption.lastUsed == nil { option = .tapToPay }
@@ -1072,6 +1084,42 @@ struct InvoicePaymentCollectionSheet: View {
                 }
 #endif
             }
+            .onChange(of: session.authorityRevision) { _, _ in loadTapRecovery() }
+        }
+    }
+
+    private func loadTapRecovery() {
+        guard TapToPayController.recoveryQualificationEnabled else { return }
+        do {
+            let receipt = try KeychainBoundTapRecoveryStore.shared.load()
+            recoveryPending = receipt?.invoiceID == invoice.id && receipt?.organizationID == session.activeOrganization?.id
+        } catch {
+            recoveryPending = true
+            recoveryMessage = "Payment recovery is unavailable. Try again before collecting."
+        }
+    }
+
+    private func checkTapRecovery() async {
+        guard !recoveryChecking else { return }
+        recoveryChecking = true
+        defer { recoveryChecking = false }
+        do {
+            switch try await BoundTapRecoveryReconciler.check(api: api, session: session, store: KeychainBoundTapRecoveryStore.shared) {
+            case .confirmed:
+                recoveryPending = false
+                recoveryMessage = nil
+                await model.load()
+            case .pending:
+                recoveryMessage = "The payment is not confirmed yet. Check again before collecting."
+            case .unknownAttempt:
+                recoveryMessage = "The request did not return an attempt number. Contact your office before collecting."
+            case .otherAccount:
+                recoveryMessage = "Open the workspace that started this payment to check it."
+            case .restartRequired:
+                recoveryMessage = "Close and reopen Thorbis, then check this payment again."
+            }
+        } catch {
+            recoveryMessage = "The payment could not be checked. Try again when you have a connection."
         }
     }
 
@@ -1165,6 +1213,7 @@ struct InvoicePaymentCollectionSheet: View {
             await model.load()
             return model.hasRecordedCardPresentPayment(intent)
         }
+        loadTapRecovery()
         if tapToPay.phase == .paid {
             InvoiceCollectionOption.lastUsed = nil
             try? await Task.sleep(nanoseconds: 900_000_000)
@@ -1321,6 +1370,7 @@ struct InvoicePaymentCollectionSheet: View {
     /// The amount is not a reason: it's checked when they press (design.thorbis.com "Don't lock the commit").
     private var blockedReason: String? {
         guard !canSubmit, !model.isRecording, !model.isLoading, !isCreatingPayLink, tapToPay?.busy != true else { return nil }
+        if recoveryPending { return "Check the previous card payment before collecting again." }
         if !session.can("invoice.payment.create", feature: "payments") { return "Your role can't take payments. Ask your office." }
         if !model.canRecordPayment { return "This invoice can't take a payment right now." }
         if offline && option != .cash && option != .check { return "Without signal, record cash or check. They record when you're back online." }
@@ -1336,7 +1386,7 @@ struct InvoicePaymentCollectionSheet: View {
     }
 
     private var canSubmit: Bool {
-        guard !model.isRecording, !model.isLoading, !isCreatingPayLink else { return false }
+        guard !recoveryPending, !model.isRecording, !model.isLoading, !isCreatingPayLink else { return false }
         if model.waitingForProjection { return true }
         guard session.can("invoice.payment.create", feature: "payments"), model.canRecordPayment else { return false }
         if offline && option != .cash && option != .check { return false }

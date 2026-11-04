@@ -25,11 +25,17 @@ import Security
         let attributes: [String: Any] = [kSecValueData as String: data,
                                          kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecSuccess { return }
-        guard status == errSecItemNotFound else { throw BoundTapRecoveryError.unavailable }
+        guard status == errSecSuccess else { throw BoundTapRecoveryError.unavailable }
+    }
+    func create(_ recovery: BoundTapRecovery) throws -> Bool {
+        let data = try JSONEncoder().encode(recovery)
         var q = query
-        q.merge(attributes) { _, new in new }
-        guard SecItemAdd(q as CFDictionary, nil) == errSecSuccess else { throw BoundTapRecoveryError.unavailable }
+        q[kSecValueData as String] = data
+        q[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(q as CFDictionary, nil)
+        if status == errSecDuplicateItem { return false }
+        guard status == errSecSuccess else { throw BoundTapRecoveryError.unavailable }
+        return true
     }
     func remove() throws {
         let status = SecItemDelete(query as CFDictionary)
