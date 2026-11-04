@@ -994,6 +994,11 @@ struct JobMediaPage: Decodable {
     let nextCursor: String?
 }
 
+struct InvoiceListPage: Decodable, Sendable {
+    let items: [InvoiceRecord]
+    let nextCursor: String?
+}
+
 @MainActor
 extension APIClient {
     private func fieldPath(_ base: String, id: String, suffix: String = "") throws -> String {
@@ -1132,6 +1137,9 @@ extension APIClient {
     }
 
     func fieldInvoices() async throws -> [InvoiceRecord] { try await allFieldPages("/v1/invoices") }
+    func fieldInvoicePage(cursor: String? = nil) async throws -> APIRead<InvoiceListPage> {
+        try await sendWithProvenance("/v1/invoices", queryItems: [URLQueryItem(name: "limit", value: "50")], cursor: cursor, requireFresh: true)
+    }
     func fieldInvoices(customerID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [InvoiceRecord] {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await allFieldPages("/v1/invoices", queryItems: [URLQueryItem(name: "customerId", value: customerID)], isCurrent: isCurrent)
