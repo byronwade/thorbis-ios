@@ -11,6 +11,12 @@ import Foundation
     let isPartial = true
 
     private let api: APIClient
+    private let session: SessionController
+    private var subscriptions = Set<AnyCancellable>()
+    private var sessionGeneration: UUID?
+    private var authorityRevision: UUID?
+    private var actorID: String?
+    private var organizationID: String?
     private var revision = UUID()
     private var generation: UUID?
     private var savedCopyScope: String?
@@ -21,7 +27,16 @@ import Foundation
     private var seenCursors = Set<String>()
     private var seenIDs = Set<String>()
 
-    init(api: APIClient) { self.api = api }
+    init(api: APIClient, session: SessionController) {
+        self.api = api
+        self.session = session
+        session.$authorityRevision.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
+        session.$phase.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
+        session.$user.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
+        session.$activeOrganization.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
+        api.$requestGeneration.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
+        api.$baseURL.dropFirst().sink { [weak self] _ in MainActor.assumeIsolated { self?.retire() } }.store(in: &subscriptions)
+    }
 
     static func customerQuery(_ value: String) -> String {
         let escaped = value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
@@ -31,6 +46,7 @@ import Foundation
     /// Caller must immediately retire when its own session/authority lease changes.
     func retire() {
         revision = UUID(); generation = nil; savedCopyScope = nil; origin = nil; query = nil
+        sessionGeneration = nil; authorityRevision = nil; actorID = nil; organizationID = nil
         items = []; nextCursor = nil; seenCursors = []; seenIDs = []; started = false
         error = nil; loading = false
     }
@@ -40,11 +56,17 @@ import Foundation
         let term = customer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty, term.utf16.count <= 128, !term.hasPrefix("\""),
               !term.contains(where: { $0.isNewline }),
-              isCurrent(), let scope = api.savedCopyScope, let origin = api.normalizedOrigin else {
+              isCurrent(), session.can("invoice.view", feature: "invoicing"),
+              session.can("customer.view", feature: "core_crm"),
+              let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let scope = api.savedCopyScope, scope == SavedCopies.scope(actorID: actor, organizationID: organization),
+              let origin = api.normalizedOrigin else {
             error = "This search needs current access and a shorter name that doesn't begin with a quote."
             return
         }
         savedCopyScope = scope; self.origin = origin; generation = api.requestGeneration
+        actorID = actor; organizationID = organization; sessionGeneration = session.generation
+        authorityRevision = session.authorityRevision
         query = Self.customerQuery(term)
         await loadNext(isCurrent: isCurrent)
     }
@@ -88,7 +110,31 @@ import Foundation
         }
     }
 
+    /// A search hit is not authority to open an invoice. Fetch the exact
+    /// resource live and recheck the complete session lease before returning it.
+    func authorizedInvoice(id: String, isCurrent: @escaping @MainActor () -> Bool) async -> InvoiceRecord? {
+        guard current(isCurrent), items.contains(where: { $0.entityId == id }) else { return nil }
+        let requestRevision = revision
+        do {
+            let invoice = try await api.liveFieldInvoice(id)
+            try Task.checkCancellation()
+            guard revision == requestRevision else { return nil }
+            guard current(isCurrent), invoice.id == id, invoice.organizationId == organizationID else {
+                retire(); return nil
+            }
+            return invoice
+        } catch {
+            if revision == requestRevision, let status = (error as? Problem)?.status,
+               [401, 403, 404].contains(status) { retire() }
+            return nil
+        }
+    }
+
     private func current(_ isCurrent: @MainActor () -> Bool) -> Bool {
-        isCurrent() && api.requestGeneration == generation && api.savedCopyScope == savedCopyScope && api.normalizedOrigin == origin
+        isCurrent() && session.can("invoice.view", feature: "invoicing") &&
+        session.can("customer.view", feature: "core_crm") && session.generation == sessionGeneration &&
+        session.authorityRevision == authorityRevision && session.user?.id == actorID &&
+        session.activeOrganization?.id == organizationID && api.requestGeneration == generation &&
+        api.savedCopyScope == savedCopyScope && api.normalizedOrigin == origin
     }
 }
