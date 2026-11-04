@@ -49,12 +49,16 @@ final class JobOverviewUITests: XCTestCase {
         let activity = app.buttons["job-section-activity"]
         XCTAssertTrue(activity.waitForExistence(timeout: 15)); activity.tap()
         let filter = app.buttons["activity-filter"]
-        XCTAssertTrue(filter.waitForExistence(timeout: 10)); filter.tap()
+        for _ in 0..<6 where !filter.isHittable { app.swipeUp() }
+        XCTAssertTrue(filter.isHittable); filter.tap()
         menuRow(app, "Notes").tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
         let photos = app.buttons["job-section-photos"]
         XCTAssertTrue(photos.waitForExistence(timeout: 5)); photos.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "photos"), object: filter)], timeout: 5), .completed)
+        let money = app.buttons["job-section-money"]
+        XCTAssertTrue(money.isHittable); money.tap()
+        XCTAssertTrue(activity.isHittable)
         activity.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
     }
@@ -62,17 +66,23 @@ final class JobOverviewUITests: XCTestCase {
     func testLongInvoiceBalanceKeepsAllFourJobSectionsTappable() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-large-invoice"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-extreme-invoice"]
         app.launch()
+        var previous: XCUIElement?
         for section in ["overview", "money", "activity", "photos"] {
             let button = app.buttons["job-section-\(section)"]
             XCTAssertTrue(button.waitForExistence(timeout: 15), section)
+            for _ in 0..<5 where !button.isHittable { app.swipeUp() }
+            XCTAssertTrue(button.isHittable, section)
             XCTAssertGreaterThanOrEqual(button.frame.width, 43.5, section)
             XCTAssertGreaterThanOrEqual(button.frame.height, 43.5, section)
+            if let previous { XCTAssertLessThanOrEqual(previous.frame.maxX, button.frame.minX + 0.5, "\(section) overlaps the previous section") }
+            previous = button
         }
         let money = app.buttons["job-section-money"]
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "due"), object: money)], timeout: 15), .completed,
                        "The full balance remains spoken")
+        XCTAssertTrue(money.label.contains("9,999,999,620.00"), money.label)
     }
     /// iPad: the job is the detail column's first screen (picked from the list beside it, so nothing
     /// to go back to). A screen pushed from it — the customer — offers the same Back circle, which
