@@ -107,16 +107,15 @@ struct PublicEstimateAction: Decodable, Equatable {
 }
 
 extension CustomerOfferReview {
+    func verifiedAcceptedAmount(_ acceptance: PublicEstimateAction.Acceptance?, signerName: String) -> Int? {
+        guard let acceptance else { return nil }
+        let receipt = CustomerOfferReceipt(id: acceptance.id, optionId: acceptance.optionId, signerName: acceptance.signerName,
+            totalAmount: acceptance.totalAmount, offerQuoteId: acceptance.offerQuoteId,
+            quoteIdentity: acceptance.quoteIdentity, selections: acceptance.selections)
+        return verifiedAcceptedAmount(receipt, signerName: signerName)
+    }
     func matchesAcceptance(_ acceptance: PublicEstimateAction.Acceptance?, signerName: String) -> Bool {
-        guard let acceptance, UUID(uuidString: acceptance.id) != nil,
-              acceptance.optionId?.lowercased() == optionID?.lowercased(),
-              acceptance.offerQuoteId?.lowercased() == quote.id.lowercased(),
-              acceptance.quoteIdentity == quote.quoteIdentity,
-              acceptance.signerName == signerName,
-              Int(exactly: acceptance.totalAmount) == quote.totalAmount,
-              let returned = acceptance.selections else { return false }
-        return returned.map { CustomerOfferSelection(offerId: $0.offerId.lowercased(), quantity: $0.quantity) }
-            .sorted { $0.offerId < $1.offerId } == selections
+        verifiedAcceptedAmount(acceptance, signerName: signerName) != nil
     }
 }
 

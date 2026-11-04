@@ -129,6 +129,7 @@ struct CustomerEstimatePresentation: View {
     @State private var showTerms = false
     @State private var showOfferShop = false
     @State private var standaloneOfferReview: CustomerOfferReview?
+    @State private var standaloneAcceptedOffer: PublicEstimateAction.Acceptance?
     @State private var offerSession: CustomerOfferAuthorityScope?
     @State private var isMember = false
     @State private var openingReview = false
@@ -179,6 +180,16 @@ struct CustomerEstimatePresentation: View {
     }
     private var presentedTotalText: String {
         customerEstimatePresentedTotal(base: flow.total, review: offerReview).map { money($0, currency: offerReview?.quote.currency ?? flow.currency) } ?? ""
+    }
+    private var approvedAmountText: String? {
+        if let offerReview {
+            let acceptance = handoff?.acceptedAction?.acceptance ?? standaloneAcceptedOffer
+            let signer = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
+            return offerReview.verifiedAcceptedAmount(acceptance, signerName: signer).map { money($0, currency: offerReview.quote.currency) }
+        }
+        // Previously approved records lack accepted-offer evidence in the aggregate.
+        if offerCapabilityEnabled && flow.estimate.status == "approved" { return nil }
+        return flow.total.map { money($0, currency: flow.currency) }
     }
     private var drawnApproval: Bool { jobID != nil && !flow.hasOptions && !requiresOffers }
     private var showsBackCircle: Bool {
@@ -472,8 +483,10 @@ struct CustomerEstimatePresentation: View {
             Text("Approved").font(Theme.customerFont(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
             Text(doneSentence).font(Theme.customerFont(type.body)).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            if flow.total != nil {
-                Text(flow.totalText).font(Theme.customerMonoFont(type.total, weight: .medium))
+            if let approvedAmountText {
+                Text(approvedAmountText).font(Theme.customerMonoFont(type.total, weight: .medium))
+            } else if offerCapabilityEnabled {
+                Text("Accepted total needs verification.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
             Text(handoff == nil && returnToDocuments == nil ? "Thank you. Please hand the device back to your technician." : "This estimate is approved. Continue when you're ready.")
                 .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
@@ -663,7 +676,7 @@ struct CustomerEstimatePresentation: View {
         openingReview = true
         openingError = nil
         error = nil
-        if handoff == nil { link = nil; uploadedSignature = nil; standaloneOfferDecision = nil; offerReview = nil; offerSession = nil }
+        if handoff == nil { link = nil; uploadedSignature = nil; standaloneOfferDecision = nil; standaloneAcceptedOffer = nil; offerReview = nil; offerSession = nil }
         consentText = handoff?.link?.action.consentText
         strokes = []
         defer { if reviewRequestID == requestID { openingReview = false } }
@@ -820,6 +833,7 @@ struct CustomerEstimatePresentation: View {
                           offerReview.matchesAcceptance(patch.acceptance, signerName: signer) else {
                         error = "The approval is unconfirmed. Ask your technician to check it."; return
                     }
+                    standaloneAcceptedOffer = patch.acceptance
                     onApproved(nil)
                 } else { onApproved(nil) }
             } else {

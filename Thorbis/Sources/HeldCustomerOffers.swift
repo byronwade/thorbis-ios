@@ -87,6 +87,16 @@ struct CustomerOfferQuote: Decodable, Equatable {
     let addOns: [AddOn]
 }
 
+struct CustomerOfferReceipt: Decodable, Equatable {
+    let id: String
+    let optionId: String?
+    let signerName: String
+    let totalAmount: Double
+    let offerQuoteId: String?
+    let quoteIdentity: String?
+    let selections: [CustomerOfferSelection]?
+}
+
 struct CustomerOfferReview: Equatable {
     let quote: CustomerOfferQuote
     let selections: [CustomerOfferSelection]
@@ -99,6 +109,16 @@ struct CustomerOfferReview: Equatable {
     func matches(token: String, revisionNumber: Int, contentHash: String, optionID: String?, generation: UUID) -> Bool {
         self.token == token && self.revisionNumber == revisionNumber && self.contentHash == contentHash &&
         self.optionID?.lowercased() == optionID?.lowercased() && self.generation == generation
+    }
+    func verifiedAcceptedAmount(_ receipt: CustomerOfferReceipt?, signerName: String) -> Int? {
+        guard let receipt, UUID(uuidString: receipt.id) != nil,
+              receipt.optionId?.lowercased() == optionID?.lowercased(),
+              receipt.offerQuoteId?.lowercased() == quote.id.lowercased(), receipt.quoteIdentity == quote.quoteIdentity,
+              receipt.signerName == signerName, Int(exactly: receipt.totalAmount) == quote.totalAmount,
+              let returned = receipt.selections else { return nil }
+        let normalized = returned.map { CustomerOfferSelection(offerId: $0.offerId.lowercased(), quantity: $0.quantity) }
+            .sorted { $0.offerId < $1.offerId }
+        return normalized == selections ? quote.totalAmount : nil
     }
     func isCurrent(now: Date) -> Bool {
         let fractional = ISO8601DateFormatter()

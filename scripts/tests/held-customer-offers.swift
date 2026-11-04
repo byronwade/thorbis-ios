@@ -52,6 +52,20 @@ import Foundation
     let afterExpiry = Date(timeIntervalSince1970: 4_200_000_000)
     precondition(!customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: false))
     precondition(customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: true))
+    func receipt(id: String = "018f0000-aaaa-7000-8000-000000000013", option: String? = nil, signer: String = "Customer",
+                 amount: Double = 2000, quoteID: String = "018f0000-aaaa-7000-8000-000000000012", digest: String? = nil,
+                 quantity: Int = 2) -> CustomerOfferReceipt {
+      CustomerOfferReceipt(id: id, optionId: option, signerName: signer, totalAmount: amount, offerQuoteId: quoteID,
+        quoteIdentity: digest ?? identity, selections: [.init(offerId: offer, quantity: quantity)])
+    }
+    precondition(reviewed.verifiedAcceptedAmount(receipt(), signerName: "Customer") == 2000)
+    precondition(reviewed.verifiedAcceptedAmount(receipt(quoteID: offer), signerName: "Customer") == nil)
+    precondition(reviewed.verifiedAcceptedAmount(receipt(digest: hash), signerName: "Customer") == nil)
+    precondition(reviewed.verifiedAcceptedAmount(receipt(quantity: 1), signerName: "Customer") == nil)
+    precondition(reviewed.verifiedAcceptedAmount(receipt(signer: "Other"), signerName: "Customer") == nil)
+    precondition(reviewed.verifiedAcceptedAmount(receipt(option: offer), signerName: "Customer") == nil)
+    precondition(reviewed.verifiedAcceptedAmount(receipt(amount: 1999), signerName: "Customer") == nil)
+    precondition(reviewed.verifiedAcceptedAmount(nil as CustomerOfferReceipt?, signerName: "Customer") == nil)
     precondition(reviewed.matches(token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
     precondition(!reviewed.matches(token: "different", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
     precondition(!reviewed.matches(token: "token", revisionNumber: 2, contentHash: hash, optionID: nil, generation: generation))

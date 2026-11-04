@@ -81,9 +81,9 @@ final class HeldCustomerOffersTests: XCTestCase {
         let selection = CustomerOfferSelection(offerId: offerID, quantity: 2)
         let reviewed = CustomerOfferReview(quote: try quote(), selections: [selection], token: "token", revisionNumber: 1,
             contentHash: hash, optionID: nil, generation: generation)
-        func receipt(_ amount: Int, _ signer: String, _ quantity: Int) throws -> PublicEstimateAction.Acceptance {
+        func receipt(_ amount: Int, _ signer: String, _ quantity: Int, quoteID: String = "018f0000-aaaa-7000-8000-000000000012", quoteIdentity: String? = nil) throws -> PublicEstimateAction.Acceptance {
             try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: Data("""
-            {"id":"018f0000-aaaa-7000-8000-000000000013","signerName":"\(signer)","acceptedAt":"2026-11-03T12:00:00Z","totalAmount":\(amount),"offerQuoteId":"018f0000-aaaa-7000-8000-000000000012","quoteIdentity":"\(identity)","selections":[{"offerId":"\(offerID)","quantity":\(quantity)}]}
+            {"id":"018f0000-aaaa-7000-8000-000000000013","signerName":"\(signer)","acceptedAt":"2026-11-03T12:00:00Z","totalAmount":\(amount),"offerQuoteId":"\(quoteID)","quoteIdentity":"\(quoteIdentity ?? identity)","selections":[{"offerId":"\(offerID)","quantity":\(quantity)}]}
             """.utf8))
         }
         XCTAssertEqual(customerOfferReviewState(reviewed, matchesScope: false, confirmed: true, now: Date()), .changed)
@@ -94,6 +94,12 @@ final class HeldCustomerOffersTests: XCTestCase {
         XCTAssertFalse(customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: false))
         XCTAssertTrue(customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: true))
         XCTAssertTrue(reviewed.matchesAcceptance(try receipt(2000, "Customer", 2), signerName: "Customer"))
+        XCTAssertEqual(reviewed.verifiedAcceptedAmount(try receipt(2000, "Customer", 2), signerName: "Customer"), 2000)
+        XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(1999, "Customer", 2), signerName: "Customer"))
+        XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(2000, "Customer", 1), signerName: "Customer"))
+        XCTAssertNil(reviewed.verifiedAcceptedAmount(nil as PublicEstimateAction.Acceptance?, signerName: "Customer"))
+        XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(2000, "Customer", 2, quoteID: offerID), signerName: "Customer"))
+        XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(2000, "Customer", 2, quoteIdentity: "sha256:" + String(repeating: "c", count: 64)), signerName: "Customer"))
         XCTAssertFalse(reviewed.matchesAcceptance(try receipt(1999, "Customer", 2), signerName: "Customer"))
         XCTAssertFalse(reviewed.matchesAcceptance(try receipt(2000, "Other", 2), signerName: "Customer"))
         XCTAssertFalse(reviewed.matchesAcceptance(try receipt(2000, "Customer", 1), signerName: "Customer"))

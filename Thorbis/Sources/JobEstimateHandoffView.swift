@@ -140,7 +140,13 @@ struct JobEstimateHandoffView: View {
     private func selectionValue(_ record: EstimateRecord) -> String {
         let state = model.selectedIDs.contains(record.id) ? "Selected" : "Not selected"
         let price: String
-        if let option = model.options(for: record.id).first(where: { $0.id == model.selection.optionIDs[record.id] }) {
+        if let context = model.context(for: record.id), context.outcome?.isApproved == true,
+           let review = context.offerReview, let signer = context.signature?.signerName,
+           let action = context.acceptedAction, let amount = review.verifiedAcceptedAmount(action.acceptance, signerName: signer) {
+            price = money(amount, currency: action.currency)
+        } else if CustomerOfferCapability.isEnabled && record.status == "approved" {
+            price = "Accepted total needs verification"
+        } else if let option = model.options(for: record.id).first(where: { $0.id == model.selection.optionIDs[record.id] }) {
             price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
         } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
             price = money(revision.totalAmount, currency: revision.currency)
@@ -162,10 +168,16 @@ struct JobEstimateHandoffView: View {
             }
             Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.customerMonoFont(type.small)).foregroundStyle(Theme.muted)
             if let context = model.context(for: record.id), context.outcome?.isApproved == true,
+               let review = context.offerReview, let signer = context.signature?.signerName,
+               let action = context.acceptedAction, let amount = review.verifiedAcceptedAmount(action.acceptance, signerName: signer) {
+                Text(money(amount, currency: action.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
+            } else if let context = model.context(for: record.id), context.outcome?.isApproved == true,
                let action = context.acceptedAction, let accepted = action.acceptance,
                let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
                 Text(option.title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 Text(money(amount, currency: option.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
+            } else if CustomerOfferCapability.isEnabled && record.status == "approved" {
+                Text("Accepted total needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
                 Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
@@ -278,7 +290,11 @@ struct JobEstimateHandoffView: View {
                 revisionNumber: item.revision.revisionNumber, contentHash: link.action.contentHash,
                 optionID: item.optionID, generation: model.api.requestGeneration) } ?? false)
         } ?? true
-        let confirmed = context?.outcome?.isApproved == true && context?.acceptedAction != nil
+        let confirmed: Bool
+        if let context, let review, let signature = context.signature {
+            confirmed = context.outcome?.isApproved == true &&
+                review.verifiedAcceptedAmount(context.acceptedAction?.acceptance, signerName: signature.signerName) != nil
+        } else { confirmed = false }
         return customerOfferReviewState(review, matchesScope: matches, confirmed: confirmed, now: Date())
     }
     private var selectedTotals: [(currency: String, amount: Int)]? {
