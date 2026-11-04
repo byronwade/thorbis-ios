@@ -55,7 +55,7 @@ struct JobDetailView: View {
     @State private var selectedInvoiceID: String?
     @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
     @State private var loadedInvoiceModelID: String?
-    @State private var showCollectPayment = false
+    @State private var paymentRoute: JobInvoicePaymentRoute?
     @State private var activityFilter = "All"
     @State private var showSchedule = false
     private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
@@ -376,6 +376,7 @@ struct JobDetailView: View {
                 selectedInvoiceID = nil
                 invoicePaymentModel = nil
                 loadedInvoiceModelID = nil
+                paymentRoute = nil
             }
             await load()
             // The next step needs the job's paper, so it loads with the job, not only on its tab.
@@ -432,6 +433,16 @@ struct JobDetailView: View {
             customerPhone = nil
             contactsLoaded = false
             contactsFailed = false
+        }
+        .onChange(of: session.authorityRevision) { _, _ in paymentRoute = nil }
+        .onChange(of: session.can("invoice.payment.create", feature: "payments")) { _, allowed in
+            if !allowed { paymentRoute = nil }
+        }
+        .onChange(of: session.can("invoice.view", feature: "invoicing")) { _, allowed in
+            if !allowed { paymentRoute = nil }
+        }
+        .onChange(of: session.can("job.view", feature: "jobs")) { _, allowed in
+            if !allowed { paymentRoute = nil }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
@@ -495,13 +506,11 @@ struct JobDetailView: View {
             }
         } }
         // A payment changes the balance the next step reads, wherever it was collected from.
-        .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) {
-            if let invoice = selectedInvoice, let model = invoicePaymentModel {
-                InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
-                    .thorbisSheetSurface()
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
+        .sheet(item: $paymentRoute, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { route in
+            InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice)
+                .thorbisSheetSurface()
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
         }
     }
 
@@ -1173,7 +1182,7 @@ struct JobDetailView: View {
         if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") {
             PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
         } else if moneyBarCollects, let model = invoicePaymentModel {
-            PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
+            PaperInvoiceCollectionFooter(model: model) { if let id = selectedInvoice?.id { presentPayment(for: id) } }
         } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
             PaperActionBar(title: "Show customer", symbol: "iphone") { openCustomerView(.estimates) }
                 .accessibilityIdentifier("job-customer-view-bar")
@@ -2413,10 +2422,19 @@ struct JobDetailView: View {
         case .reviewInvoice(let id): reviewInvoiceID = id
         case .collect(let invoiceID, _, _):
             Task {
+                let generation = session.generation
+                let authority = session.authorityRevision
+                let apiGeneration = api.requestGeneration
+                let origin = api.normalizedOrigin
+                guard let job, let expectedScope = scope(for: job) else { return }
                 selectedInvoiceID = invoiceID
-                if let invoice = invoices.first(where: { $0.id == invoiceID }) { await loadInvoicePayments(for: invoice) }
-                if invoicePaymentModel?.canRecordPayment == true { showCollectPayment = true }
-                else { withMotion(.snappy) { selectedTab = "Money" } }
+                if let invoice = invoices.first(where: { $0.id == invoiceID && expectedScope.contains($0) }) {
+                    await loadInvoicePayments(for: invoice)
+                }
+                guard session.generation == generation, session.authorityRevision == authority,
+                      api.requestGeneration == apiGeneration, api.normalizedOrigin == origin,
+                      let currentJob = self.job, scope(for: currentJob) == expectedScope else { return }
+                if !presentPayment(for: invoiceID) { withMotion(.snappy) { selectedTab = "Money" } }
             }
         case .wrapUp: showWrapUp = true
         }
@@ -2513,6 +2531,9 @@ struct JobDetailView: View {
         let requestedID = customerPaymentInvoiceID
         customerPaymentInvoiceID = nil
         let generation = session.generation
+        let authority = session.authorityRevision
+        let apiGeneration = api.requestGeneration
+        let origin = api.normalizedOrigin
         if let job { await loadJobEstimates(job) }
         await loadInvoices()
         guard session.generation == generation, let requestedID,
@@ -2521,11 +2542,23 @@ struct JobDetailView: View {
               let invoice = invoices.first(where: { $0.id == requestedID }) else { return }
         selectedInvoiceID = requestedID
         await loadInvoicePayments(for: invoice)
-        guard session.generation == generation, loadedInvoiceModelID == requestedID,
-              let actual = invoicePaymentModel?.invoice, actual.id == requestedID,
-              let job, scope(for: job)?.contains(actual) == true,
-              invoicePaymentModel?.canRecordPayment == true else { return }
-        showCollectPayment = true
+        guard session.generation == generation, session.authorityRevision == authority,
+              api.requestGeneration == apiGeneration, api.normalizedOrigin == origin else { return }
+        presentPayment(for: requestedID)
+    }
+
+    /// Revalidates the current selection at the transition, then fixes the
+    /// invoice and model together for the lifetime of the payment sheet.
+    @discardableResult private func presentPayment(for requestedID: String) -> Bool {
+        guard session.can("job.view", feature: "jobs"),
+              session.can("invoice.view", feature: "invoicing"),
+              session.can("invoice.payment.create", feature: "payments"),
+              let job, let scope = scope(for: job), invoiceRead?.scope == scope,
+              let route = JobInvoicePaymentRoute.make(requestedID: requestedID, selectedID: selectedInvoiceID,
+                                                       selected: selectedInvoice, loadedID: loadedInvoiceModelID,
+                                                       model: invoicePaymentModel, scope: scope) else { return false }
+        paymentRoute = route
+        return true
     }
 
     private func loadInvoicePayments(for invoice: InvoiceRecord) async {

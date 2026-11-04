@@ -1,6 +1,23 @@
 import Combine
 import Foundation
 
+/// One sheet owns one job invoice and the model that will record its payment.
+struct JobInvoicePaymentRoute: Identifiable {
+    let invoice: InvoiceRecord
+    let model: InvoicePaymentCollectionModel
+    var id: String { invoice.id }
+
+    @MainActor static func make(requestedID: String, selectedID: String?, selected: InvoiceRecord?,
+                     loadedID: String?, model: InvoicePaymentCollectionModel?,
+                     scope: JobDocumentScope) -> Self? {
+        guard selectedID == requestedID, loadedID == requestedID,
+              let selected, selected.id == requestedID, scope.contains(selected),
+              let model, let actual = model.invoice, actual.id == requestedID,
+              scope.contains(actual), model.canRecordPayment else { return nil }
+        return Self(invoice: actual, model: model)
+    }
+}
+
 /// Shared by the job and its customer presentation. Only the latest read may publish or update memory.
 @MainActor
 final class JobDocumentCollections: ObservableObject {
