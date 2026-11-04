@@ -162,6 +162,7 @@ struct PublicEstimateActionView: View {
                 Text("Total").font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
                 Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: selectedOption?.currency ?? action.currency))
                     .moneyStyle(.hero).foregroundStyle(Theme.foreground)
+                    .accessibilityIdentifier("public-estimate-total")
             }
             .padding(.top, 6)
             .accessibilityElement(children: .combine)

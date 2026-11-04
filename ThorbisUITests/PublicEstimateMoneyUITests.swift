@@ -10,7 +10,9 @@ final class PublicEstimateMoneyUITests: XCTestCase {
 
     func testIssuedMinorUnitsAreShownAsDollarsInOptionsAndApproval() {
         let app = open()
-        XCTAssertTrue(app.staticTexts["$1,575.00"].waitForExistence(timeout: 15))
+        let total = app.staticTexts["public-estimate-total"]
+        XCTAssertTrue(total.waitForExistence(timeout: 15))
+        XCTAssertEqual(total.label, "$1,575.00")
         let option = app.buttons["estimate-option-00000000-0000-4000-8000-000000000102"]
         XCTAssertTrue(option.waitForExistence(timeout: 10))
         if !option.isHittable { app.swipeUp() }
@@ -20,8 +22,9 @@ final class PublicEstimateMoneyUITests: XCTestCase {
 
     func testDiscountIsShownInMinorUnits() {
         let app = open(["--paper-preview-public-estimate-discount"])
-        XCTAssertTrue(app.staticTexts["$95.00"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.staticTexts["$9,500.00"].exists)
+        let total = app.staticTexts["public-estimate-total"]
+        XCTAssertTrue(total.waitForExistence(timeout: 15))
+        XCTAssertEqual(total.label, "$95.00")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "-$5.00")).firstMatch.waitForExistence(timeout: 5))
     }
     func testUnsupportedCurrencyBlocksApprovalWithExplanation() {
