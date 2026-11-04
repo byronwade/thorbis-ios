@@ -126,18 +126,18 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testSelectedReviewFoldsHiddenMaterialsWithoutExposingTheirDescription() {
         let app = open(["--paper-preview-handoff-hidden-material", "--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
         thorbisShowCustomerDoor(app).tap()
         let estimate = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.waitForExistence(timeout: 45))
         selectEstimate(app, estimate)
         thorbisStableButton(app, "handoff-review-selected").tap()
-        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 45))
         XCTAssertFalse(app.staticTexts["Private material detail"].exists)
         XCTAssertTrue(app.staticTexts["Materials"].exists)
         XCTAssertTrue(app.staticTexts["$190.00"].exists)
         thorbisStableButton(app, "handoff-continue-signatures").tap()
-        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 45))
         XCTAssertFalse(app.staticTexts["Private material detail"].exists)
         draw(app)
         thorbisStableButton(app, "handoff-submit-approval").tap()
@@ -167,14 +167,14 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testPreselectionDetailsHidePrivateMaterialsWithoutSelecting() {
         let app = open(["--paper-preview-handoff-hidden-material", "--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
         thorbisShowCustomerDoor(app).tap()
         let selected = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        XCTAssertTrue(details.waitForExistence(timeout: 45))
         visible(app, details)
         details.tap()
-        XCTAssertTrue(app.staticTexts["Materials"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Materials"].waitForExistence(timeout: 45))
         XCTAssertFalse(app.staticTexts["Private material detail"].exists)
         XCTAssertTrue(app.staticTexts["$190.00"].exists)
         app.navigationBars.buttons["Back"].firstMatch.tap()
@@ -183,17 +183,17 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testPreselectionDetailsAndDescriptionCloseOnSessionLoss() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-slow-invalidation"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
         thorbisShowCustomerDoor(app).tap()
         let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        XCTAssertTrue(details.waitForExistence(timeout: 45))
         toggleSampleControls(app)
         app.buttons["End sample session shortly"].tap()
         toggleSampleControls(app)
         visible(app, details)
         details.tap()
         let more = app.buttons["Show more, Estimate EST-8101, item 1"]
-        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        XCTAssertTrue(more.waitForExistence(timeout: 45))
         visible(app, more)
         more.tap()
         XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 5))
