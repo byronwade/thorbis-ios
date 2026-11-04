@@ -117,7 +117,7 @@ import Foundation
         guard items.contains(where: { $0.entityId == id }) else { return nil }
         let requestRevision = revision
         do {
-            let invoice = try await api.liveFieldInvoice(id)
+            let invoice = try await SavedCopies.$liveOnly.withValue(true) { try await api.liveFieldInvoice(id) }
             try Task.checkCancellation()
             guard revision == requestRevision else { return nil }
             guard current(isCurrent), invoice.id == id, invoice.organizationId == organizationID else {
