@@ -87,7 +87,9 @@ final class CustomerPhotoHandoffUITests: XCTestCase {
         app.scrollViews.firstMatch.swipeUp()
         XCTAssertTrue(second.isHittable)
         let present = app.buttons["job-media-show-customer"]
-        XCTAssertLessThan(second.frame.maxY, present.frame.minY, "The tile must be clear of the bottom selection action")
+        let selectionCount = app.staticTexts["job-media-selection-count"]
+        XCTAssertTrue(selectionCount.waitForExistence(timeout: 5))
+        XCTAssertLessThanOrEqual(second.frame.maxY, selectionCount.frame.minY, "The tile must be clear of the selection bar")
         second.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: selected, object: second)], timeout: 5), .completed)
         XCTAssertTrue(app.staticTexts["2 chosen"].waitForExistence(timeout: 5))

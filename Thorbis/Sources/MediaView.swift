@@ -747,6 +747,7 @@ struct JobMediaView: View {
             HStack {
                 Text(count == 0 ? "Tap photos to choose them" : "\(count) chosen")
                     .font(Theme.font(15, weight: .medium)).monospacedDigit()
+                    .accessibilityIdentifier("job-media-selection-count")
                 Spacer()
                 Button(count == storedPhotos.count ? "Clear" : "Choose all") {
                     updatePicked(count == storedPhotos.count ? [] : Set(storedPhotos.map(\.id)))
