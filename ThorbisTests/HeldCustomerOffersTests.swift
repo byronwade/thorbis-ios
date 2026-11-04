@@ -16,6 +16,21 @@ final class HeldCustomerOffersTests: XCTestCase {
         {"contractVersion":1,"id":"018f0000-aaaa-7000-8000-000000000012","identity":"\(identity)","quoteIdentity":"\(identity)","expiresAt":"\(expires)","currency":"USD","totalAmount":\(total),"base":{"totalAmount":1000,"lines":[{"description":"Base","quantity":1,"unitPrice":1000,"totalAmount":1000}]},"addOns":[{"id":"\(offerID)","title":"\(name)","description":"Extra","quantity":2,"totalAmount":1000,"lines":[{"description":"Extra work","quantity":4,"unitPrice":250,"totalAmount":1000}]}]}
         """.utf8))
     }
+    func testOfferAuthorityRetiresOnActorWorkspaceOriginSessionOrCapabilityChange() {
+        let sessionID = UUID(), apiID = UUID()
+        let scope = CustomerOfferAuthorityScope(actorID: "actor", organizationID: "org", sessionGeneration: sessionID,
+            apiGeneration: apiID, origin: "https://example.test")
+        func check(actor: String? = "actor", org: String? = "org", session: UUID? = nil, api: UUID? = nil,
+                   origin: String? = "https://example.test", ready: Bool = true, view: Bool = true,
+                   approve: Bool = true, job: Bool = true) -> Bool {
+            scope.permits(actorID: actor, organizationID: org, sessionGeneration: session ?? sessionID, apiGeneration: api ?? apiID,
+                origin: origin, sessionReady: ready, canViewEstimate: view, canApprove: approve, canViewJob: job)
+        }
+        XCTAssertTrue(check())
+        XCTAssertFalse(check(actor: "other")); XCTAssertFalse(check(org: "other"))
+        XCTAssertFalse(check(session: UUID())); XCTAssertFalse(check(api: UUID())); XCTAssertFalse(check(origin: "https://other.test"))
+        XCTAssertFalse(check(ready: false)); XCTAssertFalse(check(view: false)); XCTAssertFalse(check(approve: false)); XCTAssertFalse(check(job: false))
+    }
     func testUnselectedByDefaultAndChangingQuantityRetiresReviewedQuote() throws {
         var cart = CustomerOfferCart(revisionNumber: 1, contentHash: hash, optionID: nil)
         XCTAssertTrue(cart.install(try offers(), ticket: cart.ticket))
@@ -50,6 +65,9 @@ final class HeldCustomerOffersTests: XCTestCase {
         XCTAssertFalse(reviewed.matchesAcceptance(try receipt(1999, "Customer", 2), signerName: "Customer"))
         XCTAssertFalse(reviewed.matchesAcceptance(try receipt(2000, "Other", 2), signerName: "Customer"))
         XCTAssertFalse(reviewed.matchesAcceptance(try receipt(2000, "Customer", 1), signerName: "Customer"))
+        XCTAssertFalse(reviewed.matchesAcceptance(nil, signerName: "Customer"))
+        XCTAssertFalse(reviewed.matches(token: "token", revisionNumber: 1, contentHash: "different", optionID: nil, generation: generation))
+        XCTAssertFalse(reviewed.matches(token: "token", revisionNumber: 1, contentHash: hash, optionID: offerID, generation: generation))
         XCTAssertFalse(reviewed.matches(token: "different", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
         XCTAssertFalse(reviewed.matches(token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: UUID()))
     }

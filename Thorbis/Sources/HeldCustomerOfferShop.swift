@@ -8,6 +8,7 @@ struct HeldCustomerOfferShop: View {
     let onSelectionChange: () -> Void
     let initialReview: CustomerOfferReview?
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -53,7 +54,10 @@ struct HeldCustomerOfferShop: View {
             }
         }
         .task { generation = api.requestGeneration; await load() }
-        .onChange(of: api.requestGeneration) { _, _ in cart.retire(); loaded = false; error = "Ask your technician to reopen this estimate." }
+        .onChange(of: api.requestGeneration) { _, _ in cart.retire(); reading = nil; loaded = false; error = "Ask your technician to reopen this estimate." }
+        .onChange(of: session.authorityRevision) { _, _ in
+            if !currentAuthority() { cart.retire(); reading = nil; loaded = false }
+        }
     }
 
     private var content: some View {
@@ -118,9 +122,12 @@ struct HeldCustomerOfferShop: View {
                     Button("Remove") { changeQuantity(nil, for: item.id) }.frame(minHeight: 56)
                     Spacer()
                     Button("−") { changeQuantity(selected - item.quantityPolicy.step, for: item.id) }
+                        .disabled(busy || selected - item.quantityPolicy.step < item.quantityPolicy.min)
                         .frame(minWidth: 56, minHeight: 56).accessibilityLabel("Decrease \(item.title)")
                     Text("\(selected)").font(Theme.customerFont(20))
+                        .accessibilityLabel("Quantity \(selected), minimum \(item.quantityPolicy.min), maximum \(item.quantityPolicy.max)")
                     Button("+") { changeQuantity(selected + item.quantityPolicy.step, for: item.id) }
+                        .disabled(busy || selected + item.quantityPolicy.step > item.quantityPolicy.max)
                         .frame(minWidth: 56, minHeight: 56).accessibilityLabel("Increase \(item.title)")
                 }
             } else {

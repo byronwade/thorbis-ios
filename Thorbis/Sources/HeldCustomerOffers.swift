@@ -5,6 +5,21 @@ enum CustomerOfferCapability {
     static let isEnabled = false
 }
 
+struct CustomerOfferAuthorityScope: Equatable {
+    let actorID: String
+    let organizationID: String
+    let sessionGeneration: UUID
+    let apiGeneration: UUID
+    let origin: String
+
+    func permits(actorID: String?, organizationID: String?, sessionGeneration: UUID, apiGeneration: UUID,
+                 origin: String?, sessionReady: Bool, canViewEstimate: Bool, canApprove: Bool, canViewJob: Bool) -> Bool {
+        !self.actorID.isEmpty && !self.organizationID.isEmpty && !self.origin.isEmpty && sessionReady &&
+        self.actorID == actorID && self.organizationID == organizationID && self.sessionGeneration == sessionGeneration &&
+        self.apiGeneration == apiGeneration && self.origin == origin && canViewEstimate && canApprove && canViewJob
+    }
+}
+
 struct CustomerOfferSelection: Codable, Equatable, Hashable {
     let offerId: String
     let quantity: Int

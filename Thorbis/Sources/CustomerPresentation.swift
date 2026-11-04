@@ -113,6 +113,7 @@ struct CustomerEstimatePresentation: View {
     let offerCapabilityEnabled: Bool
 
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var flow: CustomerEstimateFlow
@@ -128,6 +129,7 @@ struct CustomerEstimatePresentation: View {
     @State private var showTerms = false
     @State private var showOfferShop = false
     @State private var standaloneOfferReview: CustomerOfferReview?
+    @State private var offerSession: CustomerOfferAuthorityScope?
     @State private var isMember = false
     @State private var openingReview = false
     @State private var openingError: String?
@@ -161,6 +163,15 @@ struct CustomerEstimatePresentation: View {
     private var type: CustomerType { CustomerType(sizeClass) }
     /// The proven drawn-signature approval needs a job and a single scope; options go through
     /// the customer action, which records the chosen option with the typed name.
+    private var offerAuthorityCurrent: Bool {
+        guard let identity = offerSession, identity.organizationID == flow.estimate.organizationId,
+              identity.permits(actorID: session.user?.id, organizationID: session.activeOrganization?.id,
+                sessionGeneration: session.generation, apiGeneration: api.requestGeneration, origin: api.normalizedOrigin,
+                sessionReady: session.phase == .ready, canViewEstimate: session.can("estimate.view", feature: "estimates"),
+                canApprove: session.can("estimate.approve", feature: "estimates"),
+                canViewJob: jobID == nil || session.can("job.view", feature: "jobs")) else { return false }
+        return handoff?.current() != false && handoff?.canApprove() != false
+    }
     private var requiresOffers: Bool { offerCapabilityEnabled && flow.issuedRevision?.offers?.isEmpty == false }
     private var offerReview: CustomerOfferReview? {
         get { handoff?.offerReview ?? standaloneOfferReview }
@@ -181,7 +192,10 @@ struct CustomerEstimatePresentation: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if let handoff, !handoff.current() {
+                    if requiresOffers && offerSession != nil && !offerAuthorityCurrent {
+                        CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
+                                             message: "Ask your technician to reopen this estimate.")
+                    } else if let handoff, !handoff.current() {
                         CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
                                              message: "Return the device to your technician to reopen this job.")
                     } else if handoff?.outcome == .unknown {
@@ -234,10 +248,10 @@ struct CustomerEstimatePresentation: View {
             if let link, let revision = flow.issuedRevision {
                 HeldCustomerOfferShop(token: link.token, revisionNumber: revision.revisionNumber,
                     contentHash: link.action.contentHash, optionID: flow.selectedOptionID,
-                    currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }, initialReview: offerReview,
+                    currentAuthority: { offerAuthorityCurrent }, initialReview: offerReview,
                     onSelectionChange: { offerReview = nil; strokes = []; uploadedSignature = nil }) { quote, selections in
                     guard let generation = reviewGeneration, generation == api.requestGeneration,
-                          handoff?.current() != false, handoff?.canApprove() != false,
+                          offerAuthorityCurrent,
                           quote.base.id?.lowercased() == flow.selectedOptionID?.lowercased(),
                           self.link?.token == link.token, flow.issuedRevision == revision else { return }
                     offerReview = CustomerOfferReview(quote: quote, selections: selections, token: link.token,
@@ -487,7 +501,9 @@ struct CustomerEstimatePresentation: View {
 
     @ViewBuilder private var bottomBar: some View {
         VStack(spacing: 10) {
-            if let handoff, handoff.outcome != nil {
+            if requiresOffers && offerSession != nil && !offerAuthorityCurrent {
+                CustomerSecondaryButton(title: "Hand back to the technician", type: type, action: onDone)
+            } else if let handoff, handoff.outcome != nil {
                 if handoff.outcome?.isApproved == true {
                     CustomerPresentationCommit(title: handoff.continueTitle, enabled: true, busy: false, type: type, action: onDone)
                 } else if case .retryable? = handoff.outcome {
@@ -630,6 +646,10 @@ struct CustomerEstimatePresentation: View {
         if let handoff {
             guard handoff.current() else { return }
             if handoff.signature != nil || handoff.outcome != nil || handoff.running {
+                if handoff.offerReview != nil, let actorID = session.user?.id, let organizationID = session.activeOrganization?.id, let origin = api.normalizedOrigin {
+                    offerSession = CustomerOfferAuthorityScope(actorID: actorID, organizationID: organizationID,
+                        sessionGeneration: session.generation, apiGeneration: api.requestGeneration, origin: origin)
+                }
                 try? flow.useIssuedRevision(handoff.reviewed.revision)
                 flow.selectedOptionID = handoff.reviewed.optionID
                 flow.step = handoff.outcome?.isApproved == true ? .done : .sign
@@ -643,7 +663,7 @@ struct CustomerEstimatePresentation: View {
         openingReview = true
         openingError = nil
         error = nil
-        if handoff == nil { link = nil; uploadedSignature = nil; standaloneOfferDecision = nil; offerReview = nil }
+        if handoff == nil { link = nil; uploadedSignature = nil; standaloneOfferDecision = nil; offerReview = nil; offerSession = nil }
         consentText = handoff?.link?.action.consentText
         strokes = []
         defer { if reviewRequestID == requestID { openingReview = false } }
@@ -669,14 +689,20 @@ struct CustomerEstimatePresentation: View {
     private func openOfferShop() async {
         guard requiresOffers, reviewReady, handoff?.signature == nil, standaloneOfferDecision == nil, !actionBusy, let revision = flow.issuedRevision else { return }
         let generation = api.requestGeneration
+        guard let actorID = session.user?.id, let organizationID = session.activeOrganization?.id, let origin = api.normalizedOrigin else { return }
+        let currentSession = CustomerOfferAuthorityScope(actorID: actorID, organizationID: organizationID,
+            sessionGeneration: session.generation, apiGeneration: api.requestGeneration, origin: origin)
+        if let offerSession, offerSession != currentSession { error = "Ask your technician to reopen this estimate."; return }
+        offerSession = currentSession
+        guard offerAuthorityCurrent else { error = "Ask your technician to reopen this estimate."; return }
         busy = true
         defer { busy = false }
         do {
             let opened: (token: String, action: PublicEstimateAction)
             if let link { opened = link }
-            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) }
+            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { offerAuthorityCurrent }) }
             try Task.checkCancellation()
-            guard generation == api.requestGeneration, handoff?.current() != false, handoff?.canApprove() != false else { return }
+            guard generation == api.requestGeneration, offerAuthorityCurrent else { return }
             link = opened
             showOfferShop = true
         } catch is CancellationError {} catch { self.error = error.customerSentence(.openEstimate) }
@@ -684,6 +710,7 @@ struct CustomerEstimatePresentation: View {
 
     private func startSigning() async {
         error = nil
+        if requiresOffers && offerReview != nil && !offerAuthorityCurrent { error = "Ask your technician to reopen this estimate."; return }
         if requiresOffers, let offerReview, let link, let revision = flow.issuedRevision,
            !offerReview.matches(token: link.token, revisionNumber: revision.revisionNumber, contentHash: link.action.contentHash,
                                 optionID: flow.selectedOptionID, generation: api.requestGeneration) {
@@ -721,6 +748,7 @@ struct CustomerEstimatePresentation: View {
 
     private func approve() async {
         guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
+        guard !requiresOffers || offerAuthorityCurrent else { return }
         let enteredName = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
         let signer = requiresOffers ? enteredName.precomposedStringWithCanonicalMapping : enteredName
         guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) || handoff?.signature != nil else { return }
@@ -759,7 +787,8 @@ struct CustomerEstimatePresentation: View {
                 if let jobID { _ = try? await uploadSignature(jobID: jobID) }
                 try Task.checkCancellation()
                 guard generation == api.requestGeneration else { return }
-                guard handoff?.current() != false, handoff?.canApprove() != false else { return }
+                guard handoff?.current() != false, handoff?.canApprove() != false,
+                      !requiresOffers || offerAuthorityCurrent else { return }
                 let newDecision: PublicEstimateActionDecision
                 if requiresOffers {
                     guard let offerReview,
@@ -781,7 +810,7 @@ struct CustomerEstimatePresentation: View {
                 handoff?.publicDecision = decision
                 handoff?.submissionStarted = true; handoff?.retryVerified = false
                 let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
-                guard generation == api.requestGeneration else { return }
+                guard generation == api.requestGeneration, !requiresOffers || offerAuthorityCurrent else { return }
                 if let handoff {
                     guard handoff.current() else { return }
                     guard handoff.canApprove() else { handoff.report(.unknown); return }

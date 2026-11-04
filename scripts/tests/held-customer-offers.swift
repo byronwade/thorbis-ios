@@ -2,6 +2,16 @@ import Foundation
 
 @main struct TestCart {
   static func main() throws {
+    let session = UUID(), api = UUID()
+    let authority = CustomerOfferAuthorityScope(actorID: "actor", organizationID: "org", sessionGeneration: session, apiGeneration: api, origin: "https://example.test")
+    func allowed(actor: String? = "actor", organization: String? = "org", sessionID: UUID? = nil, apiID: UUID? = nil,
+                 origin: String? = "https://example.test", view: Bool = true, approve: Bool = true, job: Bool = true) -> Bool {
+      authority.permits(actorID: actor, organizationID: organization, sessionGeneration: sessionID ?? session, apiGeneration: apiID ?? api,
+        origin: origin, sessionReady: true, canViewEstimate: view, canApprove: approve, canViewJob: job)
+    }
+    precondition(allowed() && !allowed(actor: "other") && !allowed(organization: "other"))
+    precondition(!allowed(sessionID: UUID()) && !allowed(apiID: UUID()) && !allowed(origin: "https://other.test"))
+    precondition(!allowed(view: false) && !allowed(approve: false) && !allowed(job: false))
     let offer = "018f0000-aaaa-7000-8000-000000000011"
     let hash = "sha256:" + String(repeating: "a", count: 64)
     let data = """
