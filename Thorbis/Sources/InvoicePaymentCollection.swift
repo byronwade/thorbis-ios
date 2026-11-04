@@ -1111,10 +1111,12 @@ struct InvoicePaymentCollectionSheet: View {
                 await model.load()
             case .pending:
                 recoveryMessage = "The payment is not confirmed yet. Check again before collecting."
+            case .settledNeedsReview:
+                recoveryMessage = "The payment was verified. Contact your office before collecting again."
             case .unknownAttempt:
                 recoveryMessage = "The request did not return an attempt number. Contact your office before collecting."
             case .otherAccount:
-                recoveryMessage = "Open the workspace that started this payment to check it."
+                recoveryMessage = "Use the account and workspace that started this payment, or contact your office."
             case .restartRequired:
                 recoveryMessage = "Close and reopen Thorbis, then check this payment again."
             }

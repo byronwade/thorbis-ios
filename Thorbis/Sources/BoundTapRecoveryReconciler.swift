@@ -1,6 +1,6 @@
 import Foundation
 
-enum BoundTapRecoveryResult: Equatable { case confirmed, pending, otherAccount, unknownAttempt, restartRequired }
+enum BoundTapRecoveryResult: Equatable { case confirmed, pending, settledNeedsReview, otherAccount, unknownAttempt, restartRequired }
 
 private struct BoundTapSettlementRequest: Encodable { let paymentIntentId: String }
 private struct BoundTapSettlementResponse: Decodable {
@@ -64,9 +64,9 @@ private struct BoundTapSettlementResponse: Decodable {
         guard BoundTapReconciliation.matches(receipt: receipt, snapshot: snapshot),
               snapshot.records.contains(where: { $0.id == paymentID && $0.idempotencyKey == "tap:\(receipt.invoiceID):\(attemptID)" }),
               current(), try store.load() == receipt else { return .pending }
-        // A payment row alone cannot prove that Stripe settled this exact
-        // attempt. Keep the receipt until the server supplies that evidence.
-        return .pending
+        // Settlement matches, but safe cross-process receipt clearance is not
+        // qualified. Keep the receipt and ask the office to finish recovery.
+        return .settledNeedsReview
     }
 
     private static func fresh(_ value: APIReadProvenance, path: String, generation: UUID, origin: String,
