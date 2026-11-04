@@ -365,11 +365,13 @@ struct JobCloseoutView: View {
                         }
                         if !unassociatedRecordedInvoiceIDs.isEmpty {
                             if canRefreshRecordedPayments {
-                                Text("Connect, then open these invoices from Invoices on this phone to refresh payments already sent.")
+                                Text("Connect, then search these invoice IDs in Invoices on this phone to refresh payments already sent.")
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                                 ForEach(unassociatedRecordedInvoiceIDs, id: \.self) { id in
-                                    Text("Invoice \(id.suffix(8).uppercased())")
-                                        .font(Theme.font(15)).frame(minHeight: 44, alignment: .leading)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Invoice \(id.suffix(4).uppercased())").font(Theme.font(15, weight: .medium))
+                                        Text(id).font(Theme.monoFont(12)).textSelection(.enabled)
+                                    }.frame(minHeight: 44, alignment: .leading)
                                 }
                             } else {
                                 Text("Ask your office to enable your invoice and payment access, then refresh those invoices on this phone.")
