@@ -115,7 +115,9 @@ struct PublicEstimateActionView: View {
 
     @ViewBuilder
     private var approvalFooter: some View {
-        if let action = model.action, action.signingOffered || action.canApprovePlainly {
+        if let action = model.action,
+           action.signingOffered || action.canApprovePlainly ||
+            (!action.amountsAvailableForApproval && action.status == .sent && action.allowedActions.contains("approve")) {
             VStack(spacing: 5) {
                 Button(action: approve) {
                     HStack(spacing: 8) {
