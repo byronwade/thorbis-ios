@@ -109,6 +109,14 @@ final class InvoiceGatewayPagerTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 4)
     }
 
+    func testPhraseAtUTF16LimitCanRequestOnePage() async {
+        let (_, _, pager) = await prepare([.init(200, #"{"items":[]}"#)])
+        await pager.start(customer: String(repeating: "😀", count: 64), isCurrent: { true })
+        XCTAssertNil(pager.error)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 5)
+        XCTAssertTrue(pager.isPartial)
+    }
+
     func testCustomerInputCannotInjectSearchTokens() {
         XCTAssertEqual(InvoiceGatewayPager.customerQuery(#"Acme" type:job \ office"#),
                        #"type:invoice customer:"Acme\" type:job \\ office""#)
