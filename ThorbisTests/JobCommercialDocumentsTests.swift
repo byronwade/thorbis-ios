@@ -90,6 +90,33 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 4)
     }
 
+    func testOfflineCashAndCheckRemainAvailableThroughTheScopedPaymentRoute() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "job-payment-route-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let outbox = FieldOutbox(directory: directory, defaults: defaults)
+        outbox.bind(actorID: id(3), organizationID: id(1))
+        for method in [FieldPaymentMethod.cash, .check] {
+            let value = Int.random(in: 100_000_000...999_999_999)
+            let record = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(value).utf8))
+            JobDetailCache.save(invoice: record)
+            let model = InvoicePaymentCollectionModel(api: api([URLProtocolFixture.offline]), invoiceID: record.id,
+                intentStore: InvoicePaymentIntentStore(defaults: defaults), makeIdempotencyKey: { "offline-\(UUID().uuidString)" },
+                expectedJobScope: scope())
+            model.outbox = outbox
+            model.policyVersion = 1
+            await model.load()
+            XCTAssertTrue(model.offlineCopy)
+            let route = try XCTUnwrap(JobInvoicePaymentRoute.make(requestedID: record.id, selectedID: record.id,
+                selected: record, loadedID: record.id, model: model, scope: scope()))
+            let queued = await route.model.record(amountCents: 1000, method: method)
+            XCTAssertTrue(queued)
+            XCTAssertEqual(outbox.waitingPayments(invoiceID: record.id).first?.method, method.rawValue)
+        }
+    }
+
     func testDelayedInvoiceReadCannotOpenTheNewSelectionForTheOldRequest() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let client = api([.init(200, invoice(50), gate: gate), .init(200, invoice(51)),
