@@ -44,22 +44,27 @@ private struct TerminalCallbackBox<Value>: @unchecked Sendable {
     }
 }
 
-enum StripeBoundTerminalError: Error { case alreadyInitialized }
-
 /// Owns the actual singleton/provider pairing. If the legacy provider has
 /// already initialized Stripe, refuse to operate instead of assuming ownership.
 @MainActor final class StripeBoundTerminalEnvironment {
     static let shared = StripeBoundTerminalEnvironment()
     private let provider = AttemptBoundTokenProvider()
-    private var ownsTerminal = false
+    private lazy var owner = TerminalOwnership(isInitialized: { Terminal.isInitialized() }, initialize: { [provider] in
+        Terminal.initWithTokenProvider(provider)
+    })
 
     private init() {}
 
-    func claim() throws {
-        if ownsTerminal { return }
-        guard !Terminal.isInitialized() else { throw StripeBoundTerminalError.alreadyInitialized }
-        Terminal.initWithTokenProvider(provider)
-        ownsTerminal = true
+    var legacyAvailable: Bool { owner.legacyAvailable }
+    func beginLegacyCollection() -> Bool { owner.beginLegacyCollection() }
+    func endLegacyCollection() { owner.endLegacyCollection() }
+
+    func claimLegacy(_ fetch: @escaping @MainActor () async throws -> String) throws {
+        try owner.claimLegacy { provider.fetch = fetch }
+    }
+
+    func claimBound(_ fetch: @escaping @MainActor () async throws -> String) throws {
+        try owner.claimBound { provider.fetch = fetch }
     }
 
     fileprivate func configure(_ fetch: @escaping @MainActor () async throws -> String) {
@@ -80,7 +85,10 @@ enum StripeBoundTerminalError: Error { case alreadyInitialized }
     init(clientSecret: String, environment: StripeBoundTerminalEnvironment = .shared) throws {
         self.environment = environment
         self.clientSecret = clientSecret
-        try environment.claim()
+    }
+
+    func bootstrap(_ fetch: @escaping @MainActor () async throws -> String) throws {
+        try environment.claimBound(fetch)
     }
 
     var isConnected: Bool { Terminal.shared.connectedReader != nil }

@@ -16,6 +16,10 @@ import XCTest
     var confirmationError = false
     var afterConfirm: (() -> Void)?
     var collectionError = false
+    var bootstrapOccupied = false
+    func bootstrap(_ fetch: @escaping @MainActor () async throws -> String) throws {
+        if bootstrapOccupied { throw TerminalOwnershipError.occupied }
+    }
     func disconnect() async throws {
         events.append("disconnect")
         if disconnectError { throw CancellationError() }
@@ -38,6 +42,19 @@ import XCTest
 }
 
 @MainActor final class TerminalSessionCoordinatorTests: XCTestCase {
+    func testDefiniteOwnerRefusalDoesNotParkTheNextAttempt() async throws {
+        defer { TerminalSessionCoordinator.resetForTests() }
+        let coordinator = TerminalSessionCoordinator(), driver = FakeTerminalSession()
+        let a = binding("a")
+        driver.bootstrapOccupied = true
+        do {
+            _ = try await coordinator.collect(binding: a, driver: driver, isCurrent: { true }, fetch: { self.token(a) })
+            XCTFail("Expected occupied owner")
+        } catch is TerminalOwnershipError {}
+        driver.bootstrapOccupied = false
+        _ = try await coordinator.collect(binding: a, driver: driver, isCurrent: { true }, fetch: { self.token(a) })
+        XCTAssertTrue(driver.events.contains("confirm"))
+    }
     private func binding(_ id: String, location: String = "location") -> TerminalAttemptBinding {
         .init(invoiceID: "invoice-\(id)", attemptID: "attempt-\(id)", paymentIntentID: "payment-\(id)", locationID: location,
               origin: "https://app.thorbis.com", scope: "workspace-\(id)", generation: UUID())

@@ -46,6 +46,9 @@ final class TapToPayController: ObservableObject {
     @Published private(set) var phase: Phase = .idle
 
     static let feature = "tap_to_pay"
+    // Legacy tokens have no durable attempt binding. Keep this entry closed
+    // even if a build flag is changed, until the bound flow replaces it.
+    private static let legacyCollectionQualified = false
 
     static var buildEnabled: Bool { TapToPayReadiness.buildEnabled }
 
@@ -55,7 +58,7 @@ final class TapToPayController: ObservableObject {
         #if targetEnvironment(simulator)
         false
         #else
-        PaymentCardReader.isSupported && TerminalSetup.shared.supportsTapToPay
+        PaymentCardReader.isSupported
         #endif
     }
 
@@ -72,16 +75,29 @@ final class TapToPayController: ObservableObject {
     /// returns true only once this intent's webhook-settled payment shows up.
     func charge(api: APIClient, refresh: @escaping @MainActor (CardPresentIntent) async -> Bool) async {
         guard !busy else { return }
-        guard Self.buildEnabled, Self.deviceSupported else {
+        guard Self.buildEnabled, Self.legacyCollectionQualified, Self.deviceSupported else {
             phase = .unavailable
             return
         }
+        guard TerminalSetup.shared.beginLegacyCollection() else {
+            phase = .failed("Another card payment is already in progress.")
+            return
+        }
+        var collectionSettled = false
+        var sdkStarted = false
+        defer { if collectionSettled || !sdkStarted { TerminalSetup.shared.endLegacyCollection() } }
         phase = .preparing
         do {
             let intent: CardPresentIntent
             if let cached = self.intent { intent = cached } else { intent = try await api.cardPresentIntent(invoiceID: invoiceID) }
             self.intent = intent
-            TerminalSetup.shared.prepare(api: api, invoiceID: invoiceID)
+            try TerminalSetup.shared.prepare(api: api, invoiceID: invoiceID)
+            sdkStarted = true
+            guard TerminalSetup.shared.supportsTapToPay else {
+                collectionSettled = true
+                phase = .unavailable
+                return
+            }
             try await TerminalSetup.shared.connect(locationID: intent.locationId)
             let paymentIntent = try await Terminal.shared.retrievePaymentIntent(clientSecret: intent.clientSecret)
             phase = .waitingForCard
@@ -90,7 +106,7 @@ final class TapToPayController: ObservableObject {
             _ = try await Terminal.shared.confirmPaymentIntent(collected)
             phase = .recording
             for attempt in 0..<20 {
-                if await refresh(intent) { phase = .paid; return }
+                if await refresh(intent) { collectionSettled = true; phase = .paid; return }
                 try await Task.sleep(nanoseconds: UInt64(min(1 + attempt, 4)) * 1_000_000_000)
             }
             // Money moved; Thorbis records it as soon as Stripe's confirmation arrives.
@@ -134,28 +150,24 @@ final class TapToPayController: ObservableObject {
 @MainActor
 final class TerminalSetup: NSObject {
     static let shared = TerminalSetup()
-    private let tokens = TokenProvider()
-    private var installed = false
+    func beginLegacyCollection() -> Bool {
+        StripeBoundTerminalEnvironment.shared.beginLegacyCollection()
+    }
 
-    func prepare(api: APIClient, invoiceID: String) {
-        tokens.api = api
-        tokens.invoiceID = invoiceID
-        installIfNeeded()
+    func endLegacyCollection() { StripeBoundTerminalEnvironment.shared.endLegacyCollection() }
+    func prepare(api: APIClient, invoiceID: String) throws {
+        try StripeBoundTerminalEnvironment.shared.claimLegacy { [weak api] in
+            guard let api else { throw CancellationError() }
+            return try await api.terminalConnectionToken(invoiceID: invoiceID).secret
+        }
     }
 
     var supportsTapToPay: Bool {
-        installIfNeeded()
+        guard StripeBoundTerminalEnvironment.shared.legacyAvailable, Terminal.isInitialized() else { return false }
         if case .success = Terminal.shared.supportsReaders(of: .tapToPay, discoveryMethod: .tapToPay, simulated: false) {
             return true
         }
         return false
-    }
-
-    private func installIfNeeded() {
-        if !installed {
-            Terminal.initWithTokenProvider(tokens)
-            installed = true
-        }
     }
 
     func connect(locationID: String) async throws {
@@ -173,31 +185,23 @@ final class TerminalSetup: NSObject {
     }
 }
 
-private final class TokenProvider: NSObject, ConnectionTokenProvider, @unchecked Sendable {
-    weak var api: APIClient?
-    var invoiceID = ""
-
-    func fetchConnectionToken(_ completion: @escaping ConnectionTokenCompletionBlock) {
-        let invoiceID = invoiceID
-        let reply = Unchecked(completion)
-        Task { @MainActor [weak api] in
-            guard let api else { return reply.value(nil, CancellationError()) }
-            do { reply.value(try await api.terminalConnectionToken(invoiceID: invoiceID).secret, nil) }
-            catch { reply.value(nil, error) }
-        }
-    }
-}
-
 /// Discovery reports readers through a delegate; the first one (this iPhone) is all Tap to Pay needs.
 final class Discovery: NSObject, DiscoveryDelegate, @unchecked Sendable {
-    private var continuation: CheckedContinuation<Reader, Error>?
+    private let continuation = TerminalOneShot<CheckedContinuation<Reader, Error>>()
     private var cancelable: Cancelable?
 
     @MainActor func first(_ configuration: DiscoveryConfiguration) async throws -> Reader {
-        try await withCheckedThrowingContinuation { continuation in
-            self.continuation = continuation
-            cancelable = Terminal.shared.discoverReaders(configuration, delegate: self) { [weak self] error in
-                if let error { self?.finish(.failure(error)) }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation.install(continuation)
+                cancelable = Terminal.shared.discoverReaders(configuration, delegate: self) { [weak self] error in
+                    self?.finish(.failure(error ?? DiscoveryEnded()))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [self] in
+                cancelable?.cancel { _ in }
+                finish(.failure(CancellationError()))
             }
         }
     }
@@ -208,12 +212,13 @@ final class Discovery: NSObject, DiscoveryDelegate, @unchecked Sendable {
     }
 
     private func finish(_ result: Result<Reader, Error>) {
-        guard let continuation else { return }
-        self.continuation = nil
+        guard let continuation = continuation.take() else { return }
         let sendable = Unchecked(result)
         continuation.resume(with: sendable.value)
     }
 }
+
+private struct DiscoveryEnded: Error {}
 
 /// Stripe's Objective-C callbacks and models predate Sendable; they are used on one thread at a time.
 private struct Unchecked<Value>: @unchecked Sendable {

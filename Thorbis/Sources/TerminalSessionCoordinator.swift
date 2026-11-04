@@ -32,6 +32,7 @@ struct TerminalRetrievedIntent<Value> {
 @MainActor protocol TerminalSessionDriver {
     associatedtype Intent
     associatedtype Result
+    func bootstrap(_ fetch: @escaping @MainActor () async throws -> String) throws
     var isConnected: Bool { get }
     func disconnect() async throws
     func clearCredentials() throws
@@ -40,6 +41,10 @@ struct TerminalRetrievedIntent<Value> {
     func retrieveIntent() async throws -> TerminalRetrievedIntent<Intent>
     func collect(_ intent: Intent) async throws -> TerminalRetrievedIntent<Intent>
     func confirm(_ intent: Intent) async throws -> Result
+}
+
+extension TerminalSessionDriver {
+    func bootstrap(_ fetch: @escaping @MainActor () async throws -> String) throws {}
 }
 
 /// Serializes the entire collection, not only reader connection. The caller
@@ -93,12 +98,7 @@ struct TerminalRetrievedIntent<Value> {
         guard !binding.paymentIntentID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TerminalBindingError.invalidIntent
         }
-        if driver.isConnected {
-            try await sdk { try await driver.disconnect() }
-            try checkAfterSDK()
-        }
-        try driver.clearCredentials()
-        try driver.configureTokenProvider {
+        let fetchBound: @MainActor () async throws -> String = {
             try check()
             let token = try await fetch()
             try check()
@@ -107,7 +107,25 @@ struct TerminalRetrievedIntent<Value> {
                   token.locationID == binding.locationID else { throw TerminalBindingError.invalidToken }
             return token.secret
         }
-        try check()
+        do {
+            try driver.bootstrap(fetchBound)
+        } catch is TerminalOwnershipError {
+            // Ownership refusal happens before this driver initializes SDK work.
+            throw TerminalOwnershipError.occupied
+        } catch {
+            Self.uncertainAttempt = binding.attemptID
+            throw TerminalBindingError.confirmationUncertain
+        }
+        try checkAfterSDK()
+        if driver.isConnected {
+            try await sdk { try await driver.disconnect() }
+            try checkAfterSDK()
+        }
+        try await sdk {
+            try driver.clearCredentials()
+            try driver.configureTokenProvider(fetchBound)
+        }
+        try checkAfterSDK()
         try await sdk { try await driver.connect(locationID: binding.locationID) }
         try checkAfterSDK()
         let intent = try await sdk { try await driver.retrieveIntent() }
