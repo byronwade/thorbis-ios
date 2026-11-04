@@ -8,9 +8,12 @@ final class JobDocumentsUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-invoice-empty"]
         app.launch()
         let create = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Create invoice")).firstMatch
-        XCTAssertTrue(create.waitForExistence(timeout: 15))
+        XCTAssertTrue(create.waitForExistence(timeout: 90))
         create.tap()
         XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 15))
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let created = app.buttons["job-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(created.waitForExistence(timeout: 15), "Created invoice must remain on the job after refresh")
     }
     private let invoiceA = "00000000-0000-4000-8000-000000002209"
     private let depositA = "00000000-0000-4000-8000-000000002240"

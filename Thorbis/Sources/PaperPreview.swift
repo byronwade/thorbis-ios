@@ -646,6 +646,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let lock = NSLock()
         var setupPaymentReads = 0
         var invoiceReads = 0
+        var completionInvoiceCreated = false
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
@@ -664,7 +665,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.completionInvoiceCreated = false; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
@@ -765,6 +766,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.screen == "job-invoice-empty", request.httpMethod == "POST",
            url.path == "/v1/jobs/\(PaperPreview.invoice.jobId ?? "")/completion-invoice" {
             status = 200
+            Self.scenario.lock.withLock { Self.scenario.completionInvoiceCreated = true }
             payload = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice))) ?? [:]
         } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
@@ -1132,7 +1134,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
-            if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
+            if PaperPreview.screen == "job-invoice-empty" {
+                let created = scenario.lock.withLock { scenario.completionInvoiceCreated }
+                let item = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice))
+                return ["items": created ? [item] : []]
+            }
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
         }
         if path == "/v1/invoices" && PaperPreview.screen == "owner-home" { return ["items": ownerHomeInvoices()] }
