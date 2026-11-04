@@ -333,6 +333,7 @@ struct JobMediaView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { customerPhotoRequest = UUID() }
         }
+        .onDisappear { customerPhotoRequest = UUID() }
         .onChange(of: readScope) { _, _ in
             customerPhotoRequest = UUID()
             preview.clear(); previewScope = nil; previewRecord = nil; busy = false; justCaptured = nil; captureMarkup = nil
