@@ -5,16 +5,48 @@ import Foundation
 struct JobInvoicePaymentRoute: Identifiable {
     let invoice: InvoiceRecord
     let model: InvoicePaymentCollectionModel
+    let scope: JobDocumentScope
+    let authorityToken: [String]
     var id: String { invoice.id }
+
+    func belongs(to current: JobDocumentScope) -> Bool {
+        scope.jobID == current.jobID && scope.organizationID == current.organizationID &&
+            scope.customerID == current.customerID && current.contains(invoice)
+    }
 
     @MainActor static func make(requestedID: String, selectedID: String?, selected: InvoiceRecord?,
                      loadedID: String?, model: InvoicePaymentCollectionModel?,
-                     scope: JobDocumentScope) -> Self? {
+                     scope: JobDocumentScope, authorityToken: [String] = []) -> Self? {
         guard selectedID == requestedID, loadedID == requestedID,
               let selected, selected.id == requestedID, scope.contains(selected),
               let model, let actual = model.invoice, actual.id == requestedID,
               scope.contains(actual), model.canRecordPayment else { return nil }
-        return Self(invoice: actual, model: model)
+        return Self(invoice: actual, model: model, scope: scope, authorityToken: authorityToken)
+    }
+}
+
+/// Multiple job entry points may ask for the same model while its first read
+/// is in flight. Wait for that read instead of treating its loading state as a refusal.
+@MainActor
+final class JobInvoicePaymentLoads {
+    private struct Flight {
+        let token: UUID
+        let model: InvoicePaymentCollectionModel
+        let task: Task<Void, Never>
+    }
+    private var flights: [ObjectIdentifier: Flight] = [:]
+
+    func load(_ model: InvoicePaymentCollectionModel) async {
+        let key = ObjectIdentifier(model)
+        if let flight = flights[key] {
+            await flight.task.value
+            return
+        }
+        let token = UUID()
+        let task = Task { await model.load() }
+        flights[key] = Flight(token: token, model: model, task: task)
+        await task.value
+        if flights[key]?.token == token { flights[key] = nil }
     }
 }
 
