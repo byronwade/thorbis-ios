@@ -107,6 +107,11 @@ import Foundation
         } catch {
             guard revision == requestRevision else { return }
             guard current(isCurrent) else { retire(); return }
+            if let status = (error as? Problem)?.status, [401, 403].contains(status) {
+                retire()
+                self.error = "Search access is no longer available."
+                return
+            }
             self.error = "Couldn't load more search results. Try again."
         }
     }

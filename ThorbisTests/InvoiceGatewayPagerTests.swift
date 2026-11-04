@@ -56,6 +56,30 @@ final class InvoiceGatewayPagerTests: XCTestCase {
         XCTAssertTrue(pager.isPartial)
     }
 
+    func testAuthoritativeDenialRetiresEarlierSearchPage() async {
+        let (_, _, pager) = await prepare([
+            .init(200, #"{"items":[\#(item(a))],"nextCursor":"next"}"#),
+            .init(403, #"{"title":"Denied","status":403}"#),
+        ])
+        await pager.start(customer: "Smith", isCurrent: { true })
+        XCTAssertEqual(pager.items.count, 1)
+        await pager.loadNext(isCurrent: { true })
+        XCTAssertTrue(pager.items.isEmpty)
+        XCTAssertNotNil(pager.error)
+    }
+
+    func testTransientFailureRetainsEarlierRowsAsPartial() async {
+        let (_, _, pager) = await prepare([
+            .init(200, #"{"items":[\#(item(a))],"nextCursor":"next"}"#),
+            .init(503, #"{"title":"Unavailable","status":503}"#),
+        ])
+        await pager.start(customer: "Smith", isCurrent: { true })
+        await pager.loadNext(isCurrent: { true })
+        XCTAssertEqual(pager.items.map(\.entityId), [a])
+        XCTAssertTrue(pager.isPartial)
+        XCTAssertNotNil(pager.error)
+    }
+
     func testRetiredSessionClearsRowsBeforeAnotherPage() async {
         let (api, _, pager) = await prepare([
             .init(200, #"{"items":[\#(item(a))],"nextCursor":"next"}"#),
