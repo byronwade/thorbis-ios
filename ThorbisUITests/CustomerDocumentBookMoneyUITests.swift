@@ -38,7 +38,20 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertFalse(text("Paid in full", in: app).exists)
         // A short payment history is visible without requiring a second tap.
         assertText("Card", in: app)
-        openHistory(in: app)
+        let expanded = XCTAttachment(screenshot: app.screenshot())
+        expanded.name = "Payment history visible by default"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+        let history = app.buttons["customer-payment-history"]
+        reveal(history, in: app)
+        XCTAssertTrue(history.isHittable)
+        history.tap()
+        XCTAssertFalse(text("Card", in: app).exists)
+        let collapsed = XCTAttachment(screenshot: app.screenshot())
+        collapsed.name = "Payment history collapsed by customer"
+        collapsed.lifetime = .keepAlways
+        add(collapsed)
+        history.tap()
         assertText("Card", in: app)
         assertText("Refunded $50.00", in: app)
         assertText("Received after refund $100.00", in: app)
@@ -71,6 +84,24 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         openHistory(in: app)
         assertText("Refunded $50.00", in: app)
         assertText("Cash", in: app)
+    }
+
+    func testDocumentPickerKeepsInvoiceIdentityAndAmountInSync() {
+        let app = openPrimary(extra: ["--paper-preview-job-documents-money", "--paper-preview-job-invoice-signed"])
+        for _ in 0..<3 {
+            app.buttons["Choose a job document"].tap()
+            app.buttons["INV-2240"].tap()
+            XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+            assertText("Deposit invoice", in: app)
+            assertMoneyRow("Amount due", "$0.00", in: app)
+            XCTAssertEqual(app.staticTexts["customer-document-position"].label, "3 of 4 documents")
+            app.buttons["Choose a job document"].tap()
+            app.buttons["INV-2209"].tap()
+            XCTAssertTrue(app.navigationBars["INV-2209"].waitForExistence(timeout: 10))
+            assertText("Member discount", in: app)
+            assertMoneyRow("Amount due", "$150.00", in: app)
+            XCTAssertEqual(app.staticTexts["customer-document-position"].label, "4 of 4 documents")
+        }
     }
 
     func testDraftInvoiceShowsDraftTotalRatherThanAClaimOfPayment() {
