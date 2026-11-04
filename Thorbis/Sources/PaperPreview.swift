@@ -762,7 +762,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if request.httpMethod != nil && request.httpMethod != "GET" {
+        if PaperPreview.screen == "job-invoice-empty", request.httpMethod == "POST",
+           url.path == "/v1/jobs/\(PaperPreview.invoice.jobId ?? "")/completion-invoice" {
+            status = 200
+            payload = (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice))) ?? [:]
+        } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
@@ -1142,9 +1146,6 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             fresh["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86_400))
             fresh["options"] = NSNull()
             return ["items": [waiting, fresh]]
-        }
-        if PaperPreview.screen == "job-invoice-empty", path == "/v1/jobs/\(PaperPreview.invoice.jobId ?? "")/completion-invoice" {
-            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice))
         }
         if PaperPreview.screen == "job-invoice-empty", path == "/v1/invoices/\(PaperPreview.invoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice))
