@@ -181,6 +181,33 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(selected.waitForExistence(timeout: 5))
         XCTAssertTrue((selected.value as? String)?.hasPrefix("Not selected,") == true)
     }
+    func testDetailsReaderClosesWhenSameEstimateGetsNewRevision() {
+        exerciseDetailsMutation("Replace sample revision shortly")
+    }
+    func testDetailsReaderClosesWhenEstimateLeavesJob() {
+        exerciseDetailsMutation("Remove sample estimate shortly")
+    }
+    private func exerciseDetailsMutation(_ control: String) {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls", "--paper-preview-handoff-details-mutation"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
+        thorbisShowCustomerDoor(app).tap()
+        let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(details.waitForExistence(timeout: 45))
+        visible(app, details)
+        details.tap()
+        let mutation = app.buttons[control]
+        XCTAssertTrue(mutation.waitForExistence(timeout: 45))
+        mutation.tap()
+        let more = app.buttons["Show more, Estimate EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 5))
+        visible(app, more)
+        more.tap()
+        let drawer = app.navigationBars["Description"]
+        XCTAssertTrue(drawer.waitForExistence(timeout: 5))
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: drawer)
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 30), .completed)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.exists)
+    }
     func testPreselectionDetailsAndDescriptionCloseOnSessionLoss() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-slow-invalidation"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
