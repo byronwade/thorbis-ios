@@ -9,6 +9,7 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(money.waitForExistence(timeout: 15)); money.tap()
         let photos = app.buttons["job-section-photos"]
         XCTAssertTrue(photos.waitForExistence(timeout: 5))
+        XCTAssertEqual(photos.label, "Photos")
         for section in ["overview", "money", "activity", "photos"] {
             let button = app.buttons["job-section-\(section)"]
             XCTAssertGreaterThanOrEqual(button.frame.width, 43.5, section)
@@ -23,7 +24,7 @@ final class JobOverviewUITests: XCTestCase {
         let activity = app.buttons["job-section-activity"]
         XCTAssertTrue(activity.isHittable); activity.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
-        XCTAssertTrue(filter.label.lowercased().contains("all"), filter.label)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "all"), object: filter)], timeout: 5), .completed)
         XCTAssertTrue(money.isHittable); money.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: money)], timeout: 5), .completed)
     }
@@ -50,12 +51,12 @@ final class JobOverviewUITests: XCTestCase {
         let filter = app.buttons["activity-filter"]
         XCTAssertTrue(filter.waitForExistence(timeout: 10)); filter.tap()
         menuRow(app, "Notes").tap()
-        XCTAssertTrue(filter.label.lowercased().contains("notes"), filter.label)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
         let photos = app.buttons["job-section-photos"]
         XCTAssertTrue(photos.waitForExistence(timeout: 5)); photos.tap()
-        XCTAssertTrue(filter.label.lowercased().contains("photos"), filter.label)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "photos"), object: filter)], timeout: 5), .completed)
         activity.tap()
-        XCTAssertTrue(filter.label.lowercased().contains("notes"), filter.label)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
     }
 
     func testLongInvoiceBalanceKeepsAllFourJobSectionsTappable() {
