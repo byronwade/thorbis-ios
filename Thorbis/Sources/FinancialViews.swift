@@ -480,6 +480,7 @@ struct InvoiceDetailView: View {
     /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
     var returnsWhenPaid = false
     var expectedJobScope: JobDocumentScope? = nil
+    var protectDeniedAccess = false
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
@@ -822,7 +823,8 @@ struct InvoiceDetailView: View {
             return
         }
         if paymentModel == nil {
-            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope)
+            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope,
+                                                         protectDeniedAccess: protectDeniedAccess)
             paymentModel?.outbox = outbox
             paymentModel?.policyVersion = session.policyVersion ?? 0
         }

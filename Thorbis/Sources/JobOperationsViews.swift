@@ -462,7 +462,7 @@ struct JobCloseoutView: View {
         // Collecting from the checklist comes back here once it's paid, ready to complete.
         .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0, returnsWhenPaid: true).onDisappear { Task { await load() } } }
         .thorbisDestination(isPresented: $openBilling) { BillingSchedulesView() }
-        .thorbisDestination(item: $recoveryInvoiceID) { InvoiceDetailView(id: $0).onDisappear { Task { await load() } } }
+        .thorbisDestination(item: $recoveryInvoiceID) { InvoiceDetailView(id: $0, protectDeniedAccess: true).onDisappear { Task { await load() } } }
         .sheet(item: $savedWorkScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
         .onChange(of: savedWorkScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
             if !valid { savedWorkScope = nil }
