@@ -15,7 +15,12 @@ final class InvoiceReadFence {
         let resource: String
     }
     enum Outcome { case liveSuccess, connectivityFailure, denied }
-    enum Completion: Equatable { case committed, held, denied }
+    struct Receipt: Equatable {
+        fileprivate let key: String
+        fileprivate let epoch: String
+        fileprivate let parentEpoch: String?
+    }
+    enum Completion: Equatable { case committed(Receipt), held, denied }
     enum Failure: Error { case invalidScope, storage, contended, alreadyFinished }
     private struct Record: Codable {
         let version: Int
@@ -126,11 +131,12 @@ final class InvoiceReadFence {
     // Held prototype: `write` must be synchronous and durably commit an atomic
     // replacement, and must not reenter the fence. This serializes it against
     // preflight in cooperating processes. It does not manage visible UI state.
-    func withCacheWrite(_ scope: Scope, write: () throws -> Void) throws -> Bool {
+    func withCacheWrite(_ scope: Scope, receipt: Receipt, write: () throws -> Void) throws -> Bool {
         let key = try key(scope)
         let parent = try parentKey(scope)
         return try withScopeMetadata(key, parent: parent) {
-            guard let record = try load(key), record.phase == "clean" else { return false }
+            guard receipt.key == key, let record = try load(key), record.phase == "clean",
+                  record.epoch == receipt.epoch, record.parentEpoch == receipt.parentEpoch else { return false }
             if let parent {
                 guard let invoice = try load(parent), invoice.phase == "clean",
                       invoice.epoch == record.parentEpoch else { return false }
@@ -221,7 +227,7 @@ final class InvoiceReadFence {
                 try fence.persist(Record(version: 1, phase: "clean", epoch: cleanEpoch,
                                          eligible: false, priorClean: false, priorEpoch: nil,
                                          parentEpoch: record.parentEpoch), key)
-                return .committed
+                return .committed(Receipt(key: key, epoch: cleanEpoch, parentEpoch: record.parentEpoch))
             }
         }
     }
