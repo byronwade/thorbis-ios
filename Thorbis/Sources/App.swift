@@ -302,6 +302,13 @@ final class Store: ObservableObject {
     @Published var requestedSchedule = 0 {
         didSet { if requestedSchedule > 0 { openedForRecord = true } }
     }
+    private var handledScheduleRequest = 0
+    /// Roots can be recreated at a new width. A shortcut is handled once across both layouts.
+    func consumeScheduleRequest() -> Bool {
+        guard requestedSchedule > handledScheduleRequest else { return false }
+        handledScheduleRequest = requestedSchedule
+        return true
+    }
     /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.
     @Published var requestedRecord: RecordLink? {
         didSet { if requestedRecord != nil { openedForRecord = true } }

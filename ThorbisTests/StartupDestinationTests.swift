@@ -38,4 +38,15 @@ final class StartupDestinationTests: XCTestCase {
         XCTAssertNil(defaults.object(forKey: first.key))
     }
 
+    @MainActor func testScheduleShortcutIsConsumedOnlyOnceAcrossRootRecreation() {
+        let store = Store()
+        store.requestedSchedule += 1
+        XCTAssertTrue(store.consumeScheduleRequest())
+        // A new compact or regular root must not replay the old shortcut after the user navigates.
+        XCTAssertFalse(store.consumeScheduleRequest())
+        store.requestedSchedule += 1
+        XCTAssertTrue(store.consumeScheduleRequest())
+        XCTAssertFalse(store.consumeScheduleRequest())
+    }
+
 }
