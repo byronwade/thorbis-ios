@@ -318,6 +318,19 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Wrap up this job"].waitForExistence(timeout: 5))
     }
 
+    func testInProgressJobPaymentStepOpensItsInvoice() {
+        continueAfterFailure = false
+        let app = preview("job", working: true)
+        let collect = button(startingWith: "Collect ", in: app)
+        XCTAssertTrue(collect.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !collect.isHittable { app.swipeUp() }
+        XCTAssertTrue(collect.isHittable)
+        collect.tap()
+        let invoice = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        XCTAssertTrue(invoice.label.contains("INV-2209"), invoice.label)
+    }
+
     func testAccessibleTextKeepsContactActionsSeparateAndThePrimaryActionReadable() {
         continueAfterFailure = false
         let app = preview("job", accessibleText: true)
