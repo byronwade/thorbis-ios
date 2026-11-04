@@ -218,6 +218,11 @@ struct TabletRoot: View {
         savedWorkSheet(shell)
             #if DEBUG
             .accessibilityIdentifier(ProcessInfo.processInfo.arguments.contains("--startup-fixture") ? "startup-tablet-\(title(of: tab))" : "")
+            .safeAreaInset(edge: .top) {
+                if ProcessInfo.processInfo.arguments.contains("--startup-fixture") {
+                    Button("Test tablet jobs") { show(.jobs) }.font(.caption).background(Color.yellow)
+                }
+            }
             #endif
             // iPad: the sidebar holds Create and Settings, so no header menu circle or floating + pill.
             .environment(\.paperMenuButton, false)

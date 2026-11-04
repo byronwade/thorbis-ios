@@ -90,6 +90,12 @@ struct RootView: View {
                         Button("Test delayed Home") { layout.tabs = [.home, .schedule, .jobs, .customers] }
                     }
                     Button("Test schedule shortcut") { store.requestedSchedule += 1 }
+                    if startupFixtureWide {
+                        Button("Test search and switch") {
+                            store.requestedSearch = "pipe fixture"
+                            startupFixtureWide = false
+                        }
+                    }
                     Button("Test shortcut and switch") {
                         store.requestedSchedule += 1
                         startupFixtureWide.toggle()

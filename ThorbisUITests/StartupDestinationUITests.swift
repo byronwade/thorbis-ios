@@ -74,4 +74,16 @@ final class StartupDestinationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 10))
     }
 
+    func testSearchKeepsTabletPlaceDuringAdaptiveSwitch() {
+        let app = launch()
+        XCTAssertTrue(root(app, "startup-phone-customers").waitForExistence(timeout: 30))
+        app.buttons["Test switch width"].tap()
+        XCTAssertTrue(app.buttons["Test tablet jobs"].waitForExistence(timeout: 10))
+        app.buttons["Test tablet jobs"].tap()
+        XCTAssertTrue(root(app, "startup-tablet-Jobs").waitForExistence(timeout: 10))
+        app.buttons["Test search and switch"].tap()
+        XCTAssertTrue(root(app, "startup-phone-jobs").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields.matching(NSPredicate(format: "value == %@", "pipe fixture")).firstMatch.waitForExistence(timeout: 10))
+    }
+
 }
