@@ -181,6 +181,7 @@ struct CustomerOfferCart: Equatable {
     }
 
     private static func validLines(_ lines: [CustomerOfferLine], total: Int) -> Bool {
+        guard !lines.isEmpty else { return false }
         var sum = 0
         for line in lines {
             guard line.quantity > 0 else { return false }
