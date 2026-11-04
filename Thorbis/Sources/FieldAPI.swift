@@ -1162,6 +1162,10 @@ extension APIClient {
         return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: query, cursor: cursor)
     }
 
+    func customerPhotoMetadata(_ mediaID: String) async throws -> CustomerPhotoMetadata {
+        try await send("GET", fieldPath("/v1/media", id: mediaID), requireFresh: true)
+    }
+
     func registerFieldMedia(_ jobID: String, request: FieldMediaRegistrationRequest) async throws -> FieldMediaRegistration {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), body: request)
     }

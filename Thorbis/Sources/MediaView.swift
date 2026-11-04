@@ -47,6 +47,7 @@ struct JobMediaView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var pendingMedia: PendingMediaStore
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -102,6 +103,8 @@ struct JobMediaView: View {
     @State private var selecting = false
     @State private var picked = Set<String>()
     @State private var confirmBulkArchive = false
+    @State private var customerPhotos: CustomerPhotoHandoff?
+    @State private var customerPhotoRequest = UUID()
     @State private var shareFiles: MediaShareFiles?
     @State private var contentWidth: CGFloat = 353
     #if DEBUG
@@ -244,6 +247,9 @@ struct JobMediaView: View {
                              fileMarkup: { image, tags in try enqueueDerived(image, tags: tags, caption: "Marked up", prefix: "markup") },
                              onClose: { viewer = nil })
         }
+        .fullScreenCover(item: $customerPhotos) { owner in
+            CustomerPhotoHandoffView(owner: owner) { customerPhotos = nil }
+        }
         .fullScreenCover(isPresented: $showCompare) {
             MediaCompareView(befores: befores, afters: afters, load: { try await download($0) }) { showCompare = false }
         }
@@ -324,7 +330,11 @@ struct JobMediaView: View {
                 shareFiles = nil
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { customerPhotoRequest = UUID() }
+        }
         .onChange(of: readScope) { _, _ in
+            customerPhotoRequest = UUID()
             preview.clear(); previewScope = nil; previewRecord = nil; busy = false; justCaptured = nil; captureMarkup = nil
             viewer = nil; showCompare = false; endSelecting()
         }
@@ -741,6 +751,12 @@ struct JobMediaView: View {
                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).frame(minHeight: 44)
                 .accessibilityIdentifier("job-media-choose-all")
             }
+            Button("Show selected photos to customer") { Task { await prepareCustomerPhotos() } }
+                .font(Theme.font(15, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+                .disabled(count == 0 || busy)
+                .accessibilityIdentifier("job-media-show-customer")
             HStack(spacing: 8) {
                 MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
                 MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
@@ -778,6 +794,33 @@ struct JobMediaView: View {
             if VNDocumentCameraViewController.isSupported { showScanner = true } else { importDocument = true }
         case .measure:
             if SiteMeasure.isSupported { showMeasure = true }
+        }
+    }
+
+    private func prepareCustomerPhotos() async {
+        guard !busy, scenePhase == .active, let scope = readScope, sourceScope == scope else { return }
+        let chosen = pickedRecords
+        guard !chosen.isEmpty, chosen.count == picked.count else {
+            error = "Review the selected photos in this view and try again."
+            return
+        }
+        guard chosen.count <= CustomerPhotoSelection.maximumCount else {
+            error = "Choose up to 50 photos at a time to show the customer."
+            return
+        }
+        busy = true
+        let request = UUID()
+        customerPhotoRequest = request
+        defer { busy = false }
+        do {
+            let selection = try CustomerPhotoSelection(jobID: scope.job, organizationID: scope.organization, selectedIDs: chosen.map(\.id))
+            try selection.validatePageMembership(ids: storedPhotos.map(\.id), jobID: scope.job, organizationID: scope.organization)
+            guard let owner = CustomerPhotoHandoff(selection: selection, api: api, session: session) else { throw CustomerPhotoSelection.Invalid.scope }
+            try await owner.prepare()
+            guard customerPhotoRequest == request, scenePhase == .active, owner.isCurrent, readScope == scope, sourceScope == scope, !Task.isCancelled else { throw CustomerPhotoSelection.Invalid.scope }
+            customerPhotos = owner
+        } catch {
+            self.error = "Couldn’t verify every selected photo. Check your connection, refresh this job and try again."
         }
     }
 
