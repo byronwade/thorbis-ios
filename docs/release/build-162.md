@@ -1,0 +1,7 @@
+# Build 162
+
+Uploaded to App Store Connect on 4 November 2026 from release merge `2c6ca1dfd60fe339c111400ad1bad6e2b2799652` ([PR #301](https://github.com/byronwade/thorbis-ios/pull/301)). Xcode reported the package began processing and the upload succeeded (`/tmp/thorbis-release-162-upload.log`). Processing completion, tester-group availability and installation have not been verified; local browser access reported disabled.
+
+This build groups customer-hidden estimate material details into a Materials line instead of exposing their individual descriptions. It also validates the projected scope for signing. The focused customer handoff privacy/signature test, 17 model/API tests and nine What's New tests passed; see [customer material visibility evidence](../design/evidence/customer-material-privacy-2026-11-04.md). Direct customer-book and legacy-paper UI, iPad, VoiceOver, physical-device and hosted-server qualification remain unverified. The separate pre-selection estimate details work is not included.
+
+The signed archive at `/private/tmp/thorbis-release-162/Thorbis.xcarchive` reports 1.0 (162), app bundle `com.thorbis.field`, widget build 162 and team `T677262U5B`. Strict app/widget signature verification passed and tracked source fingerprints match. Checked preview-fixture markers were absent. The Tap to Pay audit passed with Tap to Pay disabled. The upload reported the existing missing Stripe Terminal framework dSYM warning; see [build 148](build-148.md#stripe-terminal-symbol-investigation).
