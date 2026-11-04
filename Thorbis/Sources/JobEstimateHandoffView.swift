@@ -1,5 +1,120 @@
 import SwiftUI
 
+/// Read-only issued terms; selection and approval stay in the handoff.
+private struct CustomerHandoffEstimateDetails: View {
+    @ObservedObject var model: JobEstimateHandoffModel
+    let record: EstimateRecord
+    private let authority: UUID
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var revision: CustomerIssuedEstimateRevision?
+    @State private var loading = false
+    @State private var error: String?
+
+    init(model: JobEstimateHandoffModel, record: EstimateRecord) {
+        self.model = model
+        self.record = record
+        authority = model.session.authorityRevision
+    }
+
+    private var type: CustomerType { CustomerType(sizeClass) }
+    private var current: Bool { model.detailsCurrent(record, authority: authority) }
+    private var revisionMatches: Bool {
+        guard let revision else { return false }
+        return revision.matchesDetails(for: record)
+    }
+    private var access: DocumentDescriptionAccess {
+        .init(identity: .estimate(scope: model.scope, record: record, issued: revision),
+              organizationID: model.scope.organizationID, capability: "estimate.view", feature: "estimates",
+              sourceGeneration: model.session.generation, fresh: current && revisionMatches,
+              active: current && revisionMatches, scopeValid: current && revisionMatches)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-details-mutation") {
+                    Button("Replace sample revision shortly") { previewChange(revise: true) }
+                    Button("Remove sample estimate shortly") { previewChange(revise: false) }
+                }
+                #endif
+                if !current {
+                    CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                         message: "Hand the device back to your technician to reopen this estimate.")
+                } else if let revision, revisionMatches {
+                    Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let options = revision.options, !options.isEmpty {
+                        ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
+                                if !option.description.isEmpty {
+                                    ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: access,
+                                                                customerFacing: true, accessibilityContext: "Estimate EST-\(record.id.suffix(4).uppercased()), package \(index + 1)")
+                                }
+                                lines(option.lines, currency: option.currency, total: option.totalAmount,
+                                      context: "Estimate EST-\(record.id.suffix(4).uppercased()), package \(index + 1)")
+                            }
+                        }
+                    } else {
+                        lines(revision.lines, currency: revision.currency, total: revision.totalAmount,
+                              context: "Estimate EST-\(record.id.suffix(4).uppercased())")
+                    }
+                } else if revision != nil {
+                    CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                         message: "Hand the device back to your technician to reopen this estimate.")
+                } else if let error {
+                    CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() }
+                } else {
+                    CustomerSkeleton(caption: "Opening the current estimate…", heading: false)
+                }
+            }
+            .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+        }
+        .background(Theme.canvas).foregroundStyle(Theme.foreground)
+        .navigationTitle("EST-\(record.id.suffix(4).uppercased())")
+        .accessibilityIdentifier("handoff-estimate-details")
+        .task { await load() }
+    }
+
+    #if DEBUG
+    private func previewChange(revise: Bool) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(8))
+            if revise { JobEstimateHandoffPreview.shared.reviseFirst() }
+            else { JobEstimateHandoffPreview.shared.removeFirst() }
+            await model.refresh()
+        }
+    }
+    #endif
+
+    @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, total: Int, context: String) -> some View {
+        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == total,
+           let projected = customerEstimateProjection(lines, currency: currency) {
+            CustomerIncludedLabel(type: type)
+            CustomerIncludedLines(lines: projected, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false),
+                                  readingAccess: access, descriptionContext: context)
+        } else {
+            Text("These amounts couldn't be verified. Hand the device back to your technician.")
+                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func load() async {
+        guard current, !loading else { return }
+        loading = true; revision = nil; error = nil
+        defer { loading = false }
+        do {
+            let issued = try await model.issuedDetails(record, authority: authority)
+            guard current, !Task.isCancelled else { return }
+            revision = issued
+        } catch is CancellationError {} catch {
+            guard current else { return }
+            self.error = error.customerSentence(.openEstimate)
+        }
+    }
+}
+
 /// Customer-only destinations inside the existing protected customer navigation owner.
 struct JobEstimateHandoffView: View {
     @ObservedObject var model: JobEstimateHandoffModel
@@ -9,6 +124,7 @@ struct JobEstimateHandoffView: View {
     @EnvironmentObject private var session: SessionController
     @State private var reviewing = false
     @State private var checkpointID: String?
+    @State private var detailsID: String?
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -35,18 +151,26 @@ struct JobEstimateHandoffView: View {
         .navigationTitle("Estimates").navigationBarTitleDisplayMode(.inline)
         .task { await model.refresh() }
         .onChange(of: api.requestGeneration) { _, _ in
-            if !model.isCurrent { checkpointID = nil; reviewing = false; model.retire() }
+            if !model.isCurrent { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
         }
         .onChange(of: session.authorityRevision) { _, _ in
+            detailsID = nil
             if !model.isCurrent { checkpointID = nil; reviewing = false; model.retire() }
         }
         .onChange(of: model.isCurrent) { _, current in
-            if !current { checkpointID = nil; reviewing = false; model.retire() }
+            if !current { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
         }
         .onChange(of: model.approvalAuthority) { _, allowed in
             if !allowed { checkpointID = nil; reviewing = false; model.cancelApprovals() }
         }
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
+        .thorbisDestination(item: $detailsID) { id in
+            if let record = model.records.first(where: { $0.id == id }) {
+                CustomerHandoffEstimateDetails(model: model, record: record)
+                    .id(record)
+                    .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
+            }
+        }
     }
 
     private var overview: some View {
@@ -93,6 +217,17 @@ struct JobEstimateHandoffView: View {
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
                 .accessibilityIdentifier("handoff-select-\(record.id)")
             } else { estimateSummary(record) }
+            if model.detailsCurrent(record, authority: session.authorityRevision) {
+                Button { detailsID = record.id } label: {
+                    Label("View details", systemImage: "doc.text")
+                        .font(Theme.customerFont(type.body, weight: .medium))
+                        .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Read this estimate before choosing work")
+                .accessibilityIdentifier("handoff-details-\(record.id)")
+            }
             if record.status == "approved" {
                 Text("Already approved · no approval needed").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                 if let signer = model.context(for: record.id)?.approvedSignerName {

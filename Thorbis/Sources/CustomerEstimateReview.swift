@@ -23,6 +23,11 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
         else { throw customerReviewUnavailable() }
     }
 
+    /// Retained reader content must still match the record now backing its destination.
+    func matchesDetails(for record: EstimateRecord) -> Bool {
+        (try? validate(for: record)) != nil
+    }
+
     fileprivate func validate(action: PublicEstimateAction, paperHash: String) throws {
         guard action.kind == "estimate", action.signingOffered,
               action.contentHash == paperHash, paperHash.count >= 15,
