@@ -527,7 +527,7 @@ struct JobDetailView: View {
                 .task {
                     guard PaperPreview.enabled,
                           ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-scope-aba") else { return }
-                    try? await Task.sleep(for: .seconds(2))
+                    try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled else { return }
                     let original = api.savedCopyScope
                     api.savedCopyScope = (original ?? "preview") + "-other"
