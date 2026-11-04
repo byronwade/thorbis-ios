@@ -187,6 +187,21 @@ final class MediaTransferTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.first?.url?.path, "/v1/media/\(assetID)/download")
     }
 
+    func testCustomerDownloadRequestsFreshTargetAndDoesNotForwardCookies() async throws {
+        let session = URLProtocolFixture.session([
+            .init(200, #"{"url":"https://storage.example/download?token=abc","expiresAt":"2030-12-31T00:00:00Z"}"#),
+            .init(200, "preview bytes"),
+        ])
+        let api = APIClient(session: session, baseURL: "https://app.thorbis.com")
+        let transfer = MediaTransfer(api: api, storageSession: session)
+        let file = try await transfer.download(mediaID: assetID, filename: "photo.jpg", requireFresh: true)
+        defer { try? FileManager.default.removeItem(at: file) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(URLProtocolFixture.recorded[0].header("Cache-Control"), "no-cache")
+        XCTAssertNil(URLProtocolFixture.recorded[1].header("cookie"))
+        XCTAssertEqual(try Data(contentsOf: file), Data("preview bytes".utf8))
+    }
+
     func testDownloadWritesNativePreviewFileWithoutStorageCookies() async throws {
         let session = URLProtocolFixture.session([
             .init(200, #"{"url":"https://storage.example/download?token=abc","expiresAt":"2030-12-31T00:00:00Z"}"#),
