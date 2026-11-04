@@ -20,6 +20,7 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
     @Published var loading = false
     @Published var foreground = true
     private var loadID = UUID()
+    private var loadTask: Task<Void, Never>?
 
     init?(selection: CustomerPhotoSelection, api: APIClient, session: SessionController) {
         guard let actor = session.user?.id, let origin = api.normalizedOrigin,
@@ -56,7 +57,18 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
         return try await MediaTransfer(api: api).download(mediaID: assetID, filename: "photo.jpg", requireFresh: true)
     }
 
-    func clear() { loadID = UUID(); image = nil; loading = false }
+    func clear() {
+        loadTask?.cancel()
+        loadTask = nil
+        loadID = UUID()
+        image = nil
+        loading = false
+    }
+
+    func beginLoad() {
+        clear()
+        loadTask = Task { [weak self] in await self?.load() }
+    }
 
     func move(to newIndex: Int) {
         guard selection.selectedIDs.indices.contains(newIndex), newIndex != index else { return }
@@ -65,8 +77,7 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
         index = newIndex
     }
 
-    func load() async {
-        clear()
+    private func load() async {
         guard isCurrent, selection.selectedIDs.indices.contains(index) else { message = "These photos are no longer available. Please hand the device back to your technician."; return }
         let current = UUID(); loadID = current; loading = true; message = nil
         do {
@@ -130,7 +141,7 @@ struct CustomerPhotoHandoffView: View {
                 } else if let message = owner.message {
                     Text(message).font(Theme.customerFont(17)).multilineTextAlignment(.center)
                     if owner.isCurrent {
-                        Button("Try again") { Task { await owner.load() } }
+                        Button("Try again") { owner.beginLoad() }
                             .font(Theme.customerFont(CustomerModeStyle.body))
                             .frame(minWidth: CustomerModeStyle.target, minHeight: CustomerModeStyle.target).contentShape(Rectangle())
                     }
@@ -156,7 +167,7 @@ struct CustomerPhotoHandoffView: View {
                     owner.message = "Please hand the device back to your technician."
                     return
                 }
-                await owner.load()
+                owner.beginLoad()
             }
             .onDisappear { owner.clear() }
             .onChange(of: scenePhase) { _, phase in
