@@ -231,8 +231,11 @@ struct JobCloseoutView: View {
     private var canRefreshRecordedPayments: Bool {
         session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
     }
-    private var unassociatedRecordedInvoiceIDs: [String] {
-        Array(Set(outbox.recordedPayments.filter { $0.jobId == nil }.map(\.invoiceId))).sorted()
+    private var unassociatedRecordedPayments: [OutboxEntry.PaymentPayload] {
+        outbox.recordedPayments.filter { $0.jobId == nil }
+    }
+    private var recordedInvoiceIDsToRefresh: [String] {
+        Array(Set(outbox.recordedPayments.filter { $0.jobId == nil || $0.jobId == jobID }.map(\.invoiceId))).sorted()
     }
 
     /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
@@ -349,11 +352,13 @@ struct JobCloseoutView: View {
                         Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                     }
                     if closeout.unmet.contains(where: { $0.kind == "payment_or_unpaid_disposition" && $0.outcome == "blocked" }),
-                       !unassociatedPendingPayments.isEmpty || !unassociatedRecordedInvoiceIDs.isEmpty {
+                       !unassociatedPendingPayments.isEmpty || !recordedInvoiceIDsToRefresh.isEmpty {
                         PaperGroupHeader(title: "Payments to check").padding(.top, 18)
-                        Text("Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet.")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if !unassociatedPendingPayments.isEmpty || !unassociatedRecordedPayments.isEmpty {
+                            Text("Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet.")
+                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         if !unassociatedPendingPayments.isEmpty {
                             Text(session.can("job.edit", feature: "jobs") && session.can("invoice.payment.create", feature: "payments")
                                  ? "Connect and sync saved work to send waiting payments."
@@ -365,11 +370,11 @@ struct JobCloseoutView: View {
                                 }.frame(minHeight: 44).buttonStyle(PressStyle())
                             }
                         }
-                        if !unassociatedRecordedInvoiceIDs.isEmpty {
+                        if !recordedInvoiceIDsToRefresh.isEmpty {
                             if canRefreshRecordedPayments {
-                                Text("Connect, then search these invoice IDs in Invoices on this phone to refresh payments already sent.")
+                                Text("Sent payments may still be updating. Connect, then search these invoice IDs in Invoices on this phone to refresh them.")
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
-                                ForEach(unassociatedRecordedInvoiceIDs, id: \.self) { id in
+                                ForEach(recordedInvoiceIDsToRefresh, id: \.self) { id in
                                     VStack(alignment: .leading, spacing: 3) {
                                         Text("Invoice \(id.suffix(4).uppercased())").font(Theme.font(15, weight: .medium))
                                         Text(id).font(Theme.monoFont(12)).textSelection(.enabled)
