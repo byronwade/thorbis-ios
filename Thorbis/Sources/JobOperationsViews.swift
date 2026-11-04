@@ -179,7 +179,6 @@ struct JobCloseoutView: View {
     @State private var confirmCancel = false
     @State private var invoiceID: String?
     @State private var openInvoiceID: String?
-    @State private var recoveryInvoiceID: String?
     @State private var savedWorkScope: SavedWorkScope?
     @State private var openBilling = false
     @State private var unpaidReasonCode = "customer_will_pay_later"
@@ -366,11 +365,11 @@ struct JobCloseoutView: View {
                         }
                         if !unassociatedRecordedInvoiceIDs.isEmpty {
                             if canRefreshRecordedPayments {
-                                Text("Connect and open each invoice to refresh payments already sent.")
+                                Text("Connect, then open these invoices from Invoices on this phone to refresh payments already sent.")
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                                 ForEach(unassociatedRecordedInvoiceIDs, id: \.self) { id in
-                                    Button("Open invoice \(id.suffix(8).uppercased())") { recoveryInvoiceID = id }
-                                        .frame(minHeight: 44).buttonStyle(PressStyle())
+                                    Text("Invoice \(id.suffix(8).uppercased())")
+                                        .font(Theme.font(15)).frame(minHeight: 44, alignment: .leading)
                                 }
                             } else {
                                 Text("Ask your office to enable your invoice and payment access, then refresh those invoices on this phone.")
@@ -454,16 +453,10 @@ struct JobCloseoutView: View {
         // Collecting from the checklist comes back here once it's paid, ready to complete.
         .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0, returnsWhenPaid: true).onDisappear { Task { await load() } } }
         .thorbisDestination(isPresented: $openBilling) { BillingSchedulesView() }
-        .thorbisDestination(item: $recoveryInvoiceID) { InvoiceDetailView(id: $0).onDisappear { Task { await load() } } }
         .sheet(item: $savedWorkScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
         .onChange(of: savedWorkScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
             if !valid { savedWorkScope = nil }
         }
-        .onChange(of: session.authorityRevision) { _, _ in
-            if !canRefreshRecordedPayments { recoveryInvoiceID = nil }
-        }
-        .onChange(of: session.generation) { _, _ in recoveryInvoiceID = nil }
-        .onChange(of: api.normalizedOrigin) { _, _ in recoveryInvoiceID = nil }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
