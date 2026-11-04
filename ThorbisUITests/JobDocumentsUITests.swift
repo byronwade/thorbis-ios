@@ -2,6 +2,16 @@ import XCTest
 
 @MainActor
 final class JobDocumentsUITests: XCTestCase {
+    func testCreatingJobInvoiceOpensItsReview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-invoice-empty"]
+        app.launch()
+        let create = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Create invoice")).firstMatch
+        XCTAssertTrue(create.waitForExistence(timeout: 15))
+        create.tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 15))
+    }
     private let invoiceA = "00000000-0000-4000-8000-000000002209"
     private let depositA = "00000000-0000-4000-8000-000000002240"
     private let invoiceB = "00000000-0000-4000-8000-000000002241"

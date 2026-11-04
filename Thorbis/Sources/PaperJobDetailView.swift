@@ -1776,6 +1776,20 @@ struct JobDetailView: View {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates on this job",
                                     message: "Build one from the price book.")
                 }
+                // When the bar is busy with the invoice, the estimates' customer door stays here, quieter.
+                if !jobEstimates.isEmpty, !moneyBarIsCustomerView, canOpenCustomerView {
+                    // A quiet text button: the screen's one ink commit stays the bar at the bottom.
+                    Button { openCustomerView(.estimates) } label: {
+                        Label("Show customer", systemImage: "iphone")
+                            .font(Theme.font(15, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityHint("Shows this job's estimates to the customer")
+                    .accessibilityIdentifier("job-money-customer-view")
+                }
                 if !jobEstimates.isEmpty || !unavailable.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(jobEstimates) { estimate in
@@ -1794,20 +1808,6 @@ struct JobDetailView: View {
                                 .accessibilityIdentifier("job-estimate-unavailable-\(id)")
                         }
                     }
-                }
-                // When the bar is busy with the invoice, the estimates' customer door stays here, quieter.
-                if !jobEstimates.isEmpty, !moneyBarIsCustomerView, canOpenCustomerView {
-                    // A quiet text button: the screen's one ink commit stays the bar at the bottom.
-                    Button { openCustomerView(.estimates) } label: {
-                        Label("Show customer", systemImage: "iphone")
-                            .font(Theme.font(15, weight: .medium))
-                            .foregroundStyle(Theme.foreground)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityHint("Shows this job's estimates to the customer")
-                    .accessibilityIdentifier("job-money-customer-view")
                 }
                 if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true) {
                     DisclosureGroup {
@@ -1881,7 +1881,7 @@ struct JobDetailView: View {
                     if session.can("invoice.create", feature: "invoicing") || (job.estimateId != nil && session.can("invoice.create", feature: "progress_billing")) {
                         JobPanel {
                             if session.can("invoice.create", feature: "invoicing") {
-                                Button { Task { await createInvoice() } } label: {
+                                Button { Task { if let invoice = await createInvoice() { reviewInvoiceID = invoice.id } } } label: {
                                     PaperMenuRow(creatingInvoice ? "Creating…" : "Create invoice", symbol: "doc.plaintext",
                                                  subtitle: "Lines come from the approved estimate; edit them before sending")
                                         .padding(.horizontal, 16)
@@ -2469,15 +2469,20 @@ struct JobDetailView: View {
         creatingInvoice = true
         defer { creatingInvoice = false }
         let generation = session.generation
+        let apiGeneration = api.requestGeneration
         do {
             let invoice = try await api.ensureFieldCompletionInvoice(jobId)
-            guard session.generation == generation, session.activeOrganization?.id == scope.organizationID else { return nil }
+            guard session.generation == generation, api.requestGeneration == apiGeneration,
+                  session.activeOrganization?.id == scope.organizationID else { return nil }
             guard scope.contains(invoice) else {
                 throw Problem(title: "Invoice could not be verified for this job", status: nil, detail: nil)
             }
             JobInvoiceMemory.remember(invoice.id, jobID: jobId)
             selectedInvoiceID = invoice.id
             await loadInvoices()
+            guard session.generation == generation, api.requestGeneration == apiGeneration,
+                  session.activeOrganization?.id == scope.organizationID,
+                  let currentJob = self.job, self.scope(for: currentJob) == scope else { return nil }
             committed += 1
             return invoice
         } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }

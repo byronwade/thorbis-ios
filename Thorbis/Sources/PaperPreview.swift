@@ -1143,6 +1143,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             fresh["options"] = NSNull()
             return ["items": [waiting, fresh]]
         }
+        if PaperPreview.screen == "job-invoice-empty", path == "/v1/jobs/\(PaperPreview.invoice.jobId ?? "")/completion-invoice" {
+            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice))
+        }
+        if PaperPreview.screen == "job-invoice-empty", path == "/v1/invoices/\(PaperPreview.invoice.id)" {
+            return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice))
+        }
         if path == "/v1/invoices" && PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
         if path == "/v1/invoices" {
             let item = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice)) as? [String: Any]
