@@ -44,6 +44,15 @@ struct ThorbisApp: App {
             guard let session else { throw CancellationError() }
             return try await Store.fetchAuthorized(api: api, session: session)
         }
+        #if DEBUG
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--startup-fixture") {
+            let scope = StartupDestinationScope(actor: PaperPreview.actorID, workspace: PaperPreview.organizationID,
+                                                origin: api.normalizedOrigin ?? "https://app.thorbis.com")
+            StartupDestinationPreferences().set(ProcessInfo.processInfo.arguments.contains("--startup-fixture-link") ? .jobs : .customers, for: scope)
+            if ProcessInfo.processInfo.arguments.contains("--startup-fixture-schedule") { store.requestedSchedule += 1 }
+            if ProcessInfo.processInfo.arguments.contains("--startup-fixture-link") { store.requestedRecord = .customer(PaperPreview.customerID) }
+        }
+        #endif
         session.onInvalidate = { [weak store, weak pendingMedia] in
             DayPrefetch.shared.cancel()
             store?.invalidate()

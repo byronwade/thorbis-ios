@@ -216,6 +216,9 @@ struct TabletRoot: View {
 
     var body: some View {
         savedWorkSheet(shell)
+            #if DEBUG
+            .accessibilityIdentifier(ProcessInfo.processInfo.arguments.contains("--startup-fixture") ? "startup-tablet-\(title(of: tab))" : "")
+            #endif
             // iPad: the sidebar holds Create and Settings, so no header menu circle or floating + pill.
             .environment(\.paperMenuButton, false)
             .environment(\.paperShowMenu, { Task { @MainActor in settings = true } })
@@ -727,6 +730,7 @@ struct TabletRoot: View {
     #if DEBUG
     /// Screenshot-only: the same preview screen names as the phone, laid out for iPad.
     private func applyPreview() {
+        if ProcessInfo.processInfo.arguments.contains("--startup-fixture") { return }
         let job = store.jobs.first { $0.id == PaperPreview.jobID }
         let customer = store.customers.first { $0.id == PaperPreview.customerID }
         switch PaperPreview.screen {
