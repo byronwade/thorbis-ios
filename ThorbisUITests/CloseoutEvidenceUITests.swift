@@ -55,7 +55,13 @@ final class CloseoutEvidenceUITests: XCTestCase {
 
     func testUnavailableInvoicePermissionExplainsHowToRecover() {
         let app = launch("noaccess")
-        XCTAssertTrue(app.staticTexts["Ask your office to restore your invoice access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Open invoice 00002209"].exists)
+    }
+
+    func testUnavailablePaymentFeatureExplainsHowToRecover() {
+        let app = launch("no-payments")
+        XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["Open invoice 00002209"].exists)
     }
 
@@ -65,7 +71,7 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
         invoice.tap()
         XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Ask your office to restore your invoice access, then refresh those invoices on this phone."].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 20))
     }
 
     func testOfflineSavedWorkCannotSyncUntilReconnected() {

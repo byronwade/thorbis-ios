@@ -373,8 +373,8 @@ enum PaperPreview {
                 let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
                 JobDetailCache.save(invoice: old)
             }
-            let legacy = ["legacy", "legacy-recorded", "noaccess", "revoke", "offline", "satisfied"].contains(scenario)
-            let recorded = ["recorded", "legacy-recorded", "noaccess", "revoke", "satisfied"].contains(scenario)
+            let legacy = ["legacy", "legacy-recorded", "noaccess", "no-payments", "revoke", "offline", "satisfied"].contains(scenario)
+            let recorded = ["recorded", "legacy-recorded", "noaccess", "no-payments", "revoke", "satisfied"].contains(scenario)
             let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: legacy ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
             if recorded {
                 let file = folder.appendingPathComponent("\(actorID)_\(organizationID).recorded")
@@ -1255,7 +1255,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
             if PaperPreview.role != nil { enabledFeatures.append("job_booking_notices") }
-            if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
+            if ["office", "owner"].contains(PaperPreview.role) ||
+                (ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil && ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != "no-payments") { enabledFeatures.append("payments") }
             let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
