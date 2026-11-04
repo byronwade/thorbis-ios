@@ -224,17 +224,22 @@ struct JobCloseoutView: View {
     /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
     /// last seen. A partial payment leaves the requirement (and the unpaid disposition) showing.
     private var waitingPaymentsCoverBalance: Bool {
-        // The job's invoice list, plus any invoice this phone took cash on for the job; the single
-        // invoice copy is newer when a payment was recorded on the invoice screen.
-        guard let job, let organizationID = session.activeOrganization?.id,
+        // Include the job's invoice list and invoices with payments on this phone. Independent
+        // cached copies have no proven ordering, so disagreements leave coverage unknown.
+        guard let job, let organizationID = session.activeOrganization?.id, let actorID = session.user?.id,
               job.id == jobID, job.organizationId == organizationID else { return false }
+        let unassociated = outbox.pending.compactMap { entry -> OutboxEntry.PaymentPayload? in
+            if case .payment(let payload) = entry.action { return payload }
+            return nil
+        } + outbox.recordedPayments
+        guard !CloseoutInvoiceEvidence.hasUnassociatedPayments(unassociated.map(\.jobId)) else { return false }
         let listed = JobDetailCache.invoices(jobID)
         let paidHere = (outbox.pending.compactMap { entry -> String? in
             if case .payment(let payment) = entry.action, payment.jobId == jobID { payment.invoiceId } else { nil }
         } + outbox.recordedPayments.filter { $0.jobId == jobID }.map(\.invoiceId))
         guard let invoices = CloseoutInvoiceEvidence.resolve(
             listed: listed, paidHere: paidHere, id: { $0.id }, cached: JobDetailCache.invoice,
-            valid: { $0.jobId == jobID && $0.organizationId == organizationID && $0.customerId == job.customerId }
+            equivalent: { $0 == $1 }, valid: { $0.jobId == jobID && $0.organizationId == organizationID && $0.customerId == job.customerId }
         ) else { return false }
         var owing: [(String, Int)] = []
         for invoice in invoices where invoice.status == "issued" {
@@ -244,11 +249,15 @@ struct JobCloseoutView: View {
             if amounts.due > 0 { owing.append((invoice.id, amounts.due)) }
         }
         return !owing.isEmpty && owing.allSatisfy { id, due in
-            CloseoutInvoiceEvidence.covers(
-                due: due,
-                pending: outbox.waitingPayments(invoiceID: id, replayableOnly: true).map(\.amountCents),
-                recorded: outbox.recordedPayments.filter { $0.invoiceId == id }.map(\.amountCents)
-            )
+            let payments = outbox.pending.compactMap { entry -> CloseoutInvoiceEvidence.PendingPayment? in
+                guard case .payment(let payload) = entry.action, payload.invoiceId == id else { return nil }
+                return .init(actorID: entry.actorId, organizationID: entry.organizationId, jobID: payload.jobId,
+                             invoiceID: payload.invoiceId, method: payload.method, amount: payload.amountCents)
+            }
+            guard let pending = CloseoutInvoiceEvidence.pendingAmounts(payments, actorID: actorID,
+                organizationID: organizationID, jobID: jobID, invoiceID: id) else { return false }
+            return CloseoutInvoiceEvidence.covers(due: due, pending: pending,
+                recorded: outbox.recordedPayments.filter { $0.invoiceId == id }.map(\.amountCents))
         }
     }
     private var canComplete: Bool {

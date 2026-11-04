@@ -2,27 +2,27 @@ import XCTest
 @testable import Thorbis
 
 final class CloseoutInvoiceEvidenceTests: XCTestCase {
-    private struct Record { let id: String; let version: Int }
+    private struct Record: Equatable { let id: String; let version: Int }
 
     func testMissingInvoiceWithQueuedPaymentMakesEvidenceIncomplete() {
         let listed = [Record(id: "known", version: 1)]
-        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: listed, paidHere: ["missing"], id: \.id, cached: { _ in nil }))
+        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: listed, paidHere: ["missing"], id: \.id, cached: { _ in nil }, equivalent: ==))
     }
 
     func testMissingInvoiceListIsIncompleteEvenIfPaymentInvoiceIsCached() {
-        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: Optional<[Record]>.none, paidHere: ["known"], id: \.id, cached: { Record(id: $0, version: 1) }))
+        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: Optional<[Record]>.none, paidHere: ["known"], id: \.id, cached: { Record(id: $0, version: 1) }, equivalent: ==))
     }
 
-    func testCompleteEvidenceRetainsNewerCopyAndQueuedInvoice() throws {
+    func testCompleteMatchingEvidenceIncludesQueuedInvoice() throws {
         let listed = [Record(id: "known", version: 1)]
-        let resolved = try XCTUnwrap(CloseoutInvoiceEvidence.resolve(listed: listed, paidHere: ["extra", "extra"], id: \.id, cached: { Record(id: $0, version: 2) }))
+        let resolved = try XCTUnwrap(CloseoutInvoiceEvidence.resolve(listed: listed, paidHere: ["extra", "extra"], id: \.id, cached: { Record(id: $0, version: $0 == "known" ? 1 : 2) }, equivalent: ==))
         XCTAssertEqual(Set(resolved.map(\.id)), ["known", "extra"])
-        XCTAssertEqual(resolved.first(where: { $0.id == "known" })?.version, 2)
+        XCTAssertEqual(resolved.first(where: { $0.id == "known" })?.version, 1)
     }
 
     func testMismatchedScopeMakesEvidenceIncomplete() {
         let listed = [Record(id: "known", version: 1)]
-        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: listed, paidHere: [], id: \.id, cached: { _ in nil }, valid: { $0.version == 2 }))
+        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: listed, paidHere: [], id: \.id, cached: { _ in nil }, equivalent: ==, valid: { $0.version == 2 }))
     }
 
     func testRecordedPaymentCannotCoverBalanceAgainWhenProjectionIsUnknown() {
@@ -49,17 +49,46 @@ final class CloseoutInvoiceEvidenceTests: XCTestCase {
         XCTAssertEqual(amounts.due, 500)
     }
 
+    func testOnlyMatchingActorWorkspaceJobInvoiceAndCashOrCheckCanCover() {
+        let valid = CloseoutInvoiceEvidence.PendingPayment(actorID: "actor", organizationID: "org", jobID: "job", invoiceID: "invoice", method: "cash", amount: 100)
+        let invalid = [
+            CloseoutInvoiceEvidence.PendingPayment(actorID: "other", organizationID: "org", jobID: "job", invoiceID: "invoice", method: "cash", amount: 100),
+            .init(actorID: "actor", organizationID: "other", jobID: "job", invoiceID: "invoice", method: "cash", amount: 100),
+            .init(actorID: "actor", organizationID: "org", jobID: "other", invoiceID: "invoice", method: "cash", amount: 100),
+            .init(actorID: "actor", organizationID: "org", jobID: nil, invoiceID: "invoice", method: "cash", amount: 100),
+            .init(actorID: "actor", organizationID: "org", jobID: "job", invoiceID: "other", method: "cash", amount: 100),
+            .init(actorID: "actor", organizationID: "org", jobID: "job", invoiceID: "invoice", method: "card", amount: 100),
+            .init(actorID: "actor", organizationID: "org", jobID: "job", invoiceID: "invoice", method: "cash", amount: -1)
+        ]
+        let check = CloseoutInvoiceEvidence.PendingPayment(actorID: "actor", organizationID: "org", jobID: "job", invoiceID: "invoice", method: "check", amount: 50)
+        XCTAssertEqual(CloseoutInvoiceEvidence.pendingAmounts([valid, check], actorID: "actor", organizationID: "org", jobID: "job", invoiceID: "invoice"), [100, 50])
+        for item in invalid {
+            XCTAssertNil(CloseoutInvoiceEvidence.pendingAmounts([valid, item], actorID: "actor", organizationID: "org", jobID: "job", invoiceID: "invoice"))
+        }
+    }
+
+    func testUnassociatedLegacyPaymentKeepsJobCoverageUnknown() {
+        XCTAssertTrue(CloseoutInvoiceEvidence.hasUnassociatedPayments(["another-job", nil]))
+        XCTAssertFalse(CloseoutInvoiceEvidence.hasUnassociatedPayments(["another-job", "job"]))
+    }
+
     func testPaymentSumRejectsOverflowAndNegativeAmounts() {
         XCTAssertNil(CloseoutInvoiceEvidence.sum([Int.max, 1]))
         XCTAssertNil(CloseoutInvoiceEvidence.sum([10, -1]))
         XCTAssertEqual(CloseoutInvoiceEvidence.sum([10, 15]), 25)
     }
 
+    func testDisagreeingListAndIndividualInvoiceMakesEvidenceIncomplete() {
+        let listed = [Record(id: "known", version: 2)]
+        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: listed, paidHere: [], id: \.id,
+            cached: { Record(id: $0, version: 1) }, equivalent: ==))
+    }
+
     func testWrongCachedReplacementMakesEvidenceIncomplete() {
-        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: [Record(id: "known", version: 1)], paidHere: [], id: \.id, cached: { _ in Record(id: "wrong", version: 1) }))
+        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: [Record(id: "known", version: 1)], paidHere: [], id: \.id, cached: { _ in Record(id: "wrong", version: 1) }, equivalent: ==))
     }
 
     func testWrongCachedInvoiceDoesNotResolveMissingPayment() {
-        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: [Record(id: "known", version: 1)], paidHere: ["missing"], id: \.id, cached: { _ in Record(id: "wrong", version: 1) }))
+        XCTAssertNil(CloseoutInvoiceEvidence.resolve(listed: [Record(id: "known", version: 1)], paidHere: ["missing"], id: \.id, cached: { _ in Record(id: "wrong", version: 1) }, equivalent: ==))
     }
 }
