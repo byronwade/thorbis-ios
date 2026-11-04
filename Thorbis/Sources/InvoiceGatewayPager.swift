@@ -61,7 +61,8 @@ import Foundation
                 URLQueryItem(name: "q", value: query), URLQueryItem(name: "limit", value: "50")
             ], cursor: cursor, requireFresh: true)
             try Task.checkCancellation()
-            guard revision == requestRevision, current(isCurrent) else { return }
+            guard revision == requestRevision else { return }
+            guard current(isCurrent) else { retire(); return }
             var pageIDs = Set<String>()
             for item in page.items {
                 guard item.sourceId == "invoices", item.resultType == "invoice",
@@ -77,9 +78,11 @@ import Foundation
             seenIDs.formUnion(pageIDs); items.append(contentsOf: page.items)
             nextCursor = page.nextCursor; started = true; error = nil
         } catch is CancellationError {
+            if revision == requestRevision && !current(isCurrent) { retire() }
             return
         } catch {
-            guard revision == requestRevision, current(isCurrent) else { return }
+            guard revision == requestRevision else { return }
+            guard current(isCurrent) else { retire(); return }
             error = "Couldn't load more search results. Try again."
         }
     }
