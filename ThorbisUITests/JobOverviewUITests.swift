@@ -48,8 +48,10 @@ final class JobOverviewUITests: XCTestCase {
         let app = preview("job", working: true)
         let activity = app.buttons["job-section-activity"]
         XCTAssertTrue(activity.waitForExistence(timeout: 15)); activity.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
         let filter = app.buttons["activity-filter"]
-        for _ in 0..<6 where !filter.isHittable { app.swipeUp() }
+        let content = app.scrollViews.firstMatch
+        for _ in 0..<6 where !filter.isHittable { content.swipeUp() }
         XCTAssertTrue(filter.isHittable); filter.tap()
         menuRow(app, "Notes").tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
