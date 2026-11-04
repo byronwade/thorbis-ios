@@ -197,8 +197,13 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
-            guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
-            if revalidating { invoiceAccessDenied = false }
+            if revalidating {
+                guard loadedInvoice.id == invoiceID, expectedJobScope?.contains(loadedInvoice) != false else {
+                    throw Problem(title: "This invoice couldn't be verified. Refresh the job before continuing.", status: nil, detail: nil)
+                }
+            } else {
+                guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+            }
             // A copy saved on this phone is never charged: card, link and Tap to Pay wait for a live
             // read. Cash and check can still be taken and record once back online (OF-04, OF-08).
             if api.savedCopyDate("/v1/invoices/\(invoiceID)") != nil {
@@ -211,16 +216,23 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                 return
             }
             offlineCopy = false
-            JobDetailCache.save(invoice: loadedInvoice)
+            if !revalidating { JobDetailCache.save(invoice: loadedInvoice) }
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
             try Task.checkCancellation()
-            let loadedPayments = try await api.fieldPayments(invoiceID)
+            let loadedPayments = try await SavedCopies.$liveOnly.withValue(revalidating) {
+                try await api.fieldPayments(invoiceID)
+            }
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard validHistory(loadedPayments, for: loadedInvoice) else {
                 throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
+            }
+            if revalidating {
+                guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+                JobDetailCache.save(invoice: loadedInvoice)
+                invoiceAccessDenied = false
             }
             payments = loadedPayments
             JobDetailCache.save(payments: loadedPayments, invoiceID: invoiceID)

@@ -224,6 +224,31 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         XCTAssertFalse(model.canRecordPayment)
     }
 
+    func testDeniedPaymentHistoryRequiresLiveInvoiceAndLiveHistoryToRecover() async throws {
+        let uniqueID = UUID().uuidString.lowercased()
+        let body = invoice().replacingOccurrences(of: invoiceID, with: uniqueID)
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, body), .init(403, #"{"title":"Denied","status":403}"#),
+            .init(200, body), URLProtocolFixture.offline,
+            .init(200, body), .init(200, #"{"items":[]}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let suite = "denied-history-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let box = FieldOutbox(directory: directory, defaults: defaults)
+        box.bind(actorID: "00000000-0000-4000-8000-000000000004", organizationID: "00000000-0000-4000-8000-000000000002")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: uniqueID, intentStore: InvoicePaymentIntentStore(defaults: defaults))
+        model.outbox = box
+        await model.load()
+        XCTAssertTrue(model.invoiceAccessDenied); XCTAssertNil(model.invoice)
+        await model.load()
+        XCTAssertTrue(model.invoiceAccessDenied, "A live invoice alone cannot clear a denied history")
+        XCTAssertNil(model.invoice); XCTAssertFalse(model.canRecordPayment)
+        await model.load()
+        XCTAssertFalse(model.invoiceAccessDenied); XCTAssertNotNil(model.invoice)
+    }
+
     func testDeniedPaymentHistoryAlsoRetiresInvoiceContent() async {
         let client = APIClient(session: URLProtocolFixture.session([
             .init(200, invoice()), .init(403, #"{"title":"Denied","status":403}"#)
