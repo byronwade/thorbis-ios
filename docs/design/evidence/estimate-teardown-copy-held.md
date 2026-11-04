@@ -48,3 +48,5 @@ The frozen `6f70f1c` focused simulator run also stopped at compilation before te
 The `9a40257` simulator run compiled the app and ran seven session cases: six passed, and the identity-loss case failed because its `previewForce` call does nothing without Paper Preview. The failure did not exercise expiry or generation retirement. Log `/tmp/thorbis-lifecycle-9a40257-xcode.log`; source hashes `/tmp/thorbis-lifecycle-9a40257-hashes.txt`.
 
 The follow-up replaces that fixture with a real near-term session expiry while device unbinding is suspended, and checks that generation actually retires before asserting no rebind. This corrected test has not run yet.
+
+The corrected real-expiry case passed on simulator at source `6b36d9a` (one case, 10.067 seconds; `/tmp/thorbis-lifecycle-6b36d9a-xcode.log`). All recorded source hashes matched after the run (`/tmp/thorbis-lifecycle-6b36d9a-hashes.txt`). The six other focused session cases passed in the preceding `9a40257` run; only the corrected test changed between those runs. These tests do not exercise real editor lifecycle UI, provider deployment, sign-out privacy cleanup, or cross-process persistence.
