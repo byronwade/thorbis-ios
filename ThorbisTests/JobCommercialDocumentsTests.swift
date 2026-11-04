@@ -8,6 +8,57 @@ final class JobCommercialDocumentsTests: XCTestCase {
         .init(jobID: id(job), organizationID: id(1), customerID: id(2), originEstimateID: origin.map(id))
     }
 
+    func testPaymentRouteNeverUsesAFormerOrMissingInvoice() async throws {
+        let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#)])
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        await model.load()
+        XCTAssertTrue(model.canRecordPayment)
+        let current = try XCTUnwrap(model.invoice)
+        XCTAssertNotNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                     selected: current, loadedID: id(50), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(51), selectedID: id(51),
+                                                  selected: nil, loadedID: id(50), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(51),
+                                                  selected: current, loadedID: id(50), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                  selected: current, loadedID: id(51), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                  selected: current, loadedID: id(50), model: model, scope: scope(job: 101)))
+    }
+
+    func testPaymentRouteKeepsItsModelWhenAnotherInvoiceBecomesSelected() async throws {
+        let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#),
+                          .init(200, invoice(51)), .init(200, #"{"items":[]}"#)])
+        let first = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        await first.load()
+        let route = try XCTUnwrap(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                              selected: first.invoice, loadedID: id(50), model: first, scope: scope()))
+        let second = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        await second.load()
+        XCTAssertTrue(second.canRecordPayment)
+        XCTAssertEqual(route.invoice.id, id(50))
+        XCTAssertTrue(route.model === first, "The presented sheet must not switch to a newly selected model")
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(51),
+                                                  selected: second.invoice, loadedID: id(51), model: second, scope: scope()))
+    }
+
+    func testDelayedInvoiceReadCannotOpenTheNewSelectionForTheOldRequest() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, invoice(51)),
+                          .init(200, #"{"items":[]}"#), .init(200, #"{"items":[]}"#)])
+        let first = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let second = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        let delayed = Task { await first.load() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        await second.load()
+        XCTAssertTrue(second.canRecordPayment)
+        gate.release(); await delayed.value
+        XCTAssertTrue(first.canRecordPayment)
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(51),
+                                                  selected: second.invoice, loadedID: id(51), model: second, scope: scope()))
+    }
+
     func testApprovedEstimateWithUnknownOptionsDoesNotAssertBaseAmount() throws {
         var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
         payload["status"] = "approved"
