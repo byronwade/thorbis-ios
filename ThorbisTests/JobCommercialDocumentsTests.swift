@@ -324,6 +324,23 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "An obsolete link read must not request old details")
     }
 
+    func testDenialRetiresMountedJobInvoiceAndMarksListIncomplete() async throws {
+        let job = Int.random(in: 100000...900000)
+        let target = scope(job: job)
+        let client = api([.init(200, page([invoice(50, job: job), invoice(51, job: job)]))])
+        client.savedCopyScope = UUID().uuidString
+        let documents = JobDocumentCollections()
+        let loaded = await documents.loadInvoices(scope: target, api: client, isCurrent: { true })
+        XCTAssertTrue(loaded)
+        XCTAssertEqual(documents.invoices?.records.count, 2)
+        let access = try XCTUnwrap(InvoiceAccessRegistry.shared.scope(api: client, invoiceID: id(50)))
+        InvoiceAccessRegistry.shared.deny(access)
+        XCTAssertEqual(documents.invoices?.records.map(\.id), [id(51)])
+        XCTAssertEqual(documents.invoices?.unavailableIDs, [id(50)])
+        XCTAssertEqual(documents.invoices?.isComplete, false)
+        XCTAssertFalse(documents.invoices?.freshIDs.contains(id(50)) ?? true)
+    }
+
     func testSharedCollectionsRecoverKnownInvoicesOnLegacyRefresh() async throws {
         let scope = scope()
         let oldMemory = JobInvoiceMemory.ids(scope.jobID)

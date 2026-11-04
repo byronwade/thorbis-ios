@@ -170,6 +170,7 @@ struct JobCloseoutView: View {
     @EnvironmentObject var store: Store
     @EnvironmentObject var outbox: FieldOutbox
     @EnvironmentObject var pendingMedia: PendingMediaStore
+    @ObservedObject private var invoiceAccess = InvoiceAccessRegistry.shared
     @State private var closeout: FieldCloseout?
     @State private var job: JobRecord?
     @State private var error: String?
@@ -234,7 +235,12 @@ struct JobCloseoutView: View {
         } + outbox.recordedPayments.filter { $0.jobId == jobID }.map(\.invoiceId))
         guard let invoices = CloseoutInvoiceEvidence.resolve(
             listed: listed, paidHere: paidHere, id: { $0.id }, cached: JobDetailCache.invoice,
-            valid: { $0.jobId == jobID && $0.organizationId == organizationID && $0.customerId == job.customerId }
+            valid: { invoice in
+                guard invoice.jobId == jobID, invoice.organizationId == organizationID,
+                      invoice.customerId == job.customerId,
+                      let scope = invoiceAccess.scope(api: api, invoiceID: invoice.id) else { return false }
+                return !invoiceAccess.isDenied(scope)
+            }
         ) else { return false }
         var owing: [(String, Int)] = []
         for invoice in invoices where invoice.status == "issued" {

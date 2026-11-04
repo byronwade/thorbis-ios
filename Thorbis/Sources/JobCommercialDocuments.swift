@@ -8,11 +8,44 @@ final class JobDocumentCollections: ObservableObject {
     @Published private(set) var invoices: JobDocumentRead<InvoiceRecord>?
     private var estimateRequest = UUID()
     private var invoiceRequest = UUID()
+    private weak var invoiceAPI: APIClient?
+    private var invoiceDenialSubscription: AnyCancellable?
 
     func clearEstimates() { estimateRequest = UUID(); estimates = nil }
     func clearInvoices() { invoiceRequest = UUID(); invoices = nil }
     func reset() { clearEstimates(); clearInvoices() }
-    func replaceInvoice(_ invoice: InvoiceRecord) { invoices = invoices?.replacing(invoice) }
+    func replaceInvoice(_ invoice: InvoiceRecord) {
+        if let api = invoiceAPI,
+           let scope = InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoice.id),
+           InvoiceAccessRegistry.shared.isDenied(scope) { return }
+        invoices = invoices?.replacing(invoice)
+    }
+
+    private func observeInvoiceDenials(api: APIClient) {
+        invoiceAPI = api
+        guard invoiceDenialSubscription == nil else { return }
+        invoiceDenialSubscription = InvoiceAccessRegistry.shared.denial.sink { [weak self] scope in
+            MainActor.assumeIsolated {
+                guard let self, let api = self.invoiceAPI, let read = self.invoices,
+                      InvoiceAccessRegistry.shared.scope(api: api, invoiceID: scope.invoiceID) == scope,
+                      read.records.contains(where: { UUID(uuidString: $0.id)?.uuidString.lowercased() == scope.invoiceID }) else { return }
+                self.invoiceRequest = UUID()
+                self.invoices = self.removingDeniedInvoices(from: read, api: api)
+            }
+        }
+    }
+
+    private func removingDeniedInvoices(from read: JobDocumentRead<InvoiceRecord>, api: APIClient) -> JobDocumentRead<InvoiceRecord> {
+        let blocked = read.records.filter { invoice in
+            guard let scope = InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoice.id) else { return false }
+            return InvoiceAccessRegistry.shared.isDenied(scope)
+        }
+        guard !blocked.isEmpty else { return read }
+        let ids = Set(blocked.map(\.id))
+        return .init(scope: read.scope, records: read.records.filter { !ids.contains($0.id) },
+                     freshIDs: read.freshIDs.subtracting(ids), isComplete: false,
+                     unavailableIDs: Array(Set(read.unavailableIDs).union(ids)).sorted(), kind: "invoices")
+    }
 
     /// Keep the job's known documents visible while requiring a fresh membership and record read.
     func markEstimatesStale(scope: JobDocumentScope, updated: EstimateRecord? = nil, requestedID: String? = nil) {
@@ -44,19 +77,21 @@ final class JobDocumentCollections: ObservableObject {
     func loadInvoices(scope: JobDocumentScope, api: APIClient,
                       isCurrent: @escaping @MainActor () -> Bool) async -> Bool {
         guard isCurrent(), !Task.isCancelled else { return false }
+        observeInvoiceDenials(api: api)
         let request = UUID()
         invoiceRequest = request
         let current: @MainActor () -> Bool = { self.invoiceRequest == request && isCurrent() }
         guard let read = await JobDocumentsLoader.invoices(scope: scope, api: api,
             knownIDs: JobInvoiceMemory.ids(scope.jobID), retaining: invoices, isCurrent: current),
               current(), !Task.isCancelled else { return false }
-        invoices = read
-        if read.isComplete {
-            JobInvoiceMemory.replace(read.records.map(\.id), jobID: scope.jobID)
+        let safeRead = removingDeniedInvoices(from: read, api: api)
+        invoices = safeRead
+        if safeRead.isComplete {
+            JobInvoiceMemory.replace(safeRead.records.map(\.id), jobID: scope.jobID)
             // OF-04: the job's invoices as last seen, so an offline closeout still counts cash and check.
-            JobDetailCache.save(invoices: read.records, jobID: scope.jobID)
+            JobDetailCache.save(invoices: safeRead.records, jobID: scope.jobID)
         } else {
-            read.records.filter { read.freshIDs.contains($0.id) }.forEach { JobInvoiceMemory.remember($0.id, jobID: scope.jobID) }
+            safeRead.records.filter { safeRead.freshIDs.contains($0.id) }.forEach { JobInvoiceMemory.remember($0.id, jobID: scope.jobID) }
         }
         return true
     }

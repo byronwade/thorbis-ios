@@ -3,6 +3,14 @@ import XCTest
 
 @MainActor
 final class InvoiceAccessRegistryTests: XCTestCase {
+    func testScopeIsUnavailableWithoutVerifiedActorOrValidOrigin() {
+        let api = APIClient(baseURL: "https://app.thorbis.com")
+        XCTAssertNil(InvoiceAccessRegistry.shared.scope(api: api, invoiceID: UUID().uuidString))
+        api.savedCopyScope = UUID().uuidString
+        api.baseURL = "not an origin"
+        XCTAssertNil(InvoiceAccessRegistry.shared.scope(api: api, invoiceID: UUID().uuidString))
+    }
+
     func testDenialIsScopedAndChangesVersionEvenWhenAlreadyDenied() throws {
         let a = APIClient(baseURL: "https://app.thorbis.com")
         let b = APIClient(baseURL: "https://app.thorbis.com")

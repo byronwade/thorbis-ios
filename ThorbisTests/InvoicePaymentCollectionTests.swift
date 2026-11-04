@@ -6,6 +6,24 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testUnscopedExistingInvoiceStillFallsBackOfflineWithoutKnownDenial() async throws {
+        let uniqueID = UUID().uuidString.lowercased()
+        let body = invoice().replacingOccurrences(of: invoiceID, with: uniqueID)
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, body), .init(200, #"{"items":[]}"#), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        XCTAssertNil(client.savedCopyScope)
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "invoice-unscoped-" + UUID().uuidString))
+        let box = FieldOutbox(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), defaults: defaults)
+        box.bind(actorID: "00000000-0000-4000-8000-000000000004", organizationID: "00000000-0000-4000-8000-000000000002")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: uniqueID)
+        model.outbox = box
+        await model.load()
+        client.invalidateRequests()
+        await model.load()
+        XCTAssertTrue(model.offlineCopy)
+        XCTAssertNotNil(model.invoice)
+        XCTAssertTrue(model.canRecordPayment)
+    }
+
     func testSavedInvoiceStillSupportsOfflineCashOutboxAfterRefresh() async throws {
         let uniqueID = UUID().uuidString.lowercased()
         let invoiceBody = invoice().replacingOccurrences(of: invoiceID, with: uniqueID)
