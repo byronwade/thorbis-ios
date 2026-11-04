@@ -312,6 +312,20 @@ final class Store: ObservableObject {
         activeRootSession = session
         activeRoot = root
     }
+    private var handledRequestSession: UUID?
+    /// A job, record or search just opened. Remember that place so a later shell
+    /// recreate restores it instead of a stale root, and so this session skips the
+    /// start-screen choice.
+    func rememberHandledRequest(_ root: String, session: UUID) {
+        rememberRoot(root, session: session)
+        handledRequestSession = session
+    }
+    /// True when a link, shortcut or search is still pending or was already opened in this session.
+    func openedForReason(session: UUID) -> Bool {
+        requestedJobID != nil || requestedRecord != nil || requestedSearch != nil
+            || requestedSchedule > handledScheduleRequest
+            || handledRequestSession == session
+    }
     /// Both adaptive shells share a single startup decision for this session.
     func consumeStartupSelection(session: UUID) -> Bool {
         guard startupSelectionSession != session else { return false }
@@ -323,7 +337,7 @@ final class Store: ObservableObject {
     func consumeScheduleRequest(session: UUID) -> Bool {
         guard requestedSchedule > handledScheduleRequest else { return false }
         handledScheduleRequest = requestedSchedule
-        rememberRoot("schedule", session: session)
+        rememberHandledRequest("schedule", session: session)
         return true
     }
     /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.

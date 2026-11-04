@@ -322,6 +322,7 @@ struct TabletRoot: View {
         .onChange(of: store.requestedSearch, initial: true) {
             guard let query = store.requestedSearch else { return }
             store.requestedSearch = nil
+            if let id = rootID(tab) { store.rememberHandledRequest(id, session: session.generation) }
             searchSeed = query
             search = true
         }
@@ -344,16 +345,7 @@ struct TabletRoot: View {
             openHomeAtLaunch()
         }
         .onChange(of: tab) { _, value in
-            let id: String?
-            switch value {
-            case .schedule: id = "schedule"
-            case .jobs: id = "jobs"
-            case .customers: id = "customers"
-            case .place(let item): id = item.rawValue
-            case .local(let local): id = "local-" + local.rawValue
-            case .more: id = nil
-            }
-            if let id {
+            if let id = rootID(value) {
                 store.rememberRoot(id, session: session.generation)
                 _ = store.consumeStartupSelection(session: session.generation)
             }
@@ -566,8 +558,7 @@ struct TabletRoot: View {
     /// Once, from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
         guard !settledLaunchPlace, session.phase == .ready else { return }
-        guard path.isEmpty, !store.openedForRecord, store.requestedSchedule == 0,
-              store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil else {
+        guard path.isEmpty, !store.openedForReason(session: session.generation) else {
             settledLaunchPlace = true
             _ = store.consumeStartupSelection(session: session.generation)
             return
@@ -605,6 +596,17 @@ struct TabletRoot: View {
     private var localSections: [LocalWorkspaceSection] {
         guard session.user?.id != nil, session.activeOrganization?.id != nil else { return [] }
         return LocalWorkspaceSection.allCases.filter { session.can($0.requiredCapability, feature: $0.requiredFeature) }
+    }
+
+    private func rootID(_ section: TabletSection) -> String? {
+        switch section {
+        case .schedule: "schedule"
+        case .jobs: "jobs"
+        case .customers: "customers"
+        case .place(let item): item.rawValue
+        case .local(let local): "local-" + local.rawValue
+        case .more: nil
+        }
     }
 
     private func section(for item: MenuItem) -> TabletSection {
@@ -698,9 +700,11 @@ struct TabletRoot: View {
             show(.schedule)
             scheduleRange = "Today"
             scheduleSelection = job.id
+            store.rememberHandledRequest("schedule", session: session.generation)
         } else {
             show(.jobs)
             picks[.jobs] = TabletPick(id: job.id, value: job)
+            store.rememberHandledRequest("jobs", session: session.generation)
         }
     }
 
@@ -715,12 +719,15 @@ struct TabletRoot: View {
             let customer = store.customers.first { $0.id == id } ?? Customer(id: id, name: "Customer", archived: nil, createdAt: nil)
             show(.customers)
             picks[.customers] = TabletPick(id: id, value: customer)
+            store.rememberHandledRequest("customers", session: session.generation)
         case .estimate(let id):
             show(.place(.estimates))
             picks[.place(.estimates)] = TabletPick(id: id, value: PaperRoute.estimate(id))
+            store.rememberHandledRequest(MenuItem.estimates.rawValue, session: session.generation)
         case .invoice(let id):
             show(.place(.invoices))
             picks[.place(.invoices)] = TabletPick(id: id, value: PaperRoute.invoice(id))
+            store.rememberHandledRequest(MenuItem.invoices.rawValue, session: session.generation)
         }
     }
 

@@ -127,7 +127,7 @@ struct RootView: View {
         settledLaunchPlace = true
         guard store.consumeStartupSelection(session: session.generation) else { return }
         guard selectedTab == PrimaryTab.initial.rawValue, schedulePath.isEmpty,
-              !store.openedForRecord, store.requestedSchedule == 0 else { return }
+              !store.openedForReason(session: session.generation) else { return }
         if let scope = StartupDestination.scope(session: session, api: api) {
             let preference = StartupDestinationPreferences().get(for: scope)
             if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
@@ -984,10 +984,12 @@ struct RootView: View {
                 primaryTab = .schedule
                 schedulePath = NavigationPath()
                 schedulePath.append(job)
+                store.rememberHandledRequest(PrimaryTab.schedule.rawValue, session: session.generation)
             } else {
                 primaryTab = .jobs
                 jobsPath = NavigationPath()
                 jobsPath.append(job)
+                store.rememberHandledRequest(PrimaryTab.jobs.rawValue, session: session.generation)
             }
         }
     }
@@ -1000,6 +1002,7 @@ struct RootView: View {
             if drawerOpen { closeDrawer() }
             if !barSearching { openBarSearch() }
             searchModel.query = query
+            store.rememberHandledRequest(selectedTab, session: session.generation)
         }
     }
 
@@ -1024,9 +1027,11 @@ struct RootView: View {
         if home == .customers, MenuItem.customers.permitted(session) {
             primaryTab = .customers
             customersPath = target
+            store.rememberHandledRequest(PrimaryTab.customers.rawValue, session: session.generation)
         } else if home.permitted(session) {
             selectedTab = home.rawValue
             customPaths[home.rawValue] = target
+            store.rememberHandledRequest(home.rawValue, session: session.generation)
         } else {
             // No list of its own to sit on: it opens over the place showing, so Back returns there.
             switch selectedTab {
@@ -1035,6 +1040,7 @@ struct RootView: View {
             case PrimaryTab.customers.rawValue: customersPath = target
             default: customPaths[selectedTab] = target
             }
+            store.rememberHandledRequest(selectedTab, session: session.generation)
         }
     }
 

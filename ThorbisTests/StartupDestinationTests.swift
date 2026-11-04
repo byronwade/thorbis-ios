@@ -71,4 +71,59 @@ final class StartupDestinationTests: XCTestCase {
         XCTAssertEqual(store.rememberedRoot(session: session), "local-fleet")
     }
 
+    @MainActor func testHandledJobAndRecordRequestsReplaceStaleRememberedRoot() {
+        let store = Store()
+        let session = UUID()
+        store.rememberRoot("customers", session: session)
+        store.requestedJobID = "job-1"
+        store.requestedJobID = nil
+        store.rememberHandledRequest("schedule", session: session)
+        XCTAssertEqual(store.rememberedRoot(session: session), "schedule")
+        store.requestedRecord = .customer("customer-1")
+        store.requestedRecord = nil
+        store.rememberHandledRequest("customers", session: session)
+        XCTAssertEqual(store.rememberedRoot(session: session), "customers")
+        store.requestedSearch = "AC"
+        store.requestedSearch = nil
+        store.rememberHandledRequest("jobs", session: session)
+        XCTAssertEqual(store.rememberedRoot(session: session), "jobs")
+    }
+
+    @MainActor func testHandledRequestsDoNotBlockStartupForALaterSession() {
+        let store = Store()
+        let first = UUID()
+        store.requestedJobID = "job-1"
+        XCTAssertTrue(store.openedForReason(session: first))
+        store.requestedJobID = nil
+        store.rememberHandledRequest("schedule", session: first)
+        XCTAssertTrue(store.openedForReason(session: first))
+        store.requestedSchedule += 1
+        XCTAssertTrue(store.consumeScheduleRequest(session: first))
+        XCTAssertTrue(store.openedForReason(session: first))
+        let second = UUID()
+        XCTAssertTrue(store.consumeStartupSelection(session: second))
+        XCTAssertFalse(store.openedForReason(session: second))
+        XCTAssertTrue(store.openedForRecord)
+        XCTAssertGreaterThan(store.requestedSchedule, 0)
+    }
+
+    @MainActor func testPendingRequestsBlockStartupBeforeTheyAreOpened() {
+        let store = Store()
+        let session = UUID()
+        store.requestedJobID = "job-1"
+        XCTAssertTrue(store.openedForReason(session: session))
+        store.requestedJobID = nil
+        store.requestedRecord = .invoice("invoice-1")
+        XCTAssertTrue(store.openedForReason(session: session))
+        store.requestedRecord = nil
+        store.requestedSearch = "Birch"
+        XCTAssertTrue(store.openedForReason(session: session))
+        store.requestedSearch = nil
+        store.requestedSchedule += 1
+        XCTAssertTrue(store.openedForReason(session: session))
+        XCTAssertTrue(store.consumeScheduleRequest(session: session))
+        XCTAssertTrue(store.openedForReason(session: session))
+        XCTAssertFalse(store.openedForReason(session: UUID()))
+    }
+
 }
