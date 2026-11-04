@@ -338,6 +338,7 @@ struct EstimateDetailView: View {
         var attempt: CustomerHandoffAttempt?
         if current.status == "draft" {
             guard let captured = customerView.captureAttempt(api: api, session: session),
+                  current.organizationId == captured.organization,
                   session.can("estimate.send", feature: "estimates") else { return }
             attempt = captured
             busy = true
