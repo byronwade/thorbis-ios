@@ -9,3 +9,5 @@ A DEBUG-only fixture and mounted UI test have been drafted for selecting two pho
 The unrun DEBUG journey coverage now also exercises swiping and an exact asset becoming archived between download and display. The selected-image label is cleared before changing index, and in-progress preparation is invalidated when the media screen disappears. These paths still require an iOS build and the stated device/lifecycle tests.
 
 Invalidation prevents late results from being displayed and clears the current image, but background invalidation does not yet prove immediate cancellation of an already-started storage request. The resulting file must be checked for deletion after late completion and after failures; the transfer cleanup changes affect the existing staff media path too and need dedicated regression coverage.
+
+The prototype now requests cancellation of the active photo task when invalidated; whether a delayed storage transfer actually stops and cleans up is still untested. No cancellation or cleanup guarantee is claimed from that source change alone.
