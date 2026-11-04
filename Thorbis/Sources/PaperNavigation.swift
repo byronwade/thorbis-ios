@@ -25,6 +25,10 @@ struct RootView: View {
     /// Set once the launch place is settled, so a later capability refresh never moves the person.
     @State private var settledLaunchPlace = false
     @State private var phoneShellVisible = false
+    #if DEBUG
+    @State private var startupFixtureWide = false
+    private var startupFixture: Bool { PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--startup-fixture") }
+    #endif
     /// The side drawer (2026-10-31, after the Claude and ChatGPT apps): open, and a drag in progress.
     @State private var drawerOpen = false
     @State private var drawerDrag: CGFloat = 0
@@ -72,12 +76,25 @@ struct RootView: View {
 
     var body: some View {
         GeometryReader { geometry in
+            #if DEBUG
+            navigation(wide: startupFixture ? startupFixtureWide : usesTabletLayout(width: geometry.size.width))
+            #else
             navigation(wide: usesTabletLayout(width: geometry.size.width))
+            #endif
                 .background(Theme.canvas)
         }
         #if DEBUG
         .modifier(PreviewLandscape())
         .modifier(PreviewWindowWidth())
+        .safeAreaInset(edge: .top) {
+            if startupFixture {
+                HStack {
+                    Button("Test switch width") { startupFixtureWide.toggle() }
+                    Button("Test schedule shortcut") { store.requestedSchedule += 1 }
+                    if !startupFixtureWide { Button("Test open jobs") { primaryTab = .jobs } }
+                }.font(.caption).padding(4).background(Color.yellow)
+            }
+        }
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
@@ -661,6 +678,9 @@ struct RootView: View {
             if !valid { reviewScope = nil }
         }
         .background(Theme.canvas)
+        #if DEBUG
+        .accessibilityIdentifier(startupFixture ? "startup-phone-\(selectedTab)" : "")
+        #endif
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
         .onChange(of: store.requestedSchedule, initial: true) {
@@ -688,6 +708,7 @@ struct RootView: View {
     #if DEBUG
     /// Screenshot and UI-test setups (`--paper-preview --paper-preview-screen <name>`).
     private func runPreview() async {
+        if startupFixture { return }
         guard PaperPreview.enabled else { return }
         defer {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-drawer-open") {
