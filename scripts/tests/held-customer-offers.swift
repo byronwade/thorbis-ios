@@ -18,8 +18,14 @@ import Foundation
     {"contractVersion":1,"id":"018f0000-aaaa-7000-8000-000000000012","identity":"\(identity)","quoteIdentity":"\(identity)","expiresAt":"2099-01-01T00:00:00.000Z","currency":"USD","totalAmount":2000,"base":{"totalAmount":1000,"lines":[{"description":"Base","quantity":1,"unitPrice":1000,"totalAmount":1000}]},"addOns":[{"id":"\(offer)","title":"Upgrade","description":"Extra","quantity":2,"totalAmount":1000,"lines":[{"description":"Extra work","quantity":4,"unitPrice":250,"totalAmount":1000}]}]}
     """.data(using: .utf8)!
     let quote = try JSONDecoder().decode(CustomerOfferQuote.self, from: quoteData)
+    let generation = UUID()
+    let reviewed = CustomerOfferReview(quote: quote, selections: cart.selections, token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation)
+    precondition(reviewed.matches(token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
+    precondition(!reviewed.matches(token: "different", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
+    precondition(!reviewed.matches(token: "token", revisionNumber: 2, contentHash: hash, optionID: nil, generation: generation))
+    precondition(!reviewed.matches(token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: UUID()))
     precondition(cart.install(quote, ticket: captured, now: Date()))
-    precondition(customerEstimatePresentedTotal(base: 1000, review: CustomerOfferReview(quote: quote, selections: cart.selections)) == 2000)
+    precondition(customerEstimatePresentedTotal(base: 1000, review: CustomerOfferReview(quote: quote, selections: cart.selections, token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: UUID())) == 2000)
     precondition(customerEstimatePresentedTotal(base: 1000, review: nil) == 1000)
     precondition(cart.setQuantity(3, for: offer) && cart.quote == nil)
     precondition(!cart.install(quote, ticket: captured, now: Date()))

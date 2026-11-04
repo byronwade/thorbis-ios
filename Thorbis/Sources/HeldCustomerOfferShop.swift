@@ -5,6 +5,7 @@ struct HeldCustomerOfferShop: View {
     let token: String
     let currentAuthority: @MainActor () -> Bool
     let onReview: (CustomerOfferQuote, [CustomerOfferSelection]) -> Void
+    let onSelectionChange: () -> Void
     let initialReview: CustomerOfferReview?
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
@@ -12,19 +13,47 @@ struct HeldCustomerOfferShop: View {
     @State private var busy = false
     @State private var loaded = false
     @State private var error: String?
+    @State private var reading: OfferDescription?
     @State private var generation: UUID?
 
     init(token: String, revisionNumber: Int, contentHash: String, optionID: String?,
          currentAuthority: @escaping @MainActor () -> Bool, initialReview: CustomerOfferReview? = nil,
-         onReview: @escaping (CustomerOfferQuote, [CustomerOfferSelection]) -> Void) {
+         onSelectionChange: @escaping () -> Void, onReview: @escaping (CustomerOfferQuote, [CustomerOfferSelection]) -> Void) {
         self.token = token
         self.currentAuthority = currentAuthority
         self.initialReview = initialReview
+        self.onSelectionChange = onSelectionChange
         self.onReview = onReview
         _cart = State(initialValue: CustomerOfferCart(revisionNumber: revisionNumber, contentHash: contentHash, optionID: optionID))
     }
 
     var body: some View {
+        Group {
+            if currentAuthority() && (generation == nil || generation == api.requestGeneration) {
+                content
+            } else {
+                VStack(spacing: 20) {
+                    Text("Please hand the device back").font(Theme.customerFont(24, weight: .medium))
+                    Text("Ask your technician to reopen this estimate.").font(Theme.customerFont(20))
+                    Button("Back") { dismiss() }.frame(minHeight: 56)
+                }.padding(24)
+            }
+        }
+        .sheet(item: $reading) { entry in
+            NavigationStack {
+                if currentAuthority(), generation == api.requestGeneration {
+                    ScrollView { Text(entry.text).font(Theme.customerFont(20)).frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true).padding(24) }
+                        .navigationTitle("Details").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { reading = nil } } }
+                }
+            }
+        }
+        .task { generation = api.requestGeneration; await load() }
+        .onChange(of: api.requestGeneration) { _, _ in cart.retire(); loaded = false; error = "Ask your technician to reopen this estimate." }
+    }
+
+    private var content: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -69,31 +98,34 @@ struct HeldCustomerOfferShop: View {
                 Button("Back") { dismiss() }.frame(minHeight: 56)
             }.font(Theme.customerFont(20, weight: .medium)).padding(.horizontal, 24)
         }
-        .task { generation = api.requestGeneration; await load() }
-        .onChange(of: api.requestGeneration) { _, _ in cart.retire(); loaded = false; error = "Ask your technician to reopen this estimate." }
     }
 
     private func offerRow(_ item: CustomerAvailableOffer) -> some View {
         let selected = cart.selections.first { $0.offerId == item.id.lowercased() }?.quantity
         return VStack(alignment: .leading, spacing: 8) {
             Text(item.title).font(Theme.customerFont(22, weight: .medium))
-            Text(item.description).font(Theme.customerFont(20)).fixedSize(horizontal: false, vertical: true)
+            description(item.description, label: item.title)
             Text("From \(price(item.totalAmount)) for \(item.quantityPolicy.min)")
                 .font(Theme.customerFont(18)).foregroundStyle(Theme.muted)
             if let selected {
                 HStack {
-                    Button("Remove") { cart.setQuantity(nil, for: item.id) }.frame(minHeight: 56)
+                    Button("Remove") { changeQuantity(nil, for: item.id) }.frame(minHeight: 56)
                     Spacer()
-                    Button("−") { cart.setQuantity(selected - item.quantityPolicy.step, for: item.id) }
+                    Button("−") { changeQuantity(selected - item.quantityPolicy.step, for: item.id) }
                         .frame(minWidth: 56, minHeight: 56).accessibilityLabel("Decrease \(item.title)")
                     Text("\(selected)").font(Theme.customerFont(20))
-                    Button("+") { cart.setQuantity(selected + item.quantityPolicy.step, for: item.id) }
+                    Button("+") { changeQuantity(selected + item.quantityPolicy.step, for: item.id) }
                         .frame(minWidth: 56, minHeight: 56).accessibilityLabel("Increase \(item.title)")
                 }
             } else {
-                Button("Add \(item.title)") { cart.setQuantity(item.quantityPolicy.min, for: item.id) }.frame(minHeight: 56)
+                Button("Add \(item.title)") { changeQuantity(item.quantityPolicy.min, for: item.id) }.frame(minHeight: 56)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func changeQuantity(_ quantity: Int?, for id: String) {
+        let before = cart.selections
+        if cart.setQuantity(quantity, for: id), before != cart.selections { onSelectionChange() }
     }
 
     private func quoteGroup(title: String, lines: [CustomerOfferLine], total: Int) -> some View {
@@ -101,13 +133,28 @@ struct HeldCustomerOfferShop: View {
             HStack(alignment: .firstTextBaseline) { Text(title); Spacer(); Text(price(total)) }
                 .font(Theme.customerFont(20, weight: .medium))
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(line.description).font(Theme.customerFont(18)).fixedSize(horizontal: false, vertical: true)
+                description(line.description, label: title)
                 Text("\(line.quantity) × \(price(line.unitPrice)) · \(price(line.totalAmount))")
                     .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
             }
         }
     }
 
+    private struct OfferDescription: Identifiable {
+        let id = UUID()
+        let text: String
+    }
+    private func description(_ text: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(text).font(Theme.customerFont(20)).lineLimit(text.count > 80 || text.contains("\n") ? 2 : nil)
+            if text.count > 80 || text.contains("\n") {
+                Button("Show more") {
+                    guard generation == api.requestGeneration, currentAuthority() else { return }
+                    reading = OfferDescription(text: text)
+                }.frame(minHeight: 56).accessibilityLabel("Show more, \(label)")
+            }
+        }
+    }
     private func price(_ cents: Int) -> String {
         money(cents, currency: "USD")
     }

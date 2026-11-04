@@ -75,6 +75,16 @@ struct CustomerOfferQuote: Decodable, Equatable {
 struct CustomerOfferReview: Equatable {
     let quote: CustomerOfferQuote
     let selections: [CustomerOfferSelection]
+    let token: String
+    let revisionNumber: Int
+    let contentHash: String
+    let optionID: String?
+    let generation: UUID
+
+    func matches(token: String, revisionNumber: Int, contentHash: String, optionID: String?, generation: UUID) -> Bool {
+        self.token == token && self.revisionNumber == revisionNumber && self.contentHash == contentHash &&
+        self.optionID?.lowercased() == optionID?.lowercased() && self.generation == generation
+    }
     func isCurrent(now: Date) -> Bool {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

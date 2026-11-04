@@ -234,8 +234,13 @@ struct CustomerEstimatePresentation: View {
             if let link, let revision = flow.issuedRevision {
                 HeldCustomerOfferShop(token: link.token, revisionNumber: revision.revisionNumber,
                     contentHash: link.action.contentHash, optionID: flow.selectedOptionID,
-                    currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }, initialReview: offerReview) { quote, selections in
-                    offerReview = CustomerOfferReview(quote: quote, selections: selections)
+                    currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }, initialReview: offerReview,
+                    onSelectionChange: { offerReview = nil; strokes = []; uploadedSignature = nil }) { quote, selections in
+                    guard let generation = reviewGeneration, generation == api.requestGeneration,
+                          handoff?.current() != false, handoff?.canApprove() != false else { return }
+                    offerReview = CustomerOfferReview(quote: quote, selections: selections, token: link.token,
+                        revisionNumber: revision.revisionNumber, contentHash: link.action.contentHash,
+                        optionID: flow.selectedOptionID, generation: generation)
                     strokes = []; uploadedSignature = nil; showOfferShop = false
                 }
             }
@@ -399,11 +404,16 @@ struct CustomerEstimatePresentation: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Your full name").font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
                 TextField("Your full name", text: $name, prompt: .placeholder("Your full name"))
+                    .disabled(standaloneOfferDecision != nil)
                     .textContentType(.name)
                     .font(Theme.customerFont(type.body))
                     .padding(.horizontal, 16)
                     .frame(minHeight: type.target)
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+            }
+            if standaloneOfferDecision != nil {
+                Text("The previous approval is unconfirmed. Retry the same decision or ask your technician to check it.")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -411,12 +421,14 @@ struct CustomerEstimatePresentation: View {
                     Spacer()
                     if SignatureInk.hasInk(strokes) {
                         Button("Clear") { strokes = [] }
+                            .disabled(standaloneOfferDecision != nil)
                             .font(Theme.customerFont(type.small, weight: .medium))
                             .frame(minWidth: type.target, minHeight: 44)
                     }
                 }
                 ZStack(alignment: .bottomLeading) {
                     SignaturePad(strokes: $strokes)
+                        .disabled(standaloneOfferDecision != nil)
                     if !SignatureInk.hasInk(strokes) {
                         Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
                             .padding(16).allowsHitTesting(false)
@@ -527,6 +539,7 @@ struct CustomerEstimatePresentation: View {
                 CustomerTextButton(title: "Back", type: type) {
                     if let handoff { handoff.backToReview() } else { flow.back(); error = nil }
                 }
+                .disabled(standaloneOfferDecision != nil)
             case .done:
                 if let returnToDocuments {
                     CustomerPresentationCommit(title: "Back to job documents", enabled: true, busy: false, type: type, action: returnToDocuments)
@@ -592,6 +605,7 @@ struct CustomerEstimatePresentation: View {
     // MARK: Actions
 
     @State private var standaloneLink: (token: String, action: PublicEstimateAction)?
+    @State private var standaloneOfferDecision: PublicEstimateActionDecision?
     private var link: (token: String, action: PublicEstimateAction)? {
         get { handoff?.link ?? standaloneLink }
         nonmutating set { if let handoff { handoff.link = newValue } else { standaloneLink = newValue } }
@@ -606,6 +620,11 @@ struct CustomerEstimatePresentation: View {
 
     private func openReview() async {
         guard flow.estimate.status != "approved" else { return }
+        if handoff == nil, standaloneOfferDecision != nil {
+            reviewGeneration = nil
+            openingError = "The previous approval is unconfirmed. Ask your technician to check it."
+            return
+        }
         if let handoff {
             guard handoff.current() else { return }
             if handoff.signature != nil || handoff.outcome != nil || handoff.running {
@@ -622,7 +641,7 @@ struct CustomerEstimatePresentation: View {
         openingReview = true
         openingError = nil
         error = nil
-        if handoff == nil { link = nil; uploadedSignature = nil }
+        if handoff == nil { link = nil; uploadedSignature = nil; standaloneOfferDecision = nil; offerReview = nil }
         consentText = handoff?.link?.action.consentText
         strokes = []
         defer { if reviewRequestID == requestID { openingReview = false } }
@@ -646,7 +665,7 @@ struct CustomerEstimatePresentation: View {
     }
 
     private func openOfferShop() async {
-        guard requiresOffers, reviewReady, handoff?.signature == nil, !actionBusy, let revision = flow.issuedRevision else { return }
+        guard requiresOffers, reviewReady, handoff?.signature == nil, standaloneOfferDecision == nil, !actionBusy, let revision = flow.issuedRevision else { return }
         let generation = api.requestGeneration
         busy = true
         defer { busy = false }
@@ -663,6 +682,11 @@ struct CustomerEstimatePresentation: View {
 
     private func startSigning() async {
         error = nil
+        if requiresOffers, let offerReview, let link, let revision = flow.issuedRevision,
+           !offerReview.matches(token: link.token, revisionNumber: revision.revisionNumber, contentHash: link.action.contentHash,
+                                optionID: flow.selectedOptionID, generation: api.requestGeneration) {
+            self.offerReview = nil; error = "This estimate changed. Please review the total again."; return
+        }
         if requiresOffers && offerReview == nil { await openOfferShop(); return }
         if requiresOffers, let offerReview, !offerReview.isCurrent(now: Date()), handoff?.submissionStarted != true {
             self.offerReview = nil; error = "This total expired. Please review it again."; return
@@ -734,7 +758,10 @@ struct CustomerEstimatePresentation: View {
                 guard handoff?.current() != false, handoff?.canApprove() != false else { return }
                 let newDecision: PublicEstimateActionDecision
                 if requiresOffers {
-                    guard let offerReview, offerReview.isCurrent(now: Date()) || handoff?.submissionStarted == true else {
+                    guard let offerReview,
+                          offerReview.matches(token: link.token, revisionNumber: action.revisionNumber, contentHash: action.contentHash,
+                                              optionID: flow.selectedOptionID, generation: generation),
+                          offerReview.isCurrent(now: Date()) || handoff?.submissionStarted == true else {
                         error = "This total expired. Please review it again."; return
                     }
                     newDecision = .approveOffer(revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
@@ -744,7 +771,8 @@ struct CustomerEstimatePresentation: View {
                     newDecision = .approve(revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
                         signerName: signer, consentVersion: consentVersion, consent: true, optionID: flow.selectedOptionID)
                 }
-                let decision = handoff?.publicDecision ?? newDecision
+                let decision = handoff?.publicDecision ?? standaloneOfferDecision ?? newDecision
+                if requiresOffers && handoff == nil { standaloneOfferDecision = decision }
                 handoff?.publicDecision = decision
                 handoff?.submissionStarted = true; handoff?.retryVerified = false
                 let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
@@ -753,6 +781,12 @@ struct CustomerEstimatePresentation: View {
                     guard handoff.current() else { return }
                     guard handoff.canApprove() else { handoff.report(.unknown); return }
                     handoff.report(await handoff.publicConfirmed(patch))
+                } else if requiresOffers {
+                    guard patch.status == .approved, let offerReview,
+                          offerReview.matchesAcceptance(patch.acceptance, signerName: signer) else {
+                        error = "The approval is unconfirmed. Ask your technician to check it."; return
+                    }
+                    onApproved(nil)
                 } else { onApproved(nil) }
             } else {
                 return

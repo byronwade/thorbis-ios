@@ -25,13 +25,30 @@ final class HeldCustomerOffersTests: XCTestCase {
         let ticket = cart.ticket
         XCTAssertTrue(cart.install(try quote(), ticket: ticket, now: Date()))
         XCTAssertTrue(cart.quoteIsCurrent(now: Date()))
-        XCTAssertEqual(customerEstimatePresentedTotal(base: 1000, review: CustomerOfferReview(quote: try quote(), selections: cart.selections)), 2000)
+        XCTAssertEqual(customerEstimatePresentedTotal(base: 1000, review: CustomerOfferReview(quote: try quote(), selections: cart.selections, token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: UUID())), 2000)
         XCTAssertEqual(customerEstimatePresentedTotal(base: 1000, review: nil), 1000)
         XCTAssertFalse(cart.quoteIsCurrent(now: Date(timeIntervalSince1970: 4_200_000_000)))
         XCTAssertTrue(cart.setQuantity(3, for: offerID))
         XCTAssertNil(cart.quote)
         XCTAssertFalse(cart.install(try quote(), ticket: ticket, now: Date()))
         XCTAssertFalse(cart.install(try quote(), ticket: cart.ticket, now: Date()))
+    }
+    func testAcceptanceMustMatchTheQuoteChoiceSignerAndTotal() throws {
+        let generation = UUID()
+        let selection = CustomerOfferSelection(offerId: offerID, quantity: 2)
+        let reviewed = CustomerOfferReview(quote: try quote(), selections: [selection], token: "token", revisionNumber: 1,
+            contentHash: hash, optionID: nil, generation: generation)
+        func receipt(_ amount: Int, _ signer: String, _ quantity: Int) throws -> PublicEstimateAction.Acceptance {
+            try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: Data("""
+            {"id":"018f0000-aaaa-7000-8000-000000000013","signerName":"\(signer)","acceptedAt":"2026-11-03T12:00:00Z","totalAmount":\(amount),"offerQuoteId":"018f0000-aaaa-7000-8000-000000000012","quoteIdentity":"\(identity)","selections":[{"offerId":"\(offerID)","quantity":\(quantity)}]}
+            """.utf8))
+        }
+        XCTAssertTrue(reviewed.matchesAcceptance(try receipt(2000, "Customer", 2), signerName: "Customer"))
+        XCTAssertFalse(reviewed.matchesAcceptance(try receipt(1999, "Customer", 2), signerName: "Customer"))
+        XCTAssertFalse(reviewed.matchesAcceptance(try receipt(2000, "Other", 2), signerName: "Customer"))
+        XCTAssertFalse(reviewed.matchesAcceptance(try receipt(2000, "Customer", 1), signerName: "Customer"))
+        XCTAssertFalse(reviewed.matches(token: "different", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
+        XCTAssertFalse(reviewed.matches(token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: UUID()))
     }
     func testUnsupportedScopeTamperedTotalsAndExpiredQuoteFailClosed() throws {
         var cart = CustomerOfferCart(revisionNumber: 1, contentHash: hash, optionID: nil)

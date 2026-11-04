@@ -52,6 +52,7 @@ struct JobEstimateSignatureIntent: Equatable {
 @MainActor
 final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
     let reviewed: JobEstimateReviewedItem
+    let apiGeneration: UUID
     var initialSignerName: String
     let current: @MainActor () -> Bool
     let canApprove: @MainActor () -> Bool
@@ -78,9 +79,9 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
     var publicConfirmed: @MainActor (PublicEstimateActionPatch) async -> JobEstimateHandoffOutcome = { _ in .unknown }
     var changed: @MainActor () -> Void = {}
 
-    init(reviewed: JobEstimateReviewedItem, initialSignerName: String, current: @escaping @MainActor () -> Bool,
+    init(reviewed: JobEstimateReviewedItem, apiGeneration: UUID, initialSignerName: String, current: @escaping @MainActor () -> Bool,
          canApprove: @escaping @MainActor () -> Bool, transfer: MediaTransfer) {
-        self.id = reviewed.key; self.reviewed = reviewed; self.initialSignerName = initialSignerName
+        self.id = reviewed.key; self.reviewed = reviewed; self.apiGeneration = apiGeneration; self.initialSignerName = initialSignerName
         self.current = current; self.canApprove = canApprove; self.transfer = transfer
     }
     func freezeSignature(signerName: String, png: Data, signedAt: String) throws -> JobEstimateSignatureIntent {
@@ -110,16 +111,14 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
     /// Acceptance comes from the already bound token, never from the frozen requested choice alone.
     func retainAcceptedAction(_ action: PublicEstimateAction) -> Bool {
         if let offerReview {
-            guard current(), let link, action.kind == "estimate", action.status == .approved,
+            guard current(), let link,
+                  offerReview.matches(token: link.token, revisionNumber: reviewed.revision.revisionNumber,
+                    contentHash: link.action.contentHash, optionID: reviewed.optionID, generation: apiGeneration),
+                  action.kind == "estimate", action.status == .approved,
                   action.revisionNumber == reviewed.revision.revisionNumber,
                   action.contentHash == link.action.contentHash, action.title == reviewed.revision.title,
-                  action.currency == offerReview.quote.currency, let acceptance = action.acceptance,
-                  acceptance.optionId?.lowercased() == reviewed.optionID?.lowercased(),
-                  acceptance.offerQuoteId?.lowercased() == offerReview.quote.id.lowercased(),
-                  acceptance.quoteIdentity == offerReview.quote.quoteIdentity,
-                  acceptance.selections?.sorted(by: { $0.offerId.lowercased() < $1.offerId.lowercased() }) == offerReview.selections,
-                  Int(exactly: acceptance.totalAmount) == offerReview.quote.totalAmount,
-                  let signature, acceptance.signerName == signature.signerName else { return false }
+                  action.currency == offerReview.quote.currency, let signature,
+                  offerReview.matchesAcceptance(action.acceptance, signerName: signature.signerName) else { return false }
             acceptedAction = action
             return true
         }
@@ -352,7 +351,7 @@ final class JobEstimateHandoffModel: ObservableObject {
                 #else
                 transfer = MediaTransfer(api: api)
                 #endif
-                let context = CustomerEstimateHandoffContext(reviewed: item, initialSignerName: lastSignerName ?? customerName,
+                let context = CustomerEstimateHandoffContext(reviewed: item, apiGeneration: api.requestGeneration, initialSignerName: lastSignerName ?? customerName,
                     current: { [weak self] in self?.isCurrent == true },
                     canApprove: { [weak self] in self?.approvalAllowed(item) == true }, transfer: transfer)
                 context.validate = { [weak self] in guard let self else { throw CancellationError() }; try await self.verifyMembership(item) }
