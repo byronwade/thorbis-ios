@@ -546,6 +546,8 @@ struct TabletRoot: View {
     /// Once, from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
         guard !settledLaunchPlace, session.phase == .ready else { return }
+        settledLaunchPlace = true
+        guard store.consumeStartupSelection(session: session.generation) else { return }
         guard path.isEmpty, !store.openedForRecord, store.requestedSchedule == 0,
               store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil else {
             settledLaunchPlace = true

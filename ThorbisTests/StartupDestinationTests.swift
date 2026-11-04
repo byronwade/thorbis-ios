@@ -49,4 +49,13 @@ final class StartupDestinationTests: XCTestCase {
         XCTAssertFalse(store.consumeScheduleRequest())
     }
 
+    @MainActor func testLaunchDecisionIsConsumedOnceAcrossRootRecreation() {
+        let store = Store()
+        let session = UUID()
+        XCTAssertTrue(store.consumeStartupSelection(session: session))
+        // Replacing a phone shell with a tablet shell cannot reapply a start choice.
+        XCTAssertFalse(store.consumeStartupSelection(session: session))
+        XCTAssertTrue(store.consumeStartupSelection(session: UUID()))
+    }
+
 }
