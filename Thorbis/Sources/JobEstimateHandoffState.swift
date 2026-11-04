@@ -566,8 +566,8 @@ final class JobEstimateHandoffPresenter: ObservableObject {
 
 extension JobEstimateHandoffPresenter {
     /// Estimate and invoice detail's "Show to customer": Customer view on the document's own job,
-    /// read fresh and checked against this workspace and customer. False when there is no verified
-    /// job (the caller keeps its single-document presentation).
+    /// read and checked against this workspace and customer. An unavailable job permits the
+    /// single-document presentation; a superseded request must not open another cover.
     enum OpenResult { case presented, unavailable, superseded }
 
     func openCustomerView(jobID: String, customerID: String, customerName: String, start: CustomerViewStart,
