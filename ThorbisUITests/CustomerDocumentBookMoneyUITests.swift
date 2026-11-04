@@ -36,6 +36,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         assertMoneyRow("Paid", "$150.00", in: app)
         assertMoneyRow("Amount due", "$150.00", in: app)
         XCTAssertFalse(text("Paid in full", in: app).exists)
+        // A short payment history is visible without requiring a second tap.
+        assertText("Card", in: app)
         openHistory(in: app)
         assertText("Card", in: app)
         assertText("Refunded $50.00", in: app)

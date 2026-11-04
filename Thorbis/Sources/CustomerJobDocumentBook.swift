@@ -314,6 +314,7 @@ private struct CustomerInvoiceBookPage: View {
     @StateObject private var model: InvoicePaymentCollectionModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showPayments = false
+    @State private var choseInitialPaymentVisibility = false
 
     init(invoice: InvoiceRecord, scope: JobDocumentScope, sourceGeneration: UUID?, api: APIClient, fresh: Bool,
          canSign: Bool, canPay: Bool, active: Bool, refresh: @escaping () async -> Void,
@@ -389,6 +390,12 @@ private struct CustomerInvoiceBookPage: View {
             }
         }
         .task(id: original) { await model.load() }
+        .onChange(of: model.historyComplete) { _, complete in
+            guard complete, !choseInitialPaymentVisibility else { return }
+            // Show a short history immediately; keep large histories easy to scan.
+            showPayments = model.payments.count <= 2
+            choseInitialPaymentVisibility = true
+        }
     }
 
     private var paymentHistory: some View {
