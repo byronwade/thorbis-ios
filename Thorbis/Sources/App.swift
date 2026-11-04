@@ -19,6 +19,9 @@ struct ThorbisApp: App {
     @State private var lastSavedCopyCheck = Date.distantPast
     @StateObject private var estimateHandoff: JobEstimateHandoffPresenter
     @StateObject private var photoHandoff: CustomerPhotoPresenter
+    #if DEBUG
+    @State private var previewHandoffProbe = ""
+    #endif
 
     init() {
         let handoffArbiter = CustomerHandoffArbiter()
@@ -186,6 +189,15 @@ struct ThorbisApp: App {
                     CustomerPhotoHandoffView(owner: owner) { photoHandoff.authenticatedExit() }
                 }
             }
+            #if DEBUG
+            .overlay(alignment: .topLeading) {
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+                    Button(previewHandoffProbe.isEmpty ? "Check handoff" : previewHandoffProbe) {
+                        previewHandoffProbe = photoHandoff.availableRevision == nil ? "Handoff busy" : "Handoff available"
+                    }.frame(minHeight: 44).background(Theme.canvas).accessibilityIdentifier("preview-handoff-probe")
+                }
+            }
+            #endif
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.canvas)
             .environmentObject(estimateHandoff)

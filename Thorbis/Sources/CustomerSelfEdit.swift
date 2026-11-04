@@ -358,8 +358,15 @@ struct CustomerModeOwnerUnlockButton: View {
 /// DEBUG fixture controls for customer mode, laid out above the protected navigation stack so
 /// they push it down instead of covering its toolbar.
 private struct CustomerModePreviewControlsStack: ViewModifier {
+    @EnvironmentObject private var session: SessionController
+    @State private var replaced = false
     func body(content: Content) -> some View {
         VStack(spacing: 0) {
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+                Button(replaced ? "Preview session replaced" : "Preview replace session") {
+                    Task { await session.restore(); replaced = true }
+                }.frame(minHeight: 44).accessibilityIdentifier(replaced ? "preview-session-replaced" : "preview-replace-session")
+            }
             if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
             else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
             else if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-documents-status-change") { PaperPreviewConnectionMenu() }
