@@ -66,4 +66,12 @@ final class StartupDestinationUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Open app to", "Jobs")).firstMatch.waitForExistence(timeout: 10))
     }
 
+    func testCustomerLinkBeatsRememberedRootDuringAdaptiveSwitch() {
+        let app = launch()
+        XCTAssertTrue(root(app, "startup-phone-customers").waitForExistence(timeout: 30))
+        app.buttons["Test link and switch"].tap()
+        XCTAssertTrue(root(app, "startup-tablet-Customers").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 10))
+    }
+
 }
