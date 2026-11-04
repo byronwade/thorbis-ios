@@ -456,6 +456,13 @@ struct NewEstimateView: View {
                                     NotificationCenter.default.post(name: Notification.Name("ThorbisEstimateTestParentTeardown"), object: nil)
                                 }.accessibilityIdentifier("estimate-recovery-parent-teardown")
                             }
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-signout-check") {
+                                Button("Sample sign out") { Task { await session.signOut() } }
+                                    .accessibilityIdentifier("estimate-recovery-signout")
+                                if let message = session.error {
+                                    Text(message).accessibilityIdentifier("estimate-recovery-signout-error")
+                                }
+                            }
                             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-create-hold") {
                                 Button("Revalidate sample") {
                                     Task {

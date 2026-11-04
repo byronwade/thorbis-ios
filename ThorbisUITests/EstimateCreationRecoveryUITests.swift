@@ -145,6 +145,29 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertFalse(save.isEnabled, "Do not send an unreconciled in-memory draft")
     }
 
+    func testSignOutKeepsPresentedJobDraftWhenPersistenceFails() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
+            "--paper-preview-estimate-create-recovery", "--commercial-draft-test-all-writes-fail",
+            "--paper-preview-estimate-signout-check", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 30)); if !add.isHittable { app.swipeUp() }; add.tap()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" still here")
+        XCTAssertEqual(title.value as? String, original + " still here")
+        let signOut = app.buttons["estimate-recovery-signout"]
+        XCTAssertTrue(signOut.waitForExistence(timeout: 5)); signOut.tap()
+        let warning = app.staticTexts["estimate-recovery-signout-error"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 10))
+        XCTAssertTrue(warning.label.contains("could not be saved"))
+        XCTAssertTrue(title.exists)
+        XCTAssertEqual(title.value as? String, original + " still here")
+    }
+
     func testParentTeardownRecoveryCopySurvivesProcessRelaunch() {
         continueAfterFailure = false
         let app = XCUIApplication()
