@@ -97,4 +97,11 @@ final class StartupDestinationTests: XCTestCase {
         XCTAssertFalse(store.hasStartupIntent(session: second))
     }
 
+    func testSearchUsesPermittedRememberedRootBeforePhoneAppears() {
+        XCTAssertEqual(StartupDestination.searchRoot(current: "customers", remembered: "jobs", phoneVisible: false, rememberedAllowed: true), "jobs")
+        XCTAssertEqual(StartupDestination.searchRoot(current: "customers", remembered: "jobs", phoneVisible: false, rememberedAllowed: false), "customers")
+        XCTAssertEqual(StartupDestination.searchRoot(current: "customers", remembered: nil, phoneVisible: false, rememberedAllowed: true), "customers")
+        XCTAssertEqual(StartupDestination.searchRoot(current: "customers", remembered: "jobs", phoneVisible: true, rememberedAllowed: true), "customers")
+    }
+
 }
