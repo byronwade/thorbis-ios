@@ -1,5 +1,16 @@
 import Foundation
 
+/// Mirrors the server's customer projection; invalid inputs never expose hidden lines.
+func customerEstimateProjection(_ lines: [FieldLine], currency: String) -> [FieldLine]? {
+    guard CustomerDocumentAmounts(lines: lines, currency: currency) != nil else { return nil }
+    let hidden = lines.filter { $0.showToCustomer == false }
+    guard let first = hidden.first else { return lines }
+    guard let total = paperLinesTotal(hidden) else { return nil }
+    return lines.filter { $0.showToCustomer != false }
+        + [FieldLine(id: first.id, description: "Materials", quantity: 1,
+                     unitPrice: FieldMoney(amount: total, currency: currency), source: nil)]
+}
+
 /// Display-only breakdown of canonical document lines, using exact minor units.
 struct CustomerDocumentAmounts: Equatable {
     let subtotal: Int
