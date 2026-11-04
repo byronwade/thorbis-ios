@@ -11,3 +11,5 @@ The unrun DEBUG journey coverage now also exercises swiping and an exact asset b
 Invalidation prevents late results from being displayed and clears the current image, but background invalidation does not yet prove immediate cancellation of an already-started storage request. The resulting file must be checked for deletion after late completion and after failures; the transfer cleanup changes affect the existing staff media path too and need dedicated regression coverage.
 
 The prototype now requests cancellation of the active photo task when invalidated; whether a delayed storage transfer actually stops and cleans up is still untested. No cancellation or cleanup guarantee is claimed from that source change alone.
+
+The entry currently reuses the existing staff Select control, which is gated by `job.edit`; a view-only staff member cannot start this prototype. Verify the intended capability before broadening access, because the existing selection bar also contains tag, archive and share actions.
