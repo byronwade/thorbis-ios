@@ -1,0 +1,7 @@
+# Closeout payment evidence
+
+This held candidate makes the offline payment shortcut wait when the job invoice list is missing, a queued invoice cannot be found, records disagree, or a payment's identity, job, tender or amount is inconsistent. It uses checked USD document amounts, including discounts, and does not count already-recorded payments again against a balance that may already include them. Pending cash and check remain in the outbox.
+
+A pending or recorded legacy payment without a job association leaves the shortcut blocked until the association can be verified; this can affect other jobs because the existing cache does not prove that the payment belongs elsewhere. Conflicting invoice copies also require a refresh, even when the difference is only metadata. These are conservative availability costs. The existing unscoped job cache and cross-view invoice denial handling are not solved by this change.
+
+Earlier source `b677a10` compiled and passed ten focused closeout helper tests and the existing offline cash-outbox test on simulator (`/tmp/thorbis-closeout-xcode.log`). A separate debug-only fixture at `1669b71` passed four mounted checklist cases (`/tmp/thorbis-closeout-mounted-xcode.log`): pending payment, missing invoice, wrong organization, and recorded payment. Those results predate the additional scope, conflicting-copy and legacy-payment checks in this release-based candidate; the exact final source still requires a fresh simulator run. No physical-device or real customer data validation is claimed.
