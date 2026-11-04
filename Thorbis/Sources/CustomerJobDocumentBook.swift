@@ -366,12 +366,22 @@ private struct CustomerInvoiceBookPage: View {
                             .accessibilityLabel("Loading your payments")
                     } else if !model.historyComplete {
                         CustomerProblemBanner(message: "Payments couldn't be loaded. The invoice's paid amount is shown above.",
-                                              actionTitle: "Try again") { await model.load() }
+                                              actionTitle: "Try again") {
+                            #if DEBUG
+                            if PaperPreview.isJobDocumentsPreview { PaperPreviewProtocol.restoreDocumentHistory() }
+                            #endif
+                            await model.load()
+                        }
                     } else {
                         paymentHistory
                         if model.paymentTotalCents != invoice.amountPaid {
                             CustomerProblemBanner(message: "Payments are still updating. Refresh to confirm the balance.",
-                                                  symbol: "arrow.clockwise", actionTitle: "Refresh payments") { await model.load() }
+                                                  symbol: "arrow.clockwise", actionTitle: "Refresh payments") {
+                                #if DEBUG
+                                if PaperPreview.isJobDocumentsPreview { PaperPreviewProtocol.restoreDocumentHistory() }
+                                #endif
+                                await model.load()
+                            }
                         }
                     }
                 }
