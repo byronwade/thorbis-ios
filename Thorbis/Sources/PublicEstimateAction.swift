@@ -9,7 +9,7 @@ struct PublicEstimateAction: Decodable, Equatable {
     let contentHash: String
     let allowedActions: [String]
     let nonce: String?
-    let totalAmount: Double
+    @PublicEstimateAmount var totalAmount: Double
     let currency: String
     let html: String?
     let approvalWithoutSignatureAllowed: Bool?
@@ -29,15 +29,15 @@ struct PublicEstimateAction: Decodable, Equatable {
     struct ScopeLine: Decodable, Equatable, Identifiable {
         let id: String
         let description: String
-        let quantity: Double
-        let unitPrice: Double
+        @PublicEstimateQuantity var quantity: Double
+        @PublicEstimateSignedAmount var unitPrice: Double
     }
 
     struct Option: Decodable, Equatable, Identifiable {
         let id: String
         let title: String
         let description: String
-        let totalAmount: Double
+        @PublicEstimateAmount var totalAmount: Double
         let currency: String
     }
 
@@ -46,7 +46,7 @@ struct PublicEstimateAction: Decodable, Equatable {
         let optionId: String?
         let signerName: String
         let acceptedAt: String
-        let totalAmount: Double
+        @PublicEstimateAmount var totalAmount: Double
     }
 
     var canApprovePlainly: Bool {
@@ -111,7 +111,7 @@ struct PublicEstimateActionPatch: Decodable {
     let contentHash: String?
     let allowedActions: [String]?
     let nonce: String?
-    let totalAmount: Double?
+    @OptionalPublicEstimateAmount var totalAmount: Double?
     let currency: String?
     let html: String?
     let approvalWithoutSignatureAllowed: Bool?

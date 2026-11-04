@@ -973,7 +973,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         if path == "/v1/public/document-actions/preview-estimate" {
-            return [
+            let discount = ProcessInfo.processInfo.arguments.contains("--paper-preview-public-estimate-discount")
+            var sample: [String: Any] = [
                 "kind": "estimate",
                 "title": "AC not cooling — Compressor replacement",
                 "status": "sent",
@@ -981,20 +982,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 "contentHash": "preview-issued-content-hash-2026",
                 "allowedActions": ["approve", "decline", "request_changes"],
                 "nonce": "preview-decision-nonce-2026",
-                "totalAmount": 1575.00,
+                "totalAmount": discount ? 9500 : 157500,
                 "currency": "USD",
                 "html": """
                 <!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>body{font:15px -apple-system,BlinkMacSystemFont,sans-serif;color:#201b14;background:#fff;margin:22px;line-height:1.5}.eyebrow{font-size:11px;color:#59544d;letter-spacing:.08em;text-transform:uppercase}h1{font-size:24px;margin:6px 0 16px}.line{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid #e5e2dc}.total{display:flex;justify-content:space-between;font-weight:700;padding-top:18px}.note{margin-top:22px;padding:12px;background:#f7f4ee;border-radius:10px}</style></head><body><div class=\"eyebrow\">Estimate · Revision 2</div><h1>AC not cooling — Compressor replacement</h1><p>Prepared for Danielle Marlowe</p><div class=\"line\"><span>Compressor diagnostic</span><span>$120.00</span></div><div class=\"line\"><span>Replace compressor</span><span>$1,455.00</span></div><div class=\"total\"><span>Estimate total</span><span>$1,575.00</span></div><div class=\"note\">This sample estimate is for design review only.</div></body></html>
                 """,
                 "approvalWithoutSignatureAllowed": false,
-                "scopeLines": [],
-                "options": [
-                    ["id": "00000000-0000-4000-8000-000000000101", "title": "Compressor repair", "description": "Replace the failed compressor and verify system operation.", "totalAmount": 1575.00, "currency": "USD"],
-                    ["id": "00000000-0000-4000-8000-000000000102", "title": "Full system replacement", "description": "Install a new high-efficiency system with a two-year labor warranty.", "totalAmount": 4850.00, "currency": "USD"]
+                "scopeLines": discount ? [["id": "repair", "description": "Repair", "quantity": 1, "unitPrice": 10000], ["id": "discount", "description": "Discount", "quantity": 1, "unitPrice": -500]] : [],
+                "options": discount ? [] : [
+                    ["id": "00000000-0000-4000-8000-000000000101", "title": "Compressor repair", "description": "Replace the failed compressor and verify system operation.", "totalAmount": 157500, "currency": "USD"],
+                    ["id": "00000000-0000-4000-8000-000000000102", "title": "Full system replacement", "description": "Install a new high-efficiency system with a two-year labor warranty.", "totalAmount": 485000, "currency": "USD"]
                 ],
                 "consentVersion": "estimate-approval-v1",
                 "consentText": "I understand that typing my name records my electronic signature and approval of the selected estimate option."
-            ] as [String: Any]
+            ]
+            if discount { sample.removeValue(forKey: "html") }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-public-estimate-unsupported-currency") { sample["currency"] = "EUR" }
+            return sample
         }
         if path == "/v1/invoices/\(PaperPreview.refundInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.refundInvoice))
