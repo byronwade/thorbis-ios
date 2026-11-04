@@ -80,7 +80,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
         }
         if let scope = InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID),
-           InvoiceAccessRegistry.shared.isDenied(scope) {
+           InvoiceAccessRegistry.shared.isDenied(scope) || (try? InvoiceAccessPreflight.shared.canUseOffline(scope)) != true {
             retireDeniedInvoice()
         }
     }
@@ -213,8 +213,18 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                 waitingLoadRequests.removeAll { superseded.contains($0) }
             }
         }
+        var holdTicket: UUID?
         do {
             try Task.checkCancellation()
+            if let accessScope {
+                do {
+                    guard try InvoiceAccessPreflight.shared.canUseOffline(accessScope) else { retireDeniedInvoice(); return }
+                    if !api.knownOffline { holdTicket = try InvoiceAccessPreflight.shared.begin(accessScope) }
+                } catch {
+                    retireDeniedInvoice()
+                    return
+                }
+            }
             let revalidating = invoiceAccessDenied
             let loadedInvoice = try await SavedCopies.$liveOnly.withValue(revalidating) {
                 try await api.fieldInvoice(invoiceID)
@@ -223,13 +233,18 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) else { throw CancellationError() }
             if let accessScope, (InvoiceAccessRegistry.shared.version(accessScope) != denialVersion ||
-                                 (InvoiceAccessRegistry.shared.isDenied(accessScope) && !revalidating)) { return }
+                                 (InvoiceAccessRegistry.shared.isInProcessDenied(accessScope) && !revalidating)) { return }
             if revalidating {
                 guard loadedInvoice.id == invoiceID, expectedJobScope?.contains(loadedInvoice) != false else {
                     throw Problem(title: "This invoice couldn't be verified. Refresh the job before continuing.", status: nil, detail: nil)
                 }
-            } else {
+            } else if holdTicket == nil {
+                if let accessScope, (try? InvoiceAccessPreflight.shared.canUseOffline(accessScope)) != true { retireDeniedInvoice(); return }
                 guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+            } else {
+                guard loadedInvoice.id == invoiceID, expectedJobScope?.contains(loadedInvoice) != false else {
+                    throw Problem(title: "This invoice couldn't be verified. Refresh the job before continuing.", status: nil, detail: nil)
+                }
             }
             // A copy saved on this phone is never charged: card, link and Tap to Pay wait for a live
             // read. Cash and check can still be taken and record once back online (OF-04, OF-08).
@@ -238,12 +253,18 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                     loadError = "Saved on this phone. Payments need a connection."
                     return
                 }
+                if let accessScope, let ticket = holdTicket {
+                    guard try InvoiceAccessPreflight.shared.finish(accessScope, ticket: ticket) else { retireDeniedInvoice(); return }
+                    holdTicket = nil
+                    guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+                    cacheInvoice(loadedInvoice, scope: accessScope)
+                }
                 useOfflineCopy(loadedInvoice)
                 coalesceWaiters = true
                 return
             }
             offlineCopy = false
-            if !revalidating { JobDetailCache.save(invoice: loadedInvoice) }
+            if !revalidating && holdTicket == nil { cacheInvoice(loadedInvoice, scope: accessScope) }
             if pendingRequest == nil {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
@@ -255,14 +276,20 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             guard generation == api.requestGeneration else { throw CancellationError() }
             guard accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) else { throw CancellationError() }
             if let accessScope, (InvoiceAccessRegistry.shared.version(accessScope) != denialVersion ||
-                                 (InvoiceAccessRegistry.shared.isDenied(accessScope) && !revalidating)) { return }
+                                 (InvoiceAccessRegistry.shared.isInProcessDenied(accessScope) && !revalidating)) { return }
             guard validHistory(loadedPayments, for: loadedInvoice) else {
                 throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
+            }
+            if let accessScope, let ticket = holdTicket {
+                guard try InvoiceAccessPreflight.shared.finish(accessScope, ticket: ticket) else { retireDeniedInvoice(); return }
+                holdTicket = nil
+                guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
+                cacheInvoice(loadedInvoice, scope: accessScope)
             }
             if revalidating {
                 if let accessScope { InvoiceAccessRegistry.shared.allow(accessScope) }
                 guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
-                JobDetailCache.save(invoice: loadedInvoice)
+                cacheInvoice(loadedInvoice, scope: accessScope)
                 invoiceAccessDenied = false
             }
             payments = loadedPayments
@@ -286,8 +313,14 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             pendingRequest = nil
             historyComplete = false
         } catch {
+            if error.isConnectivityFailure, let accessScope, let ticket = holdTicket {
+                guard (try? InvoiceAccessPreflight.shared.finish(accessScope, ticket: ticket)) == true else { retireDeniedInvoice(); return }
+                holdTicket = nil
+            }
+            if let accessScope, holdTicket == nil,
+               (try? InvoiceAccessPreflight.shared.canUseOffline(accessScope)) != true { retireDeniedInvoice(); return }
             if !invoiceAccessDenied, error.isConnectivityFailure, outbox != nil,
-               let cached = invoice ?? JobDetailCache.invoice(invoiceID), acceptInvoiceMutationResponse(cached) {
+               let cached = invoice ?? offlineInvoice(scope: accessScope), acceptInvoiceMutationResponse(cached) {
                 // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
                 useOfflineCopy(cached)
                 coalesceWaiters = true
@@ -297,6 +330,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             if let status = (error as? Problem)?.status, [401, 403, 404].contains(status) {
                 definitiveDenial = true
                 if let accessScope {
+                    // The preflight already holds the durable scope if this write fails.
+                    try? InvoiceAccessPreflight.shared.deny(accessScope)
                     InvoiceAccessRegistry.shared.deny(accessScope)
                     guard accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) else { return }
                 } else {
@@ -306,6 +341,21 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             loadError = error.localizedDescription
         }
+    }
+
+    private func cacheInvoice(_ record: InvoiceRecord, scope: InvoiceAccessRegistry.Scope?) {
+        if let scope { try? InvoiceEpochCache.shared.save(record, scope: scope) }
+        JobDetailCache.save(invoice: record)
+    }
+
+    private func offlineInvoice(scope: InvoiceAccessRegistry.Scope?) -> InvoiceRecord? {
+        guard let scope else { return JobDetailCache.invoice(invoiceID) }
+        guard (try? InvoiceAccessPreflight.shared.canUseOffline(scope)) == true else { return nil }
+        if (try? InvoiceAccessPreflight.shared.cacheEpoch(scope)) != nil {
+            return InvoiceEpochCache.shared.load(scope: scope)
+        }
+        // A scope with no marker has no observed denial; preserve legacy offline use.
+        return JobDetailCache.invoice(invoiceID)
     }
 
     /// Shows the copy saved on this phone so cash and check can go to the outbox (OF-08). A payment

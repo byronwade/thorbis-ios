@@ -21,7 +21,10 @@ import Foundation
               let id = UUID(uuidString: invoiceID) else { return nil }
         return Scope(actorWorkspace: identity, origin: origin, invoiceID: id.uuidString.lowercased())
     }
-    func isDenied(_ scope: Scope) -> Bool { denied.contains(scope) }
+    func isInProcessDenied(_ scope: Scope) -> Bool { denied.contains(scope) }
+    func isDenied(_ scope: Scope) -> Bool {
+        denied.contains(scope) || (try? InvoiceAccessPreflight.shared.canUseOffline(scope)) != true
+    }
     func version(_ scope: Scope) -> UUID? { versions[scope] }
     func deny(_ scope: Scope) {
         versions[scope] = UUID()
