@@ -145,7 +145,7 @@ struct RootView: View {
             phoneShell()
                 .onAppear {
                     phoneShellVisible = true
-                    if store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil,
+                    if store.requestedJobID == nil, store.requestedRecord == nil,
                        let saved = store.rememberedRoot(session: session.generation),
                        let destination = StartupDestination(rawValue: saved), destination.permitted(session) {
                         selectedTab = saved
@@ -997,6 +997,10 @@ struct RootView: View {
     /// Opens search with the words a Siri or Shortcuts search asked for.
     private func openRequestedSearch(phone: Bool) {
         guard let query = store.requestedSearch else { return }
+        let saved = store.rememberedRoot(session: session.generation)
+        let permitted = saved.flatMap(StartupDestination.init(rawValue:))?.permitted(session) ?? false
+        selectedTab = StartupDestination.searchRoot(current: selectedTab, remembered: saved,
+                                                    phoneVisible: phoneShellVisible, rememberedAllowed: permitted)
         store.noteHandledNavigation(session: session.generation, root: selectedTab)
         store.requestedSearch = nil
         if phone {

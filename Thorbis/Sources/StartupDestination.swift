@@ -6,6 +6,11 @@ enum StartupDestination: String, CaseIterable {
     case localFleet = "local-fleet", localEquipment = "local-equipment"
     case localAgreements = "local-agreements", localTeam = "local-team"
 
+    static func searchRoot(current: String, remembered: String?, phoneVisible: Bool, rememberedAllowed: Bool) -> String {
+        guard !phoneVisible, rememberedAllowed, let remembered else { return current }
+        return remembered
+    }
+
     func launchTarget(isPermitted: Bool, openedForReason: Bool) -> StartupDestination? {
         guard self != .automatic, isPermitted, !openedForReason else { return nil }
         return self
