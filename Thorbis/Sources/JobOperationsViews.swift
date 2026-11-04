@@ -226,26 +226,29 @@ struct JobCloseoutView: View {
     private var waitingPaymentsCoverBalance: Bool {
         // The job's invoice list, plus any invoice this phone took cash on for the job; the single
         // invoice copy is newer when a payment was recorded on the invoice screen.
-        let listed = JobDetailCache.invoices(jobID) ?? []
+        guard let job, let organizationID = session.activeOrganization?.id,
+              job.id == jobID, job.organizationId == organizationID else { return false }
+        let listed = JobDetailCache.invoices(jobID)
         let paidHere = (outbox.pending.compactMap { entry -> String? in
             if case .payment(let payment) = entry.action, payment.jobId == jobID { payment.invoiceId } else { nil }
         } + outbox.recordedPayments.filter { $0.jobId == jobID }.map(\.invoiceId))
-            .filter { id in !listed.contains { $0.id == id } }
-        let invoices = listed.map { JobDetailCache.invoice($0.id) ?? $0 }
-            + Set(paidHere).compactMap { JobDetailCache.invoice($0) }
-        let owing = invoices.filter { $0.status == "issued" }.compactMap { invoice -> (String, Int)? in
-            let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-            let due = total - invoice.amountPaid
-            return due > 0 ? (invoice.id, due) : nil
+        guard let invoices = CloseoutInvoiceEvidence.resolve(
+            listed: listed, paidHere: paidHere, id: { $0.id }, cached: JobDetailCache.invoice,
+            valid: { $0.jobId == jobID && $0.organizationId == organizationID && $0.customerId == job.customerId }
+        ) else { return false }
+        var owing: [(String, Int)] = []
+        for invoice in invoices where invoice.status == "issued" {
+            guard invoice.currency == "USD",
+                  let amounts = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency,
+                                                        amountPaid: invoice.amountPaid) else { return false }
+            if amounts.due > 0 { owing.append((invoice.id, amounts.due)) }
         }
         return !owing.isEmpty && owing.allSatisfy { id, due in
-            let queued = outbox.waitingPayments(invoiceID: id, replayableOnly: true).reduce(0) { $0 + $1.amountCents }
-            // Recorded from the queue but newer than this phone's saved copy of the invoice.
-            let saved = Set((JobDetailCache.payments(id) ?? []).map(\.idempotencyKey))
-            let recorded = outbox.recordedPayments
-                .filter { $0.invoiceId == id && !saved.contains($0.idempotencyKey) }
-                .reduce(0) { $0 + $1.amountCents }
-            return queued + recorded >= due
+            CloseoutInvoiceEvidence.covers(
+                due: due,
+                pending: outbox.waitingPayments(invoiceID: id, replayableOnly: true).map(\.amountCents),
+                recorded: outbox.recordedPayments.filter { $0.invoiceId == id }.map(\.amountCents)
+            )
         }
     }
     private var canComplete: Bool {
