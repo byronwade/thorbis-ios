@@ -108,6 +108,7 @@ struct JobMediaView: View {
     @State private var customerPhotoRequest = UUID()
     @State private var shareFiles: MediaShareFiles?
     @State private var contentWidth: CGFloat = 353
+    @State private var selectionBarHeight: CGFloat = 0
     #if DEBUG
     @State private var previewStateApplied = false
     #endif
@@ -196,14 +197,17 @@ struct JobMediaView: View {
                     Text(videoNotice ?? "Photos, PDFs and video clips up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+            .padding(.horizontal, Theme.gutter).padding(.top, 8)
+            // The media grid is embedded in the job screen; reserve the actual selection-bar
+            // height in its own content so the final tile can scroll above the overlay.
+            .padding(.bottom, selecting ? max(24, selectionBarHeight) : 24)
             .onGeometryChange(for: CGFloat.self) { $0.size.width - Theme.gutter * 2 } action: { contentWidth = $0 }
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .safeAreaInset(edge: .bottom) {
             if selecting {
-                selectionBar
+                selectionBar.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { selectionBarHeight = $0 }
             } else if canAdd && !dynamicTypeSize.isAccessibilitySize {
                 captureControls
                     .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
