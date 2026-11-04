@@ -24,6 +24,7 @@ struct RootView: View {
     @State private var customPaths: [String: NavigationPath] = [:]
     /// Set once the launch place is settled, so a later capability refresh never moves the person.
     @State private var settledLaunchPlace = false
+    @State private var phoneShellVisible = false
     /// The side drawer (2026-10-31, after the Claude and ChatGPT apps): open, and a drag in progress.
     @State private var drawerOpen = false
     @State private var drawerDrag: CGFloat = 0
@@ -116,14 +117,15 @@ struct RootView: View {
         #endif
         guard session.phase == .ready else { return }
         layout.applyRoleDefaults(WorkRole(session), permitted: { $0.permitted(session) })
-        openHomeAtLaunch()
+        if phoneShellVisible { openHomeAtLaunch() }
     }
 
     /// Owners whose pinned places lead with Home open there; everyone else still opens on Today. Only
     /// at launch, only from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
-        guard !settledLaunchPlace else { return }
+        guard !settledLaunchPlace, session.phase == .ready else { return }
         settledLaunchPlace = true
+        guard store.consumeStartupSelection(session: session.generation) else { return }
         guard selectedTab == PrimaryTab.initial.rawValue, schedulePath.isEmpty,
               !store.openedForRecord, store.requestedSchedule == 0 else { return }
         if let scope = StartupDestination.scope(session: session, api: api) {
@@ -139,7 +141,11 @@ struct RootView: View {
     /// iPad at regular width gets the sidebar and split columns; compact width (Slide Over, a
     /// narrow Split View) and every iPhone get the phone layout.
     @ViewBuilder private func navigation(wide: Bool) -> some View {
-        if wide { TabletRoot() } else { phoneShell() }
+        if wide { TabletRoot() } else {
+            phoneShell()
+                .onAppear { phoneShellVisible = true; applyRoleDefaults() }
+                .onDisappear { phoneShellVisible = false }
+        }
     }
 
     @Environment(\.horizontalSizeClass) private var sizeClass

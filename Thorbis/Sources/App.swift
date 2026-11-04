@@ -302,6 +302,13 @@ final class Store: ObservableObject {
     @Published var requestedSchedule = 0 {
         didSet { if requestedSchedule > 0 { openedForRecord = true } }
     }
+    private var startupSelectionSession: UUID?
+    /// Both adaptive shells share a single startup decision for this session.
+    func consumeStartupSelection(session: UUID) -> Bool {
+        guard startupSelectionSession != session else { return false }
+        startupSelectionSession = session
+        return true
+    }
     private var handledScheduleRequest = 0
     /// Roots can be recreated at a new width. A shortcut is handled once across both layouts.
     func consumeScheduleRequest() -> Bool {
