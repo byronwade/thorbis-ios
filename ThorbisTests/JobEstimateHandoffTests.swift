@@ -304,7 +304,9 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         }
         for _ in 0..<100 where continuation == nil { try await Task.sleep(for: .milliseconds(10)) }
         guard let continuation else { task.cancel(); XCTFail("Preparation did not reach the gated read"); return }
-        let lease = try XCTUnwrap(documents.claimLegacy())
+        guard let lease = documents.claimLegacy() else {
+            continuation.resume(); task.cancel(); XCTFail("Legacy handoff did not acquire ownership"); return
+        }
         documents.releaseLegacy(lease)
         continuation.resume()
         let presented = try await task.value
