@@ -1,0 +1,7 @@
+# Customer estimate details before selection
+
+Customers can open a sent estimate's current issued details before selecting it. The reader checks live job membership and issued revision, uses the checked customer material projection, and does not select or approve the estimate. It is scoped to sent estimates; already-approved estimate details are separate work.
+
+On isolated source 957d917 the revision-identity unit test and the long-description, no-selection UI case passed; three other cases initially failed waiting for controls that appeared by the failure snapshot (`/tmp/thorbis-details-updated-957d917-test.log`). With longer readiness waits on unchanged production code, session-loss drawer retirement, hidden-material privacy and existing review-to-approval tests passed (`/tmp/thorbis-details-updated-6b2ecd8-test.log`). The first mutation fixture used identical descriptions for both revisions and failed its old-text assertion (`/tmp/thorbis-details-mutation-3f5c684-test.log`). With distinct revised terms, both mounted refresh-driven same-ID revision replacement and job unlink cases passed (`/tmp/thorbis-details-mutation-8297232-test.log`). These runs did not record before-and-after source manifests.
+
+The mounted mutation tests explicitly trigger a refresh; they do not establish automatic detection of external changes without refresh, server atomicity, iPad, VoiceOver or physical-device behavior. No hosted server, customer catalog or add-on contract is changed. The original work-in-progress remains preserved separately.
