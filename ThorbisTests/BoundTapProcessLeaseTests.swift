@@ -47,7 +47,7 @@ final class BoundTapProcessLeaseTests: XCTestCase {
         }
         XCTAssertEqual(try pipe.fileHandleForReading.read(upToCount: 1), Data("R".utf8))
         XCTAssertThrowsError(try BoundTapProcessLease.acquire(path: path))
-        process.terminate()
+        XCTAssertEqual(Darwin.kill(process.processIdentifier, SIGKILL), 0)
         process.waitUntilExit()
         let recovered = try BoundTapProcessLease.acquire(path: path)
         recovered.close()

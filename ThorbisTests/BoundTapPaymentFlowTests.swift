@@ -72,7 +72,7 @@ private final class FakeBoundTapLease: BoundTapLease {
     func testRecoveryPreflightFailureAllowsRetryWithoutCreatingAnAttempt() async throws {
         defer { BoundTapPaymentFlow.resetForTests() }
         do {
-            let _: Int = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { FakeBoundTapLease() }, isCurrent: { true }, create: { throw BoundTapPreflightError.recoveryUnavailable }, collect: { $0 })
+            let _: Int = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { FakeBoundTapLease() }, isCurrent: { true }, prepare: { throw BoundTapPreflightError.recoveryUnavailable }, create: { 1 }, collect: { $0 })
             XCTFail("Expected recovery preflight failure")
         } catch { XCTAssertEqual(error as? BoundTapFlowError, .recoveryUnavailable) }
         let result = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { FakeBoundTapLease() }, isCurrent: { true }, create: { 1 }, collect: { $0 })
@@ -86,6 +86,48 @@ private final class FakeBoundTapLease: BoundTapLease {
             let _: Int = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { held }, isCurrent: { true }, create: { 1 }, collect: { _ in throw CancellationError() })
             XCTFail("Expected uncertainty")
         } catch { XCTAssertEqual(error as? BoundTapFlowError, .uncertain) }
+        XCTAssertFalse(held.closed)
+        BoundTapPaymentFlow.resetForTests()
+        XCTAssertTrue(held.closed)
+    }
+
+    func testPreflightNamedErrorAfterSdkStartsStillRetainsLease() async throws {
+        defer { BoundTapPaymentFlow.resetForTests() }
+        let held = FakeBoundTapLease()
+        do {
+            let _: Int = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { held }, isCurrent: { true }, create: { 1 }, collect: { _ in throw BoundTapPreflightError.recoveryUnavailable })
+            XCTFail("Expected uncertainty")
+        } catch { XCTAssertEqual(error as? BoundTapFlowError, .uncertain) }
+        XCTAssertFalse(held.closed)
+    }
+
+    func testPreflightNamedErrorDuringRequestRetainsLease() async throws {
+        defer { BoundTapPaymentFlow.resetForTests() }
+        let held = FakeBoundTapLease()
+        do {
+            let _: Int = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { held }, isCurrent: { true }, create: { throw BoundTapPreflightError.recoveryPending }, collect: { $0 })
+            XCTFail("Expected uncertainty")
+        } catch { XCTAssertEqual(error as? BoundTapFlowError, .uncertain) }
+        XCTAssertFalse(held.closed)
+    }
+
+    func testRetirementAfterMarkerDoesNotStartRequestAndRetainsLease() async throws {
+        defer { BoundTapPaymentFlow.resetForTests() }
+        let held = FakeBoundTapLease()
+        var current = true, requested = false
+        do {
+            let _: Int = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { held }, isCurrent: { current }, prepare: { current = false }, create: { requested = true; return 1 }, collect: { $0 })
+            XCTFail("Expected uncertainty")
+        } catch { XCTAssertEqual(error as? BoundTapFlowError, .uncertain) }
+        XCTAssertFalse(requested)
+        XCTAssertFalse(held.closed)
+    }
+
+    func testCompletedOperationAlsoRetainsLeaseUntilProcessRetirement() async throws {
+        defer { BoundTapPaymentFlow.resetForTests() }
+        let held = FakeBoundTapLease()
+        let result = try await BoundTapPaymentFlow.run(enabled: true, supported: true, lease: { held }, isCurrent: { true }, create: { 1 }, collect: { $0 })
+        XCTAssertEqual(result, 1)
         XCTAssertFalse(held.closed)
         BoundTapPaymentFlow.resetForTests()
         XCTAssertTrue(held.closed)

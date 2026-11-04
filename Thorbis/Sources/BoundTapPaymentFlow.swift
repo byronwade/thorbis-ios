@@ -20,6 +20,7 @@ enum BoundTapPreflightError: Error { case recoveryPending, recoveryUnavailable }
         supported: Bool,
         lease: @MainActor () throws -> BoundTapLease,
         isCurrent: @escaping @MainActor () -> Bool,
+        prepare: @MainActor () throws -> Void = {},
         create: @MainActor () async throws -> Attempt,
         collect: @MainActor (Attempt) async throws -> Result
     ) async throws -> Result {
@@ -34,18 +35,25 @@ enum BoundTapPreflightError: Error { case recoveryPending, recoveryUnavailable }
         catch BoundTapProcessLeaseError.busy { throw BoundTapFlowError.busy }
         catch { throw BoundTapFlowError.recoveryUnavailable }
         do {
+            try prepare()
+        } catch BoundTapPreflightError.recoveryPending {
+            held.close()
+            throw BoundTapFlowError.recoveryPending
+        } catch {
+            held.close()
+            throw BoundTapFlowError.recoveryUnavailable
+        }
+        do {
+            guard isCurrent(), !Task.isCancelled else { throw BoundTapFlowError.retired }
             let attempt = try await create()
             guard isCurrent(), !Task.isCancelled else { throw BoundTapFlowError.retired }
             let result = try await collect(attempt)
             guard isCurrent(), !Task.isCancelled else { throw BoundTapFlowError.retired }
-            held.close()
+            // A successful Swift return alone does not prove every SDK or
+            // token callback has quiesced. Keep ownership until process exit.
+            uncertain = true
+            uncertainLease = held
             return result
-        } catch BoundTapPreflightError.recoveryPending {
-            held.close()
-            throw BoundTapFlowError.recoveryPending
-        } catch BoundTapPreflightError.recoveryUnavailable {
-            held.close()
-            throw BoundTapFlowError.recoveryUnavailable
         } catch {
             uncertain = true
             // An SDK callback can outlive task cancellation. Do not allow a

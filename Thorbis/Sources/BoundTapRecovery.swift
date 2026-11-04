@@ -24,14 +24,15 @@ struct BoundTapRecovery: Codable, Equatable {
 }
 
 @MainActor enum BoundTapRecoveryManager {
-    static func prepare<Attempt>(store: BoundTapRecoveryStoring, marker: BoundTapRecovery,
-                                 create: @MainActor () async throws -> Attempt,
-                                 identify: @MainActor (Attempt, BoundTapRecovery) throws -> BoundTapRecovery) async throws -> Attempt {
+    static func begin(store: BoundTapRecoveryStoring, marker: BoundTapRecovery) throws {
         let created: Bool
         do { created = try store.create(marker) }
         catch { throw BoundTapPreflightError.recoveryUnavailable }
         guard created else { throw BoundTapPreflightError.recoveryPending }
-        let attempt = try await create()
+    }
+    static func record<Attempt>(store: BoundTapRecoveryStoring, marker: BoundTapRecovery,
+                                attempt: Attempt,
+                                identify: @MainActor (Attempt, BoundTapRecovery) throws -> BoundTapRecovery) throws {
         let receipt = try identify(attempt, marker)
         guard receipt.origin == marker.origin, receipt.actorID == marker.actorID,
               receipt.organizationID == marker.organizationID, receipt.invoiceID == marker.invoiceID,
@@ -40,6 +41,13 @@ struct BoundTapRecovery: Codable, Equatable {
               let amount = receipt.amount, amount > 0,
               let currency = receipt.currency, !currency.isEmpty else { throw BoundTapFlowError.uncertain }
         try store.save(receipt)
+    }
+    static func prepare<Attempt>(store: BoundTapRecoveryStoring, marker: BoundTapRecovery,
+                                 create: @MainActor () async throws -> Attempt,
+                                 identify: @MainActor (Attempt, BoundTapRecovery) throws -> BoundTapRecovery) async throws -> Attempt {
+        try begin(store: store, marker: marker)
+        let attempt = try await create()
+        try record(store: store, marker: marker, attempt: attempt, identify: identify)
         return attempt
     }
 }

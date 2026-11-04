@@ -152,18 +152,20 @@ final class TapToPayController: ObservableObject {
             return now == authority && api.savedCopyScopeRevision == scopeRevision && api.savedCopyScope == scope
         }
         let recoveryStore = KeychainBoundTapRecoveryStore.shared
+        let marker = BoundTapRecovery(origin: origin, actorID: actor, organizationID: organization,
+                                      invoiceID: self.invoiceID, attemptID: nil, paymentIntentID: nil,
+                                      amount: nil, currency: nil)
         phase = .preparing
         do {
             _ = try await BoundTapPaymentFlow.run(enabled: Self.buildEnabled && Self.boundCollectionQualified,
                                                    supported: Self.deviceSupported,
                                                    lease: { try BoundTapProcessLease.acquire(path: sharedContainer.path) },
                                                    isCurrent: current,
+                                                   prepare: { try BoundTapRecoveryManager.begin(store: recoveryStore, marker: marker) },
                                                    create: {
-                let marker = BoundTapRecovery(origin: origin, actorID: actor, organizationID: organization,
-                                               invoiceID: self.invoiceID, attemptID: nil, paymentIntentID: nil,
-                                               amount: nil, currency: nil)
-                return try await BoundTapRecoveryManager.prepare(store: recoveryStore, marker: marker,
-                    create: { try await api.cardPresentIntent(invoiceID: self.invoiceID) }, identify: { intent, marker in
+                let intent = try await api.cardPresentIntent(invoiceID: self.invoiceID)
+                try BoundTapRecoveryManager.record(store: recoveryStore, marker: marker, attempt: intent,
+                    identify: { intent, marker in
                         var receipt = marker
                         receipt.attemptID = intent.attemptId
                         receipt.paymentIntentID = intent.paymentIntentId
@@ -171,6 +173,7 @@ final class TapToPayController: ObservableObject {
                         receipt.currency = intent.amount.currency
                         return receipt
                     })
+                return intent
             },
                                                    collect: { intent in
                 let binding = TerminalAttemptBinding(invoiceID: self.invoiceID, attemptID: intent.attemptId,
