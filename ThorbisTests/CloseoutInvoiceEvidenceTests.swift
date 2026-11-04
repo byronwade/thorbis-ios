@@ -31,6 +31,24 @@ final class CloseoutInvoiceEvidenceTests: XCTestCase {
         XCTAssertTrue(CloseoutInvoiceEvidence.covers(due: 100, pending: [100], recorded: [100]))
     }
 
+    func testInvoiceAmountsRejectOverflowAndWrongCurrency() {
+        let overflow = FieldLine(id: "1", description: "Work", quantity: Int.max,
+                                 unitPrice: FieldMoney(amount: 2, currency: "USD"), source: nil)
+        let wrongCurrency = FieldLine(id: "2", description: "Work", quantity: 1,
+                                      unitPrice: FieldMoney(amount: 100, currency: "EUR"), source: nil)
+        XCTAssertNil(CustomerDocumentAmounts(lines: [overflow], currency: "USD"))
+        XCTAssertNil(CustomerDocumentAmounts(lines: [wrongCurrency], currency: "USD"))
+    }
+
+    func testInvoiceAmountsAccountForDiscountsAndPayments() throws {
+        let charge = FieldLine(id: "1", description: "Work", quantity: 1,
+                               unitPrice: FieldMoney(amount: 1000, currency: "USD"), source: nil)
+        let discount = FieldLine(id: "2", description: "Discount", quantity: 1,
+                                 unitPrice: FieldMoney(amount: -200, currency: "USD"), source: nil)
+        let amounts = try XCTUnwrap(CustomerDocumentAmounts(lines: [charge, discount], currency: "USD", amountPaid: 300))
+        XCTAssertEqual(amounts.due, 500)
+    }
+
     func testPaymentSumRejectsOverflowAndNegativeAmounts() {
         XCTAssertNil(CloseoutInvoiceEvidence.sum([Int.max, 1]))
         XCTAssertNil(CloseoutInvoiceEvidence.sum([10, -1]))
