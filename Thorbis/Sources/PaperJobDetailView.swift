@@ -2483,7 +2483,8 @@ struct JobDetailView: View {
                 guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
                       api.requestGeneration == apiGeneration, api.normalizedOrigin == origin,
                       api.savedCopyScopeRevision == copyRevision,
-                      let currentJob = self.job, scope(for: currentJob) == expectedScope else { return }
+                      let currentJob = self.job,
+                      scope(for: currentJob)?.matchesJobCustomer(expectedScope) == true else { return }
                 if !presentPayment(for: invoiceID) { withMotion(.snappy) { selectedTab = "Money" } }
             }
         case .wrapUp: showWrapUp = true
@@ -2605,7 +2606,7 @@ struct JobDetailView: View {
         guard session.can("job.view", feature: "jobs"),
               session.can("invoice.view", feature: "invoicing"),
               session.can("invoice.payment.create", feature: "payments"),
-              let job, let scope = scope(for: job), invoiceRead?.scope == scope,
+              let job, let scope = scope(for: job), invoiceRead?.scope.matchesJobCustomer(scope) == true,
               let route = JobInvoicePaymentRoute.make(requestedID: requestedID, selectedID: selectedInvoiceID,
                                                        selected: selectedInvoice, loadedID: loadedInvoiceModelID,
                                                        model: invoicePaymentModel, scope: scope,

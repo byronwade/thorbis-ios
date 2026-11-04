@@ -39,6 +39,13 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(route.invoice.id, id(50))
         XCTAssertEqual(route.authorityToken, ["session-A"])
         XCTAssertTrue(route.model === first, "The presented sheet must not switch to a newly selected model")
+        XCTAssertTrue(scope().matchesJobCustomer(scope(origin: 55)),
+                       "A changed origin estimate must not refuse invoice collection")
+        XCTAssertTrue(scope(origin: 10).matchesJobCustomer(scope(origin: 55)))
+        XCTAssertNotEqual(scope(), scope(origin: 55), "Estimate identity stays distinct for estimate reads")
+        XCTAssertFalse(scope().matchesJobCustomer(scope(job: 101)))
+        XCTAssertFalse(scope().matchesJobCustomer(.init(jobID: id(100), organizationID: id(1), customerID: id(4))))
+        XCTAssertFalse(scope().matchesJobCustomer(.init(jobID: id(100), organizationID: id(9), customerID: id(2))))
         XCTAssertTrue(route.belongs(to: scope()))
         XCTAssertTrue(route.belongs(to: scope(origin: 55)), "A changed estimate does not change the invoice's job or customer")
         XCTAssertFalse(route.belongs(to: scope(job: 101)), "A changed job must retire the payment sheet")

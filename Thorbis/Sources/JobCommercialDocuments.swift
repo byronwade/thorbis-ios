@@ -10,8 +10,7 @@ struct JobInvoicePaymentRoute: Identifiable {
     var id: String { invoice.id }
 
     func belongs(to current: JobDocumentScope) -> Bool {
-        scope.jobID == current.jobID && scope.organizationID == current.organizationID &&
-            scope.customerID == current.customerID && current.contains(invoice)
+        scope.matchesJobCustomer(current) && current.contains(invoice)
     }
 
     @MainActor static func make(requestedID: String, selectedID: String?, selected: InvoiceRecord?,
@@ -124,6 +123,11 @@ struct JobDocumentScope: Equatable {
 
     func contains(_ invoice: InvoiceRecord) -> Bool {
         invoice.jobId == jobID && invoice.organizationId == organizationID && invoice.customerId == customerID
+    }
+
+    /// Invoice paper stays with the job and customer. The origin estimate can change independently.
+    func matchesJobCustomer(_ other: JobDocumentScope) -> Bool {
+        jobID == other.jobID && organizationID == other.organizationID && customerID == other.customerID
     }
 
     func contains(_ estimate: EstimateRecord, requestedID: String) -> Bool {
