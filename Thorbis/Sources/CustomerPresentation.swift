@@ -166,6 +166,9 @@ struct CustomerEstimatePresentation: View {
         get { handoff?.offerReview ?? standaloneOfferReview }
         nonmutating set { if let handoff { handoff.offerReview = newValue } else { standaloneOfferReview = newValue } }
     }
+    private var presentedTotalText: String {
+        customerEstimatePresentedTotal(base: flow.total, review: offerReview).map { money($0, currency: offerReview?.quote.currency ?? flow.currency) } ?? ""
+    }
     private var drawnApproval: Bool { jobID != nil && !flow.hasOptions && !requiresOffers }
     private var showsBackCircle: Bool {
         handoff == nil && returnToDocuments == nil && flow.hasOptions && flow.step == .review && reviewReady && !actionBusy
@@ -231,14 +234,16 @@ struct CustomerEstimatePresentation: View {
             if let link, let revision = flow.issuedRevision {
                 HeldCustomerOfferShop(token: link.token, revisionNumber: revision.revisionNumber,
                     contentHash: link.action.contentHash, optionID: flow.selectedOptionID,
-                    currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) { quote, selections in
+                    currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }, initialReview: offerReview) { quote, selections in
                     offerReview = CustomerOfferReview(quote: quote, selections: selections)
                     strokes = []; uploadedSignature = nil; showOfferShop = false
                 }
             }
         }
-        .onChange(of: flow.selectedOptionID) { _, _ in
-            offerReview = nil; strokes = []; uploadedSignature = nil
+        .onChange(of: flow.selectedOptionID) { _, newValue in
+            if let offerReview, offerReview.quote.base.id?.lowercased() != newValue?.lowercased() {
+                self.offerReview = nil; strokes = []; uploadedSignature = nil
+            }
         }
 
         .task { await loadOffer() }
@@ -378,7 +383,7 @@ struct CustomerEstimatePresentation: View {
                     .frame(minHeight: type.target)
                     .disabled(actionBusy || handoff?.signature != nil)
             }
-            if let total = flow.total, let example = offer.example(for: total) {
+            if !requiresOffers, let total = flow.total, let example = offer.example(for: total) {
                 CustomerFinancingLine(example: example, type: type)
                 seeTerms
             }
@@ -387,8 +392,8 @@ struct CustomerEstimatePresentation: View {
 
     private var signScreen: some View {
         VStack(alignment: .leading, spacing: 18) {
-            header(eyebrow: "\(flow.choiceName) · \(offerReview.map { money($0.quote.totalAmount, currency: $0.quote.currency) } ?? flow.totalText)", title: "Sign to approve")
-            Text(consentText ?? "By signing, I approve \"\(flow.choiceName)\" for \(flow.totalText) as shown.")
+            header(eyebrow: "\(flow.choiceName) · \(presentedTotalText)", title: "Sign to approve")
+            Text(consentText ?? "By signing, I approve \"\(flow.choiceName)\" for \(presentedTotalText) as shown.")
                 .font(Theme.customerFont(type.body))
                 .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 8) {
@@ -673,7 +678,7 @@ struct CustomerEstimatePresentation: View {
         defer { busy = false }
         do {
             let opened: (token: String, action: PublicEstimateAction)
-            if let retained = handoff?.link { opened = retained }
+            if let retained = link { opened = retained }
             else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) }
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { return }

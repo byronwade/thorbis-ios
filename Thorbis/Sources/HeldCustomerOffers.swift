@@ -61,6 +61,7 @@ struct CustomerOfferQuote: Decodable, Equatable {
         let totalAmount: Int
         let lines: [CustomerOfferLine]
     }
+    let contractVersion: Int
     let id: String
     let quoteIdentity: String
     let identity: String
@@ -80,6 +81,10 @@ struct CustomerOfferReview: Equatable {
         guard let date = fractional.date(from: quote.expiresAt) ?? ISO8601DateFormatter().date(from: quote.expiresAt) else { return false }
         return date > now
     }
+}
+
+func customerEstimatePresentedTotal(base: Int?, review: CustomerOfferReview?) -> Int? {
+    review?.quote.totalAmount ?? base
 }
 
 /// A request ticket is retired on every changed selection or document scope.
@@ -123,7 +128,7 @@ struct CustomerOfferCart: Equatable {
     }
 
     mutating func install(_ result: CustomerOfferQuote, ticket captured: UUID, now: Date) -> Bool {
-        guard captured == ticket, UUID(uuidString: result.id) != nil, result.currency == "USD",
+        guard captured == ticket, result.contractVersion == 1, UUID(uuidString: result.id) != nil, result.currency == "USD",
               result.identity == result.quoteIdentity, result.identity.range(of: "^sha256:[0-9a-f]{64}$", options: .regularExpression) != nil,
               let expiry = Self.expiryDate(result.expiresAt), expiry > now,
               result.base.id?.lowercased() == optionID?.lowercased(),

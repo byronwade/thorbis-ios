@@ -15,10 +15,12 @@ import Foundation
     let captured = cart.ticket
     let identity = "sha256:" + String(repeating: "b", count: 64)
     let quoteData = """
-    {"id":"018f0000-aaaa-7000-8000-000000000012","identity":"\(identity)","quoteIdentity":"\(identity)","expiresAt":"2099-01-01T00:00:00.000Z","currency":"USD","totalAmount":2000,"base":{"totalAmount":1000,"lines":[{"description":"Base","quantity":1,"unitPrice":1000,"totalAmount":1000}]},"addOns":[{"id":"\(offer)","title":"Upgrade","description":"Extra","quantity":2,"totalAmount":1000,"lines":[{"description":"Extra work","quantity":4,"unitPrice":250,"totalAmount":1000}]}]}
+    {"contractVersion":1,"id":"018f0000-aaaa-7000-8000-000000000012","identity":"\(identity)","quoteIdentity":"\(identity)","expiresAt":"2099-01-01T00:00:00.000Z","currency":"USD","totalAmount":2000,"base":{"totalAmount":1000,"lines":[{"description":"Base","quantity":1,"unitPrice":1000,"totalAmount":1000}]},"addOns":[{"id":"\(offer)","title":"Upgrade","description":"Extra","quantity":2,"totalAmount":1000,"lines":[{"description":"Extra work","quantity":4,"unitPrice":250,"totalAmount":1000}]}]}
     """.data(using: .utf8)!
     let quote = try JSONDecoder().decode(CustomerOfferQuote.self, from: quoteData)
     precondition(cart.install(quote, ticket: captured, now: Date()))
+    precondition(customerEstimatePresentedTotal(base: 1000, review: CustomerOfferReview(quote: quote, selections: cart.selections)) == 2000)
+    precondition(customerEstimatePresentedTotal(base: 1000, review: nil) == 1000)
     precondition(cart.setQuantity(3, for: offer) && cart.quote == nil)
     precondition(!cart.install(quote, ticket: captured, now: Date()))
     precondition(!cart.install(quote, ticket: cart.ticket, now: Date()))

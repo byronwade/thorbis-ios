@@ -5,6 +5,7 @@ struct HeldCustomerOfferShop: View {
     let token: String
     let currentAuthority: @MainActor () -> Bool
     let onReview: (CustomerOfferQuote, [CustomerOfferSelection]) -> Void
+    let initialReview: CustomerOfferReview?
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
     @State private var cart: CustomerOfferCart
@@ -14,10 +15,11 @@ struct HeldCustomerOfferShop: View {
     @State private var generation: UUID?
 
     init(token: String, revisionNumber: Int, contentHash: String, optionID: String?,
-         currentAuthority: @escaping @MainActor () -> Bool,
+         currentAuthority: @escaping @MainActor () -> Bool, initialReview: CustomerOfferReview? = nil,
          onReview: @escaping (CustomerOfferQuote, [CustomerOfferSelection]) -> Void) {
         self.token = token
         self.currentAuthority = currentAuthority
+        self.initialReview = initialReview
         self.onReview = onReview
         _cart = State(initialValue: CustomerOfferCart(revisionNumber: revisionNumber, contentHash: contentHash, optionID: optionID))
     }
@@ -118,6 +120,14 @@ struct HeldCustomerOfferShop: View {
             let response = try await api.heldAvailableOffers(token: token, revisionNumber: cart.revisionNumber,
                 optionID: cart.optionID, currentAuthority: currentAuthority)
             guard generation == api.requestGeneration, currentAuthority(), cart.install(response, ticket: ticket) else { return }
+            if !loaded, let initialReview {
+                for selection in initialReview.selections {
+                    guard cart.setQuantity(selection.quantity, for: selection.offerId) else {
+                        cart.retire(); self.error = "These options changed. Ask your technician to reopen the estimate."; return
+                    }
+                }
+                _ = cart.install(initialReview.quote, ticket: cart.ticket, now: Date())
+            }
             loaded = true
         } catch is CancellationError {} catch { self.error = "We couldn’t load the options. Check your connection and try again." }
     }
