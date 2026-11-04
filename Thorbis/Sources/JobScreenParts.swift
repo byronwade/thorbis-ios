@@ -262,9 +262,8 @@ struct JobCircleLabel: View {
     }
 }
 
-/// The three job sections as Linear text tabs (the style Today uses, `PaperTabs(textTabs:)`): plain
-/// words on the ground, the chosen one on a light well pill, left-aligned. Values stay "Overview",
-/// "Money", "Activity"; only the words change. A label with its own words and spoken form keeps
+/// Job sections as Linear text tabs (the style Today uses, `PaperTabs(textTabs:)`): plain
+/// words on the ground, the chosen one on a light well pill, left-aligned. A label with its own words and spoken form keeps
 /// `PaperTabs` out (it binds the label to the value and has no per-tab identifiers).
 struct JobSectionControl: View {
     let options: [(value: String, label: String, spoken: String)]
