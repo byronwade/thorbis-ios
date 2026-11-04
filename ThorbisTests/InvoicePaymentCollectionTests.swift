@@ -529,6 +529,21 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.method == "POST" }.count, 0)
     }
 
+    func testDeniedInvoiceRefreshStopsNewPaymentAttempts() async {
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice()), .init(200, #"{"items":[]}"#),
+            .init(403, #"{"title":"Forbidden","status":403}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await model.load()
+        XCTAssertTrue(model.canRecordPayment)
+        await model.load()
+        XCTAssertFalse(model.canRecordPayment)
+        let result = await model.record(amountCents: 2500, method: .cash)
+        XCTAssertFalse(result)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.method == "POST" }.count, 0)
+    }
+
     func testPermissionErrorIsShownAndRejectedIntentCanBeEdited() async {
         let client = APIClient(session: URLProtocolFixture.session([
             .init(200, invoice()), .init(200, #"{"items":[]}"#),

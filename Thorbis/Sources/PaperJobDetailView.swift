@@ -58,6 +58,9 @@ struct JobDetailView: View {
     @State private var invoicePaymentLoads = JobInvoicePaymentLoads()
     @State private var paymentRoute: JobInvoicePaymentRoute?
     @State private var activityFilter = "All"
+    #if DEBUG
+    @State private var previewPaymentRevalidated = false
+    #endif
     @State private var showSchedule = false
     private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
@@ -135,11 +138,13 @@ struct JobDetailView: View {
     private let activityFilters = ["All", "Notes", "Status", "Estimates", "Photos"]
     private var showsPhotos: Bool { selectedTab == "Activity" && activityFilter == "Photos" }
 
-    /// Changes here invalidate a presented payment without depending on the
-    /// estimate link, which can change independently of the invoice's job.
+    /// Retire a mounted sheet on material authority or job changes. A routine
+    /// authority revision alone does not discard a technician's entered amount.
+    /// This token does not establish fresh per-invoice authorization.
     private var paymentAuthorityToken: [String] {
-        [session.generation.uuidString, session.authorityRevision.uuidString,
+        [session.generation.uuidString,
          session.user?.id ?? "", session.activeOrganization?.id ?? "", String(session.policyVersion ?? 0),
+         session.authorityGeneration ?? "",
          api.requestGeneration.uuidString, api.savedCopyScopeRevision.uuidString,
          api.savedCopyScope ?? "", api.normalizedOrigin ?? "", job?.id ?? "",
          job?.organizationId ?? "", job?.customerId ?? "",
@@ -523,6 +528,23 @@ struct JobDetailView: View {
            session.can("invoice.payment.create", feature: "payments") {
             InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice)
                 .thorbisSheetSurface().presentationDetents([.large]).presentationDragIndicator(.visible)
+                #if DEBUG
+                .overlay(alignment: .topLeading) {
+                    if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revalidate") {
+                        Button(previewPaymentRevalidated ? "Preview revalidated" : "Preview revalidate") {
+                            Task {
+                                let previous = session.authorityRevision
+                                if ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revoke") {
+                                    PaperPreviewProtocol.revokePaymentPermission()
+                                }
+                                await session.revalidate()
+                                previewPaymentRevalidated = session.authorityRevision != previous
+                            }
+                        }
+                        .accessibilityIdentifier(previewPaymentRevalidated ? "preview-payment-revalidated" : "preview-payment-revalidate")
+                    }
+                }
+                #endif
                 #if DEBUG
                 .task {
                     guard PaperPreview.enabled,
