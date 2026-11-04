@@ -574,7 +574,9 @@ struct JobMediaView: View {
         return Button {
             if selecting {
                 guard stored else { return }
-                if isPicked { picked.remove(record.id) } else { picked.insert(record.id) }
+                var next = picked
+                if isPicked { next.remove(record.id) } else { next.insert(record.id) }
+                updatePicked(next)
             } else {
                 open(record)
             }
@@ -749,7 +751,7 @@ struct JobMediaView: View {
                     .font(Theme.font(15, weight: .medium)).monospacedDigit()
                 Spacer()
                 Button(count == storedPhotos.count ? "Clear" : "Choose all") {
-                    picked = count == storedPhotos.count ? [] : Set(storedPhotos.map(\.id))
+                    updatePicked(count == storedPhotos.count ? [] : Set(storedPhotos.map(\.id)))
                 }
                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).frame(minHeight: 44)
                 .accessibilityIdentifier("job-media-choose-all")
@@ -831,15 +833,21 @@ struct JobMediaView: View {
         }
     }
 
+    private func updatePicked(_ next: Set<String>) {
+        guard next != picked else { return }
+        customerPhotoRequest = UUID()
+        picked = next
+    }
+
     private func startSelecting() {
         filter = filter == .documents ? .all : filter
-        picked = []
+        updatePicked([])
         justCaptured = nil
         withMotion(.easeOut(duration: 0.2)) { selecting = true }
     }
 
     private func endSelecting() {
-        picked = []
+        updatePicked([])
         withMotion(.easeOut(duration: 0.2)) { selecting = false }
     }
 
@@ -908,7 +916,9 @@ struct JobMediaView: View {
                     return false
                 }
                 records.removeAll { $0.id == record.id }
-                picked.remove(record.id)
+                var remaining = picked
+                remaining.remove(record.id)
+                updatePicked(remaining)
             } catch is CancellationError {
                 return false
             } catch {
@@ -1185,7 +1195,7 @@ struct JobMediaView: View {
         case "tag": capture = MediaCaptureRequest(mode: .single, stage: "Before", held: sample.jpegData(compressionQuality: 0.8))
         case "select":
             startSelecting()
-            picked = Set(storedPhotos.prefix(3).map(\.id))
+            updatePicked(Set(storedPhotos.prefix(3).map(\.id)))
         case "markup": captureMarkup = sample.jpegData(compressionQuality: 0.8).map { PhotoMarkupTarget(data: $0, tags: ["Before"]) }
         case "measure": showMeasure = true
         case "untagged": filter = .untagged
