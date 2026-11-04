@@ -292,7 +292,7 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         XCTAssertFalse(model.invoiceAccessDenied); XCTAssertNotNil(model.invoice)
     }
 
-    func testDeniedInvoiceRetiresAnotherOpenPaymentModel() async {
+    func testDeniedInvoiceRetiresAnotherOpenPaymentModel() async throws {
         let client = APIClient(session: URLProtocolFixture.session([
             .init(200, invoice()), .init(200, #"{"items":[]}"#),
             .init(200, invoice()), .init(200, #"{"items":[]}"#),
@@ -307,6 +307,8 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         XCTAssertNil(first.invoice)
         XCTAssertNil(second.invoice, "A denial must retire the same invoice in another open model")
         XCTAssertFalse(second.canRecordPayment)
+        let stale = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice().utf8))
+        XCTAssertFalse(second.acceptInvoiceMutationResponse(stale), "An old response cannot resurrect a denied invoice")
         let reopened = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
         XCTAssertTrue(reopened.invoiceAccessDenied, "Reopening in this process must not restore the parent invoice before a fresh read")
     }

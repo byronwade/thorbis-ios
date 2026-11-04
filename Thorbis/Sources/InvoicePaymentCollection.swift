@@ -279,6 +279,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             reconcileAcceptedPayment()
         } catch is CancellationError {
+            guard generation == api.requestGeneration,
+                  accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) else { return }
             invoice = nil
             payments = []
             pendingRequest = nil
@@ -294,8 +296,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             // A definitive denial must not be followed by an older queued retry.
             if let status = (error as? Problem)?.status, [401, 403, 404].contains(status) {
                 definitiveDenial = true
-                if let accessScope, accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) {
+                if let accessScope {
                     InvoiceAccessRegistry.shared.deny(accessScope)
+                    guard accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) else { return }
+                } else {
+                    guard generation == api.requestGeneration else { return }
                 }
                 retireDeniedInvoice()
             }
