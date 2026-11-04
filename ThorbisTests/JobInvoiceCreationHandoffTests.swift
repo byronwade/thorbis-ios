@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class JobInvoiceCreationHandoffTests: XCTestCase {
-    private final class Gate {
+    @MainActor private final class Gate {
         var continuation: CheckedContinuation<Void, Never>?
         func wait() async { await withCheckedContinuation { continuation = $0 } }
         func release() { continuation?.resume(); continuation = nil }
