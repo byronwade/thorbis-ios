@@ -69,6 +69,26 @@ import XCTest
         XCTAssertFalse(created)
     }
 
+    func testLookupAcceptsOnlyExactPersistedOperationAndNeverReplacesAnExistingAttempt() {
+        var input = marker()
+        input.operationID = "00000000-0000-4000-8000-000000000001"
+        let recovered = BoundTapRecoveryManager.recovered(marker: input, attemptID: input.operationID,
+                                                           intentID: "pi_test", amount: 100, currency: "USD")
+        XCTAssertEqual(recovered?.attemptID, input.operationID)
+        XCTAssertEqual(recovered?.paymentIntentID, "pi_test")
+        XCTAssertNil(BoundTapRecoveryManager.recovered(marker: input, attemptID: "00000000-0000-4000-8000-000000000002", intentID: "pi_test", amount: 100, currency: "USD"))
+        XCTAssertNil(BoundTapRecoveryManager.recovered(marker: input, attemptID: input.operationID, intentID: "bad\nintent", amount: 100, currency: "USD"))
+        input.attemptID = input.operationID
+        XCTAssertNil(BoundTapRecoveryManager.recovered(marker: input, attemptID: input.operationID, intentID: "pi_test", amount: 100, currency: "USD"))
+    }
+
+    func testOldMarkerWithoutOperationRemainsReadableButCannotBeGuessed() throws {
+        let data = try JSONEncoder().encode(marker())
+        let decoded = try JSONDecoder().decode(BoundTapRecovery.self, from: data)
+        XCTAssertNil(decoded.operationID)
+        XCTAssertNil(BoundTapRecoveryManager.recovered(marker: decoded, attemptID: "00000000-0000-4000-8000-000000000001", intentID: "pi_test", amount: 100, currency: "USD"))
+    }
+
     func testReleaseRequiresEvidenceCurrentAuthorityNoSDKAndMatchingReceipt() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: false)

@@ -13,6 +13,8 @@ struct BoundTapRecovery: Codable, Equatable {
     var paymentIntentID: String?
     var amount: Int?
     var currency: String?
+    /// Persisted before the create request; optional for older held markers.
+    var operationID: String? = nil
 }
 
 @MainActor protocol BoundTapRecoveryStoring {
@@ -24,6 +26,20 @@ struct BoundTapRecovery: Codable, Equatable {
 }
 
 @MainActor enum BoundTapRecoveryManager {
+    static func recovered(marker: BoundTapRecovery, attemptID: String?, intentID: String?, amount: Int?, currency: String?) -> BoundTapRecovery? {
+        guard marker.attemptID == nil, marker.paymentIntentID == nil, marker.amount == nil, marker.currency == nil,
+              let operation = marker.operationID, UUID(uuidString: operation) != nil,
+              let attemptID, attemptID.lowercased() == operation.lowercased(),
+              let intentID, !intentID.isEmpty, intentID.utf8.count <= 255,
+              intentID.utf8.allSatisfy({ (0x21...0x7e).contains($0) }),
+              let amount, amount > 0, let currency, !currency.isEmpty else { return nil }
+        var receipt = marker
+        receipt.attemptID = attemptID
+        receipt.paymentIntentID = intentID
+        receipt.amount = amount
+        receipt.currency = currency
+        return receipt
+    }
     static func begin(store: BoundTapRecoveryStoring, marker: BoundTapRecovery) throws {
         let created: Bool
         do { created = try store.create(marker) }
@@ -36,7 +52,9 @@ struct BoundTapRecovery: Codable, Equatable {
         let receipt = try identify(attempt, marker)
         guard receipt.origin == marker.origin, receipt.actorID == marker.actorID,
               receipt.organizationID == marker.organizationID, receipt.invoiceID == marker.invoiceID,
+              receipt.operationID == marker.operationID,
               let attemptID = receipt.attemptID, UUID(uuidString: attemptID) != nil,
+              marker.operationID == nil || marker.operationID?.lowercased() == attemptID.lowercased(),
               let intentID = receipt.paymentIntentID, !intentID.isEmpty,
               let amount = receipt.amount, amount > 0,
               let currency = receipt.currency, !currency.isEmpty else { throw BoundTapFlowError.uncertain }

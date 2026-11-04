@@ -2,6 +2,12 @@ import Foundation
 @preconcurrency import StripeTerminal
 
 private struct BoundTapSettlementRequest: Encodable { let paymentIntentId: String }
+private struct BoundTapOperationResponse: Decodable {
+    let status: String
+    let attemptId: String?
+    let paymentIntentId: String?
+    let amount: FieldMoney?
+}
 private struct BoundTapSettlementResponse: Decodable {
     let status: String
     let attemptId: String?
@@ -24,9 +30,7 @@ private struct BoundTapSettlementResponse: Decodable {
         do { lease = try BoundTapProcessLease.acquire(path: container.path) }
         catch BoundTapProcessLeaseError.busy { return .restartRequired }
         defer { lease.close() }
-        guard let receipt = try store.load() else { return .pending }
-        guard let attemptID = receipt.attemptID, UUID(uuidString: attemptID) != nil, let intentID = receipt.paymentIntentID,
-              let expectedAmount = receipt.amount, let currency = receipt.currency else { return .unknownAttempt }
+        guard var receipt = try store.load() else { return .pending }
         guard session.phase == .ready, session.user?.id == receipt.actorID,
               session.activeOrganization?.id == receipt.organizationID,
               session.can("invoice.payment.create", feature: "payments"),
@@ -41,6 +45,21 @@ private struct BoundTapSettlementResponse: Decodable {
             api.savedCopyScope == scope && api.savedCopyScopeRevision == scopeRevision
         }
         let invoicePath = try api.financialPath("/v1/invoices", id: receipt.invoiceID, suffix: "")
+        if receipt.attemptID == nil {
+            guard let operationID = receipt.operationID, UUID(uuidString: operationID) != nil else { return .unknownAttempt }
+            let operationPath = invoicePath + "/card-present-operations/\(operationID)"
+            let operation: APIRead<BoundTapOperationResponse> = try await api.sendWithProvenance(operationPath, requireFresh: true)
+            guard current(), fresh(operation.provenance, path: operationPath, generation: apiGeneration,
+                                   origin: receipt.origin, scope: scope, scopeRevision: scopeRevision),
+                  operation.value.status == "found",
+                  let recovered = BoundTapRecoveryManager.recovered(marker: receipt, attemptID: operation.value.attemptId,
+                      intentID: operation.value.paymentIntentId, amount: operation.value.amount?.amount, currency: operation.value.amount?.currency),
+                  try store.load() == receipt else { return .pending }
+            receipt = recovered
+            try store.save(receipt)
+        }
+        guard let attemptID = receipt.attemptID, UUID(uuidString: attemptID) != nil, let intentID = receipt.paymentIntentID,
+              let expectedAmount = receipt.amount, let currency = receipt.currency else { return .unknownAttempt }
         let settlement: BoundTapSettlementResponse = try await api.send("POST",
             try api.financialPath("/v1/invoices", id: receipt.invoiceID, suffix: "/card-present-attempts/\(attemptID)/reconciliation"),
             body: BoundTapSettlementRequest(paymentIntentId: intentID))

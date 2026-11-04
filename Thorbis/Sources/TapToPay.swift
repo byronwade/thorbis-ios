@@ -23,8 +23,13 @@ extension APIClient {
         try await send("POST", try financialPath("/v1/invoices", id: invoiceID, suffix: "/terminal-connection-token"))
     }
 
-    func cardPresentIntent(invoiceID: String) async throws -> CardPresentIntent {
-        try await send("POST", try financialPath("/v1/invoices", id: invoiceID, suffix: "/card-present-intents"))
+    func cardPresentIntent(invoiceID: String, operationID: String? = nil) async throws -> CardPresentIntent {
+        let path = try financialPath("/v1/invoices", id: invoiceID, suffix: "/card-present-intents")
+        if let operationID {
+            struct Request: Encodable { let operationId: String }
+            return try await send("POST", path, body: Request(operationId: operationID))
+        }
+        return try await send("POST", path)
     }
 }
 
@@ -152,9 +157,10 @@ final class TapToPayController: ObservableObject {
             return now == authority && api.savedCopyScopeRevision == scopeRevision && api.savedCopyScope == scope
         }
         let recoveryStore = KeychainBoundTapRecoveryStore.shared
+        let operationID = UUID().uuidString.lowercased()
         let marker = BoundTapRecovery(origin: origin, actorID: actor, organizationID: organization,
                                       invoiceID: self.invoiceID, attemptID: nil, paymentIntentID: nil,
-                                      amount: nil, currency: nil)
+                                      amount: nil, currency: nil, operationID: operationID)
         phase = .preparing
         do {
             _ = try await BoundTapPaymentFlow.run(enabled: Self.buildEnabled && Self.boundCollectionQualified,
@@ -163,7 +169,7 @@ final class TapToPayController: ObservableObject {
                                                    isCurrent: current,
                                                    prepare: { try BoundTapRecoveryManager.begin(store: recoveryStore, marker: marker) },
                                                    create: {
-                let intent = try await api.cardPresentIntent(invoiceID: self.invoiceID)
+                let intent = try await api.cardPresentIntent(invoiceID: self.invoiceID, operationID: operationID)
                 try BoundTapRecoveryManager.record(store: recoveryStore, marker: marker, attempt: intent,
                     identify: { intent, marker in
                         var receipt = marker
