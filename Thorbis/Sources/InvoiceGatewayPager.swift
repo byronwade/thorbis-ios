@@ -41,7 +41,7 @@ import Foundation
         guard !term.isEmpty, term.utf16.count <= 128, !term.hasPrefix("\""),
               !term.contains(where: { $0.isNewline }),
               isCurrent(), let scope = api.savedCopyScope, let origin = api.normalizedOrigin else {
-            error = "This search needs current access and a name of at most 128 characters that doesn't begin with a quote."
+            error = "This search needs current access and a shorter name that doesn't begin with a quote."
             return
         }
         savedCopyScope = scope; self.origin = origin; generation = api.requestGeneration
