@@ -1,10 +1,23 @@
 import XCTest
+import Combine
 @testable import Thorbis
 
 @MainActor
 final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
+
+    func testSavedCopyScopeRevisionPublishesAwayAndBackChanges() {
+        let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        var revisions: [UUID] = []
+        let observation = client.$savedCopyScopeRevision.dropFirst().sink { revisions.append($0) }
+        client.savedCopyScope = "scope-A"
+        client.savedCopyScope = "scope-B"
+        client.savedCopyScope = "scope-A"
+        XCTAssertEqual(revisions.count, 3)
+        XCTAssertEqual(Set(revisions).count, 3)
+        withExtendedLifetime(observation) {}
+    }
 
     func testSavedInvoiceSourceSurvivesConcurrentLiveInvoiceResponse() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
