@@ -9,6 +9,9 @@ struct HeldCustomerOfferShop: View {
     let initialReview: CustomerOfferReview?
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private var type: CustomerType { CustomerType(sizeClass) }
     @State private var cart: CustomerOfferCart
     @State private var busy = false
     @State private var loaded = false
@@ -80,24 +83,27 @@ struct HeldCustomerOfferShop: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(24)
+                if typeSize.isAccessibilitySize { footer }
             }
+            if !typeSize.isAccessibilitySize { footer }
+        }
+    }
+
+    private var footer: some View {
             VStack(spacing: 8) {
                 if let quote = cart.quote {
-                    Button("Continue with \(price(quote.totalAmount))") {
+                    CustomerPresentationCommit(title: "Continue with \(price(quote.totalAmount))", enabled: true, busy: busy, type: type) {
                         guard generation == api.requestGeneration, currentAuthority(), cart.quoteIsCurrent(now: Date()) else {
                             cart.invalidateQuote(); error = "This total expired. Please review it again."
                             return
                         }
                         onReview(quote, cart.selections)
                     }
-                        .frame(maxWidth: .infinity, minHeight: 56)
                 } else if loaded && error == nil {
-                    Button("Review total") { Task { await requestQuote() } }
-                        .frame(maxWidth: .infinity, minHeight: 56)
+                    CustomerPresentationCommit(title: "Review total", enabled: true, busy: busy, type: type) { Task { await requestQuote() } }
                 }
-                Button("Back") { dismiss() }.frame(minHeight: 56)
-            }.font(Theme.customerFont(20, weight: .medium)).padding(.horizontal, 24)
-        }
+                CustomerSecondaryButton(title: "Back", type: type) { dismiss() }
+            }.padding(.horizontal, 24).padding(.bottom, 12)
     }
 
     private func offerRow(_ item: CustomerAvailableOffer) -> some View {
@@ -120,7 +126,7 @@ struct HeldCustomerOfferShop: View {
             } else {
                 Button("Add \(item.title)") { changeQuantity(item.quantityPolicy.min, for: item.id) }.frame(minHeight: 56)
             }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(16).panelBackground(cornerRadius: 14)
     }
 
     private func changeQuantity(_ quantity: Int?, for id: String) {
