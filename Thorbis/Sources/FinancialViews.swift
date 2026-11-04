@@ -1060,11 +1060,7 @@ struct LineText: Equatable {
 /// line after the others with their sum, so no price is hidden and the lines still add up to the
 /// total. The server's PDF and approval link fold the same way.
 func customerEstimateLines(_ lines: [FieldLine]) -> [FieldLine] {
-    let hidden = lines.filter { $0.showToCustomer == false }
-    guard let first = hidden.first, let sum = paperLinesTotal(hidden) else { return lines }
-    return lines.filter { $0.showToCustomer != false }
-        + [FieldLine(id: first.id, description: "Materials", quantity: 1,
-                     unitPrice: FieldMoney(amount: sum, currency: first.unitPrice.currency), source: nil)]
+    customerEstimateProjection(lines, currency: lines.first?.unitPrice.currency ?? "USD") ?? []
 }
 
 func paperLinesTotal(_ lines: [FieldLine]) -> Int? {

@@ -105,6 +105,21 @@ final class CustomerEstimateReviewTests: XCTestCase {
         XCTAssertEqual(mint["contentHash"] as? String, paperHash)
     }
 
+    func testSigningMatchesProjectedMaterialsAndRejectsRawHiddenDetails() async throws {
+        var object = revision
+        object["lines"] = [["id": "line-1", "description": "Private material detail", "quantity": 2,
+                            "unitPrice": ["amount": 6600, "currency": "USD"], "showToCustomer": false]]
+        let review = try decodedRevision(object)
+        var projected = action
+        projected["scopeLines"] = [["id": "line-1", "description": "Materials", "quantity": 1, "unitPrice": 13_200]]
+        let api = client([.init(200, try json(paper)), .init(200, #"{"token":"customer-token"}"#), .init(200, try json(projected))])
+        _ = try await api.openInPersonEstimateApproval(review)
+        var raw = action
+        raw["scopeLines"] = [["id": "line-1", "description": "Private material detail", "quantity": 2, "unitPrice": 6600]]
+        let mismatch = client([.init(200, try json(paper)), .init(200, #"{"token":"customer-token"}"#), .init(200, try json(raw))])
+        await rejects { _ = try await mismatch.openInPersonEstimateApproval(review) }
+    }
+
     func testForeignPaperSourceOrRevisionStopsBeforeMinting() async throws {
         let review = try decodedRevision()
         for mutation: [String: Any] in [

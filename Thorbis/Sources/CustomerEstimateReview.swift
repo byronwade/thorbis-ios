@@ -45,8 +45,10 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
         else { throw customerReviewUnavailable() }
 
         if reviewed.isEmpty {
-            guard let scope = action.scopeLines, scope.count == lines.count,
-                  zip(scope, lines).allSatisfy({ actual, expected in
+            guard let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == totalAmount,
+                  let projected = customerEstimateProjection(lines, currency: currency),
+                  let scope = action.scopeLines, scope.count == projected.count,
+                  zip(scope, projected).allSatisfy({ actual, expected in
                       actual.id == expected.id && actual.description == expected.description
                           && Int(exactly: actual.quantity) == expected.quantity
                           && Int(exactly: actual.unitPrice) == expected.unitPrice.amount

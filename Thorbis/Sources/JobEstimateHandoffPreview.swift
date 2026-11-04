@@ -53,6 +53,11 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func amount(_ id: String) -> Int { id == Self.a || id == Self.c ? 19000 : id == Self.b && flags.contains("--paper-preview-handoff-mixed") ? 0 : 32000 }
     private func lines(_ id: String) -> [[String: Any]] {
+        if id == Self.a, flags.contains("--paper-preview-handoff-hidden-material") {
+            return [["id": id, "description": "Visible service", "quantity": 1, "unitPrice": ["amount": 14000, "currency": "USD"]],
+                    ["id": "00000000-0000-4000-8000-000000008111", "description": "Private material detail", "quantity": 1,
+                     "unitPrice": ["amount": 5000, "currency": "USD"], "group": "material", "showToCustomer": false]]
+        }
         if flags.contains("--paper-preview-handoff-long-description"), id == Self.a ||
             (id == Self.b && flags.contains("--paper-preview-handoff-duplicate-titles")) {
             let description = id == Self.a
@@ -96,7 +101,13 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         ["id": PaperPreview.jobID, "organizationId": org, "customerId": PaperPreview.customerID, "title": "Sample service visit", "status": "in_progress", "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z", "allowedTransitions": ["completed", "paused"]]
     }
     private func action(_ id: String) -> [String: Any] {
-        let scopes = lines(id).map { line -> [String: Any] in ["id": id, "description": line["description"]!, "quantity": 1, "unitPrice": amount(id)] }
+        let scopes: [[String: Any]]
+        if id == Self.a, flags.contains("--paper-preview-handoff-hidden-material") {
+            scopes = [["id": id, "description": "Visible service", "quantity": 1, "unitPrice": 14000],
+                      ["id": "00000000-0000-4000-8000-000000008111", "description": "Materials", "quantity": 1, "unitPrice": 5000]]
+        } else {
+            scopes = lines(id).map { line -> [String: Any] in ["id": id, "description": line["description"]!, "quantity": 1, "unitPrice": amount(id)] }
+        }
         let quoted = options(id).map { option -> [String: Any] in var copy = option; copy.removeValue(forKey: "lines"); return copy }
         var value: [String: Any] = ["kind": "estimate", "title": title(id), "status": status(id), "revisionNumber": 1, "contentHash": String(repeating: id == Self.a ? "a" : "b", count: 64),
                 "allowedActions": status(id) == "sent" ? ["approve","decline"] : [], "nonce": "sample-nonce-\(id)", "totalAmount": amount(id), "currency": "USD", "html": "<main>Local sample terms</main>",

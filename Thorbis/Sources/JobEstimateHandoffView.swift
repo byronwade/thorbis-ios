@@ -202,12 +202,16 @@ struct JobEstimateHandoffView: View {
                     }
                 }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
-                if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
+                if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
+                   let projected = customerEstimateProjection(lines, currency: currency) {
                     CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: lines, type: type,
+                    CustomerIncludedLines(lines: projected, type: type,
                                           rows: customerAmountRows(amounts, currency: currency, invoice: false),
                                           readingAccess: descriptionAccess(for: item),
                                           descriptionContext: reference)
+                } else {
+                    Text("These amounts couldn't be verified. Hand the device back to your technician.")
+                        .font(Theme.customerFont(type.body))
                 }
             }
             ForEach(selectedTotals, id: \.currency) { value in
