@@ -49,6 +49,13 @@ struct PublicEstimateAction: Decodable, Equatable {
         @PublicEstimateAmount var totalAmount: Double
     }
 
+    /// Only verified supported amounts can be approved, regardless of entry point.
+    var amountsAvailableForApproval: Bool {
+        guard currency == "USD", totalAmount >= 0, PublicEstimateMoney.format(totalAmount, currency: currency) != nil else { return false }
+        guard (options ?? []).allSatisfy({ $0.currency == "USD" && $0.totalAmount >= 0 && PublicEstimateMoney.format($0.totalAmount, currency: $0.currency) != nil }) else { return false }
+        return (scopeLines ?? []).allSatisfy { PublicEstimateMoney.lineTotal(quantity: $0.quantity, unitPrice: $0.unitPrice) != nil }
+    }
+
     var canApprovePlainly: Bool {
         status == .sent
             && nonce != nil
@@ -190,6 +197,16 @@ final class PublicEstimateActionModel: ObservableObject {
 
     func submit(_ decision: PublicEstimateActionDecision, api: APIClient, token: String) async {
         guard !isSubmitting, currentToken == token, let current = action else { return }
+        switch decision {
+        case .approve, .approvePlainly:
+            guard current.amountsAvailableForApproval else {
+                actionFailure = nil
+                actionError = "We can’t verify the estimate amount. Ask the company for an updated estimate."
+                return
+            }
+        case .decline, .requestChanges:
+            break
+        }
         guard Self.matchesCurrentRevision(decision, action: current), Self.isAllowed(decision, by: current) else {
             actionFailure = nil
             actionError = "This estimate no longer allows that action. Reload the link and review the current estimate."

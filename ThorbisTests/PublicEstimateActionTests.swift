@@ -288,6 +288,16 @@ final class PublicEstimateActionTests: XCTestCase {
         XCTAssertNil(retryableModel.unavailableMessage)
     }
 
+    func testModelDoesNotSubmitApprovalForUnsupportedCurrency() async {
+        let response = actionJSON.replacingOccurrences(of: "\"currency\":\"USD\"", with: "\"currency\":\"EUR\"")
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, response)]), baseURL: "https://app.thorbis.com")
+        let model = PublicEstimateActionModel()
+        await model.load(api: api, token: "issued_token-1")
+        await model.submit(.approve(revisionNumber: 7, nonce: "nonce-value-123", contentHash: "issued-content-hash-12345", signerName: "A Customer", consentVersion: "estimate-approval-v1", consent: true, optionID: nil), api: api, token: "issued_token-1")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertTrue(model.actionError?.contains("verify the estimate amount") == true)
+    }
+
     private func makeAction(
         options: String,
         signed: Bool = true,

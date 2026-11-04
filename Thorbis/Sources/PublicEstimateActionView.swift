@@ -18,17 +18,11 @@ struct PublicEstimateActionView: View {
     }
 
     private var approvalEnabled: Bool {
-        guard let action = model.action, amountsAvailable(action) else { return false }
+        guard let action = model.action, action.amountsAvailableForApproval else { return false }
         if action.signingOffered {
             return action.canApprove(signerName: model.signerName, consent: model.consent, selectedOptionID: model.selectedOptionID)
         }
         return action.canApprovePlainly
-    }
-
-    private func amountsAvailable(_ action: PublicEstimateAction) -> Bool {
-        guard action.currency == "USD", action.totalAmount >= 0, PublicEstimateMoney.format(action.totalAmount, currency: action.currency) != nil else { return false }
-        guard (action.options ?? []).allSatisfy({ $0.currency == "USD" && $0.totalAmount >= 0 && PublicEstimateMoney.format($0.totalAmount, currency: $0.currency) != nil }) else { return false }
-        return (action.scopeLines ?? []).allSatisfy { PublicEstimateMoney.lineTotal(quantity: $0.quantity, unitPrice: $0.unitPrice) != nil }
     }
 
     private var footerBottomPadding: CGFloat {
@@ -134,8 +128,8 @@ struct PublicEstimateActionView: View {
                 }
                 .disabled(!approvalEnabled || model.isSubmitting)
                 .accessibilityIdentifier("public-estimate-approve")
-                .accessibilityHint(approvalEnabled ? "Records approval of this issued estimate." : (amountsAvailable(action) ? "Choose an option, enter your name, and provide consent to continue." : "The amount cannot be verified. Ask the company for an updated estimate."))
-                if !amountsAvailable(action) {
+                .accessibilityHint(approvalEnabled ? "Records approval of this issued estimate." : (action.amountsAvailableForApproval ? "Choose an option, enter your name, and provide consent to continue." : "The amount cannot be verified. Ask the company for an updated estimate."))
+                if !action.amountsAvailableForApproval {
                     Text("We can’t verify the estimate amount. Ask the company for an updated estimate.")
                         .font(Theme.customerFont(12)).foregroundStyle(Theme.muted)
                 }
@@ -422,7 +416,7 @@ struct PublicEstimateActionView: View {
 
     private func approvalTitle(_ action: PublicEstimateAction) -> String {
         if model.isSubmitting { return "Saving approval…" }
-        if !amountsAvailable(action) { return "Amount unavailable" }
+        if !action.amountsAvailableForApproval { return "Amount unavailable" }
         if action.signingOffered, let options = action.options, !options.isEmpty, selectedOption == nil {
             return "Choose an option to approve"
         }
