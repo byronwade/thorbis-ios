@@ -369,7 +369,7 @@ struct JobCloseoutView: View {
                                         .frame(minHeight: 44).buttonStyle(PressStyle())
                                 }
                             } else {
-                                Text("Ask someone with invoice access to refresh the payments already sent.")
+                                Text("Ask your office to restore your invoice access, then refresh those invoices on this phone.")
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                             }
                         }
