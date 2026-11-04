@@ -2,6 +2,13 @@ import XCTest
 @testable import Thorbis
 
 @MainActor final class CommercialDraftAccessTests: XCTestCase {
+    func testRecoveredJobLocationMustMatchIncludingNil() {
+        XCTAssertTrue(CommercialDraftAccess.matchesLocation(expected: nil, actual: nil))
+        XCTAssertTrue(CommercialDraftAccess.matchesLocation(expected: "one", actual: "one"))
+        XCTAssertFalse(CommercialDraftAccess.matchesLocation(expected: nil, actual: "one"))
+        XCTAssertFalse(CommercialDraftAccess.matchesLocation(expected: "one", actual: nil))
+        XCTAssertFalse(CommercialDraftAccess.matchesLocation(expected: "one", actual: "two"))
+    }
     func testDeniedReadCannotRevealDraft() async {
         let result = await CommercialDraftAccess.verify(expectedScope: "scope", currentScope: { "scope" }, read: {
             throw NSError(domain: "denied", code: 403)

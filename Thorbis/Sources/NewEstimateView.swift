@@ -297,7 +297,7 @@ struct NewEstimateView: View {
             if let jobID {
                 guard let job, job.id == jobID, job.organizationId == expected.organizationID,
                       (expectedCustomer.isEmpty || job.customerId == expectedCustomer),
-                      (jobLocationID == nil || job.locationId == jobLocationID) else { return false }
+                      CommercialDraftAccess.matchesLocation(expected: jobLocationID, actual: job.locationId) else { return false }
             }
             if !expectedCustomer.isEmpty {
                 guard let customer, customer.id == expectedCustomer, customer.organizationId == expected.organizationID else { return false }
