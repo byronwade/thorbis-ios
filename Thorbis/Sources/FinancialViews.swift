@@ -118,6 +118,7 @@ struct EstimateDetailView: View {
     @State private var showRevisionEditor = false
     @State private var action = ""
     @State private var showToCustomer = false
+    @State private var legacyHandoffID: UUID?
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
     @State private var memberPricing: MemberPricing?
     @State private var showPDF = false
@@ -276,7 +277,9 @@ struct EstimateDetailView: View {
         } }
         .task { await loadAndMaybePresent() }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
-        .fullScreenCover(isPresented: $showToCustomer) {
+        .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
+            if let id = legacyHandoffID { customerView.releaseLegacy(id); legacyHandoffID = nil }
+        }) {
             if let record { customerMode(record) }
         }
     }
@@ -354,7 +357,8 @@ struct EstimateDetailView: View {
             busy = false
             if opened != .unavailable { return }
         }
-        guard !customerView.photoHandoffActive else { return }
+        guard let id = customerView.claimLegacy() else { return }
+        legacyHandoffID = id
         showToCustomer = true
     }
 
@@ -496,6 +500,7 @@ struct InvoiceDetailView: View {
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var showSignature = false
     @State private var showToCustomer = false
+    @State private var legacyHandoffID: UUID?
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
     /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
     @State private var collectAfterCustomer = false
@@ -664,6 +669,7 @@ struct InvoiceDetailView: View {
             }
         } }
         .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
+            if let id = legacyHandoffID { customerView.releaseLegacy(id); legacyHandoffID = nil }
             if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
             Task { await loadFinancing() }
         }) {
@@ -759,7 +765,8 @@ struct InvoiceDetailView: View {
             busy = false
             if opened != .unavailable { return }
         }
-        guard !customerView.photoHandoffActive else { return }
+        guard let id = customerView.claimLegacy() else { return }
+        legacyHandoffID = id
         showToCustomer = true
     }
 

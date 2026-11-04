@@ -806,7 +806,8 @@ struct JobMediaView: View {
     }
 
     private func prepareCustomerPhotos() async {
-        guard !busy, scenePhase == .active, let scope = readScope, sourceScope == scope else { return }
+        guard !busy, scenePhase == .active, let scope = readScope, sourceScope == scope,
+              let handoffRevision = photoHandoff.availableRevision else { return }
         let chosen = pickedRecords
         guard !chosen.isEmpty, chosen.count == picked.count else {
             error = "Review the selected photos in this view and try again."
@@ -831,7 +832,7 @@ struct JobMediaView: View {
                   Set(pickedRecords.map(\.id)) == picked, !Task.isCancelled else {
                 throw CustomerPhotoSelection.Invalid.scope
             }
-            guard estimateHandoff.active == nil, photoHandoff.present(owner) else { throw CustomerPhotoSelection.Invalid.scope }
+            guard estimateHandoff.active == nil, photoHandoff.present(owner, expectedRevision: handoffRevision) else { throw CustomerPhotoSelection.Invalid.scope }
         } catch {
             self.error = "Couldn’t verify every selected photo. Check your connection, refresh this job and try again."
         }

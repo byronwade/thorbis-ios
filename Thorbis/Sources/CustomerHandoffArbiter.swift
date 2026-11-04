@@ -3,7 +3,7 @@ import Foundation
 /// Serializes protected customer presentations across app-level owners.
 @MainActor
 final class CustomerHandoffArbiter {
-    enum Owner: Equatable { case documents, photos }
+    enum Owner: Equatable { case documents, photos, legacy(UUID) }
     private(set) var owner: Owner?
     private(set) var revision = UUID()
 

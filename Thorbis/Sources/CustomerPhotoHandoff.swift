@@ -8,8 +8,10 @@ final class CustomerPhotoPresenter: ObservableObject {
     private let arbiter: CustomerHandoffArbiter
     init(arbiter: CustomerHandoffArbiter = CustomerHandoffArbiter()) { self.arbiter = arbiter }
     @Published private(set) var active: CustomerPhotoHandoff?
-    func present(_ owner: CustomerPhotoHandoff) -> Bool {
-        guard active == nil, owner.isCurrent, arbiter.claim(.photos) else { return false }
+    var availableRevision: UUID? { arbiter.owner == nil ? arbiter.revision : nil }
+    func present(_ owner: CustomerPhotoHandoff, expectedRevision: UUID) -> Bool {
+        guard active == nil, owner.isCurrent, arbiter.revision == expectedRevision,
+              arbiter.claim(.photos) else { return false }
         active = owner
         return true
     }

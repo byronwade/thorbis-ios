@@ -532,7 +532,11 @@ enum CustomerViewExit: Equatable {
 final class JobEstimateHandoffPresenter: ObservableObject {
     private let arbiter: CustomerHandoffArbiter
     init(arbiter: CustomerHandoffArbiter = CustomerHandoffArbiter()) { self.arbiter = arbiter }
-    var photoHandoffActive: Bool { arbiter.owner == .photos }
+    func claimLegacy() -> UUID? {
+        let id = UUID()
+        return arbiter.claim(.legacy(id)) ? id : nil
+    }
+    func releaseLegacy(_ id: UUID) { arbiter.release(.legacy(id)) }
     @Published private(set) var active: JobEstimateHandoffModel?
     private(set) var start: CustomerViewStart = .estimates
     /// The customer's own details, when this person may edit customers.
