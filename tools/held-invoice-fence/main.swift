@@ -18,6 +18,20 @@ if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--hold-trans
     exit(0)
 }
 
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--deny-publication-race" {
+    let childFence = InvoiceReadFence(directory: URL(fileURLWithPath: CommandLine.arguments[2]))
+    let childScope = InvoiceReadFence.Scope(actor: "018f0000-0000-7000-8000-000000000001", organization: "018f0000-0000-7000-8000-000000000002", origin: "https://example.invalid", invoice: "018f0000-0000-7000-8000-000000000007", resource: "invoice")
+    let attempt = try childFence.begin(childScope)
+    _ = try attempt.finish(.denied)
+    exit(0)
+}
+
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--probe-publication-lock" {
+    let childFence = InvoiceReadFence(directory: URL(fileURLWithPath: CommandLine.arguments[2]))
+    let childScope = InvoiceReadFence.Scope(actor: "018f0000-0000-7000-8000-000000000001", organization: "018f0000-0000-7000-8000-000000000002", origin: "https://example.invalid", invoice: "018f0000-0000-7000-8000-000000000007", resource: "invoice")
+    do { _ = try childFence.begin(childScope); exit(2) } catch { exit(0) }
+}
+
 let dir = FileManager.default.temporaryDirectory.appendingPathComponent("invoice-fence-\(UUID().uuidString)")
 try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 defer { try? FileManager.default.removeItem(at: dir) }
@@ -99,6 +113,39 @@ holder.waitUntilExit()
 require(holder.terminationStatus == 0, "child denial finished")
 require(!fence.cacheAllowed(sharedScope), "cross-process denial leaves invoice held")
 require(!fence.cacheAllowed(sharedHistory), "invoice denial must also hold its history")
+// Delayed cache publication must not reuse an earlier authorization after a
+// different process has retired the resource.
+let publicationRaceScope = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000007", resource: "invoice")
+let publicationInitial = try fence.begin(publicationRaceScope)
+_ = try publicationInitial.finish(.liveSuccess)
+require(fence.cacheAllowed(publicationRaceScope), "publication setup starts clean")
+let denialProcess = Process()
+denialProcess.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+denialProcess.arguments = ["--deny-publication-race", dir.path]
+try denialProcess.run()
+denialProcess.waitUntilExit()
+require(denialProcess.terminationStatus == 0, "independent process denied invoice")
+var publishedStale = false
+_ = try fence.withCacheWrite(publicationRaceScope) { publishedStale = true }
+require(!publishedStale, "a stale authorization must not publish after cross-process denial")
+let writeRecovery = try fence.begin(publicationRaceScope)
+_ = try writeRecovery.finish(.liveSuccess)
+var publishedFresh = false
+let wrote = try fence.withCacheWrite(publicationRaceScope) {
+    let contender = Process()
+    contender.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    contender.arguments = ["--probe-publication-lock", dir.path]
+    try contender.run()
+    contender.waitUntilExit()
+    require(contender.terminationStatus == 0, "cross-process preflight must not overlap publication")
+    publishedFresh = true
+}
+require(wrote && publishedFresh, "current clean scope can publish")
+enum InjectedWriteError: Error { case failed }
+var threwWrite = false
+do { _ = try fence.withCacheWrite(publicationRaceScope) { throw InjectedWriteError.failed } } catch { threwWrite = true }
+require(threwWrite, "cache failure must reach caller")
+require(!fence.cacheAllowed(publicationRaceScope), "failed cache write leaves a durable hold")
 let restoredInvoice = try fence.begin(sharedScope)
 _ = try restoredInvoice.finish(.liveSuccess)
 require(!fence.cacheAllowed(sharedHistory), "invoice recovery must not restore old history")

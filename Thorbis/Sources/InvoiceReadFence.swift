@@ -123,6 +123,27 @@ final class InvoiceReadFence {
         } catch { return false }
     }
 
+    // Held prototype: `write` must be synchronous and durably commit an atomic
+    // replacement, and must not reenter the fence. This serializes it against
+    // preflight in cooperating processes. It does not manage visible UI state.
+    func withCacheWrite(_ scope: Scope, write: () throws -> Void) throws -> Bool {
+        let key = try key(scope)
+        let parent = try parentKey(scope)
+        return try withScopeMetadata(key, parent: parent) {
+            guard let record = try load(key), record.phase == "clean" else { return false }
+            if let parent {
+                guard let invoice = try load(parent), invoice.phase == "clean",
+                      invoice.epoch == record.parentEpoch else { return false }
+            }
+            try persist(Record(version: 1, phase: "pending", epoch: UUID().uuidString,
+                               eligible: false, priorClean: false, priorEpoch: nil,
+                               parentEpoch: record.parentEpoch), key)
+            try write()
+            try persist(record, key)
+            return true
+        }
+    }
+
     func begin(_ scope: Scope) throws -> Attempt {
         let key = try key(scope)
         let parent = try parentKey(scope)
