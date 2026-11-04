@@ -664,7 +664,7 @@ struct RootView: View {
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
         .onChange(of: store.requestedSchedule, initial: true) {
-            guard store.consumeScheduleRequest() else { return }
+            guard store.consumeScheduleRequest(session: session.generation) else { return }
             if drawerOpen { closeDrawer() }
             schedulePath = NavigationPath()
             primaryTab = .schedule

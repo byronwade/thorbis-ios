@@ -315,7 +315,7 @@ struct TabletRoot: View {
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob() }
         .onChange(of: store.jobs) { openRequestedJob() }
         .onChange(of: store.requestedSchedule, initial: true) {
-            guard store.consumeScheduleRequest() else { return }
+            guard store.consumeScheduleRequest(session: session.generation) else { return }
             show(.schedule); scheduleRange = "Today"
         }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord() }
