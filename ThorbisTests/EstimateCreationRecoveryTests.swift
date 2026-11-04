@@ -33,8 +33,9 @@ extension EstimateCreationRecoveryTests {
         XCTAssertFalse(uncertain.mayProceed(validDraft: true))
     }
 
-    func testOnlyExplicitInputRejectionsAllowAnotherAttempt() {
-        XCTAssertTrue(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Invalid", status: 422, detail: nil)))
+    func testUnprovenHttpRejectionsDoNotPermitAnotherCreate() {
+        XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Conflict", status: 409, detail: nil)))
+        XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Invalid", status: 422, detail: nil)))
         XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Network error", status: nil, detail: nil)))
         XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Invalid API response", status: 201, detail: nil)))
         XCTAssertFalse(EstimateCreationRecovery.isDefinitiveRejection(Problem(title: "Server error", status: 500, detail: nil)))

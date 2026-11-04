@@ -13,11 +13,10 @@ struct EstimateCreationRecovery {
         self.createOutcomeUncertain = createOutcomeUncertain
     }
 
-    /// These client/server input or authorization rejections are definitive; other responses
-    /// can follow a commit and must not enable another creation in this editor.
+    /// An HTTP status alone does not identify where a failure occurred. Without
+    /// a proven pre-commit receipt, keep a submitted create uncertain.
     static func isDefinitiveRejection(_ error: Error) -> Bool {
-        guard let status = (error as? Problem)?.status else { return false }
-        return [400, 403, 404, 409, 413, 422].contains(status)
+        false
     }
 
     var canEdit: Bool { !isSaving && savedEstimateID == nil }
