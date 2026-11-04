@@ -96,11 +96,18 @@ final class JobCommercialDocumentsTests: XCTestCase {
         let suite = "job-payment-route-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
+        var cachedInvoiceIDs: [String] = []
+        defer {
+            let cache = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("JobDetailCache", isDirectory: true)
+            for id in cachedInvoiceIDs { try? FileManager.default.removeItem(at: cache.appendingPathComponent("\(id).invoice.json")) }
+        }
         let outbox = FieldOutbox(directory: directory, defaults: defaults)
         outbox.bind(actorID: id(3), organizationID: id(1))
         for method in [FieldPaymentMethod.cash, .check] {
             let value = Int.random(in: 100_000_000...999_999_999)
             let record = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(value).utf8))
+            cachedInvoiceIDs.append(record.id)
             JobDetailCache.save(invoice: record)
             let model = InvoicePaymentCollectionModel(api: api([URLProtocolFixture.offline]), invoiceID: record.id,
                 intentStore: InvoicePaymentIntentStore(defaults: defaults), makeIdempotencyKey: { "offline-\(UUID().uuidString)" },
