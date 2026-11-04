@@ -367,7 +367,13 @@ enum PaperPreview {
                 listed = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
             }
             JobDetailCache.save(invoices: [listed], jobID: jobID)
-            let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
+            if scenario == "disagreement" {
+                var json = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(invoice)) as! [String: Any]
+                json["amountPaid"] = 30_000
+                let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
+                JobDetailCache.save(invoice: old)
+            }
+            let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: scenario == "legacy" ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
             if scenario == "recorded" {
                 let file = folder.appendingPathComponent("\(actorID)_\(organizationID).recorded")
                 try! JSONEncoder().encode([payment]).write(to: file)
