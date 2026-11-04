@@ -17,7 +17,7 @@ enum ReleaseNotes {
             date: "2026-11-03",
             highlights: [
                 .init(symbol: "checklist", title: "Clearer payment closeout",
-                      detail: "Closeout checks known invoices before counting payments waiting to sync."),
+                      detail: "Closeout checks known invoices and explains when saved payments need review."),
             ]
         ),
         ReleaseNote(
