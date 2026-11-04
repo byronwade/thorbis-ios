@@ -202,6 +202,28 @@ final class MediaTransferTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), Data("preview bytes".utf8))
     }
 
+    func testCancelledCustomerDownloadDoesNotLeavePreviewFile() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let session = URLProtocolFixture.session([
+            .init(200, #"{"url":"https://storage.example/download?token=abc","expiresAt":"2030-12-31T00:00:00Z"}"#),
+            .init(200, "preview bytes", gate: gate),
+        ])
+        let api = APIClient(session: session, baseURL: "https://app.thorbis.com")
+        let transfer = MediaTransfer(api: api, storageSession: session)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("ThorbisMediaPreviews", isDirectory: true)
+        func contents() -> Set<String> { Set((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []) }
+        let before = contents()
+        let task = Task { try await transfer.download(mediaID: assetID, filename: "photo.jpg", requireFresh: true) }
+        defer { task.cancel(); gate.release() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "The storage request must be in flight before cancellation")
+        task.cancel()
+        gate.release()
+        do { let file = try await task.value; try? FileManager.default.removeItem(at: file); XCTFail("Cancelled download returned a file") }
+        catch is CancellationError {} catch let error as URLError where error.code == .cancelled {} catch { XCTFail("Unexpected error: \(error)") }
+        XCTAssertTrue(contents().subtracting(before).isEmpty)
+    }
+
     func testDownloadWritesNativePreviewFileWithoutStorageCookies() async throws {
         let session = URLProtocolFixture.session([
             .init(200, #"{"url":"https://storage.example/download?token=abc","expiresAt":"2030-12-31T00:00:00Z"}"#),
