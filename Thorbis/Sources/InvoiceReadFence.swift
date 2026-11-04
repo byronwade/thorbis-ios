@@ -31,6 +31,7 @@ final class InvoiceReadFence {
         let priorClean: Bool
         let priorEpoch: String?
         let parentEpoch: String?
+        let payloadDigest: Data?
     }
     private let directory: URL
 
@@ -116,12 +117,13 @@ final class InvoiceReadFence {
         guard fsync(folder) == 0 else { throw Failure.storage }
     }
 
-    func cacheAllowed(_ scope: Scope) -> Bool {
+    func cacheAllowed(_ scope: Scope, payload: Data) -> Bool {
         do {
             let key = try key(scope)
             let parent = try parentKey(scope)
             return try withScopeMetadata(key, parent: parent) {
-                guard let record = try load(key), record.phase == "clean" else { return false }
+                guard let record = try load(key), record.phase == "clean",
+                      record.payloadDigest == Data(SHA256.hash(data: payload)) else { return false }
                 guard let parent else { return true }
                 guard let invoice = try load(parent), invoice.phase == "clean" else { return false }
                 return record.parentEpoch == invoice.epoch
@@ -145,7 +147,7 @@ final class InvoiceReadFence {
             }
             try persist(Record(version: 1, phase: "pending", epoch: UUID().uuidString,
                                eligible: false, priorClean: false, priorEpoch: nil,
-                               parentEpoch: record.parentEpoch), key)
+                               parentEpoch: record.parentEpoch, payloadDigest: nil), key)
             try write(payload)
             try persist(record, key)
             return true
@@ -170,7 +172,7 @@ final class InvoiceReadFence {
             let priorClean = prior?.phase == "clean" && (parent == nil || prior?.parentEpoch == parentEpoch)
             try persist(Record(version: 1, phase: "pending", epoch: epoch, eligible: true,
                                priorClean: priorClean, priorEpoch: priorClean ? prior?.epoch : nil,
-                               parentEpoch: parentEpoch), key)
+                               parentEpoch: parentEpoch, payloadDigest: priorClean ? prior?.payloadDigest : nil), key)
         }
         handedOff = true
         return Attempt(fence: self, key: key, parent: parent, transport: transport, epoch: epoch)
@@ -200,7 +202,7 @@ final class InvoiceReadFence {
             if case .denied = outcome {
                 try fence.withMetadata(key) {
                     try fence.persist(Record(version: 1, phase: "denied", epoch: UUID().uuidString,
-                                             eligible: false, priorClean: false, priorEpoch: nil, parentEpoch: nil), key)
+                                             eligible: false, priorClean: false, priorEpoch: nil, parentEpoch: nil, payloadDigest: nil), key)
                 }
                 return .denied
             }
@@ -226,9 +228,17 @@ final class InvoiceReadFence {
                 } else {
                     cleanEpoch = UUID().uuidString
                 }
+                let digest: Data
+                switch outcome {
+                case let .liveSuccess(payload): digest = Data(SHA256.hash(data: payload))
+                case .connectivityFailure:
+                    guard let previous = record.payloadDigest, previous.count == 32 else { return .held }
+                    digest = previous
+                case .denied: return .held
+                }
                 try fence.persist(Record(version: 1, phase: "clean", epoch: cleanEpoch,
                                          eligible: false, priorClean: false, priorEpoch: nil,
-                                         parentEpoch: record.parentEpoch), key)
+                                         parentEpoch: record.parentEpoch, payloadDigest: digest), key)
                 guard case let .liveSuccess(payload) = outcome else { return .restored }
                 return .committed(Receipt(key: key, epoch: cleanEpoch, parentEpoch: record.parentEpoch,
                                           payloadDigest: Data(SHA256.hash(data: payload))))
