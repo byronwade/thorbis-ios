@@ -49,7 +49,7 @@ struct PublicEstimateAction: Decodable, Equatable {
         @PublicEstimateAmount var totalAmount: Double
     }
 
-    /// Only verified supported amounts can be approved, regardless of entry point.
+    /// Validate customer-facing amounts before approving this issued action.
     var amountsAvailableForApproval: Bool {
         guard currency == "USD", totalAmount >= 0, PublicEstimateMoney.format(totalAmount, currency: currency) != nil else { return false }
         guard (options ?? []).allSatisfy({ $0.currency == "USD" && $0.totalAmount >= 0 && PublicEstimateMoney.format($0.totalAmount, currency: $0.currency) != nil }) else { return false }
@@ -57,7 +57,8 @@ struct PublicEstimateAction: Decodable, Equatable {
     }
 
     var canApprovePlainly: Bool {
-        status == .sent
+        amountsAvailableForApproval
+            && status == .sent
             && nonce != nil
             && allowedActions.contains("approve")
             && approvalWithoutSignatureAllowed == true
@@ -76,7 +77,7 @@ struct PublicEstimateAction: Decodable, Equatable {
 
     func canApprove(signerName: String, consent: Bool, selectedOptionID: String?) -> Bool {
         let normalizedName = signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard signingOffered, contentHash.count >= 15,
+        guard amountsAvailableForApproval, signingOffered, contentHash.count >= 15,
               consent, !normalizedName.isEmpty, normalizedName.count <= 120 else { return false }
         if let options, !options.isEmpty {
             return options.contains { $0.id == selectedOptionID }
