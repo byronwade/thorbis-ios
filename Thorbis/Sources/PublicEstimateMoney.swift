@@ -1,7 +1,8 @@
 import Foundation
 
 /// Public estimate amounts are USD cents. Validate JSON as Decimal before converting
-/// to Double so an invalid fractional wire value cannot round into an integer.
+/// to Double to reject fractional and out-of-range values within Decimal precision.
+/// The server contract remains responsible for emitting bounded integer JSON numbers.
 private func checkedPublicEstimateInteger(_ value: Decimal, range: ClosedRange<Decimal>, codingPath: [CodingKey]) throws -> Double {
     var original = value
     var rounded = Decimal()
