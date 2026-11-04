@@ -981,8 +981,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances") { return ["items": []] }
                 var payment = jsonObject(PaperPreview.refundPayment) as! [String: Any]
                 payment["invoiceId"] = invoices[1].id
-                payment["amount"] = ["amount": 34000, "currency": "USD"]
-                payment["netAmount"] = ["amount": 34000, "currency": "USD"]
+                let staleHistory = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-history-mismatch-once") &&
+                    scenario.lock.withLock { scenario.documentPaymentReads += 1; return scenario.documentPaymentReads == 1 }
+                let received = staleHistory ? 33000 : 34000
+                payment["amount"] = ["amount": received, "currency": "USD"]
+                payment["netAmount"] = ["amount": received, "currency": "USD"]
                 return ["items": [payment]]
             }
         }

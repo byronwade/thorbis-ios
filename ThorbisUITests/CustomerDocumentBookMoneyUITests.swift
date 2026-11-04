@@ -129,6 +129,31 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         assertMoneyRow("Paid", "$340.00", in: app)
     }
 
+    func testCollapsedHistoryStaysCollapsedAfterRefresh() {
+        let app = openPrimary(extra: ["--paper-preview-job-documents-money", "--paper-preview-job-history-mismatch-once", "--paper-preview-job-invoice-signed"])
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        assertText("Payments are still updating", in: app)
+        let history = app.buttons["customer-payment-history"]
+        reveal(history, in: app)
+        XCTAssertTrue(history.isHittable)
+        XCTAssertTrue(text("Card", in: app).exists)
+        history.tap()
+        XCTAssertFalse(text("Card", in: app).exists)
+        let refresh = pages(app).buttons["Refresh payments"]
+        reveal(refresh, in: app)
+        XCTAssertTrue(refresh.isHittable)
+        refresh.tap()
+        let cleared = NSPredicate(format: "exists == false")
+        expectation(for: cleared, evaluatedWith: refresh)
+        waitForExpectations(timeout: 10)
+        reveal(history, in: app)
+        XCTAssertFalse(text("Card", in: app).exists)
+        history.tap()
+        assertText("Card", in: app)
+    }
+
     func testDraftInvoiceShowsDraftTotalRatherThanAClaimOfPayment() {
         let app = openPrimary(extra: ["--paper-preview-job-invoice-draft"])
         assertText("Draft total", in: app)
