@@ -468,6 +468,41 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         waitForExpectations(timeout: 15)
     }
 
+    func testRevalidationKeepsEnteredAmountAfterFreshInvoiceCheck() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--paper-preview-payment-revalidate"], screen: "job-invoice")
+        let amount = enterPaymentAmount(app)
+        app.buttons["preview-payment-revalidate"].tap()
+        XCTAssertTrue(app.staticTexts["Checking this invoice…"].waitForExistence(timeout: 10))
+        XCTAssertFalse(amount.exists, "Invoice content is hidden while authority is being checked")
+        XCTAssertTrue(amount.waitForExistence(timeout: 15))
+        XCTAssertEqual(amount.value as? String, "12.34")
+    }
+
+    func testDeniedRefreshKeepsDraftCoveredUntilSuccessfulRetry() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--paper-preview-payment-revalidate",
+                          "--paper-preview-payment-refresh-denied"], screen: "job-invoice")
+        let amount = enterPaymentAmount(app)
+        app.buttons["preview-payment-revalidate"].tap()
+        XCTAssertTrue(app.staticTexts["Invoice needs a refresh"].waitForExistence(timeout: 15))
+        XCTAssertFalse(amount.exists, "A denied invoice must remain hidden")
+        app.buttons["Try again"].tap()
+        XCTAssertTrue(amount.waitForExistence(timeout: 15))
+        XCTAssertEqual(amount.value as? String, "12.34")
+    }
+
+    private func enterPaymentAmount(_ app: XCUIApplication) -> XCUIElement {
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 15)); collect.tap()
+        let cash = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Cash")).firstMatch
+        XCTAssertTrue(cash.waitForExistence(timeout: 10)); cash.tap()
+        let amount = app.textFields["Amount to collect in dollars"]
+        XCTAssertTrue(amount.waitForExistence(timeout: 5)); amount.tap()
+        let current = (amount.value as? String) ?? ""
+        amount.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count) + "12.34")
+        if app.buttons["Done"].exists { app.buttons["Done"].tap() }
+        return amount
+    }
+
     func testPartialReadRequiresRefreshBeforeBuildingAnotherEstimate() {
         let app = launch(["--paper-preview-job-documents-partial"])
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't load all estimates")).firstMatch.waitForExistence(timeout: 15))

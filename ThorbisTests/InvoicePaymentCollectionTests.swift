@@ -7,6 +7,22 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testPaymentReverificationRequiresFreshInvoiceAndCompleteHistory() async {
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice()), .init(200, #"{"items":[]}"#),
+            .init(200, invoice()), .init(200, #"{"items":[]}"#),
+            .init(403, #"{"title":"Denied","status":403}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await model.load()
+        let verified = await model.reverifyForPresentedPayment()
+        XCTAssertTrue(verified)
+        let freshRequests = Array(URLProtocolFixture.recorded.suffix(2))
+        XCTAssertTrue(freshRequests.allSatisfy { $0.cachePolicy == .reloadIgnoringLocalCacheData })
+        let denied = await model.reverifyForPresentedPayment()
+        XCTAssertFalse(denied, "A denied refresh cannot unmask stale invoice data")
+    }
+
     func testSavedCopyScopeRevisionPublishesAwayAndBackChanges() {
         let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
         var revisions: [UUID] = []

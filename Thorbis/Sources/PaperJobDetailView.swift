@@ -57,6 +57,9 @@ struct JobDetailView: View {
     @State private var loadedInvoiceModelID: String?
     @State private var invoicePaymentLoads = JobInvoicePaymentLoads()
     @State private var paymentRoute: JobInvoicePaymentRoute?
+    @State private var paymentVerifiedToken: [String]?
+    @State private var paymentVerificationFailed = false
+    @State private var paymentVerificationRetry = 0
     @State private var activityFilter = "All"
     @State private var showSchedule = false
     private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
@@ -137,8 +140,8 @@ struct JobDetailView: View {
 
     /// Changes here invalidate a presented payment without depending on the
     /// estimate link, which can change independently of the invoice's job.
-    private var paymentAuthorityToken: [String] {
-        [session.generation.uuidString, session.authorityRevision.uuidString,
+    private var paymentHardAuthorityToken: [String] {
+        [session.generation.uuidString,
          session.user?.id ?? "", session.activeOrganization?.id ?? "", String(session.policyVersion ?? 0),
          api.requestGeneration.uuidString, api.savedCopyScopeRevision.uuidString,
          api.savedCopyScope ?? "", api.normalizedOrigin ?? "", job?.id ?? "",
@@ -146,6 +149,9 @@ struct JobDetailView: View {
          String(session.can("job.view", feature: "jobs")),
          String(session.can("invoice.view", feature: "invoicing")),
          String(session.can("invoice.payment.create", feature: "payments"))]
+    }
+    private var paymentAuthorityToken: [String] {
+        paymentHardAuthorityToken + [session.authorityRevision.uuidString]
     }
 
     private var liveActivityKey: String {
@@ -448,7 +454,7 @@ struct JobDetailView: View {
             contactsLoaded = false
             contactsFailed = false
         }
-        .onChange(of: paymentAuthorityToken) { _, _ in paymentRoute = nil }
+        .onChange(of: paymentHardAuthorityToken) { _, _ in paymentRoute = nil; paymentVerifiedToken = nil }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
@@ -517,12 +523,46 @@ struct JobDetailView: View {
     }
 
     @ViewBuilder private func paymentSheet(_ route: JobInvoicePaymentRoute) -> some View {
-        if route.authorityToken == paymentAuthorityToken,
+        if Array(route.authorityToken.dropLast()) == paymentHardAuthorityToken,
            let job, let scope = scope(for: job), route.belongs(to: scope),
            session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
            session.can("invoice.payment.create", feature: "payments") {
-            InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice)
+            let verified = paymentVerifiedToken == paymentAuthorityToken
+            ZStack {
+                InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice)
+                    .allowsHitTesting(verified).accessibilityHidden(!verified)
+                if !verified { paymentVerificationCover }
+                #if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revalidate") {
+                    VStack { HStack {
+                        Button("Preview revalidate") {
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-refresh-denied") {
+                                PaperPreviewProtocol.denyNextPaymentInvoiceRead()
+                            }
+                            Task { await session.revalidate() }
+                        }.accessibilityIdentifier("preview-payment-revalidate")
+                        Spacer()
+                    }; Spacer() }
+                }
+                #endif
+            }
                 .thorbisSheetSurface().presentationDetents([.large]).presentationDragIndicator(.visible)
+                .task(id: paymentAuthorityToken + [String(paymentVerificationRetry)]) {
+                    let token = paymentAuthorityToken
+                    guard paymentVerifiedToken != token else { return }
+                    paymentVerificationFailed = false
+                    #if DEBUG
+                    if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revalidate") {
+                        try? await Task.sleep(for: .seconds(2))
+                        guard !Task.isCancelled else { return }
+                    }
+                    #endif
+                    let verified = await route.model.reverifyForPresentedPayment()
+                    guard !Task.isCancelled, paymentRoute?.id == route.id,
+                          token == paymentAuthorityToken else { return }
+                    if verified { paymentVerifiedToken = token }
+                    else { paymentVerificationFailed = true }
+                }
                 #if DEBUG
                 .task {
                     guard PaperPreview.enabled,
@@ -535,6 +575,20 @@ struct JobDetailView: View {
                 }
                 #endif
         }
+    }
+
+    private var paymentVerificationCover: some View {
+        VStack(spacing: 16) {
+            if !paymentVerificationFailed { ProgressView() }
+            Text(paymentVerificationFailed ? "Invoice needs a refresh" : "Checking this invoice…")
+                .font(Theme.font(17, weight: .medium))
+            Text(paymentVerificationFailed ? "Your amount is still here. Try again or ask your office for access." : "Your amount will stay here.")
+                .font(Theme.font(15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+            if paymentVerificationFailed { Button("Try again") { paymentVerificationRetry += 1 } }
+            Button("Close") { paymentRoute = nil }
+        }
+        .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.canvas.ignoresSafeArea())
     }
 
     /// Native bar with Thorbis circles: our back on the left (`thorbisDestination`), share and
@@ -2588,6 +2642,8 @@ struct JobDetailView: View {
                                                        selected: selectedInvoice, loadedID: loadedInvoiceModelID,
                                                        model: invoicePaymentModel, scope: scope,
                                                        authorityToken: paymentAuthorityToken) else { return false }
+        paymentVerifiedToken = paymentAuthorityToken
+        paymentVerificationFailed = false
         paymentRoute = route
         return true
     }

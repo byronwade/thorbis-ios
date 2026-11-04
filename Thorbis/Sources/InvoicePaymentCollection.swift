@@ -59,6 +59,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
     private var verifiedHistoryGeneration: UUID?
+    private var completedPresentationVerification: UUID?
     private var loadWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(api: APIClient, invoiceID: String,
@@ -158,8 +159,11 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         }
     }
 
-    func load() async {
+    func load() async { await load(presentationVerification: nil) }
+
+    private func load(presentationVerification: UUID?) async {
         guard !isLoading else { return }
+        completedPresentationVerification = nil
         let generation = api.requestGeneration
         isLoading = true
         historyComplete = false
@@ -206,6 +210,9 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             verifiedHistoryGeneration = generation
             historyComplete = true
             loadError = nil
+            if SavedCopies.liveOnly, let presentationVerification {
+                completedPresentationVerification = presentationVerification
+            }
             if acceptedPaymentID == nil, let request = pendingRequest,
                let recovered = payments.first(where: { $0.idempotencyKey == request.idempotencyKey }) {
                 acceptedPaymentID = recovered.id
@@ -233,6 +240,18 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         guard isLoading else { return false }
         await withCheckedContinuation { loadWaiters.append($0) }
         return true
+    }
+
+    /// A presented payment must only reappear after its own complete live read.
+    /// If another owner wins the load race, no marker is issued and it stays covered.
+    func reverifyForPresentedPayment() async -> Bool {
+        guard !isRecording, !waitingForProjection else { return false }
+        _ = await waitForCurrentLoad()
+        guard !Task.isCancelled, !isRecording, !waitingForProjection else { return false }
+        let verification = UUID()
+        await SavedCopies.$liveOnly.withValue(true) { await load(presentationVerification: verification) }
+        return completedPresentationVerification == verification && !offlineCopy && historyComplete &&
+            loadError == nil && canRecordPayment
     }
 
     /// Shows the copy saved on this phone so cash and check can go to the outbox (OF-08). A payment

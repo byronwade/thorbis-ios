@@ -646,6 +646,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let lock = NSLock()
         var setupPaymentReads = 0
         var invoiceReads = 0
+        var denyNextPaymentInvoice = false
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
@@ -664,8 +665,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.denyNextPaymentInvoice = false; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
+    static func denyNextPaymentInvoiceRead() { scenario.lock.withLock { scenario.denyNextPaymentInvoice = true } }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
             guard !scenario.savedWorkOffline else { return false }
@@ -765,6 +767,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if url.path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)",
+                  request.value(forHTTPHeaderField: "Cache-Control") == "no-cache",
+                  Self.scenario.lock.withLock({
+                      guard Self.scenario.denyNextPaymentInvoice else { return false }
+                      Self.scenario.denyNextPaymentInvoice = false
+                      return true
+                  }) {
+            status = 403
+            payload = ["status": 403, "title": "Sample invoice unavailable"]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-review-pending") {
