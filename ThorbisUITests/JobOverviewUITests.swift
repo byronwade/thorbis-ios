@@ -36,7 +36,7 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
         let photos = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Photos", "job-section-chooser")).firstMatch
         XCTAssertTrue(photos.waitForExistence(timeout: 5)); photos.tap()
-        XCTAssertTrue(chooser.label.contains("Photos"), chooser.label)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Photos"), object: chooser)], timeout: 10), .completed, chooser.label)
         let filter = app.buttons["activity-filter"]
         XCTAssertTrue(filter.waitForExistence(timeout: 10))
         XCTAssertTrue(filter.label.lowercased().contains("photos"), filter.label)
