@@ -722,6 +722,15 @@ struct InvoiceDetailView: View {
                 .environmentObject(lease)
             }
         }
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+                Text("Preview lease \(legacyHandoffLease == nil ? "none" : "held"), cover \(showToCustomer ? "on" : "off")")
+                    .font(.caption).padding(8).background(Theme.canvas)
+                    .accessibilityIdentifier("preview-legacy-state")
+            }
+        }
+        #endif
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
