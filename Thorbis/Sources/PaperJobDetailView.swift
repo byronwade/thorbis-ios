@@ -2476,26 +2476,28 @@ struct JobDetailView: View {
         let authority = session.authorityRevision
         let apiGeneration = api.requestGeneration
         do {
-            let invoice = try await api.ensureFieldCompletionInvoice(jobId)
-            guard session.generation == generation, session.authorityRevision == authority,
-                  api.requestGeneration == apiGeneration, session.activeOrganization?.id == scope.organizationID,
-                  session.can("job.view", feature: "jobs"), session.can("invoice.create", feature: "invoicing") else { return nil }
-            guard scope.contains(invoice) else {
-                throw Problem(title: "Invoice could not be verified for this job", status: nil, detail: nil)
-            }
-            guard session.can("invoice.view", feature: "invoicing") else {
-                error = "Invoice created. Ask your office for invoice access to review it."
-                return nil
-            }
-            JobInvoiceMemory.remember(invoice.id, jobID: jobId)
-            selectedInvoiceID = invoice.id
-            await loadInvoices()
-            guard session.generation == generation, session.authorityRevision == authority,
-                  api.requestGeneration == apiGeneration,
-                  session.activeOrganization?.id == scope.organizationID,
-                  session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
-                  session.can("invoice.create", feature: "invoicing"),
-                  let currentJob = self.job, self.scope(for: currentJob) == scope else { return nil }
+            let invoice = try await JobInvoiceCreationHandoff.run(
+                create: { try await api.ensureFieldCompletionInvoice(jobId) },
+                isCurrent: {
+                    session.generation == generation && session.authorityRevision == authority &&
+                        api.requestGeneration == apiGeneration && session.activeOrganization?.id == scope.organizationID &&
+                        session.can("job.view", feature: "jobs") && session.can("invoice.create", feature: "invoicing") &&
+                        self.job.flatMap { self.scope(for: $0) } == scope
+                },
+                verify: { invoice in
+                    guard scope.contains(invoice) else {
+                        throw Problem(title: "Invoice could not be verified for this job", status: nil, detail: nil)
+                    }
+                },
+                canView: { session.can("invoice.view", feature: "invoicing") },
+                withoutView: { error = "Invoice created. Ask your office for invoice access to review it." },
+                prepareRefresh: { invoice in
+                    JobInvoiceMemory.remember(invoice.id, jobID: jobId)
+                    selectedInvoiceID = invoice.id
+                },
+                refresh: { await loadInvoices() }
+            )
+            guard let invoice else { return nil }
             committed += 1
             return invoice
         } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }
