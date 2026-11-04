@@ -460,6 +460,7 @@ struct JobCloseoutView: View {
             if !session.can("invoice.view", feature: "invoicing") { recoveryInvoiceID = nil }
         }
         .onChange(of: session.generation) { _, _ in recoveryInvoiceID = nil }
+        .onChange(of: api.normalizedOrigin) { _, _ in recoveryInvoiceID = nil }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
