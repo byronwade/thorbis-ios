@@ -2,6 +2,25 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoHandoffUITests: XCTestCase {
+    func testJobAccessRevocationKeepsProtectedCustomerCover() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-photo-handoff", "--paper-preview-photo-handoff-revoke", "--paper-preview-owner-auth", "approved"]
+        app.launch()
+        let select = app.buttons["Select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
+        let photo = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009301"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 10)); photo.tap()
+        app.buttons["job-media-show-customer"].tap()
+        XCTAssertTrue(app.images["customer-photo-image"].waitForExistence(timeout: 20))
+        let revoke = app.buttons["preview-customer-photo-revoke"]
+        XCTAssertTrue(revoke.waitForExistence(timeout: 10)); revoke.tap()
+        XCTAssertTrue(app.staticTexts["These photos are no longer available. Please hand the device back to your technician."].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.images["customer-photo-image"].isHittable)
+        XCTAssertFalse(app.buttons["Select"].isHittable)
+        XCTAssertTrue(app.buttons["customer-mode-owner-exit"].isHittable)
+    }
+
     func testViewOnlyTechnicianCanShowPhotosWithoutEditActions() {
         continueAfterFailure = false
         let app = XCUIApplication()

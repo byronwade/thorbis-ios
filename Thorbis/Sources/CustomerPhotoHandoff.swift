@@ -1,6 +1,15 @@
 import SwiftUI
 import ImageIO
 
+/// Owned above the app's session/navigation branches, so losing a job screen cannot
+/// reveal staff UI while a device is in customer hands.
+@MainActor
+final class CustomerPhotoPresenter: ObservableObject {
+    @Published private(set) var active: CustomerPhotoHandoff?
+    func present(_ owner: CustomerPhotoHandoff) { guard active == nil else { return }; active = owner }
+    func authenticatedExit() { active?.clear(); active = nil }
+}
+
 /// A temporary selection, kept only in memory and scoped to the current staff authority.
 @MainActor
 final class CustomerPhotoHandoff: ObservableObject, Identifiable {
@@ -185,5 +194,16 @@ struct CustomerPhotoHandoffView: View {
             .onChange(of: session.generation) { _, _ in if !owner.isCurrent { owner.clear(); owner.message = "These photos are no longer available. Please hand the device back to your technician." } }
             .onChange(of: api.requestGeneration) { _, _ in if !owner.isCurrent { owner.clear(); owner.message = "These photos are no longer available. Please hand the device back to your technician." } }
         }
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-photo-handoff-revoke") {
+                Button("Preview revoke") {
+                    Task { PaperPreviewProtocol.revokeJobMediaView(); await session.revalidate() }
+                }
+                .frame(minWidth: 80, minHeight: 44).background(Theme.canvas)
+                .accessibilityIdentifier("preview-customer-photo-revoke")
+            }
+        }
+        #endif
     }
 }

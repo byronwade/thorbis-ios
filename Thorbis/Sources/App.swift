@@ -18,6 +18,7 @@ struct ThorbisApp: App {
     @State private var publicEstimateToken: String?
     @State private var lastSavedCopyCheck = Date.distantPast
     @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
+    @StateObject private var photoHandoff = CustomerPhotoPresenter()
 
     init() {
         // Popovers put the keyboard away before opening; they need to know whether it is up.
@@ -177,9 +178,15 @@ struct ThorbisApp: App {
                     JobEstimateProtectedOwner(model: model, presenter: estimateHandoff)
                 }
             }
+            .fullScreenCover(isPresented: Binding(get: { photoHandoff.active != nil }, set: { _ in })) {
+                if let owner = photoHandoff.active {
+                    CustomerPhotoHandoffView(owner: owner) { photoHandoff.authenticatedExit() }
+                }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.canvas)
             .environmentObject(estimateHandoff)
+            .environmentObject(photoHandoff)
             .environmentObject(api)
             .environmentObject(store)
             .environmentObject(session)

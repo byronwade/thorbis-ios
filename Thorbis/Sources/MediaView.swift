@@ -47,6 +47,8 @@ struct JobMediaView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var pendingMedia: PendingMediaStore
+    @EnvironmentObject private var photoHandoff: CustomerPhotoPresenter
+    @EnvironmentObject private var estimateHandoff: JobEstimateHandoffPresenter
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
@@ -103,7 +105,6 @@ struct JobMediaView: View {
     @State private var selecting = false
     @State private var picked = Set<String>()
     @State private var confirmBulkArchive = false
-    @State private var customerPhotos: CustomerPhotoHandoff?
     @State private var customerPhotoRequest = UUID()
     @State private var shareFiles: MediaShareFiles?
     @State private var contentWidth: CGFloat = 353
@@ -246,9 +247,6 @@ struct JobMediaView: View {
                              archive: { await archive([$0]) },
                              fileMarkup: { image, tags in try enqueueDerived(image, tags: tags, caption: "Marked up", prefix: "markup") },
                              onClose: { viewer = nil })
-        }
-        .fullScreenCover(item: $customerPhotos) { owner in
-            CustomerPhotoHandoffView(owner: owner) { customerPhotos = nil }
         }
         .fullScreenCover(isPresented: $showCompare) {
             MediaCompareView(befores: befores, afters: afters, load: { try await download($0) }) { showCompare = false }
@@ -830,7 +828,8 @@ struct JobMediaView: View {
                   Set(pickedRecords.map(\.id)) == picked, !Task.isCancelled else {
                 throw CustomerPhotoSelection.Invalid.scope
             }
-            customerPhotos = owner
+            guard estimateHandoff.active == nil, photoHandoff.active == nil else { throw CustomerPhotoSelection.Invalid.scope }
+            photoHandoff.present(owner)
         } catch {
             self.error = "Couldn’t verify every selected photo. Check your connection, refresh this job and try again."
         }

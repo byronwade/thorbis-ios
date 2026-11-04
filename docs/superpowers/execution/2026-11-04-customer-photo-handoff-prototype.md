@@ -13,3 +13,5 @@ Invalidation prevents late results from being displayed and clears the current i
 The prototype now requests cancellation of the active photo task when invalidated; whether a delayed storage transfer actually stops and cleans up is still untested. No cancellation or cleanup guarantee is claimed from that source change alone.
 
 The entry now allows staff with the existing `job.view` media scope to select stored photos. Tag, archive and share remain hidden behind `job.edit`, with additional guards at the mutation entry points. This separation and the backend authorization contract are untested in the deployed environment.
+
+The protected photo cover has been moved to an app-root presenter, following the estimate handoff ownership pattern, so job view removal does not by itself own the cover lifetime. A DEBUG mounted test for revoked job access and protected hand-back is drafted but unrun; coexistence with other customer presentations and real session replacement still needs simulator testing and independent review.
