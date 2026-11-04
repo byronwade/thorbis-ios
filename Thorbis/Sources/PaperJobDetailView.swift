@@ -2374,6 +2374,9 @@ struct JobDetailView: View {
     }
 
     private func buildEstimate() {
+        #if DEBUG
+        CommercialDraftStore.trace("buildEstimate canBuild=\(canBuildEstimate) hasJob=\(job != nil) scope=\(job.map { scope(for: $0) != nil } ?? false) estimatesComplete=\(estimateRead?.isComplete == true)")
+        #endif
         guard canBuildEstimate, let job, scope(for: job) != nil else { return }
         showNewEstimate = true
     }

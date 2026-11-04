@@ -150,7 +150,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
             "--paper-preview-estimate-create-recovery", "--commercial-draft-test-all-writes-fail",
-            "--paper-preview-estimate-signout-check", "--commercial-draft-test-id", UUID().uuidString]
+            "--paper-preview-estimate-signout-check", "--commercial-draft-test-trace", "--commercial-draft-test-id", UUID().uuidString]
         app.launch()
         let add = app.buttons["job-add-estimate"]
         XCTAssertTrue(add.waitForExistence(timeout: 30)); if !add.isHittable { app.swipeUp() }; add.tap()
