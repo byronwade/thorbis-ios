@@ -59,6 +59,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
     private var verifiedHistoryGeneration: UUID?
+    private var loadWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
@@ -164,7 +165,12 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         historyComplete = false
         verifiedHistoryGeneration = nil
         payments = []
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            let waiters = loadWaiters
+            loadWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
         do {
             try Task.checkCancellation()
             let loadedInvoice = try await api.fieldInvoice(invoiceID)
@@ -219,6 +225,14 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             loadError = error.localizedDescription
         }
+    }
+
+    /// Wait for a read started by another owner without changing the model's
+    /// own refresh semantics (payment reconciliation may need a new read).
+    func waitForCurrentLoad() async -> Bool {
+        guard isLoading else { return false }
+        await withCheckedContinuation { loadWaiters.append($0) }
+        return true
     }
 
     /// Shows the copy saved on this phone so cash and check can go to the outbox (OF-08). A payment

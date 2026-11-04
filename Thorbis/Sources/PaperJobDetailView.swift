@@ -139,6 +139,7 @@ struct JobDetailView: View {
     /// estimate link, which can change independently of the invoice's job.
     private var paymentAuthorityToken: [String] {
         [session.generation.uuidString, session.authorityRevision.uuidString,
+         session.user?.id ?? "", session.activeOrganization?.id ?? "", String(session.policyVersion ?? 0),
          api.requestGeneration.uuidString, api.normalizedOrigin ?? "", job?.id ?? "",
          job?.organizationId ?? "", job?.customerId ?? "",
          String(session.can("job.view", feature: "jobs")),

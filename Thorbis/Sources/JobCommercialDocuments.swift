@@ -43,7 +43,11 @@ final class JobInvoicePaymentLoads {
             return
         }
         let token = UUID()
-        let task = Task { await model.load() }
+        let task = Task {
+            if !(await model.waitForCurrentLoad()) { await model.load() }
+            // Another owner can start a read between the first check and load().
+            _ = await model.waitForCurrentLoad()
+        }
         flights[key] = Flight(token: token, model: model, task: task)
         await task.value
         if flights[key]?.token == token { flights[key] = nil }
