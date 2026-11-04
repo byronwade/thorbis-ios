@@ -299,7 +299,9 @@ final class Store: ObservableObject {
     /// RootView clears the request as soon as it opens it. What's new waits for the next launch.
     var openedForRecord = false
     /// Bumped by the "Show my schedule" shortcut; RootView switches to Schedule.
-    @Published var requestedSchedule = 0
+    @Published var requestedSchedule = 0 {
+        didSet { if requestedSchedule > 0 { openedForRecord = true } }
+    }
     /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.
     @Published var requestedRecord: RecordLink? {
         didSet { if requestedRecord != nil { openedForRecord = true } }

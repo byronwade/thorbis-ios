@@ -7,9 +7,11 @@ import UserNotifications
 /// Native grouped lists per D-025 (Apple HIG for settings), Thorbis tokens for color.
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
+    @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var pendingMedia: PendingMediaStore
+    @State private var startupDestination: StartupDestination = .automatic
     @State private var confirmSignOut = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -113,6 +115,18 @@ struct SettingsView: View {
                                     value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System")
                             }
                             WellDivider(leading: Self.rowDivider)
+                            if let scope = StartupDestination.scope(session: session, api: api) {
+                                ThorbisMenu(items: StartupDestination.allCases.filter { $0.permitted(session) }.map { destination in
+                                    ThorbisMenuItem(destination.displayTitle, isSelected: startupDestination == destination) {
+                                        StartupDestinationPreferences().set(destination, for: scope)
+                                        startupDestination = destination
+                                    }
+                                }, title: "Open app to") {
+                                    row("Open app to", symbol: "rectangle.on.rectangle", value: startupDestination.permitted(session) ? startupDestination.displayTitle : "Automatic")
+                                }
+                                .accessibilityHint("Applies the next time you open the app on this device")
+                                WellDivider(leading: Self.rowDivider)
+                            }
                             Button {
                                 Task { await notificationsTapped() }
                             } label: {
@@ -176,6 +190,9 @@ struct SettingsView: View {
                             isPresented: $confirmSignOut,
                             actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
+            .task(id: StartupDestination.scope(session: session, api: api)?.key) {
+                startupDestination = StartupDestination.scope(session: session, api: api).map { StartupDestinationPreferences().get(for: $0) } ?? .automatic
+            }
         }
     }
 
