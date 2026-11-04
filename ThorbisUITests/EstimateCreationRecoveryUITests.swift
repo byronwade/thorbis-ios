@@ -145,6 +145,31 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         XCTAssertFalse(save.isEnabled, "Do not send an unreconciled in-memory draft")
     }
 
+    func testParentTeardownRecoveryCopySurvivesProcessRelaunch() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates", "--paper-preview-working-job",
+            "--paper-preview-estimate-create-recovery", "--commercial-draft-test-all-writes-fail",
+            "--paper-preview-estimate-parent-teardown", "--commercial-draft-test-id", UUID().uuidString]
+        app.launch()
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 30)); if !add.isHittable { app.swipeUp() }; add.tap()
+        let title = app.textFields["Estimate title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        let original = title.value as? String ?? ""
+        title.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: 0.5)).tap(); title.typeText(" kept after restart")
+        let expected = original + " kept after restart"
+        XCTAssertEqual(title.value as? String, expected)
+        app.buttons["estimate-recovery-parent-teardown"].tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 10))
+        app.terminate(); app.launch()
+        XCTAssertTrue(add.waitForExistence(timeout: 30)); if !add.isHittable { app.swipeUp() }; add.tap()
+        let copy = app.buttons["Review recovery copy 1"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 15)); copy.tap()
+        XCTAssertTrue(app.staticTexts[expected].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Read-only draft")).firstMatch.exists)
+    }
+
     func testMemoryDraftDiscardDoesNotRevealOlderAutosave() {
         continueAfterFailure = false
         let app = XCUIApplication()

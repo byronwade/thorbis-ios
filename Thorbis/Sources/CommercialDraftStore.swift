@@ -65,6 +65,7 @@ struct CommercialDraftScope: Codable, Hashable {
     static let unpersistedEstimates = VolatileDraftRecovery<CommercialDraftScope, CommercialNewEstimateDraft>()
     static let recoveryCopyEdits = VolatileDraftRecovery<RecoveryCopyEditKey<CommercialDraftScope>, RecoveryCopyEditState<CommercialNewEstimateDraft>>()
     static let estimateRecoveryCopyAttempts = EstimateRecoveryCopyAttempts<CommercialDraftScope, CommercialNewEstimateDraft>()
+    static let automaticEstimateCopies = EstimateAutomaticCopies<CommercialDraftScope>()
     static let estimateRecoveryCopies: EstimateRecoveryCopyStore<CommercialDraftScope, CommercialNewEstimateDraft> = {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
@@ -81,10 +82,12 @@ struct CommercialDraftScope: Codable, Hashable {
     }()
     /// Retire volatile recovery only after every original-scope copy is confirmed.
     static func retireEstimateRecoveryMemory() -> Bool {
-        EstimateTransitionMemory.retire(primary: unpersistedEstimates, edits: recoveryCopyEdits,
+        let retired = EstimateTransitionMemory.retire(primary: unpersistedEstimates, edits: recoveryCopyEdits,
             attempts: estimateRecoveryCopyAttempts) { id, scope, draft in
                 try estimateRecoveryCopies.install(draft, scope: scope, id: id)
             }
+        if retired { automaticEstimateCopies.clear() }
+        return retired
     }
     private let directory: URL
     private let removeItem: (URL) throws -> Void

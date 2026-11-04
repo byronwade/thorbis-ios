@@ -191,7 +191,10 @@ struct NewEstimateView: View {
         _ = EstimateTeardownPreservation.preserve(draft, scope: draftScope, intentID: editingRecoverySessionID,
             attempts: CommercialDraftStore.estimateRecoveryCopyAttempts,
             hold: { holdUnpersistedDraft(draft) },
-            install: { id, value in try CommercialDraftStore.estimateRecoveryCopies.install(value, scope: draftScope, id: id) })
+            install: { id, value in
+                CommercialDraftStore.automaticEstimateCopies.mark(id, scope: draftScope)
+                try CommercialDraftStore.estimateRecoveryCopies.install(value, scope: draftScope, id: id)
+            })
     }
     private func saveDraft(uncertain: Bool? = nil, leavingOriginalScope: Bool = false) throws {
         guard ownsDraft, (scopeMatches || leavingOriginalScope), let draftScope else {
@@ -236,7 +239,19 @@ struct NewEstimateView: View {
             let pending = CommercialDraftStore.unpersistedEstimates.read(for: draftScope)
             let saved = try CommercialDraftStore.shared.load(CommercialNewEstimateDraft.self, scope: draftScope)
             let copies = jobID == nil ? [] : try CommercialDraftStore.estimateRecoveryCopies.list(scope: draftScope)
-            if !copies.isEmpty || (pending != nil && saved != nil) {
+            // A copy automatically made from this in-memory draft is not a
+            // competing version. Open the original editor when every saved
+            // copy is byte-equivalent and no canonical draft exists.
+            let onlyMatchingCopies: Bool
+            if let pending, saved == nil,
+               CommercialDraftStore.automaticEstimateCopies.onlyAutomatic(copies, scope: draftScope) {
+                let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+                let expected = try encoder.encode(pending)
+                onlyMatchingCopies = try copies.allSatisfy { id in
+                    try encoder.encode(CommercialDraftStore.estimateRecoveryCopies.read(scope: draftScope, id: id)) == expected
+                }
+            } else { onlyMatchingCopies = false }
+            if (!copies.isEmpty && !onlyMatchingCopies) || (pending != nil && saved != nil) {
                 recoverySavedDraft = saved; recoveryMemoryDraft = pending; recoveryCopyIDs = copies
                 recoveryChoicePending = true; didRecoverDraft = true
                 return
@@ -722,6 +737,7 @@ struct NewEstimateView: View {
             var discovered: [UUID]?
             try CommercialDraftStore.estimateRecoveryCopyAttempts.perform(draft, scope: draftScope, intentID: intentID) { id, intended in
                 try CommercialDraftStore.estimateRecoveryCopies.install(intended, scope: draftScope, id: id)
+                CommercialDraftStore.automaticEstimateCopies.promote(id, scope: draftScope)
                 if recoveryChoicePending { discovered = try CommercialDraftStore.estimateRecoveryCopies.list(scope: draftScope) }
             }
             if let discovered { recoveryCopyIDs = discovered }
