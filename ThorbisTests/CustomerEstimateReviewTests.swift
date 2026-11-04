@@ -21,6 +21,18 @@ final class CustomerEstimateReviewTests: XCTestCase {
         ])
     }
 
+    func testRetainedDetailsRejectSameEstimateAfterRevisionChanges() throws {
+        let issued = try decodedRevision()
+        XCTAssertTrue(issued.matchesDetails(for: try localEstimate()))
+        var replaced = aggregate
+        replaced["currentRevisionNumber"] = 3
+        let newer = try JSONDecoder().decode(EstimateRecord.self, from: Data(json(replaced).utf8))
+        XCTAssertFalse(issued.matchesDetails(for: newer))
+        replaced["organizationId"] = "00000000-0000-4000-8000-000000000999"
+        let foreign = try JSONDecoder().decode(EstimateRecord.self, from: Data(json(replaced).utf8))
+        XCTAssertFalse(issued.matchesDetails(for: foreign))
+    }
+
     func testForeignAggregateIdentityCannotStartRevisionRead() async throws {
         for field in ["id", "organizationId", "customerId", "locationId"] {
             var foreign = aggregate
