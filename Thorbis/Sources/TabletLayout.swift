@@ -314,7 +314,10 @@ struct TabletRoot: View {
         .onChange(of: scheduleRange) { path = NavigationPath() }
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob() }
         .onChange(of: store.jobs) { openRequestedJob() }
-        .onChange(of: store.requestedSchedule) { show(.schedule); scheduleRange = "Today" }
+        .onChange(of: store.requestedSchedule, initial: true) {
+            guard store.consumeScheduleRequest(session: session.generation) else { return }
+            show(.schedule); scheduleRange = "Today"
+        }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord() }
         .onChange(of: store.requestedSearch, initial: true) {
             guard let query = store.requestedSearch else { return }
@@ -330,10 +333,30 @@ struct TabletRoot: View {
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
         .onAppear {
-            if session.can("job.view", feature: "jobs") { tab = .schedule }
+            if store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil,
+               let saved = store.rememberedRoot(session: session.generation),
+               let destination = StartupDestination(rawValue: saved), destination.permitted(session) {
+                if let item = destination.menuItem { tab = section(for: item) }
+                else if let local = destination.localSection { tab = .local(local) }
+            } else if session.can("job.view", feature: "jobs") { tab = .schedule }
             else if session.can("customer.view", feature: "core_crm") { tab = .customers }
             else if let first = menuPlaces.first { tab = section(for: first) }
             openHomeAtLaunch()
+        }
+        .onChange(of: tab) { _, value in
+            let id: String?
+            switch value {
+            case .schedule: id = "schedule"
+            case .jobs: id = "jobs"
+            case .customers: id = "customers"
+            case .place(let item): id = item.rawValue
+            case .local(let local): id = "local-" + local.rawValue
+            case .more: id = nil
+            }
+            if let id {
+                store.rememberRoot(id, session: session.generation)
+                _ = store.consumeStartupSelection(session: session.generation)
+            }
         }
         // Owners whose places lead with Home open there, as on the phone (the role's places can
         // arrive just after launch).
@@ -542,13 +565,28 @@ struct TabletRoot: View {
 
     /// Once, from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
-        guard !settledLaunchPlace, layout.visibleTabs(session).first == .home else { return }
-        settledLaunchPlace = true
-        guard tab == .schedule, path.isEmpty, !store.openedForRecord, store.requestedJobID == nil,
-              store.requestedRecord == nil else { return }
+        guard !settledLaunchPlace, session.phase == .ready else { return }
+        guard path.isEmpty, !store.openedForRecord, store.requestedSchedule == 0,
+              store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil else {
+            settledLaunchPlace = true
+            _ = store.consumeStartupSelection(session: session.generation)
+            return
+        }
         #if DEBUG
         if PaperPreview.enabled, PaperPreview.screen != "schedule" { return }
         #endif
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let preference = StartupDestinationPreferences().get(for: scope)
+            if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
+                settledLaunchPlace = true
+                guard store.consumeStartupSelection(session: session.generation) else { return }
+                if let item = target.menuItem { show(section(for: item)); return }
+                if let local = target.localSection { show(.local(local)); return }
+            }
+        }
+        guard layout.visibleTabs(session).first == .home, tab == .schedule else { return }
+        settledLaunchPlace = true
+        guard store.consumeStartupSelection(session: session.generation) else { return }
         show(.place(.home))
     }
 

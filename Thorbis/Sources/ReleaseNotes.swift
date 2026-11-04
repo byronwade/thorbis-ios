@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-03-startup-destination",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "rectangle.on.rectangle", title: "Choose your start screen",
+                      detail: "Choose where Thorbis opens on this device from Settings."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-03-public-estimate-amounts",
             date: "2026-11-03",
             highlights: [

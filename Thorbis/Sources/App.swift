@@ -299,7 +299,33 @@ final class Store: ObservableObject {
     /// RootView clears the request as soon as it opens it. What's new waits for the next launch.
     var openedForRecord = false
     /// Bumped by the "Show my schedule" shortcut; RootView switches to Schedule.
-    @Published var requestedSchedule = 0
+    @Published var requestedSchedule = 0 {
+        didSet { if requestedSchedule > 0 { openedForRecord = true } }
+    }
+    private var startupSelectionSession: UUID?
+    private var activeRootSession: UUID?
+    private var activeRoot: String?
+    func rememberedRoot(session: UUID) -> String? {
+        activeRootSession == session ? activeRoot : nil
+    }
+    func rememberRoot(_ root: String, session: UUID) {
+        activeRootSession = session
+        activeRoot = root
+    }
+    /// Both adaptive shells share a single startup decision for this session.
+    func consumeStartupSelection(session: UUID) -> Bool {
+        guard startupSelectionSession != session else { return false }
+        startupSelectionSession = session
+        return true
+    }
+    private var handledScheduleRequest = 0
+    /// Roots can be recreated at a new width. A shortcut is handled once across both layouts.
+    func consumeScheduleRequest(session: UUID) -> Bool {
+        guard requestedSchedule > handledScheduleRequest else { return false }
+        handledScheduleRequest = requestedSchedule
+        rememberRoot("schedule", session: session)
+        return true
+    }
     /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.
     @Published var requestedRecord: RecordLink? {
         didSet { if requestedRecord != nil { openedForRecord = true } }

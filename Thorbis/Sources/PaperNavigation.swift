@@ -24,6 +24,7 @@ struct RootView: View {
     @State private var customPaths: [String: NavigationPath] = [:]
     /// Set once the launch place is settled, so a later capability refresh never moves the person.
     @State private var settledLaunchPlace = false
+    @State private var phoneShellVisible = false
     /// The side drawer (2026-10-31, after the Claude and ChatGPT apps): open, and a drag in progress.
     @State private var drawerOpen = false
     @State private var drawerDrag: CGFloat = 0
@@ -116,23 +117,49 @@ struct RootView: View {
         #endif
         guard session.phase == .ready else { return }
         layout.applyRoleDefaults(WorkRole(session), permitted: { $0.permitted(session) })
-        openHomeAtLaunch()
+        if phoneShellVisible { openHomeAtLaunch() }
     }
 
     /// Owners whose pinned places lead with Home open there; everyone else still opens on Today. Only
     /// at launch, only from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
-        guard !settledLaunchPlace else { return }
+        guard !settledLaunchPlace, session.phase == .ready else { return }
         settledLaunchPlace = true
-        guard layout.visibleTabs(session).first == .home, selectedTab == PrimaryTab.initial.rawValue,
-              schedulePath.isEmpty, !store.openedForRecord else { return }
-        selectedTab = MenuItem.home.rawValue
+        guard store.consumeStartupSelection(session: session.generation) else { return }
+        guard selectedTab == PrimaryTab.initial.rawValue, schedulePath.isEmpty,
+              !store.openedForRecord, store.requestedSchedule == 0 else { return }
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let preference = StartupDestinationPreferences().get(for: scope)
+            if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
+                selectedTab = target.rawValue
+                return
+            }
+        }
+        if layout.visibleTabs(session).first == .home { selectedTab = MenuItem.home.rawValue }
     }
 
     /// iPad at regular width gets the sidebar and split columns; compact width (Slide Over, a
     /// narrow Split View) and every iPhone get the phone layout.
     @ViewBuilder private func navigation(wide: Bool) -> some View {
-        if wide { TabletRoot() } else { phoneShell() }
+        if wide { TabletRoot() } else {
+            phoneShell()
+                .onAppear {
+                    phoneShellVisible = true
+                    if store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil,
+                       let saved = store.rememberedRoot(session: session.generation),
+                       let destination = StartupDestination(rawValue: saved), destination.permitted(session) {
+                        selectedTab = saved
+                    }
+                    applyRoleDefaults()
+                }
+                .onChange(of: selectedTab) { _, value in
+                    if phoneShellVisible {
+                        store.rememberRoot(value, session: session.generation)
+                        _ = store.consumeStartupSelection(session: session.generation)
+                    }
+                }
+                .onDisappear { phoneShellVisible = false }
+        }
     }
 
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -636,7 +663,8 @@ struct RootView: View {
         .background(Theme.canvas)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
-        .onChange(of: store.requestedSchedule) {
+        .onChange(of: store.requestedSchedule, initial: true) {
+            guard store.consumeScheduleRequest(session: session.generation) else { return }
             if drawerOpen { closeDrawer() }
             schedulePath = NavigationPath()
             primaryTab = .schedule
