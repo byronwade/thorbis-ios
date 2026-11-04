@@ -268,6 +268,9 @@ struct ThorbisApp: App {
 
 extension ThorbisApp {
     @MainActor private func resync() async {
+        #if DEBUG
+        if PaperPreview.enabled, ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil { return }
+        #endif
         await session.revalidate()
         guard session.phase == .ready, !session.isOffline else { return }
         // Photos first: a queued Complete job may depend on them meeting the photo requirement.

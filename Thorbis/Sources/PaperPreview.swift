@@ -355,6 +355,31 @@ enum PaperPreview {
         return hashes
     }
     @MainActor static func outbox() -> FieldOutbox {
+        if let scenario = ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent("closeout-outbox-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+            let folder = root.appendingPathComponent("Outbox", isDirectory: true)
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let invoice = issuedInvoice
+            var listed = invoice
+            if scenario == "foreign" {
+                var json = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(invoice)) as! [String: Any]
+                json["organizationId"] = "00000000-0000-4000-8000-000000000099"
+                listed = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
+            }
+            JobDetailCache.save(invoices: [listed], jobID: jobID)
+            let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
+            if scenario == "recorded" {
+                let file = folder.appendingPathComponent("\(actorID)_\(organizationID).recorded")
+                try! JSONEncoder().encode([payment]).write(to: file)
+            }
+            let box = FieldOutbox(directory: root, defaults: defaults())
+            box.bind(actorID: actorID, organizationID: organizationID)
+            if scenario != "recorded" { box.enqueue(.payment(payment), policyVersion: 1) }
+            if scenario == "missing" {
+                box.enqueue(.payment(.init(invoiceId: "00000000-0000-4000-8000-000000000099", jobId: jobID, amountCents: 100, method: "cash", idempotencyKey: "preview-missing")), policyVersion: 1)
+            }
+            return box
+        }
         guard let root = savedWorkRoot() else {
             return FieldOutbox(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString), defaults: defaults())
         }
@@ -897,6 +922,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                          "locationId": NSNull(), "estimateId": NSNull(), "estimateRevisionNumber": NSNull()]
             let photos: [String: Any] = ["requirement": "photos", "kind": "photos", "outcome": "satisfied",
                                          "detail": "2 of 2 photos added", "nextAction": NSNull(), "commercialSource": NSNull()]
+            if ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil {
+                let payment: [String: Any] = ["requirement": "payment", "kind": "payment_or_unpaid_disposition", "outcome": "blocked", "detail": "Payment is due", "nextAction": "collect_payment", "commercialSource": "invoice"]
+                return ["policy": ["organizationId": org, "requireNotes": false, "requiredPhotoCount": 0, "requiredChecks": [], "updatedByUserId": NSNull(), "updatedAt": NSNull()],
+                        "facts": ["noteCount": 0, "photoCount": 0, "acknowledgedCheckKeys": [], "authorizationTarget": target],
+                        "acknowledged": [], "requirements": [payment], "unmet": [payment], "completable": false]
+            }
             let notes: [String: Any] = ["requirement": "notes", "kind": "notes", "outcome": "blocked",
                                         "detail": "Add a note about the work", "nextAction": "Add a note", "commercialSource": NSNull()]
             return ["policy": ["organizationId": org, "requireNotes": true, "requiredPhotoCount": 2,
