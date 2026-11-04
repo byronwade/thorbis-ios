@@ -67,7 +67,10 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
 
     func beginLoad() {
         clear()
-        loadTask = Task { [weak self] in await self?.load() }
+        loadTask = Task { [weak self] in
+            guard let self else { return }
+            await self.load()
+        }
     }
 
     func move(to newIndex: Int) {
