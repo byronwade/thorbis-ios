@@ -292,6 +292,23 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         XCTAssertFalse(model.invoiceAccessDenied); XCTAssertNotNil(model.invoice)
     }
 
+    func testDeniedInvoiceRetiresAnotherOpenPaymentModel() async {
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice()), .init(200, #"{"items":[]}"#),
+            .init(200, invoice()), .init(200, #"{"items":[]}"#),
+            .init(403, #"{"title":"Denied","status":403}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "cross-model-" + UUID().uuidString
+        let first = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        let second = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        await first.load(); client.invalidateRequests(); await second.load()
+        XCTAssertNotNil(first.invoice); XCTAssertNotNil(second.invoice)
+        client.invalidateRequests(); await first.load()
+        XCTAssertNil(first.invoice)
+        XCTAssertNil(second.invoice, "A denial must retire the same invoice in another open model")
+        XCTAssertFalse(second.canRecordPayment)
+    }
+
     func testDeniedInvoiceReloadRetiresPreviouslyDisplayedInvoice() async {
         for status in [403, 404] {
             let client = APIClient(session: URLProtocolFixture.session([
