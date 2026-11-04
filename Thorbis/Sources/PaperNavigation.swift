@@ -127,7 +127,7 @@ struct RootView: View {
         settledLaunchPlace = true
         guard store.consumeStartupSelection(session: session.generation) else { return }
         guard selectedTab == PrimaryTab.initial.rawValue, schedulePath.isEmpty,
-              !store.openedForRecord, store.requestedSchedule == 0 else { return }
+              !store.hasStartupIntent(session: session.generation) else { return }
         if let scope = StartupDestination.scope(session: session, api: api) {
             let preference = StartupDestinationPreferences().get(for: scope)
             if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
@@ -980,6 +980,8 @@ struct RootView: View {
         if phone {
             if drawerOpen { closeDrawer() }
             let tabs = layout.visibleTabs(session)
+            store.noteHandledNavigation(session: session.generation,
+                root: tabs.contains(.schedule) || !tabs.contains(.jobs) ? "schedule" : "jobs")
             if tabs.contains(.schedule) || !tabs.contains(.jobs) {
                 primaryTab = .schedule
                 schedulePath = NavigationPath()
@@ -995,6 +997,7 @@ struct RootView: View {
     /// Opens search with the words a Siri or Shortcuts search asked for.
     private func openRequestedSearch(phone: Bool) {
         guard let query = store.requestedSearch else { return }
+        store.noteHandledNavigation(session: session.generation, root: selectedTab)
         store.requestedSearch = nil
         if phone {
             if drawerOpen { closeDrawer() }
@@ -1020,6 +1023,8 @@ struct RootView: View {
         case .invoice(let id): target.append(PaperRoute.invoice(id)); home = .invoices
         }
         guard phone else { return }
+        let root = home.permitted(session) ? home.rawValue : selectedTab
+        store.noteHandledNavigation(session: session.generation, root: root)
         if drawerOpen { closeDrawer() }
         if home == .customers, MenuItem.customers.permitted(session) {
             primaryTab = .customers

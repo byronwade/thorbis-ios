@@ -318,12 +318,21 @@ final class Store: ObservableObject {
         startupSelectionSession = session
         return true
     }
+    private var handledNavigationSession: UUID?
+    func noteHandledNavigation(session: UUID, root: String? = nil) {
+        handledNavigationSession = session
+        if let root { rememberRoot(root, session: session) }
+    }
+    func hasStartupIntent(session: UUID) -> Bool {
+        handledNavigationSession == session || requestedJobID != nil || requestedRecord != nil ||
+            requestedSearch != nil || requestedSchedule > handledScheduleRequest
+    }
     private var handledScheduleRequest = 0
     /// Roots can be recreated at a new width. A shortcut is handled once across both layouts.
     func consumeScheduleRequest(session: UUID) -> Bool {
         guard requestedSchedule > handledScheduleRequest else { return false }
         handledScheduleRequest = requestedSchedule
-        rememberRoot("schedule", session: session)
+        noteHandledNavigation(session: session, root: "schedule")
         return true
     }
     /// A customer, estimate or invoice a link asked to open; RootView pushes it and clears this.

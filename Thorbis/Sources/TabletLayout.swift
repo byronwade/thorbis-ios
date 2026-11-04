@@ -321,6 +321,7 @@ struct TabletRoot: View {
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord() }
         .onChange(of: store.requestedSearch, initial: true) {
             guard let query = store.requestedSearch else { return }
+            store.noteHandledNavigation(session: session.generation)
             store.requestedSearch = nil
             searchSeed = query
             search = true
@@ -566,8 +567,7 @@ struct TabletRoot: View {
     /// Once, from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
         guard !settledLaunchPlace, session.phase == .ready else { return }
-        guard path.isEmpty, !store.openedForRecord, store.requestedSchedule == 0,
-              store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil else {
+        guard path.isEmpty, !store.hasStartupIntent(session: session.generation) else {
             settledLaunchPlace = true
             _ = store.consumeStartupSelection(session: session.generation)
             return
@@ -694,7 +694,9 @@ struct TabletRoot: View {
               let job = id == JobActivityLink.nextJob ? PaperWorkGroups.next(store.jobs) : store.jobs.first(where: { $0.id == id })
         else { return }
         store.requestedJobID = nil
-        if JobFiltering.schedule(store.jobs, range: .today).contains(where: { $0.id == job.id }) {
+        let isToday = JobFiltering.schedule(store.jobs, range: .today).contains(where: { $0.id == job.id })
+        store.noteHandledNavigation(session: session.generation, root: isToday ? "schedule" : "jobs")
+        if isToday {
             show(.schedule)
             scheduleRange = "Today"
             scheduleSelection = job.id
@@ -710,6 +712,13 @@ struct TabletRoot: View {
         store.requestedRecord = nil
         let access = record.access
         guard session.can(access.capability, feature: access.feature) else { return }
+        let root: String
+        switch record {
+        case .customer: root = "customers"
+        case .estimate: root = "estimates"
+        case .invoice: root = "invoices"
+        }
+        store.noteHandledNavigation(session: session.generation, root: root)
         switch record {
         case .customer(let id):
             let customer = store.customers.first { $0.id == id } ?? Customer(id: id, name: "Customer", archived: nil, createdAt: nil)

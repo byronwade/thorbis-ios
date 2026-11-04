@@ -71,4 +71,30 @@ final class StartupDestinationTests: XCTestCase {
         XCTAssertEqual(store.rememberedRoot(session: session), "local-fleet")
     }
 
+    @MainActor func testHandledLinkOnlyOverridesItsOwnSession() {
+        let store = Store()
+        let first = UUID(), second = UUID()
+        store.requestedRecord = .customer("customer")
+        XCTAssertTrue(store.hasStartupIntent(session: first))
+        store.noteHandledNavigation(session: first, root: "customers")
+        store.requestedRecord = nil
+        XCTAssertTrue(store.hasStartupIntent(session: first))
+        XCTAssertEqual(store.rememberedRoot(session: first), "customers")
+        XCTAssertFalse(store.hasStartupIntent(session: second))
+        XCTAssertNil(store.rememberedRoot(session: second))
+        // A new request arriving while signed out must remain available to the next session.
+        store.requestedRecord = .customer("another")
+        XCTAssertTrue(store.hasStartupIntent(session: second))
+    }
+
+    @MainActor func testHandledScheduleDoesNotBlockAnotherSession() {
+        let store = Store()
+        let first = UUID(), second = UUID()
+        store.requestedSchedule += 1
+        XCTAssertTrue(store.hasStartupIntent(session: first))
+        XCTAssertTrue(store.consumeScheduleRequest(session: first))
+        XCTAssertTrue(store.hasStartupIntent(session: first))
+        XCTAssertFalse(store.hasStartupIntent(session: second))
+    }
+
 }
