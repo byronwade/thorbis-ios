@@ -21,6 +21,25 @@ final class CustomerPhotoHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["customer-mode-owner-exit"].isHittable)
     }
 
+    func testLastPhotoCanScrollAboveSelectionBar() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "--paper-preview-photo-handoff"]
+        app.launch()
+        let select = app.buttons["Select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
+        let last = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009303"]
+        let count = app.staticTexts["job-media-selection-count"]
+        XCTAssertTrue(last.waitForExistence(timeout: 10)); XCTAssertTrue(count.waitForExistence(timeout: 5))
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<5 where !last.isHittable || last.frame.maxY > count.frame.minY { scroll.swipeUp() }
+        XCTAssertTrue(last.isHittable)
+        XCTAssertLessThanOrEqual(last.frame.maxY, count.frame.minY)
+        last.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "value ENDSWITH %@", "Selected"), object: last)], timeout: 5), .completed)
+        XCTAssertTrue(app.staticTexts["1 chosen"].waitForExistence(timeout: 5))
+    }
+
     func testViewOnlyTechnicianCanShowPhotosWithoutEditActions() {
         continueAfterFailure = false
         let app = XCUIApplication()
