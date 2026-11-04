@@ -62,6 +62,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private var acceptedPaymentID: String?
     private var verifiedHistoryGeneration: UUID?
     private var waitingLoadRequests: [UUID] = []
+    private var denialSubscription: AnyCancellable?
 
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
@@ -72,6 +73,26 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         self.expectedJobScope = expectedJobScope
         self.intentStore = intentStore
         self.makeIdempotencyKey = makeIdempotencyKey
+        denialSubscription = InvoiceAccessRegistry.shared.denial.sink { [weak self] scope in
+            MainActor.assumeIsolated {
+                guard let self, InvoiceAccessRegistry.shared.scope(api: self.api, invoiceID: self.invoiceID) == scope else { return }
+                self.retireDeniedInvoice()
+            }
+        }
+        if let scope = InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID),
+           InvoiceAccessRegistry.shared.isDenied(scope) {
+            retireDeniedInvoice()
+        }
+    }
+
+    private func retireDeniedInvoice() {
+        invoiceAccessDenied = true
+        invoice = nil
+        payments = []
+        historyComplete = false
+        verifiedHistoryGeneration = nil
+        offlineCopy = false
+        loadError = "This invoice is unavailable. Refresh to try again."
     }
 
     var totalCents: Int? {
@@ -167,6 +188,9 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         guard !Task.isCancelled else { return }
         let request = UUID()
         let generation = api.requestGeneration
+        let accessScope = InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID)
+        let denialVersion = accessScope.flatMap { InvoiceAccessRegistry.shared.version($0) }
+        if let accessScope, InvoiceAccessRegistry.shared.isDenied(accessScope) { retireDeniedInvoice() }
         waitingLoadRequests.append(request)
         defer { waitingLoadRequests.removeAll { $0 == request } }
         while isLoading || waitingLoadRequests.last != request {
@@ -197,6 +221,9 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
+            guard accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) else { throw CancellationError() }
+            if let accessScope, (InvoiceAccessRegistry.shared.version(accessScope) != denialVersion ||
+                                 (InvoiceAccessRegistry.shared.isDenied(accessScope) && !revalidating)) { return }
             if revalidating {
                 guard loadedInvoice.id == invoiceID, expectedJobScope?.contains(loadedInvoice) != false else {
                     throw Problem(title: "This invoice couldn't be verified. Refresh the job before continuing.", status: nil, detail: nil)
@@ -226,10 +253,14 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             try Task.checkCancellation()
             guard generation == api.requestGeneration else { throw CancellationError() }
+            guard accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) else { throw CancellationError() }
+            if let accessScope, (InvoiceAccessRegistry.shared.version(accessScope) != denialVersion ||
+                                 (InvoiceAccessRegistry.shared.isDenied(accessScope) && !revalidating)) { return }
             guard validHistory(loadedPayments, for: loadedInvoice) else {
                 throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
             }
             if revalidating {
+                if let accessScope { InvoiceAccessRegistry.shared.allow(accessScope) }
                 guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
                 JobDetailCache.save(invoice: loadedInvoice)
                 invoiceAccessDenied = false
@@ -263,11 +294,10 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             // A definitive denial must not be followed by an older queued retry.
             if let status = (error as? Problem)?.status, [401, 403, 404].contains(status) {
                 definitiveDenial = true
-                invoiceAccessDenied = true
-                invoice = nil
-                payments = []
-                historyComplete = false
-                offlineCopy = false
+                if let accessScope, accessScope == InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID) {
+                    InvoiceAccessRegistry.shared.deny(accessScope)
+                }
+                retireDeniedInvoice()
             }
             loadError = error.localizedDescription
         }
@@ -320,6 +350,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
 
     @discardableResult
     func acceptInvoiceMutationResponse(_ updated: InvoiceRecord) -> Bool {
+        if let scope = InvoiceAccessRegistry.shared.scope(api: api, invoiceID: invoiceID),
+           InvoiceAccessRegistry.shared.isDenied(scope) { return false }
         guard updated.id == invoiceID, expectedJobScope?.contains(updated) != false else {
             invoice = nil
             payments = []

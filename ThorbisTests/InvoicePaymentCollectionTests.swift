@@ -307,6 +307,8 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         XCTAssertNil(first.invoice)
         XCTAssertNil(second.invoice, "A denial must retire the same invoice in another open model")
         XCTAssertFalse(second.canRecordPayment)
+        let reopened = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID)
+        XCTAssertTrue(reopened.invoiceAccessDenied, "Reopening in this process must not restore the parent invoice before a fresh read")
     }
 
     func testDeniedInvoiceReloadRetiresPreviouslyDisplayedInvoice() async {
