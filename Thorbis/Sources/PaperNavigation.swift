@@ -94,6 +94,11 @@ struct RootView: View {
                         store.requestedSchedule += 1
                         startupFixtureWide.toggle()
                     }
+                    Button("Test link and switch") {
+                        store.rememberRoot("jobs", session: session.generation)
+                        store.requestedRecord = .customer(PaperPreview.customerID)
+                        startupFixtureWide.toggle()
+                    }
                     if !startupFixtureWide {
                         Button("Test open jobs") { primaryTab = .jobs }
                         Button("Test settings") { showSettings = true }
