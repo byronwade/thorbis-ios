@@ -25,6 +25,18 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Waiting to sync"].exists)
     }
 
+    func testDisagreeingCachedInvoicesKeepMountedChecklistBlocked() {
+        let app = launch("disagreement")
+        XCTAssertTrue(app.staticTexts["0 of 1"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Waiting to sync"].exists)
+    }
+
+    func testLegacyPaymentWithUnknownJobKeepsMountedChecklistBlocked() {
+        let app = launch("legacy")
+        XCTAssertTrue(app.staticTexts["0 of 1"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Waiting to sync"].exists)
+    }
+
     private func launch(_ scenario: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
