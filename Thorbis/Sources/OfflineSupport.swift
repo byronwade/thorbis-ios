@@ -72,7 +72,12 @@ struct WorkspaceCache {
 /// opened before still opens and can be worked without signal (OF-04).
 enum JobDetailCache {
     private static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        #if DEBUG
+        if PaperPreview.enabled, ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil {
+            return FileManager.default.temporaryDirectory.appendingPathComponent("closeout-fixture-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        }
+        #endif
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("JobDetailCache", isDirectory: true)
     }
 
