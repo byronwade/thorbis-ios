@@ -14,7 +14,7 @@ final class InvoiceReadFence {
         /// "invoice" and "history" are distinct authority decisions.
         let resource: String
     }
-    enum Outcome { case liveSuccess(Data), connectivityFailure, denied }
+    enum Outcome { case liveSuccess(Data), connectivityFailure, denied, uncertain }
     struct Receipt: Equatable {
         fileprivate let key: String
         fileprivate let epoch: String
@@ -23,6 +23,7 @@ final class InvoiceReadFence {
     }
     enum Completion: Equatable { case committed(Receipt), restored, held, denied }
     enum Failure: Error { case invalidScope, storage, contended, alreadyFinished }
+    enum FaultPoint { case holdFileSync, recordWrite, recordPartialWrite, recordFileSync, recordRename, holdRemoval, holdRemovalSync }
     private struct Record: Codable {
         let version: Int
         let phase: String
@@ -36,12 +37,15 @@ final class InvoiceReadFence {
     private let directory: URL
     private let syncDirectory: (Int32) -> Int32
     private let syncHoldDirectory: (Int32) -> Int32
+    private let injectFailure: (FaultPoint) -> Bool
 
     init(directory: URL, syncDirectory: @escaping (Int32) -> Int32 = { Darwin.fsync($0) },
-         syncHoldDirectory: @escaping (Int32) -> Int32 = { Darwin.fsync($0) }) {
+         syncHoldDirectory: @escaping (Int32) -> Int32 = { Darwin.fsync($0) },
+         injectFailure: @escaping (FaultPoint) -> Bool = { _ in false }) {
         self.directory = directory
         self.syncDirectory = syncDirectory
         self.syncHoldDirectory = syncHoldDirectory
+        self.injectFailure = injectFailure
     }
 
     private func key(_ scope: Scope) throws -> String {
@@ -112,7 +116,7 @@ final class InvoiceReadFence {
         let hold = directory.appendingPathComponent("\(key).hold").path
         let holdFD = open(hold, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)
         guard holdFD >= 0 else { throw Failure.storage }
-        let holdSynced = fsync(holdFD) == 0
+        let holdSynced = !injectFailure(.holdFileSync) && fsync(holdFD) == 0
         close(holdFD)
         // This hold must survive a process exit before the new record is renamed.
         guard holdSynced, syncHoldDirectory(folder) == 0 else { throw Failure.storage }
@@ -121,8 +125,12 @@ final class InvoiceReadFence {
         guard fd >= 0 else { throw Failure.storage }
         var renamed = false
         defer { close(fd); if !renamed { _ = unlink(temporary) } }
-        let written = data.withUnsafeBytes { bytes -> Bool in
+        let written = !injectFailure(.recordWrite) && data.withUnsafeBytes { bytes -> Bool in
             guard let base = bytes.baseAddress else { return false }
+            if injectFailure(.recordPartialWrite) {
+                _ = Darwin.write(fd, base, min(bytes.count, 1))
+                return false
+            }
             var offset = 0
             while offset < bytes.count {
                 let amount = Darwin.write(fd, base.advanced(by: offset), bytes.count - offset)
@@ -131,13 +139,14 @@ final class InvoiceReadFence {
             }
             return true
         }
-        guard written, fsync(fd) == 0 else { throw Failure.storage }
-        guard rename(temporary, directory.appendingPathComponent("\(key).json").path) == 0 else { throw Failure.storage }
+        guard written, !injectFailure(.recordFileSync), fsync(fd) == 0 else { throw Failure.storage }
+        guard !injectFailure(.recordRename), rename(temporary, directory.appendingPathComponent("\(key).json").path) == 0 else { throw Failure.storage }
         renamed = true
         guard syncDirectory(folder) == 0 else { throw Failure.storage }
         // The new record is already durable. If removal isn't durable, a crash
         // may restore the hold, which conservatively requires a fresh read.
-        guard unlink(hold) == 0, fsync(folder) == 0 else { throw Failure.storage }
+        guard !injectFailure(.holdRemoval), unlink(hold) == 0,
+              !injectFailure(.holdRemovalSync), fsync(folder) == 0 else { throw Failure.storage }
     }
 
     func cacheAllowed(_ scope: Scope, payload: Data) -> Bool {
@@ -265,6 +274,10 @@ final class InvoiceReadFence {
             guard transport >= 0 else { throw Failure.alreadyFinished }
             let fd = transport
             transport = -1
+            // An uncertain async cancellation does not prove the transport's
+            // callbacks are quiescent. Keep the lock until process exit; a
+            // terminal-callback-aware owner is needed before this can ship.
+            if case .uncertain = outcome { return .held }
             defer { _ = flock(fd, LOCK_UN); close(fd) }
             if case .denied = outcome {
                 try fence.withMetadata(key) {
@@ -285,7 +298,7 @@ final class InvoiceReadFence {
                 switch outcome {
                 case .liveSuccess: canRestore = true
                 case .connectivityFailure: canRestore = record.priorClean
-                case .denied: canRestore = false
+                case .denied, .uncertain: canRestore = false
                 }
                 guard canRestore else { return .held }
                 let cleanEpoch: String
@@ -301,7 +314,7 @@ final class InvoiceReadFence {
                 case .connectivityFailure:
                     guard let previous = record.payloadDigest, previous.count == 32 else { return .held }
                     digest = previous
-                case .denied: return .held
+                case .denied, .uncertain: return .held
                 }
                 try fence.persist(Record(version: 1, phase: "clean", epoch: cleanEpoch,
                                          eligible: false, priorClean: false, priorEpoch: nil,

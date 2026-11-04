@@ -6,6 +6,107 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testFencedInvoiceTransportBindsReceiptToExactLiveResponse() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let actor = UUID().uuidString.lowercased()
+        let organization = "00000000-0000-4000-8000-000000000002"
+        let scope = InvoiceReadFence.Scope(actor: actor, organization: organization, origin: "https://app.thorbis.com", invoice: invoiceID, resource: "invoice")
+        let fence = InvoiceReadFence(directory: dir)
+        let body = invoice()
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, body)]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = SavedCopies.scope(actorID: actor, organizationID: organization)
+        let result = try await client.fieldFencedInvoice(scope, fence: fence)
+        XCTAssertEqual(result.read.value.id, invoiceID)
+        XCTAssertEqual(result.read.rawData, Data(body.utf8))
+        XCTAssertTrue(fence.cacheAllowed(scope, payload: result.read.rawData))
+        XCTAssertFalse(fence.cacheAllowed(scope, payload: Data("another invoice".utf8)))
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+        let key = SavedCopies.key(origin: scope.origin, path: "/v1/invoices/\(invoiceID)", query: [])
+        XCTAssertFalse(SavedCopyStore.shared.exists(scope: try XCTUnwrap(client.savedCopyScope), key: key), "The unmediated async cache writer must not receive fenced bytes")
+    }
+
+    func testFencedInvoiceRefusesTransportIfPreflightHoldFails() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let actor = UUID().uuidString.lowercased()
+        let organization = "00000000-0000-4000-8000-000000000002"
+        let scope = InvoiceReadFence.Scope(actor: actor, organization: organization, origin: "https://app.thorbis.com", invoice: invoiceID, resource: "invoice")
+        let fence = InvoiceReadFence(directory: dir, injectFailure: { $0 == .holdFileSync })
+        let client = APIClient(session: URLProtocolFixture.session([.init(403, #"{"title":"Denied"}"#)]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = SavedCopies.scope(actorID: actor, organizationID: organization)
+        do { _ = try await client.fieldFencedInvoice(scope, fence: fence); XCTFail("Expected failed hold") } catch {}
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
+    func testFencedInvoiceDenialHoldsEarlierVerifiedBytes() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let actor = UUID().uuidString.lowercased()
+        let organization = "00000000-0000-4000-8000-000000000002"
+        let scope = InvoiceReadFence.Scope(actor: actor, organization: organization, origin: "https://app.thorbis.com", invoice: invoiceID, resource: "invoice")
+        let fence = InvoiceReadFence(directory: dir)
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice()), .init(403, #"{"title":"Denied"}"#)]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = SavedCopies.scope(actorID: actor, organizationID: organization)
+        let first = try await client.fieldFencedInvoice(scope, fence: fence)
+        do { _ = try await client.fieldFencedInvoice(scope, fence: fence); XCTFail("Expected denial") } catch {}
+        XCTAssertFalse(fence.cacheAllowed(scope, payload: first.read.rawData))
+        XCTAssertFalse(InvoiceReadFence(directory: dir).cacheAllowed(scope, payload: first.read.rawData))
+    }
+
+    func testFencedInvoiceDiscardsResponseAfterIdentityChangesAwayAndBack() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let actor = UUID().uuidString.lowercased()
+        let organization = "00000000-0000-4000-8000-000000000002"
+        let scope = InvoiceReadFence.Scope(actor: actor, organization: organization, origin: "https://app.thorbis.com", invoice: invoiceID, resource: "invoice")
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice(), gate: gate)]), baseURL: "https://app.thorbis.com")
+        let identity = SavedCopies.scope(actorID: actor, organizationID: organization)
+        client.savedCopyScope = identity
+        let fence = InvoiceReadFence(directory: dir)
+        let pending = Task { try await client.fieldFencedInvoice(scope, fence: fence) }
+        await waitForRequests(1)
+        client.savedCopyScope = "another-scope"
+        client.savedCopyScope = identity
+        gate.release()
+        do { _ = try await pending.value; XCTFail("A retired response cannot commit") } catch {}
+        XCTAssertFalse(fence.cacheAllowed(scope, payload: Data(invoice().utf8)))
+    }
+
+    func testFencedInvoiceRejectsDifferentFinalResponseOrigin() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let actor = UUID().uuidString.lowercased()
+        let organization = "00000000-0000-4000-8000-000000000002"
+        let scope = InvoiceReadFence.Scope(actor: actor, organization: organization, origin: "https://app.thorbis.com", invoice: invoiceID, resource: "invoice")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice(), finalURL: URL(string: "https://other.invalid/v1/invoices/\(invoiceID)"))]), baseURL: scope.origin)
+        client.savedCopyScope = SavedCopies.scope(actorID: actor, organizationID: organization)
+        let fence = InvoiceReadFence(directory: dir)
+        do { _ = try await client.fieldFencedInvoice(scope, fence: fence); XCTFail("A foreign final response must not authorize cache") } catch {}
+        XCTAssertFalse(fence.cacheAllowed(scope, payload: Data(invoice().utf8)))
+    }
+
+    func testCancelledFencedInvoiceCannotStartAnotherReadBeforeTransportQuiesces() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let actor = UUID().uuidString.lowercased()
+        let organization = "00000000-0000-4000-8000-000000000002"
+        let scope = InvoiceReadFence.Scope(actor: actor, organization: organization, origin: "https://app.thorbis.com", invoice: invoiceID, resource: "invoice")
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(403, #"{"title":"Denied"}"#, gate: gate), .init(200, invoice())]), baseURL: scope.origin)
+        client.savedCopyScope = SavedCopies.scope(actorID: actor, organizationID: organization)
+        let fence = InvoiceReadFence(directory: dir)
+        let pending = Task { try await client.fieldFencedInvoice(scope, fence: fence) }
+        await waitForRequests(1)
+        pending.cancel()
+        do { _ = try await pending.value; XCTFail("Expected cancellation or denial") } catch {}
+        gate.release()
+        do { _ = try await client.fieldFencedInvoice(scope, fence: fence); XCTFail("No new request may erase an uncertain outcome") } catch {}
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertFalse(fence.cacheAllowed(scope, payload: Data(invoice().utf8)))
+    }
+
     func testSavedInvoiceSourceSurvivesConcurrentLiveInvoiceResponse() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let client = APIClient(session: URLProtocolFixture.session([

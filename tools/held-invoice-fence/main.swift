@@ -128,6 +128,36 @@ crashPreflightChild.arguments = ["--crash-after-failed-preflight", dir.path]
 try crashPreflightChild.run(); crashPreflightChild.waitUntilExit()
 require(crashPreflightChild.terminationStatus == 0, "failed preflight must stop before transport even if process exits immediately")
 require(!fence.cacheAllowed(crashPreflightScope, payload: livePayload), "the hold visible after process exit prevents reuse until a new read")
+let cancellationScope = InvoiceReadFence.Scope(actor: scope.actor, organization: scope.organization, origin: scope.origin, invoice: "018f0000-0000-7000-8000-000000000011", resource: "invoice")
+let canceledAttempt = try fence.begin(cancellationScope)
+let cancellationResult = try canceledAttempt.finish(.uncertain)
+require(cancellationResult == .held, "uncertain terminal result stays held")
+var cancellationBlocked = false
+do { _ = try fence.begin(cancellationScope) } catch { cancellationBlocked = true }
+require(cancellationBlocked, "uncertain callback quiescence must prevent later requests in the same process")
+require(!fence.cacheAllowed(cancellationScope, payload: livePayload), "uncertain result cannot authorize cache")
+// Every stage fails closed before transport, and a failed denial never revives the old copy.
+let faults: [InvoiceReadFence.FaultPoint] = [.holdFileSync, .recordWrite, .recordPartialWrite, .recordFileSync, .recordRename, .holdRemoval, .holdRemovalSync]
+for fault in faults {
+    let recovery = try fence.begin(crashPreflightScope)
+    _ = try recovery.finish(.liveSuccess(livePayload))
+    let failing = InvoiceReadFence(directory: dir, injectFailure: { $0 == fault })
+    var issued = false
+    do { _ = try failing.begin(crashPreflightScope); issued = true } catch {}
+    require(!issued, "preflight failure must not start transport at \(fault)")
+    require(!fence.cacheAllowed(crashPreflightScope, payload: livePayload), "preflight failure must hold the record at \(fault)")
+    require(fence.cacheAllowed(unrelated, payload: livePayload), "failure must not hide an unrelated record")
+    let reset = try fence.begin(crashPreflightScope)
+    _ = try reset.finish(.liveSuccess(livePayload))
+    var arm = false
+    let denialFence = InvoiceReadFence(directory: dir, injectFailure: { arm && $0 == fault })
+    let denial = try denialFence.begin(crashPreflightScope)
+    arm = true
+    var failed = false
+    do { _ = try denial.finish(.denied) } catch { failed = true }
+    require(failed, "denial write must surface failure at \(fault)")
+    require(!fence.cacheAllowed(crashPreflightScope, payload: livePayload), "failed denial must not revive the old record at \(fault)")
+}
 require(!fence.cacheAllowed(scope, payload: livePayload), "unverified scope must start held")
 let initial = try fence.begin(scope)
 require(!fence.cacheAllowed(scope, payload: livePayload), "live read must hold cache")

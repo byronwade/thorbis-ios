@@ -13,6 +13,8 @@ import SwiftUI
 enum SavedCopies {
     /// Set around a pull to refresh: always ask the server, never reuse a read from moments ago.
     @TaskLocal static var liveOnly = false
+    /// The fenced owner, not the ordinary asynchronous writer, owns this response.
+    @TaskLocal static var suppressWrite = false
 
     /// Reads worth keeping: a job's, customer's, estimate's or invoice's own record and lists.
     static func isKept(_ path: String, query: [URLQueryItem] = []) -> Bool {

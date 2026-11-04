@@ -20,6 +20,9 @@ struct APIReadProvenance: Equatable, Sendable {
 struct APIRead<Value> {
     let value: Value
     let provenance: APIReadProvenance
+    /// Exact response bytes; this is not itself proof of authorization.
+    let rawData: Data
+    let finalResponseURL: URL?
 }
 extension APIRead: Sendable where Value: Sendable {}
 
@@ -273,7 +276,8 @@ final class APIClient: ObservableObject {
 
     func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil) async throws -> APIRead<T> {
         let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor)
-        return APIRead(value: try decodeResponse(response), provenance: response.provenance)
+        return APIRead(value: try decodeResponse(response), provenance: response.provenance, rawData: response.data,
+                       finalResponseURL: response.finalResponseURL)
     }
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
@@ -445,6 +449,7 @@ final class APIClient: ObservableObject {
         let status: Int
         let contentType: String?
         let provenance: APIReadProvenance
+        let finalResponseURL: URL?
     }
 
     private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
@@ -480,7 +485,7 @@ final class APIClient: ObservableObject {
             APIReadProvenance(origin: requestOrigin, savedCopyScope: copyScope, savedCopyScopeRevision: copyScopeRevision, generation: generation,
                               path: path, cursor: cursor, source: source)
         }
-        let reuseKey = readKey.flatMap { Self.reusesRecentRead(path, query: requestQueryItems) ? $0 : nil }
+        let reuseKey = readKey.flatMap { !SavedCopies.suppressWrite && Self.reusesRecentRead(path, query: requestQueryItems) ? $0 : nil }
         if let reuseKey, !SavedCopies.liveOnly, let recent = recentReads[reuseKey], recent.epoch == epoch,
            recent.generation == generation, Date().timeIntervalSince(recent.at) < Self.recentReadWindow {
             PerfProbe.request(method, path, note: "reused")
@@ -489,7 +494,7 @@ final class APIClient: ObservableObject {
                                            generation: original.generation, path: original.path,
                                            cursor: original.cursor, source: .recentResponse)
             return DataResponse(data: recent.response.data, status: recent.response.status,
-                                contentType: recent.response.contentType, provenance: reused)
+                                contentType: recent.response.contentType, provenance: reused, finalResponseURL: recent.response.finalResponseURL)
         }
         let keptKey = isJSONRead && copyScope != nil && SavedCopies.isKept(path, query: pageQuery) ? readKey : nil
         func savedCopy() -> DataResponse? {
@@ -498,7 +503,7 @@ final class APIClient: ObservableObject {
             if savedCopyPaths[path] != copy.savedAt { savedCopyPaths[path] = copy.savedAt }
             PerfProbe.request(method, path, note: "saved copy")
             return DataResponse(data: copy.data, status: 200, contentType: "application/json",
-                                provenance: provenance(.savedCopy(copy.savedAt)))
+                                provenance: provenance(.savedCopy(copy.savedAt)), finalResponseURL: nil)
         }
         if keptKey != nil, knownOffline, !SavedCopies.liveOnly, let copy = savedCopy() { return copy }
         if let copyScope, let keptKey, SavedCopyStore.shared.exists(scope: copyScope, key: keptKey) {
@@ -560,13 +565,13 @@ final class APIClient: ObservableObject {
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
         let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"),
-                                    provenance: provenance(.urlSession(cacheBypassed: freshRead)))
+                                    provenance: provenance(.urlSession(cacheBypassed: freshRead)), finalResponseURL: resp.url)
         if let reuseKey, mutationEpoch == epoch {
             recentReads[reuseKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
             if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }
         }
         if savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }
-        if let copyScope, let keptKey, savedCopyScope == copyScope, code == 200,
+        if !SavedCopies.suppressWrite, let copyScope, let keptKey, savedCopyScope == copyScope, code == 200,
            response.contentType?.lowercased().hasPrefix("application/json") != false {
             SavedCopyStore.shared.write(data, scope: copyScope, key: keptKey)
         }
