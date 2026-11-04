@@ -83,7 +83,7 @@ import Foundation
         } catch {
             guard revision == requestRevision else { return }
             guard current(isCurrent) else { retire(); return }
-            error = "Couldn't load more search results. Try again."
+            self.error = "Couldn't load more search results. Try again."
         }
     }
 
