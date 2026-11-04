@@ -93,6 +93,11 @@ struct CustomerOfferReview: Equatable {
     }
 }
 
+/// The server permits an identical already-submitted decision to replay after quote expiry.
+func customerOfferDecisionCanSubmit(_ review: CustomerOfferReview, now: Date, hasExactPriorAttempt: Bool) -> Bool {
+    hasExactPriorAttempt || review.isCurrent(now: now)
+}
+
 func customerEstimatePresentedTotal(base: Int?, review: CustomerOfferReview?) -> Int? {
     review?.quote.totalAmount ?? base
 }

@@ -688,7 +688,8 @@ struct CustomerEstimatePresentation: View {
             self.offerReview = nil; error = "This estimate changed. Please review the total again."; return
         }
         if requiresOffers && offerReview == nil { await openOfferShop(); return }
-        if requiresOffers, let offerReview, !offerReview.isCurrent(now: Date()), handoff?.submissionStarted != true {
+        if requiresOffers, let offerReview, !customerOfferDecisionCanSubmit(offerReview, now: Date(),
+            hasExactPriorAttempt: handoff?.publicDecision != nil || standaloneOfferDecision != nil) {
             self.offerReview = nil; error = "This total expired. Please review it again."; return
         }
         guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady, let revision = flow.issuedRevision else {
@@ -761,7 +762,8 @@ struct CustomerEstimatePresentation: View {
                     guard let offerReview,
                           offerReview.matches(token: link.token, revisionNumber: action.revisionNumber, contentHash: action.contentHash,
                                               optionID: flow.selectedOptionID, generation: generation),
-                          offerReview.isCurrent(now: Date()) || handoff?.submissionStarted == true else {
+                          customerOfferDecisionCanSubmit(offerReview, now: Date(),
+                            hasExactPriorAttempt: handoff?.publicDecision != nil || standaloneOfferDecision != nil) else {
                         error = "This total expired. Please review it again."; return
                     }
                     newDecision = .approveOffer(revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
