@@ -120,7 +120,7 @@ final class APIClient: ObservableObject {
 
     /// The verified actor and workspace whose saved copies this client reads and writes; nil
     /// while signed out, which turns saved copies off entirely.
-    private(set) var savedCopyScopeRevision = UUID()
+    @Published private(set) var savedCopyScopeRevision = UUID()
     var savedCopyScope: String? {
         didSet { if savedCopyScope != oldValue { savedCopyScopeRevision = UUID() } }
     }

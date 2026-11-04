@@ -457,6 +457,17 @@ final class JobDocumentsSafetyUITests: XCTestCase {
     private let invoice = "00000000-0000-4000-8000-000000002209"
     private let second = "00000000-0000-4000-8000-000000002240"
 
+    func testOpenCollectionClosesWhenSavedScopeChangesAwayAndBack() {
+        let app = launch(["--paper-preview-job-invoices-equal-balances", "--paper-preview-payment-scope-aba"], screen: "job-invoice")
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 15))
+        collect.tap()
+        let sheet = app.navigationBars["Collect payment"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: sheet)
+        waitForExpectations(timeout: 15)
+    }
+
     func testPartialReadRequiresRefreshBeforeBuildingAnotherEstimate() {
         let app = launch(["--paper-preview-job-documents-partial"])
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Couldn't load all estimates")).firstMatch.waitForExistence(timeout: 15))

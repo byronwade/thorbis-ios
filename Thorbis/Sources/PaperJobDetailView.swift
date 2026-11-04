@@ -140,7 +140,8 @@ struct JobDetailView: View {
     private var paymentAuthorityToken: [String] {
         [session.generation.uuidString, session.authorityRevision.uuidString,
          session.user?.id ?? "", session.activeOrganization?.id ?? "", String(session.policyVersion ?? 0),
-         api.requestGeneration.uuidString, api.normalizedOrigin ?? "", job?.id ?? "",
+         api.requestGeneration.uuidString, api.savedCopyScopeRevision.uuidString,
+         api.savedCopyScope ?? "", api.normalizedOrigin ?? "", job?.id ?? "",
          job?.organizationId ?? "", job?.customerId ?? "",
          String(session.can("job.view", feature: "jobs")),
          String(session.can("invoice.view", feature: "invoicing")),
@@ -522,6 +523,16 @@ struct JobDetailView: View {
            session.can("invoice.payment.create", feature: "payments") {
             InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice)
                 .thorbisSheetSurface().presentationDetents([.large]).presentationDragIndicator(.visible)
+                #if DEBUG
+                .task {
+                    guard PaperPreview.enabled,
+                          ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-scope-aba") else { return }
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled, let original = api.savedCopyScope else { return }
+                    api.savedCopyScope = original + "-preview-other"
+                    api.savedCopyScope = original
+                }
+                #endif
         }
     }
 
@@ -2397,11 +2408,13 @@ struct JobDetailView: View {
         let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
         let originalScope = model.scope, actorID = session.user?.id
-        let generation = session.generation, apiGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        let generation = session.generation, apiGeneration = api.requestGeneration,
+            copyRevision = api.savedCopyScopeRevision, origin = api.normalizedOrigin
         let current: @MainActor () -> Bool = { [weak api, weak session] in
             guard let api, let session else { return false }
             return session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
-                session.generation == generation && api.requestGeneration == apiGeneration && api.normalizedOrigin == origin &&
+                session.generation == generation && api.requestGeneration == apiGeneration &&
+                api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
                 session.can("job.view", feature: "jobs")
         }
         estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
@@ -2409,6 +2422,7 @@ struct JobDetailView: View {
             guard current() else { return }
             // The customer may have changed a phone, an email or a contact in their own hands.
             await loadContacts(job)
+            guard current() else { return }
             if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
             await finishCustomerDocuments()
         }
@@ -2436,6 +2450,7 @@ struct JobDetailView: View {
                 let generation = session.generation
                 let authority = session.authorityRevision
                 let apiGeneration = api.requestGeneration
+                let copyRevision = api.savedCopyScopeRevision
                 let origin = api.normalizedOrigin
                 guard let job, let expectedScope = scope(for: job) else { return }
                 selectedInvoiceID = invoiceID
@@ -2444,6 +2459,7 @@ struct JobDetailView: View {
                 }
                 guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
                       api.requestGeneration == apiGeneration, api.normalizedOrigin == origin,
+                      api.savedCopyScopeRevision == copyRevision,
                       let currentJob = self.job, scope(for: currentJob) == expectedScope else { return }
                 if !presentPayment(for: invoiceID) { withMotion(.snappy) { selectedTab = "Money" } }
             }
@@ -2544,6 +2560,7 @@ struct JobDetailView: View {
         let generation = session.generation
         let authority = session.authorityRevision
         let apiGeneration = api.requestGeneration
+        let copyRevision = api.savedCopyScopeRevision
         let origin = api.normalizedOrigin
         if let job { await loadJobEstimates(job) }
         await loadInvoices()
@@ -2554,7 +2571,8 @@ struct JobDetailView: View {
         selectedInvoiceID = requestedID
         await loadInvoicePayments(for: invoice)
         guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
-              api.requestGeneration == apiGeneration, api.normalizedOrigin == origin else { return }
+              api.requestGeneration == apiGeneration, api.savedCopyScopeRevision == copyRevision,
+              api.normalizedOrigin == origin else { return }
         presentPayment(for: requestedID)
     }
 
