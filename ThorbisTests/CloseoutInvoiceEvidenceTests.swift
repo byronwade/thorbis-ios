@@ -68,8 +68,8 @@ final class CloseoutInvoiceEvidenceTests: XCTestCase {
     }
 
     func testUnassociatedLegacyPaymentKeepsJobCoverageUnknown() {
-        XCTAssertTrue(CloseoutInvoiceEvidence.hasUnassociatedPayments(["another-job", nil]))
-        XCTAssertFalse(CloseoutInvoiceEvidence.hasUnassociatedPayments(["another-job", "job"]))
+        XCTAssertTrue(CloseoutInvoiceEvidence.hasUnassociatedPayments(["other-job", nil]))
+        XCTAssertFalse(CloseoutInvoiceEvidence.hasUnassociatedPayments(["other-job", "job"]))
     }
 
     func testPaymentSumRejectsOverflowAndNegativeAmounts() {

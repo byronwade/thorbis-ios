@@ -232,8 +232,8 @@ struct JobCloseoutView: View {
             if case .payment(let payload) = entry.action { return payload }
             return nil
         } + outbox.recordedPayments
-        guard !CloseoutInvoiceEvidence.hasUnassociatedPayments(unassociated.map(\.jobId)) else { return false }
         let listed = JobDetailCache.invoices(jobID)
+        guard !CloseoutInvoiceEvidence.hasUnassociatedPayments(unassociated.map(\.jobId)) else { return false }
         let paidHere = (outbox.pending.compactMap { entry -> String? in
             if case .payment(let payment) = entry.action, payment.jobId == jobID { payment.invoiceId } else { nil }
         } + outbox.recordedPayments.filter { $0.jobId == jobID }.map(\.invoiceId))

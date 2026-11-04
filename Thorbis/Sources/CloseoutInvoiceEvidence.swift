@@ -33,6 +33,7 @@ enum CloseoutInvoiceEvidence {
         let amount: Int
     }
 
+    /// A nil job link cannot be assigned safely using the unscoped legacy invoice cache.
     static func hasUnassociatedPayments(_ jobIDs: [String?]) -> Bool { jobIDs.contains { $0 == nil } }
 
     static func pendingAmounts(_ payments: [PendingPayment], actorID: String, organizationID: String,
