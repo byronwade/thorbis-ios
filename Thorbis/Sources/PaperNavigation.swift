@@ -997,7 +997,7 @@ struct RootView: View {
     /// Opens search with the words a Siri or Shortcuts search asked for.
     private func openRequestedSearch(phone: Bool) {
         guard let query = store.requestedSearch else { return }
-        store.noteHandledNavigation(session: session.generation, root: selectedTab)
+        store.noteHandledNavigation(session: session.generation)
         store.requestedSearch = nil
         if phone {
             if drawerOpen { closeDrawer() }
