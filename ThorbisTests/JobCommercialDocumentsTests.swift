@@ -90,6 +90,27 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 4)
     }
 
+    func testJobLoadWaitsForSheetOwnedReadOfTheSameModel() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, #"{"items":[]}"#)])
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let sheetRead = Task { await model.load() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        let loads = JobInvoicePaymentLoads()
+        var jobReadFinished = false
+        let jobRead = Task { await loads.load(model); jobReadFinished = true }
+        var cancelledWouldOpen = false
+        let cancelled = Task { await loads.load(model); if !Task.isCancelled { cancelledWouldOpen = true } }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(jobReadFinished, "A job refresh must wait for the sheet's in-flight read")
+        cancelled.cancel()
+        gate.release(); await sheetRead.value; await jobRead.value; await cancelled.value
+        XCTAssertTrue(model.canRecordPayment)
+        XCTAssertFalse(cancelledWouldOpen, "A cancelled route must not present after the shared read completes")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+    }
+
     func testOfflineCashAndCheckRemainAvailableThroughTheScopedPaymentRoute() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
