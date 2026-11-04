@@ -373,14 +373,16 @@ enum PaperPreview {
                 let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
                 JobDetailCache.save(invoice: old)
             }
-            let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: scenario == "legacy" ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
-            if scenario == "recorded" {
+            let legacy = ["legacy", "legacy-recorded", "noaccess", "no-payments", "offline", "satisfied"].contains(scenario)
+            let recorded = ["recorded", "legacy-recorded", "noaccess", "no-payments", "satisfied"].contains(scenario)
+            let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: legacy ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
+            if recorded {
                 let file = folder.appendingPathComponent("\(actorID)_\(organizationID).recorded")
                 try! JSONEncoder().encode([payment]).write(to: file)
             }
             let box = FieldOutbox(directory: root, defaults: defaults())
             box.bind(actorID: actorID, organizationID: organizationID)
-            if scenario != "recorded" { box.enqueue(.payment(payment), policyVersion: 1) }
+            if !recorded { box.enqueue(.payment(payment), policyVersion: 1) }
             if scenario == "missing" {
                 box.enqueue(.payment(.init(invoiceId: "00000000-0000-4000-8000-000000000099", jobId: jobID, amountCents: 100, method: "cash", idempotencyKey: "preview-missing")), policyVersion: 1)
             }
@@ -929,10 +931,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let photos: [String: Any] = ["requirement": "photos", "kind": "photos", "outcome": "satisfied",
                                          "detail": "2 of 2 photos added", "nextAction": NSNull(), "commercialSource": NSNull()]
             if ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil {
-                let payment: [String: Any] = ["requirement": "payment", "kind": "payment_or_unpaid_disposition", "outcome": "blocked", "detail": "Payment is due", "nextAction": "collect_payment", "commercialSource": "invoice"]
+                let satisfied = ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "satisfied"
+                let payment: [String: Any] = ["requirement": "payment", "kind": "payment_or_unpaid_disposition", "outcome": satisfied ? "satisfied" : "blocked", "detail": satisfied ? "Payment recorded" : "Payment is due", "nextAction": "collect_payment", "commercialSource": "invoice"]
                 return ["policy": ["organizationId": org, "requireNotes": false, "requiredPhotoCount": 0, "requiredChecks": [], "updatedByUserId": NSNull(), "updatedAt": NSNull()],
                         "facts": ["noteCount": 0, "photoCount": 0, "acknowledgedCheckKeys": [], "authorizationTarget": target],
-                        "acknowledged": [], "requirements": [payment], "unmet": [payment], "completable": false]
+                        "acknowledged": [], "requirements": [payment], "unmet": satisfied ? [] : [payment], "completable": satisfied]
             }
             let notes: [String: Any] = ["requirement": "notes", "kind": "notes", "outcome": "blocked",
                                         "detail": "Add a note about the work", "nextAction": "Add a note", "commercialSource": NSNull()]
@@ -1218,6 +1221,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "noaccess" { capabilities.removeAll { $0 == "invoice.view" } }
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
@@ -1247,7 +1251,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
             if PaperPreview.role != nil { enabledFeatures.append("job_booking_notices") }
-            if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
+            if ["office", "owner"].contains(PaperPreview.role) ||
+                (ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != nil && ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] != "no-payments") { enabledFeatures.append("payments") }
             let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })
             return ["organizationId": org, "evaluatedAt": now, "features": features]
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.

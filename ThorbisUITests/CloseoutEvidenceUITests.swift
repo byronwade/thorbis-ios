@@ -37,13 +37,57 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Waiting to sync"].exists)
     }
 
+    func testLegacyPendingPaymentOpensSavedWorkReview() {
+        let app = launch("legacy")
+        let review = app.buttons["Review saved work"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        review.tap()
+        XCTAssertTrue(app.buttons["saved-work-sync"].waitForExistence(timeout: 10))
+    }
+
+    func testLegacyRecordedPaymentIdentifiesInvoiceWithoutOpeningRoute() {
+        let app = launch("legacy-recorded")
+        XCTAssertTrue(app.staticTexts["Invoice 00002209"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Connect, then open these invoices from Invoices on this phone to refresh payments already sent."].exists)
+        XCTAssertFalse(app.buttons["Open invoice 00002209"].exists)
+    }
+
+    func testUnavailableInvoicePermissionExplainsHowToRecover() {
+        let app = launch("noaccess")
+        XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Invoice 00002209"].exists)
+    }
+
+    func testUnavailablePaymentFeatureExplainsHowToRecover() {
+        let app = launch("no-payments")
+        XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Invoice 00002209"].exists)
+    }
+
+    func testOfflineSavedWorkCannotSyncUntilReconnected() {
+        let app = launch("offline")
+        let review = app.buttons["Review saved work"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        review.tap()
+        let sync = app.buttons["saved-work-sync"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 10))
+        XCTAssertFalse(sync.isEnabled)
+        XCTAssertTrue(app.staticTexts["Offline · work stays saved on this phone"].exists)
+    }
+
+    func testSatisfiedServerPaymentDoesNotShowRecoveryWarning() {
+        let app = launch("satisfied")
+        XCTAssertTrue(app.staticTexts["1 of 1"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Payments to check"].exists)
+    }
+
     private func launch(_ scenario: String) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-closeout"]
         app.launchEnvironment["THORBIS_CLOSEOUT_TEST"] = scenario
         app.launch()
-        XCTAssertTrue(app.staticTexts["Payment is due"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts[scenario == "satisfied" ? "Payment recorded" : "Payment is due"].waitForExistence(timeout: 20))
         return app
     }
 }
