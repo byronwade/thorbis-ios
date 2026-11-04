@@ -18,11 +18,15 @@ private struct CustomerHandoffEstimateDetails: View {
 
     private var type: CustomerType { CustomerType(sizeClass) }
     private var current: Bool { model.detailsCurrent(record, authority: authority) }
+    private var revisionMatches: Bool {
+        guard let revision else { return false }
+        return revision.matchesDetails(for: record)
+    }
     private var access: DocumentDescriptionAccess {
         .init(identity: .estimate(scope: model.scope, record: record, issued: revision),
               organizationID: model.scope.organizationID, capability: "estimate.view", feature: "estimates",
-              sourceGeneration: model.session.generation, fresh: current && revision != nil,
-              active: current, scopeValid: current)
+              sourceGeneration: model.session.generation, fresh: current && revisionMatches,
+              active: current && revisionMatches, scopeValid: current && revisionMatches)
     }
 
     var body: some View {
@@ -31,7 +35,7 @@ private struct CustomerHandoffEstimateDetails: View {
                 if !current {
                     CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
                                          message: "Hand the device back to your technician to reopen this estimate.")
-                } else if let revision {
+                } else if let revision, revisionMatches {
                     Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                     if let options = revision.options, !options.isEmpty {
@@ -50,6 +54,9 @@ private struct CustomerHandoffEstimateDetails: View {
                         lines(revision.lines, currency: revision.currency, total: revision.totalAmount,
                               context: "Estimate EST-\(record.id.suffix(4).uppercased())")
                     }
+                } else if revision != nil {
+                    CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                         message: "Hand the device back to your technician to reopen this estimate.")
                 } else if let error {
                     CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() }
                 } else {
@@ -143,6 +150,7 @@ struct JobEstimateHandoffView: View {
         .thorbisDestination(item: $detailsID) { id in
             if let record = model.records.first(where: { $0.id == id }) {
                 CustomerHandoffEstimateDetails(model: model, record: record)
+                    .id(record)
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             }
         }
@@ -192,7 +200,7 @@ struct JobEstimateHandoffView: View {
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
                 .accessibilityIdentifier("handoff-select-\(record.id)")
             } else { estimateSummary(record) }
-            if record.status == "sent", model.complete, model.freshIDs.contains(record.id), model.isCurrent {
+            if model.detailsCurrent(record, authority: session.authorityRevision) {
                 Button { detailsID = record.id } label: {
                     Label("View details", systemImage: "doc.text")
                         .font(Theme.customerFont(type.body, weight: .medium))
