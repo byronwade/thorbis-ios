@@ -53,6 +53,19 @@ final class InvoiceGatewayPagerTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
     }
 
+    func testUnsupportedQuoteAndUTF16LengthRemainPartialWithoutNetwork() async {
+        let api = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        api.savedCopyScope = UUID().uuidString
+        let pager = InvoiceGatewayPager(api: api)
+        await pager.start(customer: "\"Smith\"", isCurrent: { true })
+        XCTAssertNotNil(pager.error)
+        XCTAssertTrue(pager.isPartial)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 0)
+        await pager.start(customer: String(repeating: "😀", count: 65), isCurrent: { true })
+        XCTAssertNotNil(pager.error)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 0)
+    }
+
     func testCustomerInputCannotInjectSearchTokens() {
         XCTAssertEqual(InvoiceGatewayPager.customerQuery(#"Acme" type:job \ office"#),
                        #"type:invoice customer:"Acme\" type:job \\ office""#)

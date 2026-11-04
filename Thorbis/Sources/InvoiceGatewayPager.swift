@@ -38,9 +38,10 @@ import Foundation
     func start(customer: String, isCurrent: @escaping @MainActor () -> Bool) async {
         retire()
         let term = customer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty, term.count <= 100, !term.contains(where: { $0.isNewline }),
+        guard !term.isEmpty, term.utf16.count <= 128, !term.hasPrefix("\""),
+              !term.contains(where: { $0.isNewline }),
               isCurrent(), let scope = api.savedCopyScope, let origin = api.normalizedOrigin else {
-            error = "Search needs a valid customer name and current access."
+            error = "This search needs current access and a name of at most 128 characters that doesn't begin with a quote."
             return
         }
         savedCopyScope = scope; self.origin = origin; generation = api.requestGeneration
