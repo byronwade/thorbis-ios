@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-03-navigation-routing",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "arrow.turn.up.right", title: "Keep your place",
+                      detail: "Links and search open on the right screen when you switch layouts or workspaces."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-03-startup-destination",
             date: "2026-11-03",
             highlights: [
