@@ -1198,6 +1198,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.isEmptyWorkspace, ["/v1/jobs", "/v1/customers", "/v1/estimates"].contains(path) {
             return ["items": [Any]()]
         }
+        if PaperPreview.screen == "job-media", ProcessInfo.processInfo.arguments.contains("--paper-preview-photo-handoff"),
+           path.hasPrefix("/v1/media/"), !path.hasSuffix("/download") {
+            let mediaID = String(path.dropFirst("/v1/media/".count))
+            guard ["00000000-0000-4000-8000-000000009301", "00000000-0000-4000-8000-000000009302", "00000000-0000-4000-8000-000000009303"].contains(mediaID) else { return NSNull() }
+            return ["id": mediaID, "jobId": PaperPreview.jobID, "kind": "photo", "uploadState": "stored", "archived": false]
+        }
         switch path {
         case "/api/auth/get-session":
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-cleanup-failure") { return NSNull() }

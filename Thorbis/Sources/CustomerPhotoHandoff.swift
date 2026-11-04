@@ -44,6 +44,18 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
             loadAsset: { try await self.api.customerPhotoMetadata($0) })
     }
 
+    private func download(_ assetID: String) async throws -> URL {
+        #if DEBUG
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-photo-handoff") {
+            guard let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGOwb9kCRAwQCgAnPgXdEEuqSQAAAABJRU5ErkJggg==") else { throw CustomerPhotoSelection.Invalid.records }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            return url
+        }
+        #endif
+        return try await MediaTransfer(api: api).download(mediaID: assetID, filename: "photo.jpg", requireFresh: true)
+    }
+
     func clear() { loadID = UUID(); image = nil; loading = false }
 
     func load() async {
@@ -55,7 +67,7 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
             let record = try await api.customerPhotoMetadata(assetID)
             guard isCurrent, current == loadID, !Task.isCancelled else { throw CancellationError() }
             _ = try CustomerPhotoSelection(jobID: selection.jobID, organizationID: selection.organizationID, selectedIDs: [assetID]).validateFresh([record])
-            let file = try await MediaTransfer(api: api).download(mediaID: assetID, filename: "photo.jpg", requireFresh: true)
+            let file = try await download(assetID)
             defer { try? FileManager.default.removeItem(at: file) }
             guard isCurrent, current == loadID, !Task.isCancelled else { throw CancellationError() }
             // The download endpoint may issue a URL for an archived object. Recheck the exact
@@ -86,8 +98,15 @@ struct CustomerPhotoHandoffView: View {
     @Environment(\.scenePhase) private var scenePhase
     let onUnlocked: () -> Void
 
+    private func authenticateOwner() async -> Bool {
+        #if DEBUG
+        if let authenticate = PaperPreview.ownerAuthentication { return await authenticate("Unlock to leave customer mode") }
+        #endif
+        return await StaffUnlock.unlock()
+    }
+
     var body: some View {
-        CustomerModeContainer(onUnlocked: { owner.clear(); onUnlocked() }, ownerControlTitle: "Hand back") { handBack in
+        CustomerModeContainer(onUnlocked: { owner.clear(); onUnlocked() }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
             VStack(spacing: 20) {
                 Text("Photos from this job").font(Theme.customerFont(24, weight: .medium)).accessibilityAddTraits(.isHeader)
                 Text("\(owner.index + 1) of \(owner.selection.selectedIDs.count)")
@@ -95,7 +114,7 @@ struct CustomerPhotoHandoffView: View {
                 Spacer(minLength: 0)
                 if owner.loading { ProgressView() }
                 else if let image = owner.image, owner.isCurrent, scenePhase == .active {
-                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Photo \(owner.index + 1) of \(owner.selection.selectedIDs.count)")
+                    Image(uiImage: image).resizable().scaledToFit().accessibilityLabel("Photo \(owner.index + 1) of \(owner.selection.selectedIDs.count)").accessibilityIdentifier("customer-photo-image")
                         .gesture(DragGesture(minimumDistance: 35).onEnded { gesture in
                             guard abs(gesture.translation.width) > abs(gesture.translation.height) else { return }
                             if gesture.translation.width < -50, owner.index + 1 < owner.selection.selectedIDs.count { owner.index += 1 }
