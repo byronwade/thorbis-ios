@@ -188,7 +188,7 @@ struct JobDetailView: View {
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
-                            case "Money": moneyContent(job)
+                            case "Money": moneyContent(job, proxy: proxy)
                             case "Activity": activityContent(job)
                             default: overviewContent(job)
                             }
@@ -1752,11 +1752,37 @@ struct JobDetailView: View {
 
     /// Money: the job's estimates, then its invoices. Each paper shows its own amount once; what's
     /// owed across them is on Overview and in the bar, never repeated in a header.
-    private func moneyContent(_ job: JobRecord) -> some View {
+    private func moneyContent(_ job: JobRecord, proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            estimatesContent(job)
-            invoiceContent(job)
+            if session.can("estimate.view", feature: "estimates") && session.can("invoice.view", feature: "invoicing") {
+                FlowRow(spacing: 8, lineSpacing: 8) {
+                    moneyJump("Estimates", id: "job-money-estimates", proxy: proxy)
+                    moneyJump("Invoices", id: "job-money-invoices", proxy: proxy)
+                }
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear.frame(height: 1).id("job-money-estimates")
+                estimatesContent(job)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear.frame(height: 1).id("job-money-invoices")
+                invoiceContent(job)
+            }
         }
+    }
+
+    private func moneyJump(_ title: String, id: String, proxy: ScrollViewProxy) -> some View {
+        Button { proxy.scrollTo(id, anchor: .center) } label: {
+            Text(title).font(Theme.font(15, weight: .medium))
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .background(Theme.fill, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityHint("Jump to \(title.lowercased()) on this job")
+        .accessibilityIdentifier("job-money-jump-\(title.lowercased())")
     }
 
     /// Every estimate has its own paper and price; the footer builds another on this job.
