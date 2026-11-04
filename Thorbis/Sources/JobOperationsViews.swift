@@ -229,6 +229,9 @@ struct JobCloseoutView: View {
             return payment
         }
     }
+    private var canRefreshRecordedPayments: Bool {
+        session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
+    }
     private var unassociatedRecordedInvoiceIDs: [String] {
         Array(Set(outbox.recordedPayments.filter { $0.jobId == nil }.map(\.invoiceId))).sorted()
     }
@@ -362,7 +365,7 @@ struct JobCloseoutView: View {
                             }
                         }
                         if !unassociatedRecordedInvoiceIDs.isEmpty {
-                            if session.can("invoice.view", feature: "invoicing") {
+                            if canRefreshRecordedPayments {
                                 Text("Connect and open each invoice to refresh payments already sent.")
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                                 ForEach(unassociatedRecordedInvoiceIDs, id: \.self) { id in
@@ -370,7 +373,7 @@ struct JobCloseoutView: View {
                                         .frame(minHeight: 44).buttonStyle(PressStyle())
                                 }
                             } else {
-                                Text("Ask your office to restore your invoice access, then refresh those invoices on this phone.")
+                                Text("Ask your office to enable your invoice and payment access, then refresh those invoices on this phone.")
                                     .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
                             }
                         }
@@ -465,7 +468,7 @@ struct JobCloseoutView: View {
             if !valid { savedWorkScope = nil }
         }
         .onChange(of: session.authorityRevision) { _, _ in
-            if !session.can("invoice.view", feature: "invoicing") { recoveryInvoiceID = nil }
+            if !canRefreshRecordedPayments { recoveryInvoiceID = nil }
         }
         .onChange(of: session.generation) { _, _ in recoveryInvoiceID = nil }
         .onChange(of: api.normalizedOrigin) { _, _ in recoveryInvoiceID = nil }
