@@ -2,6 +2,15 @@ import Foundation
 
 @main struct TestCart {
   static func main() throws {
+    let decoder = JSONDecoder()
+    let maximumSafe = try decoder.decode(CustomerSafeMinorUnits.self, from: Data("9007199254740991".utf8))
+    precondition(maximumSafe.value == 9_007_199_254_740_991)
+    precondition((try? decoder.decode(CustomerSafeMinorUnits.self, from: Data("9007199254740992".utf8))) == nil)
+    precondition((try? decoder.decode(CustomerSafeMinorUnits.self, from: Data("-1".utf8))) == nil)
+    precondition((try? decoder.decode(CustomerSafeMinorUnits.self, from: Data("1.5".utf8))) == nil)
+    struct RequiredAmount: Decodable { let totalAmount: CustomerSafeMinorUnits }
+    precondition((try? decoder.decode(RequiredAmount.self, from: Data("{}".utf8))) == nil)
+    precondition(customerAcceptedMoneyDecimal(9_007_199_254_740_991) == Decimal(string: "90071992547409.91"))
     let session = UUID(), api = UUID()
     let authority = CustomerOfferAuthorityScope(actorID: "actor", organizationID: "org", sessionGeneration: session, apiGeneration: api, origin: "https://example.test")
     func allowed(actor: String? = "actor", organization: String? = "org", sessionID: UUID? = nil, apiID: UUID? = nil,
@@ -53,7 +62,7 @@ import Foundation
     precondition(!customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: false))
     precondition(customerOfferDecisionCanSubmit(reviewed, now: afterExpiry, hasExactPriorAttempt: true))
     func receipt(id: String = "018f0000-aaaa-7000-8000-000000000013", option: String? = nil, signer: String = "Customer",
-                 amount: Double = 2000, quoteID: String = "018f0000-aaaa-7000-8000-000000000012", digest: String? = nil,
+                 amount: Int = 2000, quoteID: String = "018f0000-aaaa-7000-8000-000000000012", digest: String? = nil,
                  quantity: Int = 2) -> CustomerOfferReceipt {
       CustomerOfferReceipt(id: id, optionId: option, signerName: signer, totalAmount: amount, offerQuoteId: quoteID,
         quoteIdentity: digest ?? identity, selections: [.init(offerId: offer, quantity: quantity)])
@@ -66,6 +75,25 @@ import Foundation
     precondition(reviewed.verifiedAcceptedAmount(receipt(option: offer), signerName: "Customer") == nil)
     precondition(reviewed.verifiedAcceptedAmount(receipt(amount: 1999), signerName: "Customer") == nil)
     precondition(reviewed.verifiedAcceptedAmount(nil as CustomerOfferReceipt?, signerName: "Customer") == nil)
+    let overSafeReceipt = try JSONDecoder().decode(CustomerOfferReceipt.self, from: Data("""
+      {"id":"018f0000-aaaa-7000-8000-000000000013","signerName":"Customer","totalAmount":9007199254740993,"offerQuoteId":"018f0000-aaaa-7000-8000-000000000012","quoteIdentity":"\(identity)","selections":[{"offerId":"\(offer)","quantity":2}]}
+      """.utf8))
+    precondition(overSafeReceipt.totalAmount == 9_007_199_254_740_993)
+    precondition(reviewed.verifiedAcceptedAmount(overSafeReceipt, signerName: "Customer") == nil)
+    let tooLargeQuote = String(data: quoteData, encoding: .utf8)!.replacingOccurrences(of: "\"totalAmount\":2000,\"base\"", with: "\"totalAmount\":9007199254740992,\"base\"")
+    let invalidQuote = try JSONDecoder().decode(CustomerOfferQuote.self, from: Data(tooLargeQuote.utf8))
+    precondition(!cart.install(invalidQuote, ticket: captured, now: Date()))
+    let unsafeReview = CustomerOfferReview(quote: invalidQuote, selections: cart.selections, token: "token", revisionNumber: 1,
+      contentHash: hash, optionID: nil, generation: generation)
+    precondition(unsafeReview.verifiedAcceptedAmount(receipt(amount: 9_007_199_254_740_992), signerName: "Customer") == nil)
+    precondition(unsafeReview.verifiedAcceptedAmount(overSafeReceipt, signerName: "Customer") == nil)
+    let maxSafeData = String(data: quoteData, encoding: .utf8)!.replacingOccurrences(of: "\"totalAmount\":2000,\"base\"", with: "\"totalAmount\":9007199254740991,\"base\"")
+    let maxSafeQuote = try JSONDecoder().decode(CustomerOfferQuote.self, from: Data(maxSafeData.utf8))
+    let maxSafeReview = CustomerOfferReview(quote: maxSafeQuote, selections: cart.selections, token: "token", revisionNumber: 1,
+      contentHash: hash, optionID: nil, generation: generation)
+    precondition(maxSafeReview.verifiedAcceptedAmount(receipt(amount: 9_007_199_254_740_991), signerName: "Customer") == 9_007_199_254_740_991)
+
+
     precondition(reviewed.matches(token: "token", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
     precondition(!reviewed.matches(token: "different", revisionNumber: 1, contentHash: hash, optionID: nil, generation: generation))
     precondition(!reviewed.matches(token: "token", revisionNumber: 2, contentHash: hash, optionID: nil, generation: generation))

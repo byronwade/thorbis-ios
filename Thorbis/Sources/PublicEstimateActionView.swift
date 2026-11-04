@@ -505,6 +505,10 @@ private struct IssuedEstimatePreview: UIViewRepresentable {
     }
 }
 
+private func money(_ amount: Int, currency: String) -> String {
+    customerAcceptedMoneyDecimal(amount).formatted(.currency(code: currency))
+}
+
 private func money(_ amount: Double, currency: String) -> String {
     let formatter = NumberFormatter()
     formatter.numberStyle = .currency

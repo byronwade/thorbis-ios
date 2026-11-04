@@ -60,6 +60,18 @@ final class HeldCustomerOffersTests: XCTestCase {
         XCTAssertFalse(cart.install(try quote(), ticket: ticket, now: Date()))
         XCTAssertFalse(cart.install(try quote(), ticket: cart.ticket, now: Date()))
     }
+    func testLegacyAcceptanceUsesExactSafeIntegerMinorUnits() throws {
+        func receipt(_ amount: String?) -> Data {
+            let field = amount.map { ",\"totalAmount\":\($0)" } ?? ""
+            return Data("{\"id\":\"receipt\",\"signerName\":\"Customer\",\"acceptedAt\":\"2026-11-03T00:00:00Z\"\(field)}".utf8)
+        }
+        XCTAssertEqual(try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: receipt("9007199254740991")).totalAmount, 9_007_199_254_740_991)
+        XCTAssertThrowsError(try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: receipt(nil)))
+        XCTAssertThrowsError(try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: receipt("1.5")))
+        XCTAssertThrowsError(try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: receipt("-1")))
+        XCTAssertThrowsError(try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: receipt("9007199254740992")))
+        XCTAssertEqual(customerAcceptedMoneyDecimal(9_007_199_254_740_991), Decimal(string: "90071992547409.91"))
+    }
     func testOfferApprovalEncodesTheExactServerDecisionFields() throws {
         let decision = PublicEstimateActionDecision.approveOffer(revisionNumber: 1, nonce: "nonce-1234", contentHash: hash,
             signerName: " Customer ", consentVersion: "estimate-approval-v1", consent: true, optionID: nil,
@@ -98,6 +110,11 @@ final class HeldCustomerOffersTests: XCTestCase {
         XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(1999, "Customer", 2), signerName: "Customer"))
         XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(2000, "Customer", 1), signerName: "Customer"))
         XCTAssertNil(reviewed.verifiedAcceptedAmount(nil as PublicEstimateAction.Acceptance?, signerName: "Customer"))
+        let aboveSafe = Data("""
+            {"id":"018f0000-aaaa-7000-8000-000000000013","signerName":"Customer","acceptedAt":"2026-11-03T12:00:00Z","totalAmount":9007199254740993}
+            """.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(PublicEstimateAction.Acceptance.self, from: aboveSafe))
+
         XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(2000, "Customer", 2, quoteID: offerID), signerName: "Customer"))
         XCTAssertNil(reviewed.verifiedAcceptedAmount(try receipt(2000, "Customer", 2, quoteIdentity: "sha256:" + String(repeating: "c", count: 64)), signerName: "Customer"))
         XCTAssertFalse(reviewed.matchesAcceptance(try receipt(1999, "Customer", 2), signerName: "Customer"))

@@ -46,10 +46,25 @@ struct PublicEstimateAction: Decodable, Equatable {
         let optionId: String?
         let signerName: String
         let acceptedAt: String
-        let totalAmount: Double
+        let totalAmount: Int
         let offerQuoteId: String?
         let quoteIdentity: String?
         let selections: [CustomerOfferSelection]?
+
+        private enum CodingKeys: String, CodingKey {
+            case id, optionId, signerName, acceptedAt, totalAmount, offerQuoteId, quoteIdentity, selections
+        }
+        init(from decoder: Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            id = try fields.decode(String.self, forKey: .id)
+            optionId = try fields.decodeIfPresent(String.self, forKey: .optionId)
+            signerName = try fields.decode(String.self, forKey: .signerName)
+            acceptedAt = try fields.decode(String.self, forKey: .acceptedAt)
+            totalAmount = try fields.decode(CustomerSafeMinorUnits.self, forKey: .totalAmount).value
+            offerQuoteId = try fields.decodeIfPresent(String.self, forKey: .offerQuoteId)
+            quoteIdentity = try fields.decodeIfPresent(String.self, forKey: .quoteIdentity)
+            selections = try fields.decodeIfPresent([CustomerOfferSelection].self, forKey: .selections)
+        }
     }
 
     var canApprovePlainly: Bool {

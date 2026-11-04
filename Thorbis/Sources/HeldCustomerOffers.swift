@@ -87,11 +87,25 @@ struct CustomerOfferQuote: Decodable, Equatable {
     let addOns: [AddOn]
 }
 
+struct CustomerSafeMinorUnits: Decodable, Equatable {
+    let value: Int
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let amount = try container.decode(Int.self)
+        guard (0...9_007_199_254_740_991).contains(amount) else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Accepted total is outside the supported money range")
+        }
+        value = amount
+    }
+}
+
+func customerAcceptedMoneyDecimal(_ amount: Int) -> Decimal { Decimal(amount) / 100 }
+
 struct CustomerOfferReceipt: Decodable, Equatable {
     let id: String
     let optionId: String?
     let signerName: String
-    let totalAmount: Double
+    let totalAmount: Int
     let offerQuoteId: String?
     let quoteIdentity: String?
     let selections: [CustomerOfferSelection]?
@@ -114,7 +128,8 @@ struct CustomerOfferReview: Equatable {
         guard let receipt, UUID(uuidString: receipt.id) != nil,
               receipt.optionId?.lowercased() == optionID?.lowercased(),
               receipt.offerQuoteId?.lowercased() == quote.id.lowercased(), receipt.quoteIdentity == quote.quoteIdentity,
-              receipt.signerName == signerName, Int(exactly: receipt.totalAmount) == quote.totalAmount,
+              receipt.signerName == signerName, receipt.totalAmount == quote.totalAmount,
+              (0...9_007_199_254_740_991).contains(receipt.totalAmount),
               let returned = receipt.selections else { return nil }
         let normalized = returned.map { CustomerOfferSelection(offerId: $0.offerId.lowercased(), quantity: $0.quantity) }
             .sorted { $0.offerId < $1.offerId }
@@ -220,7 +235,7 @@ struct CustomerOfferCart: Equatable {
               let expiry = Self.expiryDate(result.expiresAt), expiry > now,
               result.base.id?.lowercased() == optionID?.lowercased(),
               Self.validLines(result.base.lines, total: result.base.totalAmount),
-              result.addOns.count == selections.count,
+              (0...9_007_199_254_740_991).contains(result.totalAmount), result.addOns.count == selections.count,
               Set(result.addOns.map { $0.id.lowercased() }).count == result.addOns.count,
               result.addOns.allSatisfy({ item in
                   selections.contains { $0.offerId == item.id.lowercased() && $0.quantity == item.quantity } &&
@@ -253,10 +268,11 @@ struct CustomerOfferCart: Equatable {
     }
 
     private static func validLines(_ lines: [CustomerOfferLine], total: Int) -> Bool {
-        guard !lines.isEmpty else { return false }
+        let limit = 9_007_199_254_740_991
+        guard !lines.isEmpty, (-limit...limit).contains(total) else { return false }
         var sum = 0
         for line in lines {
-            guard line.quantity > 0 else { return false }
+            guard line.quantity > 0, (-limit...limit).contains(line.unitPrice), (-limit...limit).contains(line.totalAmount) else { return false }
             let product = line.unitPrice.multipliedReportingOverflow(by: line.quantity)
             guard !product.overflow, product.partialValue == line.totalAmount else { return false }
             let next = sum.addingReportingOverflow(line.totalAmount)
