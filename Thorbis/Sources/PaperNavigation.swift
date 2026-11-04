@@ -94,7 +94,10 @@ struct RootView: View {
                         store.requestedSchedule += 1
                         startupFixtureWide.toggle()
                     }
-                    if !startupFixtureWide { Button("Test open jobs") { primaryTab = .jobs } }
+                    if !startupFixtureWide {
+                        Button("Test open jobs") { primaryTab = .jobs }
+                        Button("Test settings") { showSettings = true }
+                    }
                 }.font(.caption).padding(4).background(Color.yellow)
             }
         }
