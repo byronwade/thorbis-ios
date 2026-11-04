@@ -143,7 +143,21 @@ struct RootView: View {
     @ViewBuilder private func navigation(wide: Bool) -> some View {
         if wide { TabletRoot() } else {
             phoneShell()
-                .onAppear { phoneShellVisible = true; applyRoleDefaults() }
+                .onAppear {
+                    phoneShellVisible = true
+                    if store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil,
+                       let saved = store.rememberedRoot(session: session.generation),
+                       let destination = StartupDestination(rawValue: saved), destination.permitted(session) {
+                        selectedTab = saved
+                    }
+                    applyRoleDefaults()
+                }
+                .onChange(of: selectedTab) { _, value in
+                    if phoneShellVisible {
+                        store.rememberRoot(value, session: session.generation)
+                        _ = store.consumeStartupSelection(session: session.generation)
+                    }
+                }
                 .onDisappear { phoneShellVisible = false }
         }
     }
