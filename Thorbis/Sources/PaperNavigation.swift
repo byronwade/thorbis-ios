@@ -124,9 +124,16 @@ struct RootView: View {
     private func openHomeAtLaunch() {
         guard !settledLaunchPlace else { return }
         settledLaunchPlace = true
-        guard layout.visibleTabs(session).first == .home, selectedTab == PrimaryTab.initial.rawValue,
-              schedulePath.isEmpty, !store.openedForRecord else { return }
-        selectedTab = MenuItem.home.rawValue
+        guard selectedTab == PrimaryTab.initial.rawValue, schedulePath.isEmpty,
+              !store.openedForRecord, store.requestedSchedule == 0 else { return }
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let preference = StartupDestinationPreferences().get(for: scope)
+            if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
+                selectedTab = target.rawValue
+                return
+            }
+        }
+        if layout.visibleTabs(session).first == .home { selectedTab = MenuItem.home.rawValue }
     }
 
     /// iPad at regular width gets the sidebar and split columns; compact width (Slide Over, a
@@ -636,7 +643,8 @@ struct RootView: View {
         .background(Theme.canvas)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
-        .onChange(of: store.requestedSchedule) {
+        .onChange(of: store.requestedSchedule, initial: true) {
+            guard store.requestedSchedule > 0 else { return }
             if drawerOpen { closeDrawer() }
             schedulePath = NavigationPath()
             primaryTab = .schedule

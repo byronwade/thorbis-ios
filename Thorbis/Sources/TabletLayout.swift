@@ -314,7 +314,10 @@ struct TabletRoot: View {
         .onChange(of: scheduleRange) { path = NavigationPath() }
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob() }
         .onChange(of: store.jobs) { openRequestedJob() }
-        .onChange(of: store.requestedSchedule) { show(.schedule); scheduleRange = "Today" }
+        .onChange(of: store.requestedSchedule, initial: true) {
+            guard store.requestedSchedule > 0 else { return }
+            show(.schedule); scheduleRange = "Today"
+        }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord() }
         .onChange(of: store.requestedSearch, initial: true) {
             guard let query = store.requestedSearch else { return }
@@ -542,13 +545,23 @@ struct TabletRoot: View {
 
     /// Once, from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
-        guard !settledLaunchPlace, layout.visibleTabs(session).first == .home else { return }
-        settledLaunchPlace = true
-        guard tab == .schedule, path.isEmpty, !store.openedForRecord, store.requestedJobID == nil,
-              store.requestedRecord == nil else { return }
+        guard !settledLaunchPlace, session.phase == .ready else { return }
+        guard path.isEmpty, !store.openedForRecord, store.requestedSchedule == 0,
+              store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil else {
+            settledLaunchPlace = true
+            return
+        }
         #if DEBUG
         if PaperPreview.enabled, PaperPreview.screen != "schedule" { return }
         #endif
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let preference = StartupDestinationPreferences().get(for: scope)
+            if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
+                if let item = target.menuItem { show(section(for: item)); return }
+                if let local = target.localSection { show(.local(local)); return }
+            }
+        }
+        guard layout.visibleTabs(session).first == .home, tab == .schedule else { return }
         show(.place(.home))
     }
 
