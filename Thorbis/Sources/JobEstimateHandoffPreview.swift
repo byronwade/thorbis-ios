@@ -57,6 +57,10 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func amount(_ id: String) -> Int { id == Self.a || id == Self.c ? 19000 : id == Self.b && flags.contains("--paper-preview-handoff-mixed") ? 0 : 32000 }
     private func lines(_ id: String) -> [[String: Any]] {
+        if id == Self.a, changedFirstRevision, flags.contains("--paper-preview-handoff-details-mutation") {
+            return [["id": id, "description": "Updated sample revision scope", "quantity": 1,
+                     "unitPrice": ["amount": amount(id), "currency": "USD"]]]
+        }
         if id == Self.a, flags.contains("--paper-preview-handoff-hidden-material") {
             return [["id": id, "description": "Visible service", "quantity": 1, "unitPrice": ["amount": 14000, "currency": "USD"]],
                     ["id": "00000000-0000-4000-8000-000000008111", "description": "Private material detail", "quantity": 1,
