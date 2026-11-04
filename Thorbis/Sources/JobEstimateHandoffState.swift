@@ -528,10 +528,37 @@ enum CustomerViewExit: Equatable {
 
 /// Retains this one protected customer handoff ("Customer view") above workspace and authentication
 /// branches: the job's estimates, invoices and the customer's own details, with one staff hand-back.
+struct CustomerHandoffAttempt {
+    let actor: String
+    let organization: String
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let requestGeneration: UUID
+    let scopeRevision: UUID
+    let origin: String
+    let handoffRevision: UUID
+}
+
 @MainActor
 final class JobEstimateHandoffPresenter: ObservableObject {
     private let arbiter: CustomerHandoffArbiter
     init(arbiter: CustomerHandoffArbiter = CustomerHandoffArbiter()) { self.arbiter = arbiter }
+    func captureAttempt(api: APIClient, session: SessionController) -> CustomerHandoffAttempt? {
+        guard arbiter.owner == nil, session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let origin = api.normalizedOrigin else { return nil }
+        return CustomerHandoffAttempt(actor: actor, organization: organization, sessionGeneration: session.generation,
+            authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration,
+            scopeRevision: api.savedCopyScopeRevision, origin: origin, handoffRevision: arbiter.revision)
+    }
+
+    func isCurrent(_ attempt: CustomerHandoffAttempt, api: APIClient, session: SessionController) -> Bool {
+        !Task.isCancelled && session.phase == .ready && session.user?.id == attempt.actor &&
+        session.activeOrganization?.id == attempt.organization && session.generation == attempt.sessionGeneration &&
+        session.authorityRevision == attempt.authorityRevision && api.requestGeneration == attempt.requestGeneration &&
+        api.savedCopyScopeRevision == attempt.scopeRevision && api.normalizedOrigin == attempt.origin &&
+        arbiter.owner == nil && arbiter.revision == attempt.handoffRevision
+    }
+
     func claimLegacy() -> LegacyCustomerHandoffLease? {
         let id = UUID()
         guard arbiter.claim(.legacy(id)) else { return nil }

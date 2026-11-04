@@ -335,19 +335,31 @@ struct EstimateDetailView: View {
     /// Issues a draft (the revision the customer signs is frozen first), then opens customer mode.
     private func handToCustomer() async {
         guard let current = record else { return }
+        var attempt: CustomerHandoffAttempt?
         if current.status == "draft" {
+            guard let captured = customerView.captureAttempt(api: api, session: session),
+                  session.can("estimate.send", feature: "estimates") else { return }
+            attempt = captured
             busy = true
             defer { busy = false }
-            do { record = try await api.sendFieldEstimate(id, expectedRevisionNumber: current.currentRevisionNumber ?? 0) }
-            catch is CancellationError { return } catch { self.error = error.localizedDescription; return }
+            do {
+                let issued = try await api.sendFieldEstimate(id, expectedRevisionNumber: current.currentRevisionNumber ?? 0)
+                guard customerView.isCurrent(captured, api: api, session: session),
+                      session.can("estimate.send", feature: "estimates"), issued.id == current.id,
+                      issued.organizationId == current.organizationId, issued.customerId == current.customerId else { return }
+                record = issued
+            } catch is CancellationError { return } catch {
+                guard customerView.isCurrent(captured, api: api, session: session) else { return }
+                self.error = error.localizedDescription; return
+            }
         }
-        await presentToCustomer()
+        await presentToCustomer(expectedAttempt: attempt)
     }
 
     /// On a job, the estimate opens in that job's Customer view, so the customer can also see the
     /// job's other estimates, invoices and their own details. Without a job it stays a single document.
-    private func presentToCustomer() async {
-        guard let record else { return }
+    private func presentToCustomer(expectedAttempt: CustomerHandoffAttempt? = nil) async {
+        guard let record, expectedAttempt.map({ customerView.isCurrent($0, api: api, session: session) }) ?? true else { return }
         if let jobID {
             busy = true
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
@@ -357,7 +369,8 @@ struct EstimateDetailView: View {
             busy = false
             if opened != .unavailable { return }
         }
-        guard let lease = customerView.claimLegacy() else { return }
+        guard expectedAttempt.map({ customerView.isCurrent($0, api: api, session: session) }) ?? true,
+              let lease = customerView.claimLegacy() else { return }
         legacyHandoffLease = lease
         showToCustomer = true
     }

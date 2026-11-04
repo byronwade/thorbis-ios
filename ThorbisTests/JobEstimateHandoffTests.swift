@@ -285,6 +285,25 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testDraftSendAttemptIsRetiredByInterveningHandoff() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready([.init(200, record(a), gate: gate)])
+        let arbiter = CustomerHandoffArbiter()
+        let presenter = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let attempt = try XCTUnwrap(presenter.captureAttempt(api: model.api, session: model.session))
+        let task = Task { try await model.api.sendFieldEstimate(a, expectedRevisionNumber: 1) }
+        defer { task.cancel(); gate.release() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(a)/send" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(a)/send" }))
+        let lease = try XCTUnwrap(presenter.claimLegacy())
+        presenter.releaseLegacy(lease)
+        gate.release()
+        _ = try await task.value
+        XCTAssertFalse(presenter.isCurrent(attempt, api: model.api, session: model.session))
+    }
+
     func testDelayedPhotoPreparationCannotPresentAfterLegacyHandoff() async throws {
         let model = try await ready([])
         let arbiter = CustomerHandoffArbiter()
