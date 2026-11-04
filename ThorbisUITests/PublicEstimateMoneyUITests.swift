@@ -10,9 +10,8 @@ final class PublicEstimateMoneyUITests: XCTestCase {
 
     func testIssuedMinorUnitsAreShownAsDollarsInOptionsAndApproval() {
         let app = open()
-        let total = app.staticTexts["public-estimate-total"]
+        let total = app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "public-estimate-total", "$1,575.00")).firstMatch
         XCTAssertTrue(total.waitForExistence(timeout: 15))
-        XCTAssertEqual(total.label, "$1,575.00")
         let option = app.buttons["estimate-option-00000000-0000-4000-8000-000000000102"]
         XCTAssertTrue(option.waitForExistence(timeout: 10))
         if !option.isHittable { app.swipeUp() }
@@ -22,14 +21,13 @@ final class PublicEstimateMoneyUITests: XCTestCase {
 
     func testDiscountIsShownInMinorUnits() {
         let app = open(["--paper-preview-public-estimate-discount"])
-        let total = app.staticTexts["public-estimate-total"]
+        let total = app.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label == %@", "public-estimate-total", "$95.00")).firstMatch
         XCTAssertTrue(total.waitForExistence(timeout: 15))
-        XCTAssertEqual(total.label, "$95.00")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "-$5.00")).firstMatch.waitForExistence(timeout: 5))
     }
     func testUnsupportedCurrencyBlocksApprovalWithExplanation() {
         let app = open(["--paper-preview-public-estimate-unsupported-currency"])
-        let approval = app.buttons["public-estimate-approve"]
+        let approval = app.buttons.matching(NSPredicate(format: "label == %@", "Amount unavailable")).firstMatch
         XCTAssertTrue(approval.waitForExistence(timeout: 15))
         XCTAssertFalse(approval.isEnabled)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "can’t verify the estimate amount")).firstMatch.exists)
@@ -37,7 +35,7 @@ final class PublicEstimateMoneyUITests: XCTestCase {
 
     func testPlainApprovalShowsAmountProblemAndStaysDisabled() {
         let app = open(["--paper-preview-public-estimate-discount", "--paper-preview-public-estimate-unsupported-currency"])
-        let approval = app.buttons["public-estimate-approve"]
+        let approval = app.buttons.matching(NSPredicate(format: "label == %@", "Amount unavailable")).firstMatch
         XCTAssertTrue(approval.waitForExistence(timeout: 15))
         XCTAssertFalse(approval.isEnabled)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "can’t verify the estimate amount")).firstMatch.exists)
