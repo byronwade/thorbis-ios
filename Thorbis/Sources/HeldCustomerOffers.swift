@@ -113,6 +113,34 @@ func customerOfferDecisionCanSubmit(_ review: CustomerOfferReview, now: Date, ha
     hasExactPriorAttempt || review.isCurrent(now: now)
 }
 
+struct CustomerSelectedAmount: Equatable {
+    let currency: String
+    let base: Int
+    let quoteCurrency: String?
+    let quoteAmount: Int?
+    let quoteUsable: Bool
+}
+
+/// Nil means totals are unavailable; never substitute a base for an unusable quote.
+func customerSelectedTotals(_ amounts: [CustomerSelectedAmount]) -> [(currency: String, amount: Int)]? {
+    var totals: [String: Int] = [:]
+    for amount in amounts {
+        guard !amount.currency.isEmpty, amount.base >= 0 else { return nil }
+        let value: Int
+        if let quoteAmount = amount.quoteAmount {
+            guard amount.quoteUsable, amount.quoteCurrency == amount.currency, quoteAmount >= 0 else { return nil }
+            value = quoteAmount
+        } else {
+            guard amount.quoteCurrency == nil else { return nil }
+            value = amount.base
+        }
+        let result = (totals[amount.currency] ?? 0).addingReportingOverflow(value)
+        guard !result.overflow else { return nil }
+        totals[amount.currency] = result.partialValue
+    }
+    return totals.sorted { $0.key < $1.key }.map { (currency: $0.key, amount: $0.value) }
+}
+
 func customerEstimatePresentedTotal(base: Int?, review: CustomerOfferReview?) -> Int? {
     review?.quote.totalAmount ?? base
 }

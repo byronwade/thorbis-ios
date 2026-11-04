@@ -16,6 +16,18 @@ final class HeldCustomerOffersTests: XCTestCase {
         {"contractVersion":1,"id":"018f0000-aaaa-7000-8000-000000000012","identity":"\(identity)","quoteIdentity":"\(identity)","expiresAt":"\(expires)","currency":"USD","totalAmount":\(total),"base":{"totalAmount":1000,"lines":[{"description":"Base","quantity":1,"unitPrice":1000,"totalAmount":1000}]},"addOns":[{"id":"\(offerID)","title":"\(name)","description":"Extra","quantity":2,"totalAmount":1000,"lines":[{"description":"Extra work","quantity":4,"unitPrice":250,"totalAmount":1000}]}]}
         """.utf8))
     }
+    func testSelectedTotalsUseQuoteAndPreserveCurrencyWhileRejectingStaleAndOverflow() throws {
+        let values = [CustomerSelectedAmount(currency: "USD", base: 900, quoteCurrency: "USD", quoteAmount: 1400, quoteUsable: true),
+            CustomerSelectedAmount(currency: "USD", base: 300, quoteCurrency: nil, quoteAmount: nil, quoteUsable: true),
+            CustomerSelectedAmount(currency: "CAD", base: 200, quoteCurrency: nil, quoteAmount: nil, quoteUsable: true)]
+        let totals = try XCTUnwrap(customerSelectedTotals(values))
+        XCTAssertEqual(totals.map(\.currency), ["CAD", "USD"])
+        XCTAssertEqual(totals.map(\.amount), [200, 1700])
+        XCTAssertNil(customerSelectedTotals([.init(currency: "USD", base: 900, quoteCurrency: "USD", quoteAmount: 1400, quoteUsable: false)]))
+        XCTAssertNil(customerSelectedTotals([.init(currency: "USD", base: 900, quoteCurrency: "CAD", quoteAmount: 1400, quoteUsable: true)]))
+        XCTAssertNil(customerSelectedTotals([.init(currency: "USD", base: Int.max, quoteCurrency: nil, quoteAmount: nil, quoteUsable: true),
+            .init(currency: "USD", base: 1, quoteCurrency: nil, quoteAmount: nil, quoteUsable: true)]))
+    }
     func testOfferAuthorityRetiresOnActorWorkspaceOriginSessionOrCapabilityChange() {
         let sessionID = UUID(), apiID = UUID()
         let scope = CustomerOfferAuthorityScope(actorID: "actor", organizationID: "org", sessionGeneration: sessionID,
@@ -47,6 +59,22 @@ final class HeldCustomerOffersTests: XCTestCase {
         XCTAssertNil(cart.quote)
         XCTAssertFalse(cart.install(try quote(), ticket: ticket, now: Date()))
         XCTAssertFalse(cart.install(try quote(), ticket: cart.ticket, now: Date()))
+    }
+    func testOfferApprovalEncodesTheExactServerDecisionFields() throws {
+        let decision = PublicEstimateActionDecision.approveOffer(revisionNumber: 1, nonce: "nonce-1234", contentHash: hash,
+            signerName: " Customer ", consentVersion: "estimate-approval-v1", consent: true, optionID: nil,
+            offerQuoteID: "018f0000-aaaa-7000-8000-000000000012", quoteIdentity: identity,
+            selections: [CustomerOfferSelection(offerId: offerID, quantity: 2)])
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(decision.body)) as? [String: Any])
+        XCTAssertEqual(json["offerQuoteId"] as? String, "018f0000-aaaa-7000-8000-000000000012")
+        XCTAssertEqual(json["quoteIdentity"] as? String, identity)
+        XCTAssertEqual(json["signerName"] as? String, "Customer")
+        let choices = try XCTUnwrap(json["selections"] as? [[String: Any]])
+        XCTAssertEqual(choices.count, 1)
+        XCTAssertEqual(choices[0]["offerId"] as? String, offerID)
+        XCTAssertEqual(choices[0]["quantity"] as? Int, 2)
+        XCTAssertNil(json["optionId"])
+        XCTAssertEqual(decision.endpoint, "approve")
     }
     func testAcceptanceMustMatchTheQuoteChoiceSignerAndTotal() throws {
         let generation = UUID()

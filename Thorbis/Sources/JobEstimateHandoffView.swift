@@ -203,16 +203,47 @@ struct JobEstimateHandoffView: View {
                 }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
                 if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
+                    let quote = model.contexts[item.key]?.offerReview?.quote
                     CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: lines, type: type,
-                                          rows: customerAmountRows(amounts, currency: currency, invoice: false),
+                                          rows: quote == nil ? customerAmountRows(amounts, currency: currency, invoice: false) : [],
                                           readingAccess: descriptionAccess(for: item),
                                           descriptionContext: reference)
+                    if quote == nil && CustomerOfferCapability.isEnabled && item.revision.offers?.isEmpty == false {
+                        Text("Optional work can be chosen before approval.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    }
+                    if let quote {
+                        if model.contexts[item.key]?.offerReview?.isCurrent(now: Date()) == false && model.contexts[item.key]?.outcome?.isApproved != true {
+                            Text("This total expired. Open the estimate to review it again.")
+                                .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        }
+                        ForEach(quote.addOns, id: \.id) { extra in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(extra.title).font(Theme.customerFont(type.body, weight: .medium))
+                                Spacer()
+                                Text(money(extra.totalAmount, currency: quote.currency)).font(Theme.customerFont(type.body))
+                            }
+                            ReadOnlyDocumentDescription(text: extra.description, fontSize: type.body,
+                                access: descriptionAccess(for: item), customerFacing: true, accessibilityContext: "\(reference), \(extra.title)")
+                            ForEach(Array(extra.lines.enumerated()), id: \.offset) { index, line in
+                                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body,
+                                    access: descriptionAccess(for: item), customerFacing: true,
+                                    accessibilityContext: "\(reference), \(extra.title), item \(index + 1)")
+                            }
+                        }
+                        Text("Total · \(money(quote.totalAmount, currency: quote.currency))")
+                            .font(Theme.customerFont(type.body, weight: .medium))
+                    }
                 }
             }
-            ForEach(selectedTotals, id: \.currency) { value in
-                Text("Selected work · \(money(value.amount, currency: value.currency)) \(value.currency)")
-                    .font(Theme.customerFont(type.body, weight: .medium))
+            if let selectedTotals {
+                ForEach(selectedTotals, id: \.currency) { value in
+                    Text("Selected work · \(money(value.amount, currency: value.currency)) \(value.currency)")
+                        .font(Theme.customerFont(type.body, weight: .medium))
+                }
+            } else {
+                Text("A total needs review. Open the estimate to refresh it.")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
             Text("These estimates stay separate and do not become one bill.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
         }
@@ -234,16 +265,21 @@ struct JobEstimateHandoffView: View {
                   && item.revision.estimateId == item.id && item.revision.revisionNumber == item.estimate.currentRevisionNumber)
     }
 
-    private var selectedTotals: [(currency: String, amount: Int)] {
-        var values: [String: Int] = [:]
-        for item in model.reviewed {
+    private var selectedTotals: [(currency: String, amount: Int)]? {
+        let amounts = model.reviewed.map { item in
             let option = item.revision.options?.first(where: { $0.id == item.optionID })
-            let currency = option?.currency ?? item.revision.currency
-            let sum = (values[currency] ?? 0).addingReportingOverflow(option?.totalAmount ?? item.revision.totalAmount)
-            guard !sum.overflow else { return [] }
-            values[currency] = sum.partialValue
+            let context = model.contexts[item.key]
+            let review = context?.offerReview
+            let matches = review.map { value in
+                context?.link.map { link in value.matches(token: link.token, revisionNumber: item.revision.revisionNumber,
+                    contentHash: link.action.contentHash, optionID: item.optionID, generation: model.api.requestGeneration) } ?? false
+            } ?? true
+            return CustomerSelectedAmount(currency: option?.currency ?? item.revision.currency,
+                base: option?.totalAmount ?? item.revision.totalAmount,
+                quoteCurrency: review?.quote.currency, quoteAmount: review?.quote.totalAmount,
+                quoteUsable: matches && ((review.map { $0.isCurrent(now: Date()) } ?? true) || context?.outcome?.isApproved == true))
         }
-        return values.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+        return customerSelectedTotals(amounts)
     }
     private var results: some View {
         VStack(alignment: .leading, spacing: 12) {

@@ -64,7 +64,7 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
     var uploadedMediaID: String?
     var link: (token: String, action: PublicEstimateAction)?
     var publicDecision: PublicEstimateActionDecision?
-    var offerReview: CustomerOfferReview?
+    @Published var offerReview: CustomerOfferReview?
     @Published private(set) var acceptedAction: PublicEstimateAction?
     var continueTitle = "Continue"
     var checkOutcome: @MainActor () async -> Void = {}

@@ -175,7 +175,7 @@ struct CustomerEstimatePresentation: View {
     private var requiresOffers: Bool { offerCapabilityEnabled && flow.issuedRevision?.offers?.isEmpty == false }
     private var offerReview: CustomerOfferReview? {
         get { handoff?.offerReview ?? standaloneOfferReview }
-        nonmutating set { if let handoff { handoff.offerReview = newValue } else { standaloneOfferReview = newValue } }
+        nonmutating set { if let handoff { handoff.offerReview = newValue; handoff.changed() } else { standaloneOfferReview = newValue } }
     }
     private var presentedTotalText: String {
         customerEstimatePresentedTotal(base: flow.total, review: offerReview).map { money($0, currency: offerReview?.quote.currency ?? flow.currency) } ?? ""
