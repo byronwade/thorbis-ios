@@ -763,7 +763,9 @@ struct JobMediaView: View {
             if canAdd {
                 HStack(spacing: 8) {
                     MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
+                        .accessibilityIdentifier("job-media-tag-before")
                     MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
+                        .accessibilityIdentifier("job-media-tag-after")
                     MenuOrCircle(symbol: "tag.slash", label: "No stage") { Task { await retagPicked(.other) } }
                     MenuOrCircle(symbol: "square.and.arrow.up", label: "Share") { Task { await sharePicked() } }
                     MenuOrCircle(symbol: "trash", label: "Remove") { confirmBulkArchive = true }

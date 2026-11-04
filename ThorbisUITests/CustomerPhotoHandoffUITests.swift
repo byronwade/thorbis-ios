@@ -30,8 +30,8 @@ final class CustomerPhotoHandoffUITests: XCTestCase {
         XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
         let photo = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009301"]
         XCTAssertTrue(photo.waitForExistence(timeout: 10)); photo.tap()
-        XCTAssertFalse(app.buttons["Before"].isHittable)
-        XCTAssertFalse(app.buttons["After"].isHittable)
+        XCTAssertFalse(app.buttons["job-media-tag-before"].isHittable)
+        XCTAssertFalse(app.buttons["job-media-tag-after"].isHittable)
         XCTAssertFalse(app.buttons["job-media-remove-picked"].isHittable)
         XCTAssertFalse(app.buttons["Share"].isHittable)
         app.buttons["job-media-show-customer"].tap()
