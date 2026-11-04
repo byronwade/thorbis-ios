@@ -164,13 +164,7 @@ struct JobEstimateHandoffView: View {
             if !allowed { checkpointID = nil; reviewing = false; model.cancelApprovals() }
         }
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
-        .thorbisDestination(item: $detailsID) { id in
-            if let record = model.records.first(where: { $0.id == id }) {
-                CustomerHandoffEstimateDetails(model: model, record: record)
-                    .id(record)
-                    .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
-            }
-        }
+        .thorbisDestination(item: $detailsID) { id in details(id) }
     }
 
     private var overview: some View {
@@ -440,6 +434,17 @@ struct JobEstimateHandoffView: View {
         model.reviewed.first { item in
             item.key != current && model.contexts[item.key]?.outcome == nil && model.contexts[item.key]?.running != true && model.contexts[item.key]?.canApprove() == true
         }?.key
+    }
+    @ViewBuilder private func details(_ id: String) -> some View {
+        if let record = model.records.first(where: { $0.id == id }) {
+            CustomerHandoffEstimateDetails(model: model, record: record)
+                .id(record)
+                .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
+        } else {
+            CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                 message: "Hand the device back to your technician to reopen this estimate.")
+                .padding(Theme.gutter)
+        }
     }
     @ViewBuilder private func checkpoint(_ id: String) -> some View {
         if let context = model.checkpointContext(for: id), model.isCurrent {
