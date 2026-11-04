@@ -113,7 +113,8 @@ import Foundation
     /// A search hit is not authority to open an invoice. Fetch the exact
     /// resource live and recheck the complete session lease before returning it.
     func authorizedInvoice(id: String, isCurrent: @escaping @MainActor () -> Bool) async -> InvoiceRecord? {
-        guard current(isCurrent), items.contains(where: { $0.entityId == id }) else { return nil }
+        guard current(isCurrent) else { retire(); return nil }
+        guard items.contains(where: { $0.entityId == id }) else { return nil }
         let requestRevision = revision
         do {
             let invoice = try await api.liveFieldInvoice(id)
