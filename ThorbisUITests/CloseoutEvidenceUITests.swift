@@ -74,6 +74,17 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Ask your office to enable your invoice and payment access, then refresh those invoices on this phone."].waitForExistence(timeout: 20))
     }
 
+    func testResourceDenialRetiresOpenRecoveryInvoice() {
+        let app = launch("denial")
+        app.buttons["Open invoice 00002209"].tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
+        let deny = app.buttons["Trigger invoice denial"]
+        XCTAssertTrue(deny.waitForExistence(timeout: 10))
+        deny.tap()
+        XCTAssertTrue(app.staticTexts["Invoice access denied"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+    }
+
     func testOfflineSavedWorkCannotSyncUntilReconnected() {
         let app = launch("offline")
         let review = app.buttons["Review saved work"]

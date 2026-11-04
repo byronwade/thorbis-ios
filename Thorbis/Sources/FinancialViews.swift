@@ -531,6 +531,14 @@ struct InvoiceDetailView: View {
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/invoices/\(id)")).padding(.horizontal, -Theme.gutter)
                 if let error { ErrorBanner(message: error, retry: record == nil ? { await load() } : nil) }
                 if let record {
+                    #if DEBUG
+                    if PaperPreview.enabled, ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "denial" {
+                        Button("Trigger invoice denial") {
+                            PaperPreviewProtocol.denyCloseoutInvoice()
+                            Task { await load() }
+                        }
+                    }
+                    #endif
                     // v2 Evidence: the question ("Invoice 2209") and its status word, then what's owed
                     // now at 30pt; the quiet properties; the lines with their totals; then payments.
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }

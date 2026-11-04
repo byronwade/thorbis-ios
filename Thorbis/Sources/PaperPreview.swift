@@ -373,8 +373,8 @@ enum PaperPreview {
                 let old = try! JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: json))
                 JobDetailCache.save(invoice: old)
             }
-            let legacy = ["legacy", "legacy-recorded", "noaccess", "no-payments", "revoke", "offline", "satisfied"].contains(scenario)
-            let recorded = ["recorded", "legacy-recorded", "noaccess", "no-payments", "revoke", "satisfied"].contains(scenario)
+            let legacy = ["legacy", "legacy-recorded", "noaccess", "no-payments", "revoke", "denial", "offline", "satisfied"].contains(scenario)
+            let recorded = ["recorded", "legacy-recorded", "noaccess", "no-payments", "revoke", "denial", "satisfied"].contains(scenario)
             let payment = OutboxEntry.PaymentPayload(invoiceId: invoice.id, jobId: legacy ? nil : jobID, amountCents: 34_000, method: "cash", idempotencyKey: "preview-closeout")
             if recorded {
                 let file = folder.appendingPathComponent("\(actorID)_\(organizationID).recorded")
@@ -689,6 +689,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var priceBookViewRevoked = false
         var documentEstimateViewRevoked = false
         var closeoutInvoiceViewRevoked = false
+        var closeoutInvoiceDenied = false
         var jobMediaViewRevoked = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
@@ -710,6 +711,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
     static func revokeCloseoutInvoiceView() { scenario.lock.withLock { scenario.closeoutInvoiceViewRevoked = true } }
+    static func denyCloseoutInvoice() { scenario.lock.withLock { scenario.closeoutInvoiceDenied = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
@@ -800,6 +802,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if ProcessInfo.processInfo.environment["THORBIS_CLOSEOUT_TEST"] == "denial",
+                  url.path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)",
+                  Self.scenario.lock.withLock({ Self.scenario.closeoutInvoiceDenied }) {
+            status = 403
+            payload = ["status": 403, "title": "Invoice access denied"]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-review-pending") {
