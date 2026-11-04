@@ -404,8 +404,8 @@ struct InvoicesView: View {
         let query = search.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return records }
         return records.filter { record in
-            [store.customerName(record.customerId), "INV-\(record.id.suffix(4).uppercased())"]
-                .contains { $0.localizedCaseInsensitiveContains(query) }
+            InvoiceReferenceSearch.matches(query: query, invoiceID: record.id,
+                                           customerName: store.customerName(record.customerId))
         }
     }
     /// Redesign phase 3: the 34pt title with what's owed, then grouped wells by status (Draft,
