@@ -336,6 +336,9 @@ struct TabletRoot: View {
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
         .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--startup-fixture-automatic") { layout.tabs = [.schedule, .jobs, .customers] }
+            #endif
             if store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil,
                let saved = store.rememberedRoot(session: session.generation),
                let destination = StartupDestination(rawValue: saved), destination.permitted(session) {

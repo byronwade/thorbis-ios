@@ -26,7 +26,7 @@ struct RootView: View {
     @State private var settledLaunchPlace = false
     @State private var phoneShellVisible = false
     #if DEBUG
-    @State private var startupFixtureWide = false
+    @State private var startupFixtureWide = ProcessInfo.processInfo.arguments.contains("--startup-fixture-automatic")
     private var startupFixture: Bool { PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--startup-fixture") }
     #endif
     /// The side drawer (2026-10-31, after the Claude and ChatGPT apps): open, and a drag in progress.
@@ -90,6 +90,9 @@ struct RootView: View {
             if startupFixture {
                 HStack {
                     Button("Test switch width") { startupFixtureWide.toggle() }
+                    if ProcessInfo.processInfo.arguments.contains("--startup-fixture-automatic") {
+                        Button("Test delayed Home") { layout.tabs = [.home, .schedule, .jobs, .customers] }
+                    }
                     Button("Test schedule shortcut") { store.requestedSchedule += 1 }
                     Button("Test shortcut and switch") {
                         store.requestedSchedule += 1

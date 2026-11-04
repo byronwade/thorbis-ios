@@ -43,4 +43,13 @@ final class StartupDestinationUITests: XCTestCase {
         XCTAssertTrue(root(app, "startup-phone-schedule").waitForExistence(timeout: 10))
     }
 
+    func testAutomaticUsesHomeWhenLayoutArrivesLater() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "owner", "--startup-fixture", "--startup-fixture-automatic"]
+        app.launch()
+        XCTAssertTrue(root(app, "startup-tablet-Schedule").waitForExistence(timeout: 30))
+        app.buttons["Test delayed Home"].tap()
+        XCTAssertTrue(root(app, "startup-tablet-Home").waitForExistence(timeout: 10))
+    }
+
 }

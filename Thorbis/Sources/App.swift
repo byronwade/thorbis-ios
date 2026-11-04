@@ -48,7 +48,8 @@ struct ThorbisApp: App {
         if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--startup-fixture") {
             let scope = StartupDestinationScope(actor: PaperPreview.actorID, workspace: PaperPreview.organizationID,
                                                 origin: api.normalizedOrigin ?? "https://app.thorbis.com")
-            StartupDestinationPreferences().set(ProcessInfo.processInfo.arguments.contains("--startup-fixture-link") ? .jobs : .customers, for: scope)
+            let initial: StartupDestination = ProcessInfo.processInfo.arguments.contains("--startup-fixture-automatic") ? .automatic : (ProcessInfo.processInfo.arguments.contains("--startup-fixture-link") ? .jobs : .customers)
+            StartupDestinationPreferences().set(initial, for: scope)
             if ProcessInfo.processInfo.arguments.contains("--startup-fixture-schedule") { store.requestedSchedule += 1 }
             if ProcessInfo.processInfo.arguments.contains("--startup-fixture-link") { store.requestedRecord = .customer(PaperPreview.customerID) }
         }
