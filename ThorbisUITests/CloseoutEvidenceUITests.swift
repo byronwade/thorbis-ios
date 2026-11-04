@@ -45,11 +45,18 @@ final class CloseoutEvidenceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["saved-work-sync"].waitForExistence(timeout: 10))
     }
 
+    func testSentPaymentForThisJobExplainsProjectionAndIdentifiesInvoice() {
+        let app = launch("recorded")
+        XCTAssertTrue(app.staticTexts["Sent payments may still be updating. Connect, then search these invoice IDs in Invoices on this phone to refresh them."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["00000000-0000-4000-8000-000000002209"].exists)
+        XCTAssertFalse(app.staticTexts["Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet."].exists)
+    }
+
     func testLegacyRecordedPaymentIdentifiesInvoiceWithoutOpeningRoute() {
         let app = launch("legacy-recorded")
         XCTAssertTrue(app.staticTexts["Invoice 2209"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["00000000-0000-4000-8000-000000002209"].exists)
-        XCTAssertTrue(app.staticTexts["Connect, then search these invoice IDs in Invoices on this phone to refresh payments already sent."].exists)
+        XCTAssertTrue(app.staticTexts["Sent payments may still be updating. Connect, then search these invoice IDs in Invoices on this phone to refresh them."].exists)
     }
 
     func testUnavailableInvoicePermissionExplainsHowToRecover() {
