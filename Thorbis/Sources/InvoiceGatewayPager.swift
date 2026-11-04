@@ -120,13 +120,16 @@ import Foundation
     /// resource live and recheck the complete session lease before returning it.
     func authorizedInvoice(id: String, isCurrent: @escaping @MainActor () -> Bool) async -> InvoiceRecord? {
         guard current(isCurrent) else { retire(); return nil }
-        guard items.contains(where: { $0.entityId == id }) else { return nil }
+        guard let requested = UUID(uuidString: id),
+              items.contains(where: { UUID(uuidString: $0.entityId) == requested }) else { return nil }
+        let canonical = requested.uuidString.lowercased()
         let requestRevision = revision
         do {
-            let invoice = try await SavedCopies.$liveOnly.withValue(true) { try await api.liveFieldInvoice(id) }
+            let invoice = try await SavedCopies.$liveOnly.withValue(true) { try await api.liveFieldInvoice(canonical) }
             try Task.checkCancellation()
             guard revision == requestRevision else { return nil }
-            guard current(isCurrent), invoice.id == id, invoice.organizationId == organizationID else {
+            guard current(isCurrent), UUID(uuidString: invoice.id) == requested,
+                  invoice.organizationId == organizationID else {
                 retire(); return nil
             }
             return invoice

@@ -122,6 +122,17 @@ final class InvoiceGatewayPagerTests: XCTestCase {
         XCTAssertTrue(pager.items.isEmpty, "A denied resource must retire stale search rows")
     }
 
+    func testUppercaseGatewayIDOpensCanonicalInvoice() async {
+        let invoice = #"{"id":"\#(a)","organizationId":"019f0000-0000-7000-8000-000000000001","customerId":"019f0000-0000-7000-8000-000000000002","createdByUserId":"019f0000-0000-7000-8000-000000000011","origin":"manual","sourceOperationKey":"fixture","status":"draft","lines":[],"linesRevision":1,"amountPaid":0,"currency":"USD","createdAt":"2026-10-26T11:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let (_, _, pager) = await prepare([
+            .init(200, #"{"items":[\#(item(a.uppercased()))]}"#), .init(200, invoice)
+        ])
+        await pager.start(customer: "Smith", isCurrent: { true })
+        let opened = await pager.authorizedInvoice(id: a, isCurrent: { true })
+        XCTAssertEqual(opened?.id, a)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, "/v1/invoices/\(a)")
+    }
+
     func testUnsupportedQuoteAndUTF16LengthRemainPartialWithoutNetwork() async {
         let (_, _, pager) = await prepare([])
         await pager.start(customer: "\"Smith\"", isCurrent: { true })
