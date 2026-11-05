@@ -278,8 +278,8 @@ struct EstimateDetailView: View {
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
     }
 
-    private func customerMode(_ record: EstimateRecord) -> some View {
-        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit() }) { handBack in
+    private func customerMode(_ record: EstimateRecord, lease: LegacyCustomerHandoffLease) -> some View {
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }) { handBack in
             CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
                                          financing: session.can("organization.view", feature: FinancingWords.feature),
                                          onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
@@ -366,7 +366,7 @@ struct EstimateDetailView: View {
         }
         guard expectedAttempt.map({ customerView.isCurrent($0, api: api, session: session) }) ?? true,
               let lease = customerView.claimLegacy() else { return }
-        guard let handoff = LegacyCustomerHandoff(lease: lease, content: AnyView(customerMode(record)), api: api, session: session,
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: AnyView(customerMode(record, lease: lease)), api: api, session: session,
             onDismiss: { _ in customerModeClosed() }), legacyHandoff.present(handoff) else { lease.release(); return }
     }
 
@@ -716,15 +716,15 @@ struct InvoiceDetailView: View {
         }
     }
 
-    private func customerInvoiceMode(_ record: InvoiceRecord) -> some View {
-        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit() }) { handBack in
+    private func customerInvoiceMode(_ record: InvoiceRecord, lease: LegacyCustomerHandoffLease) -> some View {
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }) { handBack in
             CustomerInvoicePresentation(
                 invoice: record, customerName: store.customerName(record.customerId),
                 canSign: session.can("invoice.edit", feature: "invoicing"),
                 onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments") ? {
                     Task {
                         if await StaffUnlock.unlock(reason: "Unlock to take payment") {
-                            legacyHandoff.authenticatedExit(.collect)
+                            legacyHandoff.authenticatedExit(for: lease, .collect)
                         }
                     }
                 } : nil,
@@ -760,7 +760,7 @@ struct InvoiceDetailView: View {
             if opened != .unavailable { return }
         }
         guard let lease = customerView.claimLegacy() else { return }
-        guard let handoff = LegacyCustomerHandoff(lease: lease, content: AnyView(customerInvoiceMode(record)), api: api, session: session,
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: AnyView(customerInvoiceMode(record, lease: lease)), api: api, session: session,
             onDismiss: { exit in
                 if case .collect = exit, paymentModel?.invoice?.id == record.id,
                    paymentModel?.canRecordPayment == true, session.can("invoice.payment.create", feature: "payments") {

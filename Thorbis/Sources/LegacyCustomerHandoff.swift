@@ -47,8 +47,8 @@ final class LegacyCustomerPresenter: ObservableObject {
         return true
     }
 
-    func authenticatedExit(_ exit: LegacyCustomerHandoff.Exit = .done) {
-        guard let active else { return }
+    func authenticatedExit(for lease: LegacyCustomerHandoffLease, _ exit: LegacyCustomerHandoff.Exit = .done) {
+        guard let active, active.lease === lease else { return }
         retiring = (active, exit)
         self.active = nil
     }
@@ -72,7 +72,7 @@ struct LegacyCustomerProtectedView: View {
             if handoff.isCurrent(api: api, session: session), let content = handoff.content {
                 content
             } else {
-                CustomerModeContainer(onUnlocked: { presenter.authenticatedExit() }, ownerControlTitle: "Hand back") { handBack in
+                CustomerModeContainer(onUnlocked: { presenter.authenticatedExit(for: handoff.lease) }, ownerControlTitle: "Hand back") { handBack in
                     VStack(spacing: 20) {
                         Image(systemName: "lock.shield").font(.system(size: 44)).accessibilityHidden(true)
                         Text("Please hand the device back to your technician.")

@@ -302,11 +302,29 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertNil(owner.content)
         XCTAssertTrue(legacy.active === owner)
         XCTAssertFalse(arbiter.claim(.photos))
-        legacy.authenticatedExit()
+        legacy.authenticatedExit(for: lease)
         XCTAssertFalse(arbiter.claim(.photos), "Lease remains held until the cover dismisses")
         legacy.completedDismissal(api: model.api, session: model.session)
         XCTAssertEqual(callbackCount, 0, "A retired session must not resume staff actions")
         XCTAssertTrue(arbiter.claim(.photos))
+    }
+
+    func testLateLegacyPayUnlockCannotExitNewHandoff() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let legacy = LegacyCustomerPresenter()
+        let oldLease = try XCTUnwrap(documents.claimLegacy())
+        let oldOwner = try XCTUnwrap(LegacyCustomerHandoff(lease: oldLease, content: AnyView(Text("old")), api: model.api, session: model.session, onDismiss: { _ in }))
+        XCTAssertTrue(legacy.present(oldOwner))
+        legacy.authenticatedExit(for: oldLease)
+        legacy.completedDismissal(api: model.api, session: model.session)
+        let newLease = try XCTUnwrap(documents.claimLegacy())
+        let newOwner = try XCTUnwrap(LegacyCustomerHandoff(lease: newLease, content: AnyView(Text("new")), api: model.api, session: model.session, onDismiss: { _ in XCTFail("Late unlock must not run the new callback") }))
+        XCTAssertTrue(legacy.present(newOwner))
+        legacy.authenticatedExit(for: oldLease, .collect)
+        XCTAssertTrue(legacy.active === newOwner)
+        XCTAssertFalse(arbiter.claim(.photos))
     }
 
     func testLegacyPayCallbackRunsOnlyAfterProtectedCoverDismisses() async throws {
@@ -319,7 +337,7 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         let owner = try XCTUnwrap(LegacyCustomerHandoff(lease: lease, content: AnyView(Text("invoice")), api: model.api, session: model.session,
             onDismiss: { exit in if case .collect = exit { collected = true } }))
         XCTAssertTrue(legacy.present(owner))
-        legacy.authenticatedExit(.collect)
+        legacy.authenticatedExit(for: lease, .collect)
         XCTAssertFalse(collected)
         XCTAssertFalse(arbiter.claim(.photos))
         legacy.completedDismissal(api: model.api, session: model.session)
