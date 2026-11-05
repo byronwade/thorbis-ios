@@ -33,6 +33,26 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         verifyProtectedSessionReplacement(app)
     }
 
+    func testLegacyInvoicePayOpensItsInvoiceAfterHandBack() {
+        continueAfterFailure = false
+        let app = launch("invoice-detail")
+        let menu = app.buttons["Customer view, edit or open the PDF"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 20)); menu.tap()
+        let show = app.buttons["Customer view"].firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        let collect = app.navigationBars["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 20), "Payment must open after the protected customer cover dismisses")
+        let identity = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertTrue(identity.label.contains("INV-2209"), identity.label)
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+        XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
+        XCTAssertTrue(app.buttons["lock"].waitForExistence(timeout: 15), "The legacy handoff lease must be reusable after Pay")
+    }
+
     func testLegacyInvoiceCoverSurvivesSessionReplacement() {
         continueAfterFailure = false
         let app = launch("invoice-detail")
