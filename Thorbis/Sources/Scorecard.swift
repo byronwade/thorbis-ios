@@ -180,10 +180,18 @@ enum FilteredRecords {
         for id in ids {
             if Task.isCancelled { break }
             var record: T?
+            var mayUseCached = true
             if !offline {
-                do { record = try await fetch(id) } catch { offline = error.isConnectivityFailure }
+                do { record = try await fetch(id) } catch {
+                    offline = error.isConnectivityFailure
+                    // A denial or missing resource is not an offline failure. Do not
+                    // resurrect this particular record from the previous saved copy.
+                    if let status = (error as? Problem)?.status, [401, 403, 404].contains(status) {
+                        mayUseCached = false
+                    }
+                }
             }
-            if let found = record ?? cached(id) { records.append(found) } else { missing += 1 }
+            if let found = record ?? (mayUseCached ? cached(id) : nil) { records.append(found) } else { missing += 1 }
         }
         return (records, missing)
     }

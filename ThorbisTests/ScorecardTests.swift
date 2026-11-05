@@ -2,6 +2,24 @@ import XCTest
 @testable import Thorbis
 
 final class ScorecardTests: XCTestCase {
+    func testFilteredRecordsDoNotReturnCachedRecordAfterExplicitDenial() async {
+        for status in [401, 403, 404] {
+            let result = await FilteredRecords.load(["invoice"], fetch: { _ -> String in
+                throw Problem(title: "Unavailable", status: status, detail: nil)
+            }, cached: { _ in "previously visible" })
+            XCTAssertTrue(result.records.isEmpty, "HTTP \(status) must not restore a saved record")
+            XCTAssertEqual(result.missing, 1)
+        }
+    }
+
+    func testFilteredRecordsStillUseSavedRecordsWhenOffline() async {
+        let result = await FilteredRecords.load(["one", "two"], fetch: { _ -> String in
+            throw URLError(.notConnectedToInternet)
+        }, cached: { "saved-" + $0 })
+        XCTAssertEqual(result.records, ["saved-one", "saved-two"])
+        XCTAssertEqual(result.missing, 0)
+    }
+
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "America/Chicago")!
