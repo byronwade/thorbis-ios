@@ -3,7 +3,7 @@ import SwiftUI
 /// Everything an owner can place in the tab bar or the More menu. Search and More stay fixed so
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
-    case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, scorecard, team, notices, drafts
+    case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, paymentsLedger, billing, priceBook, money, reports, scorecard, team, notices, drafts
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .inbox: "Inbox"
         case .estimates: "Estimates"
         case .invoices: "Invoices"
+        case .paymentsLedger: "Payments"
         case .billing: "Billing schedules"
         case .priceBook: "Price book"
         case .money: "Money"
@@ -60,6 +61,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .inbox: "tray"
         case .estimates: "doc.text"
         case .invoices: "doc.plaintext"
+        case .paymentsLedger: "creditcard"
         case .billing: "list.bullet.rectangle"
         case .priceBook: "book.closed"
         case .money: "chart.bar"
@@ -81,7 +83,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .customers, .properties: Theme.markForest
         case .attention: Theme.markRed
         case .estimates: Theme.markPumpkin
-        case .invoices, .billing, .money: Theme.markForest
+        case .invoices, .paymentsLedger, .billing, .money: Theme.markForest
         case .priceBook: Theme.markBurnt
         case .reports, .scorecard: Theme.markOlive
         case .team, .notices, .drafts: Theme.markGrey
@@ -124,6 +126,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .inbox: .inbox
         case .estimates: .estimates
         case .invoices: .invoices
+        case .paymentsLedger: .paymentsLedger
         case .billing: .billing
         case .priceBook: .priceBook
         case .money: .revenue
@@ -167,6 +170,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .inbox: session.can("job.view", feature: "job_booking_notices")
         case .estimates: session.can("estimate.view", feature: "estimates")
         case .invoices: session.can("invoice.view", feature: "invoicing")
+        case .paymentsLedger: session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
         case .billing: session.can("invoice.view", feature: "progress_billing")
         case .priceBook: session.can("pricebook.view", feature: "price_book")
         case .money: session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")

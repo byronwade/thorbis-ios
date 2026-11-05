@@ -15,7 +15,7 @@ enum PlaceSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     /// The order places take inside their section (C-Nav.dc.html).
-    static let canonical: [MenuItem] = [.home, .inbox, .schedule, .jobs, .estimates, .invoices, .team,
+    static let canonical: [MenuItem] = [.home, .inbox, .schedule, .jobs, .estimates, .invoices, .paymentsLedger, .team,
                                         .customers, .properties, .money, .billing, .reports, .scorecard,
                                         .priceBook, .attention, .notices, .drafts]
 }
@@ -29,7 +29,7 @@ extension MenuItem {
     var placeSection: PlaceSection {
         switch self {
         case .home, .inbox, .schedule: .personal
-        case .jobs, .estimates, .invoices, .team: .work
+        case .jobs, .estimates, .invoices, .paymentsLedger, .team: .work
         case .customers, .properties: .customers
         case .money: .money
         case .reports: .reports
@@ -48,7 +48,7 @@ extension MenuItem {
         case .customers, .properties: Theme.markForest
         case .inbox: Theme.markPumpkin
         case .attention, .money: Theme.markBurnt
-        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts: Theme.markGrey
+        case .estimates, .invoices, .paymentsLedger, .billing, .reports, .scorecard, .team, .notices, .drafts: Theme.markGrey
         }
     }
 }

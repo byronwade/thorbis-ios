@@ -70,6 +70,16 @@ final class PaymentsCollectionTests: XCTestCase {
         catch { XCTFail("Expected cancellation after authority changed") }
     }
 
+    func testRowDistinguishesRecordedAndRefundedAmounts() {
+        func item(_ status: FieldPaymentStatus, refunded: Int) -> PaymentsCollectionItem {
+            PaymentsCollectionItem(id: paymentID, invoiceID: invoiceID, status: status, method: .card,
+                recordedAt: "2026-10-26T12:30:00Z", amount: 12500, refundedAmount: refunded, netAmount: 12500 - refunded)
+        }
+        XCTAssertEqual(PaymentsCollectionRow(item: item(.recorded, refunded: 0)).statusLabel, "Recorded")
+        XCTAssertEqual(PaymentsCollectionRow(item: item(.recorded, refunded: 2500)).statusLabel, "Partially refunded")
+        XCTAssertEqual(PaymentsCollectionRow(item: item(.refunded, refunded: 12500)).statusLabel, "Refunded")
+    }
+
     func testLatePaymentsPageCannotPublishAfterAuthorityChanges() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let api = APIClient(session: URLProtocolFixture.session([.init(200, response(), gate: gate)]), baseURL: "https://app.thorbis.com")

@@ -480,6 +480,7 @@ struct InvoiceDetailView: View {
     /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
     var returnsWhenPaid = false
     var expectedJobScope: JobDocumentScope? = nil
+    var paymentsScope: ScopedRecordFavorites.Scope? = nil
     /// The job-scoped label is display only; the full id still controls every read and payment.
     var invoiceReference: String? = nil
     @EnvironmentObject var api: APIClient
@@ -526,7 +527,18 @@ struct InvoiceDetailView: View {
 
     @State private var financingApplications: [FinancingApplication] = []
     @State private var confirmCancelFinancing = false
-    var body: some View {
+    private var paymentsAccessCurrent: Bool {
+        guard let paymentsScope else { return true }
+        return ScopedRecordFavorites.currentScope(session: session, api: api) == paymentsScope &&
+            session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
+    }
+
+    @ViewBuilder var body: some View {
+        if paymentsAccessCurrent { detailBody }
+        else { Text("This invoice is no longer available in this workspace.").foregroundStyle(Theme.muted) }
+    }
+
+    private var detailBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 OfflineBanner().padding(.horizontal, -Theme.gutter)
@@ -807,19 +819,22 @@ struct InvoiceDetailView: View {
 
     private func load() async {
         let generation = session.generation
-        guard expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
+        guard paymentsAccessCurrent, expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
             record = nil
             paymentModel = nil
             return
         }
         if paymentModel == nil {
-            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope)
+            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope,
+                                                          expectedCollectionOrganizationID: paymentsScope?.organizationID,
+                                                          isCollectionCurrent: { paymentsAccessCurrent })
             paymentModel?.outbox = outbox
             paymentModel?.policyVersion = session.policyVersion ?? 0
         }
         guard let paymentModel else { return }
+        if paymentsScope != nil { record = nil }
         await paymentModel.load()
-        guard session.generation == generation else { return }
+        guard session.generation == generation, paymentsAccessCurrent else { record = nil; return }
         record = paymentModel.invoice
         if paymentModel.invoice != nil {
             error = nil

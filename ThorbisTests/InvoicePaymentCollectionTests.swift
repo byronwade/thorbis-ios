@@ -7,6 +7,106 @@ final class InvoicePaymentCollectionTests: XCTestCase {
     private let invoiceID = "00000000-0000-4000-8000-00000000000a"
     private let paymentID = "00000000-0000-4000-8000-00000000000b"
 
+    func testPaymentsInvoiceRequiresFreshMatchingOrganization() async {
+        let organization = "00000000-0000-4000-8000-000000000002"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice()), .init(200, "{\"items\":[]}")]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID, expectedCollectionOrganizationID: organization)
+        await model.load()
+        XCTAssertEqual(model.invoice?.id, invoiceID)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.header("Cache-Control"), "no-cache")
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.header("Cache-Control"), "no-cache")
+
+        let wrongClient = APIClient(session: URLProtocolFixture.session([.init(200, invoice())]), baseURL: "https://app.thorbis.com")
+        let wrongModel = InvoicePaymentCollectionModel(api: wrongClient, invoiceID: invoiceID, expectedCollectionOrganizationID: "00000000-0000-4000-8000-000000000099")
+        await wrongModel.load()
+        XCTAssertNil(wrongModel.invoice)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "A wrong-organization invoice must not trigger a payment-history read")
+    }
+
+    func testPaymentsInvoiceDoesNotFallBackToSavedRecordWhenOffline() async throws {
+        let uniqueID = UUID().uuidString.lowercased()
+        let cachedJSON = invoice().replacingOccurrences(of: invoiceID, with: uniqueID)
+        let cached = try JSONDecoder().decode(InvoiceRecord.self, from: Data(cachedJSON.utf8))
+        JobDetailCache.save(invoice: cached)
+        let cachedFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("JobDetailCache", isDirectory: true).appendingPathComponent("\(uniqueID).invoice.json")
+        defer { try? FileManager.default.removeItem(at: cachedFile) }
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("favorite-offline-\(UUID())", isDirectory: true)
+        let box = FieldOutbox(directory: directory, defaults: UserDefaults(suiteName: "favorite-offline-\(UUID())")!)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: uniqueID,
+            expectedCollectionOrganizationID: "00000000-0000-4000-8000-000000000002")
+        model.outbox = box
+        await model.load()
+        XCTAssertNil(model.invoice, "A payment ledger invoice must not expose a previously cached invoice when fresh access cannot be checked")
+        XCTAssertFalse(model.offlineCopy)
+        withExtendedLifetime(box) {}
+    }
+
+    func testPaymentsInvoiceClearsOldDataWhenRefreshIsDenied() async {
+        let client = APIClient(session: URLProtocolFixture.session([
+            .init(200, invoice()), .init(200, "{\"items\":[]}"), .init(403, "{\"title\":\"Denied\"}")
+        ]), baseURL: "https://app.thorbis.com")
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID,
+            expectedCollectionOrganizationID: "00000000-0000-4000-8000-000000000002")
+        await model.load()
+        XCTAssertNotNil(model.invoice)
+        await model.load()
+        XCTAssertNil(model.invoice, "A denied refresh must not leave an old invoice visible")
+        XCTAssertTrue(model.payments.isEmpty)
+        XCTAssertFalse(model.historyComplete)
+    }
+
+    func testPaymentsInvoiceDiscardsDelayedReadAfterAuthorityChange() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice(), gate: gate)]), baseURL: "https://app.thorbis.com")
+        var current = true
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID,
+            expectedCollectionOrganizationID: "00000000-0000-4000-8000-000000000002", isCollectionCurrent: { current })
+        let task = Task { await model.load() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        current = false
+        gate.release(); await task.value
+        XCTAssertNil(model.invoice)
+        XCTAssertTrue(model.payments.isEmpty)
+        XCTAssertFalse(model.historyComplete)
+    }
+
+    func testPaymentsInvoiceCannotCollectAfterAuthorityChanges() async {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice()), .init(200, "{\"items\":[]}")]), baseURL: "https://app.thorbis.com")
+        var current = true
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID,
+            expectedCollectionOrganizationID: "00000000-0000-4000-8000-000000000002", isCollectionCurrent: { current })
+        await model.load()
+        XCTAssertTrue(model.canRecordPayment)
+        current = false
+        XCTAssertFalse(model.canOfferCollection)
+        XCTAssertFalse(model.canRecordPayment)
+        let recorded = await model.record(amountCents: 100, method: .cash)
+        XCTAssertFalse(recorded)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "No payment request should be sent")
+    }
+
+    func testPaymentsInvoiceClearsIfAuthorityChangesDuringPaymentHistory() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, invoice()), .init(200, "{\"items\":[]}", gate: gate)]), baseURL: "https://app.thorbis.com")
+        var current = true
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: invoiceID,
+            expectedCollectionOrganizationID: "00000000-0000-4000-8000-000000000002", isCollectionCurrent: { current })
+        let task = Task { await model.load() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        current = false
+        gate.release(); await task.value
+        XCTAssertNil(model.invoice)
+        XCTAssertTrue(model.payments.isEmpty)
+        XCTAssertFalse(model.historyComplete)
+    }
+
     func testSavedCopyScopeRevisionPublishesAwayAndBackChanges() {
         let client = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
         var revisions: [UUID] = []

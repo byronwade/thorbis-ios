@@ -1188,6 +1188,7 @@ enum PaperRoute: Hashable {
     case home
     case homeList(HomeList)
     case payments
+    case paymentsLedger
     case businessSetup
     case companyDetails
     case properties
@@ -1255,6 +1256,7 @@ struct PaperRouteView: View {
         case .home: OwnerHomeView()
         case .homeList(let list): OwnerHomeListView(list: list)
         case .payments: PaymentsSetupView()
+        case .paymentsLedger: PaymentsCollectionView()
         case .businessSetup: BusinessSetupView()
         case .companyDetails: CompanyDetailsView()
         case .properties: PropertiesView()

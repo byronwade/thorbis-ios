@@ -55,6 +55,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private let api: APIClient
     private let invoiceID: String
     private let expectedJobScope: JobDocumentScope?
+    private let expectedCollectionOrganizationID: String?
+    private let isCollectionCurrent: @MainActor () -> Bool
     private let intentStore: InvoicePaymentIntentStore
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
@@ -64,10 +66,13 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
          makeIdempotencyKey: @escaping () -> String = { UUID().uuidString.lowercased() },
-         expectedJobScope: JobDocumentScope? = nil) {
+         expectedJobScope: JobDocumentScope? = nil, expectedCollectionOrganizationID: String? = nil,
+         isCollectionCurrent: @escaping @MainActor () -> Bool = { true }) {
         self.api = api
         self.invoiceID = invoiceID
         self.expectedJobScope = expectedJobScope
+        self.expectedCollectionOrganizationID = expectedCollectionOrganizationID
+        self.isCollectionCurrent = isCollectionCurrent
         self.intentStore = intentStore
         self.makeIdempotencyKey = makeIdempotencyKey
     }
@@ -100,7 +105,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     var collectableCents: Int? { outstandingCents.map { max(0, $0 - waitingCents) } }
 
     var canOfferCollection: Bool {
-        invoice?.status == "issued" && invoice?.currency == "USD" && (collectableCents ?? 0) > 0
+        isCollectionCurrent() && invoice?.status == "issued" && invoice?.currency == "USD" && (collectableCents ?? 0) > 0
     }
 
     var paymentTotalCents: Int? {
@@ -165,6 +170,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         historyComplete = false
         verifiedHistoryGeneration = nil
         payments = []
+        if expectedCollectionOrganizationID != nil { invoice = nil; pendingRequest = nil; offlineCopy = false }
         defer {
             isLoading = false
             let waiters = loadWaiters
@@ -173,9 +179,9 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         }
         do {
             try Task.checkCancellation()
-            let loadedInvoice = try await api.fieldInvoice(invoiceID)
+            let loadedInvoice = try await api.fieldInvoice(invoiceID, requireFresh: expectedCollectionOrganizationID != nil)
             try Task.checkCancellation()
-            guard generation == api.requestGeneration else { throw CancellationError() }
+            guard generation == api.requestGeneration, isCollectionCurrent() else { throw CancellationError() }
             guard acceptInvoiceMutationResponse(loadedInvoice) else { return }
             // A copy saved on this phone is never charged: card, link and Tap to Pay wait for a live
             // read. Cash and check can still be taken and record once back online (OF-04, OF-08).
@@ -193,9 +199,9 @@ final class InvoicePaymentCollectionModel: ObservableObject {
                 pendingRequest = intentStore.load(organizationID: loadedInvoice.organizationId, invoiceID: invoiceID)
             }
             try Task.checkCancellation()
-            let loadedPayments = try await api.fieldPayments(invoiceID)
+            let loadedPayments = try await api.fieldPayments(invoiceID, requireFresh: expectedCollectionOrganizationID != nil)
             try Task.checkCancellation()
-            guard generation == api.requestGeneration else { throw CancellationError() }
+            guard generation == api.requestGeneration, isCollectionCurrent() else { throw CancellationError() }
             guard validHistory(loadedPayments, for: loadedInvoice) else {
                 throw Problem(title: "Payment history couldn't be verified. Refresh this invoice to try again.", status: nil, detail: nil)
             }
@@ -217,7 +223,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             pendingRequest = nil
             historyComplete = false
         } catch {
-            if error.isConnectivityFailure, outbox != nil,
+            if expectedCollectionOrganizationID == nil, error.isConnectivityFailure, outbox != nil,
                let cached = invoice ?? JobDetailCache.invoice(invoiceID), acceptInvoiceMutationResponse(cached) {
                 // No signal: the last copy, so cash and check can still be taken (OF-04, OF-08).
                 useOfflineCopy(cached)
@@ -282,7 +288,8 @@ final class InvoicePaymentCollectionModel: ObservableObject {
 
     @discardableResult
     func acceptInvoiceMutationResponse(_ updated: InvoiceRecord) -> Bool {
-        guard updated.id == invoiceID, expectedJobScope?.contains(updated) != false else {
+        guard isCollectionCurrent(), updated.id == invoiceID, expectedJobScope?.contains(updated) != false,
+              expectedCollectionOrganizationID.map({ $0.caseInsensitiveCompare(updated.organizationId) == .orderedSame }) != false else {
             invoice = nil
             payments = []
             historyComplete = false
