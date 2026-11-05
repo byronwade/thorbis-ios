@@ -241,11 +241,14 @@ struct LocalWorkspaceView: View {
                 }
                 if bound {
                     let rows = model.rows(section)
-                    PaperSection(section.title, count: rows.isEmpty ? nil : rows.count) {
-                        if rows.isEmpty {
-                            Text("No records on this device").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
-                        } else {
+                    // Empty: the shared empty state, not a label repeating the title over a one-line card.
+                    if rows.isEmpty {
+                        ListRoomEmpty(title: "Nothing here yet.",
+                                      message: "Add to \(section.title.lowercased()) with the button below.")
+                            .padding(.horizontal, -PaperCardMetrics.margin)
+                    } else {
+                    PaperSection(section.title, count: rows.count) {
+                        Group {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(rows) { row in
                                     HStack(spacing: 0) {
@@ -271,6 +274,7 @@ struct LocalWorkspaceView: View {
                         }
                     }
                     .id(model.revision)
+                    }
                 } else if model.error == nil {
                     SkeletonRows(count: 3, leading: false, inset: 0)
                 }

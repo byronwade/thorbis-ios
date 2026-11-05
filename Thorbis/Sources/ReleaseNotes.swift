@@ -13,6 +13,23 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-calmer-lists-and-screens",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "list.bullet", title: "Calmer job lists",
+                      detail: "Rows drop words they repeat, and titles, times and streets no longer break mid-line."),
+                .init(symbol: "tray", title: "Notices line up in the Inbox",
+                      detail: "Job notices sit beside calls and texts, with the same age and unread dot."),
+                .init(symbol: "bell", title: "Notification rules, grouped",
+                      detail: "Each role's email and in-app switches sit together in one panel."),
+                .init(symbol: "checkmark.circle", title: "One tap to confirm",
+                      detail: "Wrap up shows a single Confirm button on each item you can check off."),
+                .init(symbol: "dollarsign.circle", title: "Billing reads like Invoices",
+                      detail: "Billing schedules show as plain rows, with the amount over the status."),
+            ],
+            fixes: 13
+        ),
+        ReleaseNote(
             id: "2026-11-05-text-opens-inbox",
             date: "2026-11-05",
             highlights: [
