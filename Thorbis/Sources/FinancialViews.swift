@@ -673,6 +673,15 @@ struct InvoiceDetailView: View {
                 .presentationDragIndicator(.visible)
             }
         } }
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-sheet") {
+                Text(legacyHandoff.active == nil ? "Legacy inactive" : "Legacy active")
+                    .font(.caption).padding(8).background(Theme.canvas)
+                    .accessibilityIdentifier("preview-legacy-owner-state")
+            }
+        }
+        #endif
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
