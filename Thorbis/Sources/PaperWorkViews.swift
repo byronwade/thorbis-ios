@@ -1020,8 +1020,8 @@ struct ScheduleCompactRow: View {
         // The Schedule button sits beside the row's link, not inside it, so each is its own target.
         HStack(alignment: .center, spacing: 0) {
             NavigationLink(value: job) {
-                PaperListRow(leading: leading, title: street ?? job.title,
-                             subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
+                PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
+                             subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
                              subtitleLines: 2, dimmed: job.status == "completed") {
                     if schedule == nil {
                         StatusWord(jobStatus: pendingStatus ?? job.status, pending: pendingStatus != nil)
