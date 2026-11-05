@@ -232,7 +232,8 @@ struct AppDrawer: View {
         .accessibilityIdentifier("drawer-recent-\(recent.item.id)")
         .contextMenu {
             let kind: ScopedRecordFavorites.Kind = recent.item.kind == .job ? .job : .customer
-            let selected = recordFavorites.entries.contains { $0.kind == kind && $0.id == recent.item.id.lowercased() }
+            let selected = recordFavorites.isBound(to: ScopedRecordFavorites.currentScope(session: session, api: api)) &&
+                recordFavorites.entries.contains { $0.kind == kind && $0.id == recent.item.id.lowercased() }
             Button(selected ? "Remove from favorites" : "Add to favorites", systemImage: selected ? "star.slash" : "star") {
                 let scope = ScopedRecordFavorites.currentScope(session: session, api: api)
                 let allowed = kind == .job ? session.can("job.view", feature: "jobs") : session.can("customer.view", feature: "core_crm")
