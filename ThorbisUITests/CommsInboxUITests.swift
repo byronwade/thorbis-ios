@@ -22,11 +22,19 @@ final class CommsInboxUITests: XCTestCase {
         let button = app.buttons[menu]
         XCTAssertTrue(button.waitForExistence(timeout: 20), app.debugDescription)
         button.tap()
-        let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", row)).firstMatch
+        let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", row, menu)).firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5), app.debugDescription)
         expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: item)
         waitForExpectations(timeout: 5)
         item.tap()
+        // The popover fades out before the choice lands; under load the first tap can be eaten.
+        let chosen = NSPredicate(format: "label BEGINSWITH %@", row)
+        if !chosen.evaluate(with: app.buttons[menu]) || item.exists {
+            _ = item.waitForNonExistence(timeout: 3)
+            if !chosen.evaluate(with: app.buttons[menu]), item.exists, item.isHittable { item.tap() }
+        }
+        expectation(for: chosen, evaluatedWith: app.buttons[menu])
+        waitForExpectations(timeout: 10)
     }
 
     func testSwitchToCallsAndOpenACallersThread() {
