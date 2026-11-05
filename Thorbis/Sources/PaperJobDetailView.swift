@@ -1061,7 +1061,8 @@ struct JobDetailView: View {
 
     private func compactJobSections(_ job: JobRecord) -> some View {
         Group {
-            if measuredSectionWidth >= 188 + 2 * (Theme.gutter - 8) {
+            // Until measured, keep the four tabs; the measurement settles it before the next frame.
+            if measuredSectionWidth == 0 || measuredSectionWidth >= 188 + 2 * (Theme.gutter - 8) {
                 jobSectionControl(job).padding(.horizontal, Theme.gutter - 8)
             } else {
                 jobSectionMenu(job)
