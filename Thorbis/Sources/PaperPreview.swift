@@ -666,6 +666,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var ownerAuthenticated = false
         var estimateUnavailable = false
         var documentStatusesChanged = false
+        var completionCreates = 0
+        var completionCreated = false
+        var completionViewRevoked = false
         var savedWorkOffline = false
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
@@ -680,8 +683,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
+    static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
+    static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
             guard !scenario.savedWorkOffline else { return false }
@@ -780,7 +785,22 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if request.httpMethod != nil && request.httpMethod != "GET" {
+        if PaperPreview.isJobDocumentsPreview,
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
+           request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
+            let foreign = ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice-foreign")
+            let failed = ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice-failure")
+            Self.scenario.lock.withLock { Self.scenario.completionCreates += 1; Self.scenario.completionCreated = !foreign && !failed }
+            if failed {
+                status = 503
+                payload = ["status": 503, "title": "Sample invoice could not be created"]
+            } else {
+                var draft = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice)) as! [String: Any]
+                if foreign { draft["jobId"] = "00000000-0000-4000-8000-000000002215" }
+                status = 200
+                payload = draft
+            }
+        } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
@@ -841,9 +861,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         do {
             let body = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .fragmentsAllowed])
             let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json", "X-Thorbis-Design-Preview": "sample-data"])!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: body)
-            client?.urlProtocolDidFinishLoading(self)
+            let deliver: @Sendable () -> Void = { [weak self] in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                self.client?.urlProtocol(self, didLoad: body)
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if PaperPreview.isJobDocumentsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
+               request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: deliver)
+            } else { deliver() }
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
     override func stopLoading() {}
@@ -956,7 +984,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }]
             }
             if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") {
+                    return ["items": scenario.lock.withLock { scenario.completionCreated } ? [jsonObject(PaperPreview.invoice)!] : []]
+                }
                 return ["items": invoices.filter { $0.jobId == PaperPreview.jobID }.map { jsonObject($0)! }]
+            }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
+               scenario.lock.withLock({ scenario.completionCreated }), path == "/v1/invoices/\(PaperPreview.invoice.id)" {
+                return jsonObject(PaperPreview.invoice)
             }
             if path == "/v1/estimates" { return ["items": estimates.map { jsonObject($0)! }] }
             if path == "/v1/invoices" {
@@ -1215,6 +1250,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
+            if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.completionViewRevoked }) { capabilities.removeAll { $0 == "invoice.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
             if PaperPreview.isPaymentCollectionPreview, !scenario.lock.withLock({ scenario.paymentPermissionRevoked }) {
                 capabilities.append("invoice.payment.create")
@@ -1223,6 +1259,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
             if PaperPreview.screen == "job-onsite" { capabilities += ["job.complete", "invoice.create"] }
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "owner-home" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
