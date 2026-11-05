@@ -49,6 +49,7 @@ struct JobMediaView: View {
     @EnvironmentObject var pendingMedia: PendingMediaStore
     @EnvironmentObject private var photoHandoff: CustomerPhotoPresenter
     @EnvironmentObject private var estimateHandoff: JobEstimateHandoffPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
@@ -204,6 +205,7 @@ struct JobMediaView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width - Theme.gutter * 2 } action: { contentWidth = $0 }
         }
         .foregroundStyle(Theme.foreground)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .background(Theme.canvas)
         .safeAreaInset(edge: .bottom) {
             if selecting {
@@ -836,7 +838,7 @@ struct JobMediaView: View {
                   Set(pickedRecords.map(\.id)) == picked, !Task.isCancelled else {
                 throw CustomerPhotoSelection.Invalid.scope
             }
-            guard estimateHandoff.active == nil, photoHandoff.present(owner, expectedRevision: handoffRevision) else { throw CustomerPhotoSelection.Invalid.scope }
+            guard estimateHandoff.active == nil, photoHandoff.present(owner, expectedRevision: handoffRevision, sourceWindow: customerWindowAnchor.window, api: api, session: session) else { throw CustomerPhotoSelection.Invalid.scope }
         } catch {
             self.error = "Couldn’t verify every selected photo. Check your connection, refresh this job and try again."
         }

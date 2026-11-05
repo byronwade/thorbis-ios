@@ -8,6 +8,62 @@ final class JobCommercialDocumentsTests: XCTestCase {
         .init(jobID: id(job), organizationID: id(1), customerID: id(2), originEstimateID: origin.map(id))
     }
 
+    func testCustomerRetryVerifiesExactInvoiceAndFreshJobMembership() throws {
+        let first = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(50).utf8))
+        let second = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(51).utf8))
+        XCTAssertTrue(JobCustomerPaymentRetry.isVerified(requestedID: id(51), invoice: second, freshIDs: [id(50), id(51)], scope: scope()))
+        XCTAssertFalse(JobCustomerPaymentRetry.isVerified(requestedID: id(51), invoice: first, freshIDs: [id(50), id(51)], scope: scope()), "Equal prices do not make another invoice the requested one")
+        XCTAssertFalse(JobCustomerPaymentRetry.isVerified(requestedID: id(51), invoice: second, freshIDs: [id(50)], scope: scope()))
+        XCTAssertFalse(JobCustomerPaymentRetry.isVerified(requestedID: id(51), invoice: nil, freshIDs: [id(50), id(51)], scope: scope()), "Missing or denied invoice must fail closed")
+        XCTAssertFalse(JobCustomerPaymentRetry.isVerified(requestedID: id(51), invoice: second, freshIDs: [id(50), id(51)], scope: scope(job: 101)))
+    }
+
+    func testCustomerRetryRejectsSavedOrChangedInvoiceBalance() throws {
+        let fresh = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(51).utf8))
+        let older = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(51, paid: 100).utf8))
+        XCTAssertTrue(JobCustomerPaymentRetry.isLiveModelValid(fresh: fresh, loaded: fresh, offline: false, canRecord: true))
+        XCTAssertFalse(JobCustomerPaymentRetry.isLiveModelValid(fresh: fresh, loaded: older, offline: false, canRecord: true))
+        XCTAssertFalse(JobCustomerPaymentRetry.isLiveModelValid(fresh: fresh, loaded: fresh, offline: true, canRecord: true))
+        XCTAssertFalse(JobCustomerPaymentRetry.isLiveModelValid(fresh: fresh, loaded: fresh, offline: false, canRecord: false))
+        XCTAssertTrue(JobCustomerPaymentRetry.isProofModelValid(fresh: fresh, loaded: fresh, offline: false, loading: true, canRecord: false), "A same-model refresh keeps the footer visible while collection remains disabled")
+        XCTAssertFalse(JobCustomerPaymentRetry.isProofModelValid(fresh: fresh, loaded: older, offline: false, loading: true, canRecord: false))
+        XCTAssertFalse(JobCustomerPaymentRetry.isProofModelValid(fresh: fresh, loaded: fresh, offline: true, loading: true, canRecord: false))
+        XCTAssertFalse(JobCustomerPaymentRetry.isProofModelValid(fresh: fresh, loaded: fresh, offline: false, loading: false, canRecord: false))
+    }
+
+    func testLiveRetryModelBypassesOlderCachedInvoiceBalance() async throws {
+        let client = api([.init(200, invoice(51, paid: 100)), .init(200, invoice(51)), .init(200, #"{"items":[]}"#)])
+        let old = try await client.fieldInvoice(id(51))
+        XCTAssertEqual(old.amountPaid, 100)
+        let expected = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(51).utf8))
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        await SavedCopies.$liveOnly.withValue(true) { await model.load() }
+        XCTAssertTrue(JobCustomerPaymentRetry.isLiveModelValid(fresh: expected, loaded: model.invoice,
+            offline: model.offlineCopy, canRecord: model.canRecordPayment))
+        let invoiceReads = URLProtocolFixture.recorded.filter { $0.url?.path == "/v1/invoices/\(id(51))" }
+        XCTAssertEqual(invoiceReads.count, 2, "The retry must issue a new invoice read")
+        XCTAssertEqual(invoiceReads.last?.headers["Cache-Control"], "no-cache")
+    }
+
+    func testRetryFooterStaysValidButPaymentRouteRejectsWhileSameModelLoads() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(51)), .init(200, #"{"items":[]}"#),
+                          .init(200, invoice(51), gate: gate), .init(200, #"{"items":[]}"#)])
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        await model.load()
+        let fresh = try XCTUnwrap(model.invoice)
+        XCTAssertTrue(model.canRecordPayment)
+        let refresh = Task { await model.load() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(model.isLoading)
+        XCTAssertTrue(JobCustomerPaymentRetry.isProofModelValid(fresh: fresh, loaded: model.invoice,
+            offline: model.offlineCopy, loading: model.isLoading, canRecord: model.canRecordPayment))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(51), selectedID: id(51), selected: fresh,
+            loadedID: id(51), model: model, scope: scope()), "An in-flight refresh must never open collection")
+        gate.release(); await refresh.value
+        XCTAssertTrue(model.canRecordPayment)
+    }
+
     func testPaymentRouteNeverUsesAFormerOrMissingInvoice() async throws {
         let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#)])
         let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())

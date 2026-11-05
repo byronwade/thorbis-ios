@@ -29,6 +29,7 @@ struct JobDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var customerPaymentInvoiceID: String?
     @State private var documentInvoiceID: String?
     @State private var notes: [JobNoteRecord] = []
@@ -53,6 +54,14 @@ struct JobDetailView: View {
     private var invoicesLoaded: Bool { invoiceRead != nil }
     private var invoicesFailed: Bool { invoiceRead?.isComplete == false }
     @State private var selectedInvoiceID: String?
+    /// A customer-requested payment stays bound to this invoice until the technician explicitly chooses another.
+    @State private var customerRetryInvoiceID: String?
+    @State private var customerRetryVerified = false
+    @State private var customerRetryProof: JobCustomerPaymentRetryProof?
+    @State private var customerRetryRequest = UUID()
+    #if DEBUG
+    @State private var previewRetryListDenied = false
+    #endif
     @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
     @State private var loadedInvoiceModelID: String?
     @State private var invoicePaymentLoads = JobInvoicePaymentLoads()
@@ -283,6 +292,26 @@ struct JobDetailView: View {
                     .padding(.horizontal, 1)
             }
         }
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-retry-diagnostic") {
+                Text(debugCustomerRetryState).font(.system(size: 8)).background(Color.white).foregroundStyle(Color.black)
+                    .accessibilityIdentifier("preview-retry-state")
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-retry-list-denied-after-ready") {
+                Button(previewRetryListDenied ? "Preview list denied" : "Preview deny invoice list") {
+                    PaperPreviewProtocol.denyRetryInvoiceList()
+                    Task {
+                        await SavedCopies.$liveOnly.withValue(true) { await loadInvoices() }
+                        previewRetryListDenied = true
+                    }
+                }.frame(minHeight: 44).background(Theme.canvas).accessibilityIdentifier("preview-deny-retry-list")
+            }
+        }
+        #endif
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         // v2 Record room: sections are space and a 13 Medium label, no panels ("the page is one pour").
@@ -453,7 +482,8 @@ struct JobDetailView: View {
             contactsLoaded = false
             contactsFailed = false
         }
-        .onChange(of: paymentAuthorityToken) { _, _ in paymentRoute = nil }
+        .onChange(of: paymentAuthorityToken) { _, _ in paymentRoute = nil; invalidateCustomerRetryIfNeeded() }
+        .onChange(of: session.authorityRevision) { _, _ in invalidateCustomerRetryIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
@@ -1238,7 +1268,7 @@ struct JobDetailView: View {
 
     private var moneyBarCollects: Bool {
         guard session.can("invoice.payment.create", feature: "payments"), let invoice = selectedInvoice,
-              invoice.status != "draft", invoicePaymentModel != nil else { return false }
+              invoice.status != "draft", invoicePaymentModel != nil, allowsCustomerRetryCollection(invoice.id) else { return false }
         return loadedInvoiceModelID == invoice.id
     }
 
@@ -1988,6 +2018,7 @@ struct JobDetailView: View {
                     JobPanel {
                         ForEach(invoices) { invoice in
                             Button {
+                                customerRetryRequest = UUID(); customerRetryInvoiceID = nil; customerRetryVerified = false; customerRetryProof = nil
                                 selectedInvoiceID = invoice.id
                                 documentInvoiceID = invoice.id
                             } label: {
@@ -2399,7 +2430,8 @@ struct JobDetailView: View {
 
     /// TF-01: the one next step for this job, from its status, its estimates and its invoices.
     private var nextStep: TechJobStep? {
-        guard let job else { return nil }
+        // The generic next step may target a different invoice than the customer's request.
+        guard customerRetryInvoiceID == nil, let job else { return nil }
         let can = TechJobAbilities(
             createEstimate: session.can("estimate.create", feature: "estimates"),
             sendEstimate: session.can("estimate.send", feature: "estimates"),
@@ -2431,24 +2463,41 @@ struct JobDetailView: View {
         let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
         let originalScope = model.scope, actorID = session.user?.id
-        let generation = session.generation, apiGeneration = api.requestGeneration,
+        let generation = session.generation, authorityRevision = session.authorityRevision, apiGeneration = api.requestGeneration,
             copyRevision = api.savedCopyScopeRevision, origin = api.normalizedOrigin
-        let current: @MainActor () -> Bool = { [weak api, weak session] in
+        let sameScope: @MainActor () -> Bool = { [weak api, weak session] in
             guard let api, let session else { return false }
             return session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
                 session.generation == generation && api.requestGeneration == apiGeneration &&
                 api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
                 session.can("job.view", feature: "jobs")
         }
+        let current: @MainActor () -> Bool = { [weak session] in
+            sameScope() && session?.authorityRevision == authorityRevision
+        }
         estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
-                                         invoiceUpdated: updateInvoice) { exit in
+                                         invoiceUpdated: updateInvoice, sourceWindow: customerWindowAnchor.window) { exit in
+            if case .retryPayment(let invoiceID) = exit {
+                guard sameScope() else { return }
+                await prepareCustomerPaymentRetry(invoiceID, job: job)
+                return
+            }
             guard current() else { return }
             // The customer may have changed a phone, an email or a contact in their own hands.
             await loadContacts(job)
-            guard current() else { return }
-            if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
+            guard current() else {
+                if case .collect(let invoiceID) = exit, sameScope() {
+                    await prepareCustomerPaymentRetry(invoiceID, job: job)
+                }
+                return
+            }
+            if case .collect(let invoiceID) = exit {
+                customerRetryRequest = UUID(); customerRetryInvoiceID = nil; customerRetryVerified = false; customerRetryProof = nil
+                customerPaymentInvoiceID = invoiceID
+            }
             await finishCustomerDocuments()
         }
+        if estimateHandoffPresenter.active !== model { error = "Customer view is unavailable. Please try again." }
     }
 
     private func buildEstimate() {
@@ -2469,6 +2518,9 @@ struct JobDetailView: View {
             }
         case .reviewInvoice(let id): reviewInvoiceID = id
         case .collect(let invoiceID, _, _):
+            guard allowsCustomerRetryCollection(invoiceID) else {
+                selectedTab = "Money"; error = customerRetryUnavailableMessage(); return
+            }
             Task {
                 let generation = session.generation
                 let authority = session.authorityRevision
@@ -2552,6 +2604,7 @@ struct JobDetailView: View {
             invoicePaymentModel = nil
             loadedInvoiceModelID = nil
         }
+        invalidateCustomerRetryIfNeeded()
     }
 
     /// The job's canonical completion draft (POST /v1/jobs/{id}/completion-invoice); idempotent per job.
@@ -2575,6 +2628,76 @@ struct JobDetailView: View {
             committed += 1
             return invoice
         } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }
+    }
+
+    #if DEBUG
+    private var debugCustomerRetryState: String {
+        let target = customerRetryInvoiceID ?? "nil"
+        let match = customerRetryInvoiceID.map { allowsCustomerRetryCollection($0) } ?? false
+        return "target=\(target.suffix(4)) verified=\(customerRetryVerified) proof=\(customerRetryProof != nil) matches=\(match) loading=\(invoicePaymentModel?.isLoading ?? false) canRecord=\(invoicePaymentModel?.canRecordPayment ?? false) selected=\(selectedInvoiceID?.suffix(4) ?? "nil") loaded=\(loadedInvoiceModelID?.suffix(4) ?? "nil") complete=\(invoiceRead?.isComplete ?? false) message=\(error ?? "nil")"
+    }
+    #endif
+
+    private func allowsCustomerRetryCollection(_ invoiceID: String) -> Bool {
+        guard let requested = customerRetryInvoiceID else { return true }
+        guard customerRetryVerified, invoiceID == requested, let proof = customerRetryProof else { return false }
+        return proof.matches(requestedID: invoiceID, selectedID: selectedInvoiceID, read: invoiceRead,
+            loadedID: loadedInvoiceModelID, currentModel: invoicePaymentModel,
+            currentScope: job.flatMap { scope(for: $0) }, api: api, session: session)
+    }
+
+    private func invalidateCustomerRetryIfNeeded() {
+        guard let requested = customerRetryInvoiceID, customerRetryVerified,
+              !allowsCustomerRetryCollection(requested) else { return }
+        let canExplain = customerRetryProof?.authority.sameSessionAndScope(api: api, session: session) == true
+        customerRetryVerified = false; customerRetryProof = nil
+        if canExplain { error = customerRetryUnavailableMessage() }
+    }
+
+    private func customerRetryUnavailableMessage() -> String {
+        guard let id = customerRetryInvoiceID else { return "Open an invoice to continue." }
+        return "Couldn’t verify invoice INV-\(id.suffix(4).uppercased()). Open an invoice to continue."
+    }
+
+    private func prepareCustomerPaymentRetry(_ invoiceID: String, job: JobRecord) async {
+        let ticket = UUID(); customerRetryRequest = ticket
+        customerRetryInvoiceID = invoiceID; customerRetryVerified = false; customerRetryProof = nil
+        guard let scope = scope(for: job), let authority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              session.can("invoice.view", feature: "invoicing"), session.can("invoice.payment.create", feature: "payments") else {
+            selectedTab = "Money"; error = "Payment access changed. Ask your office to restore it."; return
+        }
+        let current: @MainActor () -> Bool = {
+            !Task.isCancelled && customerRetryRequest == ticket && authority.isCurrent(api: api, session: session) &&
+                self.job?.id == scope.jobID && self.job?.customerId == scope.customerID
+        }
+        let published = await SavedCopies.$liveOnly.withValue(true) {
+            await documents.loadInvoices(scope: scope, api: api, isCurrent: current)
+        }
+        guard current() else { return }
+        do {
+            let invoice = try await api.fieldInvoice(invoiceID, requireFresh: true)
+            guard current() else { return }
+            guard published, invoiceRead?.isComplete == true,
+                  JobCustomerPaymentRetry.isVerified(requestedID: invoiceID, invoice: invoice,
+                      freshIDs: invoiceRead?.freshIDs ?? [], scope: scope) else { throw CancellationError() }
+            let freshModel = InvoicePaymentCollectionModel(api: api, invoiceID: invoiceID, expectedJobScope: scope)
+            freshModel.outbox = outbox
+            freshModel.policyVersion = session.policyVersion ?? 0
+            await SavedCopies.$liveOnly.withValue(true) { await freshModel.load() }
+            guard current() else { return }
+            guard JobCustomerPaymentRetry.isLiveModelValid(fresh: invoice, loaded: freshModel.invoice,
+                offline: freshModel.offlineCopy, canRecord: freshModel.canRecordPayment) else { throw CancellationError() }
+            documents.replaceInvoice(invoice)
+            loadedInvoiceModelID = invoiceID; invoicePaymentModel = freshModel; selectedInvoiceID = invoiceID
+            guard selectedInvoice?.id == invoiceID else { throw CancellationError() }
+            customerRetryProof = JobCustomerPaymentRetryProof(invoice: invoice, model: freshModel, scope: scope, authority: authority)
+            customerRetryVerified = true
+            selectedTab = "Money"
+            error = "Invoice INV-\(invoiceID.suffix(4).uppercased()) is ready. Tap Collect payment to continue."
+        } catch {
+            guard current() else { return }
+            selectedTab = "Money"; self.error = customerRetryUnavailableMessage()
+        }
     }
 
     private func finishCustomerDocuments() async {
@@ -2602,6 +2725,9 @@ struct JobDetailView: View {
     /// Revalidates the current selection at the transition, then fixes the
     /// invoice and model together for the lifetime of the payment sheet.
     @discardableResult private func presentPayment(for requestedID: String) -> Bool {
+        guard allowsCustomerRetryCollection(requestedID) else {
+            error = customerRetryUnavailableMessage(); return false
+        }
         guard session.can("job.view", feature: "jobs"),
               session.can("invoice.view", feature: "invoicing"),
               session.can("invoice.payment.create", feature: "payments"),
@@ -2624,6 +2750,7 @@ struct JobDetailView: View {
             invoicePaymentModel?.policyVersion = session.policyVersion ?? 0
         }
         if let model = invoicePaymentModel { await invoicePaymentLoads.load(model) }
+        invalidateCustomerRetryIfNeeded()
     }
     private func load() async {
         let generation = session.generation

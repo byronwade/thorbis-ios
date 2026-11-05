@@ -74,3 +74,23 @@ struct CustomerPhotoPreparation {
         return try selection.validateFresh(records)
     }
 }
+
+/// A handoff never resumes after a material authority change, even if it later changes back.
+@MainActor
+final class CustomerPhotoAuthorityFence {
+    private let capabilities: Set<String>
+    private let features: [String: FeatureDecision]
+    private let policyVersion: Int?
+    private let authorityGeneration: String?
+    private(set) var isValid = true
+
+    init(capabilities: Set<String>, features: [String: FeatureDecision], policyVersion: Int?, authorityGeneration: String?) {
+        self.capabilities = capabilities; self.features = features
+        self.policyVersion = policyVersion; self.authorityGeneration = authorityGeneration
+    }
+    func observeCapabilities(_ value: Set<String>) { if value != capabilities { isValid = false } }
+    func observeFeatures(_ value: [String: FeatureDecision]) { if value != features { isValid = false } }
+    func observePolicy(version: Int?, generation: String?) {
+        if version != policyVersion || generation != authorityGeneration { isValid = false }
+    }
+}

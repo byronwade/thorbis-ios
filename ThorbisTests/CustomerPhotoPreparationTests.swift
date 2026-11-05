@@ -33,6 +33,31 @@ final class CustomerPhotoPreparationTests: XCTestCase {
         XCTAssertEqual(reads, 0)
     }
 
+    func testAuthorityFencePermanentlyRejectsPermissionAwayAndBack() {
+        let on = FeatureDecision(enabled: true, released: true, entitled: true, stage: nil, reason: nil)
+        let fence = CustomerPhotoAuthorityFence(capabilities: ["job.view"], features: ["jobs": on], policyVersion: 1, authorityGeneration: "v1")
+        XCTAssertTrue(fence.isValid)
+        fence.observeCapabilities([])
+        fence.observeCapabilities(["job.view"])
+        XCTAssertFalse(fence.isValid, "Restoring access must not revive the original customer selection")
+    }
+
+    func testAuthorityFencePermanentlyRejectsPolicyAwayAndBack() {
+        let fence = CustomerPhotoAuthorityFence(capabilities: ["job.view"], features: [:], policyVersion: 1, authorityGeneration: "v1")
+        fence.observePolicy(version: 2, generation: "v2")
+        fence.observePolicy(version: 1, generation: "v1")
+        XCTAssertFalse(fence.isValid)
+    }
+
+    func testAuthorityFenceAllowsUnchangedMaterial() {
+        let on = FeatureDecision(enabled: true, released: true, entitled: true, stage: nil, reason: nil)
+        let fence = CustomerPhotoAuthorityFence(capabilities: ["job.view"], features: ["jobs": on], policyVersion: 1, authorityGeneration: "v1")
+        fence.observeCapabilities(["job.view"])
+        fence.observeFeatures(["jobs": on])
+        fence.observePolicy(version: 1, generation: "v1")
+        XCTAssertTrue(fence.isValid)
+    }
+
     func testCancelledPreparationDoesNotStartReads() async throws {
         let selection = try CustomerPhotoSelection(jobID: "job", organizationID: "org", selectedIDs: ["a"])
         var reads = 0

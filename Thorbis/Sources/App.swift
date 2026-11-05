@@ -26,8 +26,9 @@ struct ThorbisApp: App {
 
     init() {
         let handoffArbiter = CustomerHandoffArbiter()
-        _estimateHandoff = StateObject(wrappedValue: JobEstimateHandoffPresenter(arbiter: handoffArbiter))
-        _photoHandoff = StateObject(wrappedValue: CustomerPhotoPresenter(arbiter: handoffArbiter))
+        let sceneWindow = CustomerProtectedSceneWindow()
+        _estimateHandoff = StateObject(wrappedValue: JobEstimateHandoffPresenter(arbiter: handoffArbiter, sceneWindow: sceneWindow))
+        _photoHandoff = StateObject(wrappedValue: CustomerPhotoPresenter(arbiter: handoffArbiter, sceneWindow: sceneWindow))
         // Popovers put the keyboard away before opening; they need to know whether it is up.
         ThorbisKeyboard.watch()
         #if DEBUG
@@ -179,28 +180,6 @@ struct ThorbisApp: App {
                 appContent
                 #endif
             }
-            }
-            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil }, set: { _ in })) {
-                if let model = estimateHandoff.active {
-                    JobEstimateProtectedOwner(model: model, presenter: estimateHandoff)
-                }
-            }
-            .fullScreenCover(isPresented: Binding(get: { photoHandoff.active != nil }, set: { _ in })) {
-                if let owner = photoHandoff.active {
-                    CustomerPhotoHandoffView(owner: owner) { photoHandoff.authenticatedExit() }
-                }
-            }
-            .fullScreenCover(isPresented: Binding(get: { legacyHandoff.active != nil }, set: { _ in }), onDismiss: {
-                legacyHandoff.completedDismissal(api: api, session: session)
-                #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
-                    previewHandoffProbe = photoHandoff.availableRevision == nil ? "Handoff busy" : "Handoff available"
-                }
-                #endif
-            }) {
-                if let handoff = legacyHandoff.active {
-                    LegacyCustomerProtectedView(handoff: handoff, presenter: legacyHandoff)
-                }
             }
             #if DEBUG
             .overlay(alignment: .topLeading) {

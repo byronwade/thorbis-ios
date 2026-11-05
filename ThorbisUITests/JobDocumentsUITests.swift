@@ -377,6 +377,64 @@ final class JobDocumentsUITests: XCTestCase {
         capture(app, "Accessible customer invoice")
     }
 
+    func testRefreshedCustomerPaymentRetryKeepsSecondEqualBalanceInvoice() {
+        customerRetryAfterForeground(fixture: nil, succeeds: true)
+    }
+
+    func testRefreshedCustomerPaymentRetryBlocksDeniedInvoice() {
+        customerRetryAfterForeground(fixture: "--paper-preview-retry-invoice-denied", succeeds: false)
+    }
+
+    func testRefreshedCustomerPaymentRetryBlocksMissingInvoice() {
+        customerRetryAfterForeground(fixture: "--paper-preview-retry-invoice-missing", succeeds: false)
+    }
+
+    func testVerifiedCustomerRetryStopsAfterInvoiceListDenial() {
+        customerRetryAfterForeground(fixture: "--paper-preview-retry-list-denied-after-ready", succeeds: true, denyAfterReady: true)
+    }
+
+    private func customerRetryAfterForeground(fixture: String?, succeeds: Bool, denyAfterReady: Bool = false) {
+        continueAfterFailure = false
+        var extra = ["--paper-preview-job-invoices-equal-balances", "--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved", "--paper-preview-exit-authority-diagnostic", "--paper-preview-retry-diagnostic"]
+        if let fixture { extra.append(fixture) }
+        let app = preview(extra: extra)
+        handToCustomer(app)
+        let invoice = app.buttons["customer-invoice-\(depositA)"]
+        reveal(invoice, in: app); invoice.tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        let diagnostic = app.staticTexts["preview-exit-authority"]
+        XCTAssertTrue(diagnostic.waitForExistence(timeout: 10)); XCTAssertTrue(diagnostic.label.contains("true"))
+        XCUIDevice.shared.press(.home); app.activate()
+        let changed = NSPredicate(format: "label CONTAINS %@", "false")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: changed, object: diagnostic)], timeout: 20), .completed)
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        let message = succeeds ? "Invoice INV-2240 is ready. Tap Collect payment to continue." :
+            "Couldn’t verify invoice INV-2240. Open an invoice to continue."
+        XCTAssertTrue(app.staticTexts[message].waitForExistence(timeout: 30))
+        let collect = app.buttons["Collect payment"]
+        if succeeds && denyAfterReady {
+            let deny = app.buttons["preview-deny-retry-list"]
+            XCTAssertTrue(deny.waitForExistence(timeout: 10)); deny.tap()
+            let finished = NSPredicate(format: "label == %@", "Preview list denied")
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: finished, object: deny)], timeout: 20), .completed)
+            XCTAssertFalse(collect.isHittable, "A later denied list must invalidate the verified collection")
+            XCTAssertTrue(app.staticTexts["Couldn’t verify invoice INV-2240. Open an invoice to continue."].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        } else if succeeds {
+            let exists = collect.waitForExistence(timeout: 10)
+            let state = app.staticTexts["preview-retry-state"]
+            XCTAssertTrue(state.exists)
+            print("Retry state: \(state.label)")
+            XCTAssertTrue(exists, state.label); XCTAssertTrue(collect.isHittable); collect.tap()
+            let identity = app.descendants(matching: .any)["collect-payment-invoice"]
+            XCTAssertTrue(identity.waitForExistence(timeout: 10)); XCTAssertTrue(identity.label.contains("INV-2240"), identity.label)
+        } else {
+            XCTAssertFalse(collect.isHittable, "Another invoice must not be collectible from the retry footer")
+            XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        }
+    }
+
     func testCustomerPaymentReturnsToTheSelectedInvoicesStaffCollection() {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved"])

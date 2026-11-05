@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import Combine
 
 struct JobEstimateHandoffSelection {
@@ -162,6 +163,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     private let actorID: String
     private let sessionGeneration: UUID
     private let apiGeneration: UUID
+    private let savedCopyScopeRevision: UUID
     private let origin: String?
     private var freshIDs: Set<String> = []
     private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
@@ -173,7 +175,8 @@ final class JobEstimateHandoffModel: ObservableObject {
     /// additionally need `isCurrent`; invoices and details carry their own permission gates.
     var isCurrentJob: Bool {
         !retired && !actorID.isEmpty && session.user?.id == actorID && session.activeOrganization?.id == scope.organizationID &&
-        session.generation == sessionGeneration && api.requestGeneration == apiGeneration && origin != nil && api.normalizedOrigin == origin &&
+        session.generation == sessionGeneration && api.requestGeneration == apiGeneration &&
+        api.savedCopyScopeRevision == savedCopyScopeRevision && origin != nil && api.normalizedOrigin == origin &&
         session.can("job.view", feature: "jobs")
     }
     var eligibleIDs: Set<String> {
@@ -209,7 +212,8 @@ final class JobEstimateHandoffModel: ObservableObject {
         self.scope = .init(jobID: job.id, organizationID: job.organizationId, customerID: job.customerId, originEstimateID: job.estimateId)
         self.jobLocationID = job.locationId; self.jobTitle = job.title
         self.customerName = customerName; self.documents = documents; self.api = api; self.session = session
-        actorID = session.user?.id ?? ""; sessionGeneration = session.generation; apiGeneration = api.requestGeneration; origin = api.normalizedOrigin
+        actorID = session.user?.id ?? ""; sessionGeneration = session.generation; apiGeneration = api.requestGeneration
+        savedCopyScopeRevision = api.savedCopyScopeRevision; origin = api.normalizedOrigin
     }
     func revision(for id: String) -> CustomerIssuedEstimateRevision? {
         guard let current = records.first(where: { $0.id == id }), let revision = revisions[id],
@@ -524,6 +528,8 @@ enum CustomerViewStart: Equatable {
 enum CustomerViewExit: Equatable {
     case done
     case collect(invoiceID: String)
+    /// The same staff session remains, but authority was refreshed while customer mode was open.
+    case retryPayment(invoiceID: String)
 }
 
 /// Retains this one protected customer handoff ("Customer view") above workspace and authentication
@@ -539,10 +545,42 @@ struct CustomerHandoffAttempt {
     let handoffRevision: UUID
 }
 
+/// Binds any post-handoff staff action to the authority which opened the handoff.
+struct CustomerHandoffExitAuthority {
+    let actor: String, organization: String, origin: String
+    let sessionGeneration: UUID, authorityRevision: UUID, requestGeneration: UUID, scopeRevision: UUID
+    @MainActor static func capture(api: APIClient, session: SessionController) -> Self? {
+        guard session.phase == .ready, let actor = session.user?.id, let organization = session.activeOrganization?.id,
+              let origin = api.normalizedOrigin, session.can("job.view", feature: "jobs") else { return nil }
+        return .init(actor: actor, organization: organization, origin: origin, sessionGeneration: session.generation,
+                     authorityRevision: session.authorityRevision, requestGeneration: api.requestGeneration,
+                     scopeRevision: api.savedCopyScopeRevision)
+    }
+    @MainActor func sameSessionAndScope(api: APIClient, session: SessionController) -> Bool {
+        session.phase == .ready && session.user?.id == actor && session.activeOrganization?.id == organization &&
+        session.generation == sessionGeneration && session.can("job.view", feature: "jobs") &&
+        api.requestGeneration == requestGeneration && api.savedCopyScopeRevision == scopeRevision && api.normalizedOrigin == origin
+    }
+    @MainActor func isCurrent(api: APIClient, session: SessionController) -> Bool {
+        sameSessionAndScope(api: api, session: session) && session.authorityRevision == authorityRevision
+    }
+}
+
 @MainActor
 final class JobEstimateHandoffPresenter: ObservableObject {
     private let arbiter: CustomerHandoffArbiter
-    init(arbiter: CustomerHandoffArbiter = CustomerHandoffArbiter()) { self.arbiter = arbiter }
+    private let sceneWindow: CustomerProtectedSceneWindow?
+    private var sceneOwnerID: UUID?
+    private var exitAuthority: CustomerHandoffExitAuthority?
+    #if DEBUG
+    var debugExitAuthorityCurrent: Bool {
+        guard let model = active, let exitAuthority else { return false }
+        return exitAuthority.isCurrent(api: model.api, session: model.session)
+    }
+    #endif
+    init(arbiter: CustomerHandoffArbiter = CustomerHandoffArbiter(), sceneWindow: CustomerProtectedSceneWindow? = nil) {
+        self.arbiter = arbiter; self.sceneWindow = sceneWindow
+    }
     func captureAttempt(api: APIClient, session: SessionController) -> CustomerHandoffAttempt? {
         guard arbiter.owner == nil, session.phase == .ready, let actor = session.user?.id,
               let organization = session.activeOrganization?.id, let origin = api.normalizedOrigin else { return nil }
@@ -580,19 +618,53 @@ final class JobEstimateHandoffPresenter: ObservableObject {
 
     func present(_ model: JobEstimateHandoffModel, start: CustomerViewStart, details: CustomerSelfEditModel? = nil,
                  sourceGeneration: UUID? = nil, invoiceUpdated: @escaping (InvoiceRecord) -> Void = { _ in },
-                 onExit: @escaping @MainActor (CustomerViewExit) async -> Void) {
-        guard active == nil, model.isCurrentJob, arbiter.claim(.documents) else { return }
+                 sourceWindow: UIWindow? = nil, onExit: @escaping @MainActor (CustomerViewExit) async -> Void) {
+        guard active == nil, model.isCurrentJob, let authority = CustomerHandoffExitAuthority.capture(api: model.api, session: model.session),
+              arbiter.claim(.documents) else { return }
+        exitAuthority = authority
         self.start = start; self.details = details
         self.sourceGeneration = sourceGeneration ?? model.session.generation
         self.invoiceUpdated = invoiceUpdated
         active = model; self.onAuthenticatedExit = onExit
+        if let sceneWindow {
+            let id = UUID(); sceneOwnerID = id
+            let content = AnyView(JobEstimateProtectedOwner(model: model, presenter: self)
+                .environmentObject(model.api).environmentObject(model.session))
+            guard sceneWindow.present(id: id, source: sourceWindow, content: content, onDisconnect: { [weak self] in
+                guard self?.active === model else { return }
+                self?.finishExit(.done, runCallback: false)
+            }) else { finishExit(.done, runCallback: false); return }
+        }
+    }
+
+    func authenticatedExit(from model: JobEstimateHandoffModel, _ exit: CustomerViewExit = .done) {
+        guard active === model else { return }
+        authenticatedExit(exit)
     }
 
     func authenticatedExit(_ exit: CustomerViewExit = .done) {
-        let refresh = onAuthenticatedExit
-        active?.retire(clearDocuments: false); active = nil; arbiter.release(.documents); onAuthenticatedExit = nil
+        if let sceneWindow, let sceneOwnerID {
+            sceneWindow.dismiss(id: sceneOwnerID) { [weak self] restored in self?.finishExit(exit, runCallback: restored) }
+        } else { finishExit(exit, runCallback: true) }
+    }
+
+    private func finishExit(_ exit: CustomerViewExit, runCallback: Bool) {
+        let refresh = onAuthenticatedExit, model = active, authority = exitAuthority
+        let mayRun = runCallback && model.map { authority?.isCurrent(api: $0.api, session: $0.session) == true && $0.isCurrentJob } == true
+        let mayNotify = runCallback && model.map { authority?.sameSessionAndScope(api: $0.api, session: $0.session) == true && $0.isCurrentJob } == true
+        active?.retire(clearDocuments: false); active = nil; sceneOwnerID = nil; exitAuthority = nil
+        arbiter.release(.documents); onAuthenticatedExit = nil
         details = nil; invoiceUpdated = { _ in }; start = .estimates
-        Task { await refresh?(exit) }
+        if let model, let authority {
+            Task {
+                if mayRun, authority.isCurrent(api: model.api, session: model.session) {
+                    await refresh?(exit)
+                } else if mayNotify, authority.sameSessionAndScope(api: model.api, session: model.session),
+                          case .collect(let invoiceID) = exit {
+                    await refresh?(.retryPayment(invoiceID: invoiceID))
+                }
+            }
+        }
     }
 }
 
@@ -603,9 +675,11 @@ extension JobEstimateHandoffPresenter {
     enum OpenResult { case presented, unavailable, superseded }
 
     func openCustomerView(jobID: String, customerID: String, customerName: String, start: CustomerViewStart,
-                          api: APIClient, session: SessionController,
+                          api: APIClient, session: SessionController, sourceWindow: UIWindow? = nil,
+                          sourceStillAttached: @escaping @MainActor () -> Bool = { true },
                           onExit: @escaping @MainActor (CustomerViewExit) async -> Void) async -> OpenResult {
         guard active == nil, arbiter.owner == nil else { return .superseded }
+        if sceneWindow != nil, sourceWindow?.windowScene?.activationState != .foregroundActive { return .unavailable }
         guard session.can("job.view", feature: "jobs") else { return .unavailable }
         let generation = session.generation
         let authorityRevision = session.authorityRevision
@@ -614,7 +688,7 @@ extension JobEstimateHandoffPresenter {
         let origin = api.normalizedOrigin
         let handoffRevision = arbiter.revision
         let job = try? await api.fieldJob(jobID)
-        guard !Task.isCancelled, session.generation == generation,
+        guard !Task.isCancelled, sourceStillAttached(), session.generation == generation,
               session.authorityRevision == authorityRevision, session.can("job.view", feature: "jobs"),
               api.requestGeneration == requestGeneration, api.savedCopyScopeRevision == scopeRevision,
               api.normalizedOrigin == origin, arbiter.revision == handoffRevision,
@@ -622,7 +696,7 @@ extension JobEstimateHandoffPresenter {
         guard let job, job.id == jobID, job.organizationId == session.activeOrganization?.id, job.customerId == customerID else { return .unavailable }
         let model = JobEstimateHandoffModel(job: job, customerName: customerName, documents: JobDocumentCollections(), api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
-        present(model, start: start, details: details, onExit: onExit)
+        present(model, start: start, details: details, sourceWindow: sourceWindow, onExit: onExit)
         return active === model ? .presented : .superseded
     }
 }

@@ -89,10 +89,49 @@ final class CustomerPhotoHandoffUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Share"].isHittable)
     }
 
+    func testPhotoHandoffRechecksAndRecoversAfterForegroundRevalidation() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "--paper-preview-photo-handoff", "--paper-preview-owner-auth", "approved", "--paper-preview-photo-scene-diagnostic"]
+        app.launch()
+        let select = app.buttons["Select"]
+        XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
+        let first = app.buttons["job-media-photo-00000000-0000-4000-8000-000000009301"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); first.tap()
+        let present = app.buttons["job-media-show-customer"]
+        XCTAssertTrue(present.waitForExistence(timeout: 10)); present.tap()
+        let image = app.images["customer-photo-image"]
+        XCTAssertTrue(image.waitForExistence(timeout: 20))
+        let diagnostic = app.staticTexts["preview-photo-scene-diagnostic"]
+        XCTAssertTrue(diagnostic.waitForExistence(timeout: 10))
+        func counter(_ name: String, in label: String) -> Int {
+            let prefix = name + "="
+            return label.split(separator: " ").first(where: { $0.hasPrefix(prefix) }).flatMap { Int($0.dropFirst(prefix.count)) } ?? -1
+        }
+        for _ in 0..<2 {
+            let before = diagnostic.label
+            let pauses = counter("pauses", in: before), recoveries = counter("recoveries", in: before), images = counter("images", in: before)
+            XCTAssertGreaterThanOrEqual(pauses, 0); XCTAssertGreaterThanOrEqual(recoveries, 0); XCTAssertGreaterThanOrEqual(images, 1)
+            XCUIDevice.shared.press(.home); app.activate()
+            let advanced = NSPredicate { _, _ in
+                let label = diagnostic.label
+                return counter("pauses", in: label) > pauses && counter("recoveries", in: label) > recoveries && counter("images", in: label) > images
+            }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: advanced, object: diagnostic)], timeout: 30), .completed,
+                           "Each foreground must clear, freshly revalidate and reload the selected image")
+            XCTAssertTrue(image.waitForExistence(timeout: 10))
+            XCTAssertTrue(diagnostic.label.contains("authority=true"), diagnostic.label)
+        }
+        XCTAssertFalse(app.buttons["Remove"].isHittable)
+        let exit = app.buttons["customer-mode-owner-exit"]
+        XCTAssertTrue(exit.waitForExistence(timeout: 10)); exit.tap()
+        XCTAssertTrue(app.buttons["Select"].waitForExistence(timeout: 20), "Authenticated hand-back returns to the technician")
+    }
+
     func testSelectedPhotosStayInCustomerModeUntilAuthenticatedHandBack() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "--paper-preview-photo-handoff", "--paper-preview-owner-auth", "approved"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-dates", "--paper-preview-photo-handoff", "--paper-preview-owner-auth", "approved", "--paper-preview-photo-scene-diagnostic"]
         app.launch()
         let select = app.buttons["Select"]
         XCTAssertTrue(select.waitForExistence(timeout: 20)); select.tap()
@@ -114,7 +153,11 @@ final class CustomerPhotoHandoffUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["2 chosen"].waitForExistence(timeout: 5))
         XCTAssertTrue(present.waitForExistence(timeout: 5)); present.tap()
         let image = app.images["customer-photo-image"]
-        XCTAssertTrue(image.waitForExistence(timeout: 20))
+        let loaded = image.waitForExistence(timeout: 20)
+        let diagnostic = app.staticTexts["preview-photo-scene-diagnostic"]
+        XCTAssertTrue(diagnostic.exists, "Photo lifecycle diagnostic must be mounted")
+        print("Photo lifecycle: \(diagnostic.label)")
+        XCTAssertTrue(loaded, diagnostic.label)
         XCTAssertEqual(image.label, "Photo 1 of 2")
         XCTAssertFalse(app.buttons["Before"].isHittable)
         XCTAssertFalse(app.buttons["Share"].isHittable)

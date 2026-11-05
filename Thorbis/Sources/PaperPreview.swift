@@ -101,7 +101,8 @@ enum PaperPreview {
         let approved = args[index + 1] == "approved"
         return { _ in
             if isJobEstimateHandoff { return approved && JobEstimateHandoffPreview.shared.authenticate() }
-            if approved, args.contains("--paper-preview-job-invoice-foreign-after-auth") {
+            if approved, args.contains("--paper-preview-job-invoice-foreign-after-auth") ||
+                args.contains("--paper-preview-retry-invoice-denied") || args.contains("--paper-preview-retry-invoice-missing") {
                 PaperPreviewProtocol.markOwnerAuthenticated()
             }
             return approved
@@ -288,7 +289,8 @@ enum PaperPreview {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":null,"voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
         var fixture = ProcessInfo.processInfo.arguments.contains("--paper-preview-large-invoice")
             ? json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789") : json
-        if ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test"),
+           !ProcessInfo.processInfo.arguments.contains("--paper-preview-job-sheet") {
             fixture = fixture.replacingOccurrences(of: "\"jobId\":\"00000000-0000-4000-8000-000000002214\"", with: "\"jobId\":null")
         }
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8))
@@ -660,6 +662,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var invoiceReads = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
+        var retryListDenied = false
         var estimateUnavailable = false
         var documentStatusesChanged = false
         var savedWorkOffline = false
@@ -678,8 +681,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.photoHandoffReads = [:]; scenario.photoHandoffOfflineOnce = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.retryListDenied = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.photoHandoffReads = [:]; scenario.photoHandoffOfflineOnce = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
+    static func denyRetryInvoiceList() { scenario.lock.withLock { scenario.retryListDenied = true } }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
             guard !scenario.savedWorkOffline else { return false }
@@ -802,6 +806,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ !Self.scenario.reviewConnectionRestored }) {
             status = 503
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
+        } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-retry-list-denied-after-ready"),
+                  url.path == "/v1/jobs/\(PaperPreview.jobID)/invoices",
+                  Self.scenario.lock.withLock({ Self.scenario.retryListDenied }) {
+            status = 403
+            payload = ["status": 403, "title": "Invoice list access denied"]
+        } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-retry-invoice-denied"),
+                  url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240",
+                  Self.scenario.lock.withLock({ Self.scenario.ownerAuthenticated }) {
+            status = 403
+            payload = ["status": 403, "title": "Invoice access denied"]
         } else if PaperPreview.isJobDocumentsPreview,
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-job-history-fail-once"),
                   url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments",
@@ -964,7 +980,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }]
             }
             if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
-                return ["items": invoices.filter { $0.jobId == PaperPreview.jobID }.map { jsonObject($0)! }]
+                let missing = ProcessInfo.processInfo.arguments.contains("--paper-preview-retry-invoice-missing") &&
+                    scenario.lock.withLock({ scenario.ownerAuthenticated })
+                return ["items": invoices.filter { $0.jobId == PaperPreview.jobID && (!missing || !$0.id.hasSuffix("2240")) }.map { jsonObject($0)! }]
             }
             if path == "/v1/estimates" { return ["items": estimates.map { jsonObject($0)! }] }
             if path == "/v1/invoices" {
@@ -987,7 +1005,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     object["status"] = "void"
                 }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-foreign") ||
-                    scenario.lock.withLock({ scenario.ownerAuthenticated }) {
+                    (ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-foreign-after-auth") &&
+                     scenario.lock.withLock({ scenario.ownerAuthenticated })) {
                     object["jobId"] = "00000000-0000-4000-8000-000000002215"
                 }
                 return object

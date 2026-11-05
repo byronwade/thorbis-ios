@@ -79,8 +79,8 @@ final class SessionController: ObservableObject {
     /// The server could not be reached at the last check; cached authority and data are in use.
     @Published private(set) var isOffline = false
     /// Policy version of the verified authority; offline command envelopes carry it.
-    private(set) var policyVersion: Int?
-    private(set) var authorityGeneration: String?
+    @Published private(set) var policyVersion: Int?
+    @Published private(set) var authorityGeneration: String?
     private var authorityOrigin: String?
 
     var priceBookAuthority: PriceBookAuthority? {

@@ -475,7 +475,7 @@ struct JobEstimateProtectedOwner: View {
         Group {
             if let exit = reviewingDetails, let details = presenter.details {
                 // Staff side, after authentication: the existing review and audited save.
-                CustomerSelfEditReview(model: details) { presenter.authenticatedExit(exit) }
+                CustomerSelfEditReview(model: details) { presenter.authenticatedExit(from: model, exit) }
             } else {
                 CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
                     JobCustomerDocumentsView(scope: model.scope, documents: model.documents, sourceGeneration: presenter.sourceGeneration,
@@ -487,6 +487,14 @@ struct JobEstimateProtectedOwner: View {
                 }
             }
         }
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-exit-authority-diagnostic") {
+                Text("exitAuthority=\(presenter.debugExitAuthorityCurrent)").font(.system(size: 8))
+                    .accessibilityIdentifier("preview-exit-authority").background(Color.white).foregroundStyle(Color.black)
+            }
+        }
+        #endif
         .onChange(of: model.isCurrentJob) { _, valid in if !valid { model.retire() } }
         .onChange(of: model.approvalAuthority) { _, valid in if !valid { model.cancelApprovals() } }
     }
@@ -495,7 +503,7 @@ struct JobEstimateProtectedOwner: View {
         if model.isCurrentJob, presenter.details?.hasChanges == true, session.can("customer.edit", feature: "core_crm") {
             reviewingDetails = exit
         } else {
-            presenter.authenticatedExit(exit)
+            presenter.authenticatedExit(from: model, exit)
         }
     }
     private func authenticateOwner() async -> Bool {

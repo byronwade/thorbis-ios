@@ -119,6 +119,7 @@ struct EstimateDetailView: View {
     @State private var action = ""
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
     @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var memberPricing: MemberPricing?
     @State private var showPDF = false
     @State private var openCustomer: Customer?
@@ -244,6 +245,7 @@ struct EstimateDetailView: View {
 
     var body: some View {
         scrollContent
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
@@ -357,8 +359,10 @@ struct EstimateDetailView: View {
               expectedAttempt.map({ customerView.isCurrent($0, api: api, session: session) }) ?? true else { return }
         if let jobID {
             busy = true
+            let source = customerWindowAnchor.window
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
-                customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session) { _ in
+                customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session, sourceWindow: source,
+                sourceStillAttached: { [weak customerWindowAnchor, weak source] in source != nil && customerWindowAnchor?.window === source }) { _ in
                 customerModeClosed()
             }
             busy = false
@@ -367,7 +371,7 @@ struct EstimateDetailView: View {
         guard expectedAttempt.map({ customerView.isCurrent($0, api: api, session: session) }) ?? true,
               let lease = customerView.claimLegacy() else { return }
         guard let handoff = LegacyCustomerHandoff(lease: lease, content: AnyView(customerMode(record, lease: lease)), api: api, session: session,
-            onDismiss: { _ in customerModeClosed() }), legacyHandoff.present(handoff) else { lease.release(); return }
+            onDismiss: { _ in customerModeClosed() }), legacyHandoff.present(handoff, sourceWindow: customerWindowAnchor.window, api: api, session: session) else { lease.release(); error = "Customer view is unavailable. Please try again."; return }
     }
 
     private func performAction() async {
@@ -509,6 +513,7 @@ struct InvoiceDetailView: View {
     @State private var showSignature = false
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
     @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var showPDF = false
     @State private var openCustomer: Customer?
 
@@ -597,6 +602,7 @@ struct InvoiceDetailView: View {
         #if DEBUG
         .modifier(PaperPreviewScrollAnchor())
         #endif
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
@@ -765,9 +771,29 @@ struct InvoiceDetailView: View {
         guard let record, record.organizationId == session.activeOrganization?.id else { return }
         if let jobID = record.jobId, expectedJobScope.map({ $0.contains(record) }) != false {
             busy = true
+            let source = customerWindowAnchor.window
+            let exitAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session)
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
-                customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session) { exit in
+                customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session, sourceWindow: source,
+                sourceStillAttached: { [weak customerWindowAnchor, weak source] in source != nil && customerWindowAnchor?.window === source }) { exit in
+                if case .retryPayment(let invoiceID) = exit, invoiceID == id,
+                   exitAuthority?.sameSessionAndScope(api: api, session: session) == true {
+                    error = session.can("invoice.payment.create", feature: "payments")
+                        ? "Access was refreshed. Tap Collect payment to continue."
+                        : "Payment access changed. Ask your office to restore it."
+                    return
+                }
+                guard exitAuthority?.isCurrent(api: api, session: session) == true else { return }
                 await load()
+                guard exitAuthority?.isCurrent(api: api, session: session) == true else {
+                    if case .collect(let invoiceID) = exit, invoiceID == id,
+                       exitAuthority?.sameSessionAndScope(api: api, session: session) == true {
+                        error = session.can("invoice.payment.create", feature: "payments")
+                            ? "Access was refreshed. Tap Collect payment to continue."
+                            : "Payment access changed. Ask your office to restore it."
+                    }
+                    return
+                }
                 guard case .collect(let invoiceID) = exit, invoiceID == id, paymentModel?.canRecordPayment == true,
                       session.can("invoice.payment.create", feature: "payments") else { return }
                 showCollectPayment = true
@@ -783,7 +809,7 @@ struct InvoiceDetailView: View {
                     showCollectPayment = true
                 }
                 Task { await loadFinancing() }
-            }), legacyHandoff.present(handoff) else { lease.release(); return }
+            }), legacyHandoff.present(handoff, sourceWindow: customerWindowAnchor.window, api: api, session: session) else { lease.release(); error = "Customer view is unavailable. Please try again."; return }
     }
 
     /// TF-08: issuing and collecting are one step for the tech; payment opens right after.
