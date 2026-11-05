@@ -31,7 +31,8 @@ final class PaymentsCollectionTests: XCTestCase {
 
     func testFiltersUseServerQueryAndPreserveWebSemantics() async throws {
         for (filter, expectedOperator, expectedValue) in [(PaymentsCollectionFilter.card, "and", "card"), (.cash, "and", "cash"), (.refunded, "or", "refunded")] {
-            let api = APIClient(session: URLProtocolFixture.session([.init(200, response())]), baseURL: "https://app.thorbis.com")
+            let body = filter == .cash ? response().replacingOccurrences(of: "\"payments.method\":\"card\"", with: "\"payments.method\":\"cash\"") : response()
+            let api = APIClient(session: URLProtocolFixture.session([.init(200, body)]), baseURL: "https://app.thorbis.com")
             _ = try await api.paymentsCollectionPage(filter: filter, isCurrent: { true })
             let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
             let parts = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
@@ -41,6 +42,12 @@ final class PaymentsCollectionTests: XCTestCase {
             XCTAssertEqual(root["operator"] as? String, expectedOperator)
             XCTAssertTrue(overlay.contains(expectedValue))
         }
+    }
+
+    func testRejectsRowsOutsideRequestedFilter() async {
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, response())]), baseURL: "https://app.thorbis.com")
+        do { _ = try await api.paymentsCollectionPage(filter: .cash, isCurrent: { true }); XCTFail("A card must not appear in the cash filter") }
+        catch { }
     }
 
     func testFinancedPaymentIsReadableWithoutEnablingManualRecording() async throws {

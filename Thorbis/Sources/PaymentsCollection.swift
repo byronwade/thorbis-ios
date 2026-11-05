@@ -8,6 +8,14 @@ enum PaymentsCollectionMethod: String, Decodable { case card, ach, cash, check, 
 enum PaymentsCollectionFilter: String, CaseIterable, Identifiable {
     case all = "All", card = "Card & bank", cash = "Cash & check", refunded = "Refunded"
     var id: String { rawValue }
+    func matches(status: FieldPaymentStatus, method: PaymentsCollectionMethod, refunded: Int) -> Bool {
+        switch self {
+        case .all: true
+        case .card: status == .recorded && (method == .card || method == .ach)
+        case .cash: status == .recorded && (method == .cash || method == .check)
+        case .refunded: status == .refunded || refunded > 0
+        }
+    }
     var overlay: String? {
         switch self {
         case .all: nil
@@ -127,6 +135,7 @@ extension APIClient {
                   UUID(uuidString: fields.invoiceID) != nil, !fields.recordedAt.isEmpty,
                   seen.insert(item.id.lowercased()).inserted,
                   fields.amount.value >= 0, fields.refundedAmount.value >= 0, !overflow,
+                  filter.matches(status: fields.status, method: fields.method, refunded: fields.refundedAmount.value),
                   net >= 0, net == fields.netAmount.value else {
                 throw Problem(title: "Invalid payments response", status: nil, detail: "A payment could not be verified.")
             }
