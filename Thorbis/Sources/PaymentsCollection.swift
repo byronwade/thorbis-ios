@@ -3,6 +3,21 @@ import Foundation
 /// Collection methods include financed payments; this does not enable recording a new method.
 enum PaymentsCollectionMethod: String, Decodable { case card, ach, cash, check, financing }
 
+/// The web tape filters are sent to the server, so a filtered page never implies
+/// that matching records on later pages do not exist.
+enum PaymentsCollectionFilter: String, CaseIterable, Identifiable {
+    case all = "All", card = "Card & bank", cash = "Cash & check", refunded = "Refunded"
+    var id: String { rawValue }
+    var overlay: String? {
+        switch self {
+        case .all: nil
+        case .card: #"{"schemaVersion":1,"root":{"type":"group","operator":"and","children":[{"type":"condition","field":"payments.status","operator":"is","value":"recorded"},{"type":"condition","field":"payments.method","operator":"is_any_of","value":["card","ach"]}]}}"#
+        case .cash: #"{"schemaVersion":1,"root":{"type":"group","operator":"and","children":[{"type":"condition","field":"payments.status","operator":"is","value":"recorded"},{"type":"condition","field":"payments.method","operator":"is_any_of","value":["cash","check"]}]}}"#
+        case .refunded: #"{"schemaVersion":1,"root":{"type":"group","operator":"or","children":[{"type":"condition","field":"payments.status","operator":"is","value":"refunded"},{"type":"condition","field":"payments.refunded_amount","operator":"greater_than","value":0}]}}"#
+        }
+    }
+}
+
 /// A page of server-authorized payments. Amounts are cents; this projection is online-only.
 struct PaymentsCollectionItem: Identifiable, Equatable {
     let id: String
@@ -68,7 +83,7 @@ extension APIClient {
     /// A single fresh page of the same `payments.all` view used by the web. Callers must pass a
     /// predicate covering the verified actor, workspace, permission and feature state, and clear
     /// already displayed rows whenever that state changes.
-    func paymentsCollectionPage(limit: Int = 50, cursor: String? = nil,
+    func paymentsCollectionPage(limit: Int = 50, cursor: String? = nil, filter: PaymentsCollectionFilter = .all,
                                 isCurrent: @escaping @MainActor () -> Bool) async throws -> PaymentsCollectionPage {
         guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
         guard (1...200).contains(limit), cursor.map({ UUID(uuidString: $0) != nil }) ?? true else {
@@ -79,12 +94,14 @@ extension APIClient {
         let origin = normalizedOrigin
         let response: PaymentsQueryResponse
         do {
-            response = try await send("GET", "/v1/query", queryItems: [
+            var query = [
             URLQueryItem(name: "resourceId", value: "payments"),
             URLQueryItem(name: "viewId", value: "payments.all"),
             URLQueryItem(name: "purpose", value: "collection"),
             URLQueryItem(name: "limit", value: String(limit)),
-        ], cursor: cursor, requireFresh: true)
+        ]
+            if let overlay = filter.overlay { query.append(URLQueryItem(name: "filter", value: overlay)) }
+            response = try await send("GET", "/v1/query", queryItems: query, cursor: cursor, requireFresh: true)
         } catch {
             guard !Task.isCancelled, isCurrent(), requestGeneration == generation,
                   savedCopyScopeRevision == copyRevision, normalizedOrigin == origin else { throw CancellationError() }

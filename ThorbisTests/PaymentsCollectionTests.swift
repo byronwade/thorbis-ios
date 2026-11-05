@@ -29,6 +29,20 @@ final class PaymentsCollectionTests: XCTestCase {
         XCTAssertEqual(request.header("Cache-Control"), "no-cache")
     }
 
+    func testFiltersUseServerQueryAndPreserveWebSemantics() async throws {
+        for (filter, expectedOperator, expectedValue) in [(PaymentsCollectionFilter.card, "and", "card"), (.cash, "and", "cash"), (.refunded, "or", "refunded")] {
+            let api = APIClient(session: URLProtocolFixture.session([.init(200, response())]), baseURL: "https://app.thorbis.com")
+            _ = try await api.paymentsCollectionPage(filter: filter, isCurrent: { true })
+            let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+            let parts = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+            let overlay = try XCTUnwrap(parts.first(where: { $0.name == "filter" })?.value)
+            let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(overlay.utf8)) as? [String: Any])
+            let root = try XCTUnwrap(json["root"] as? [String: Any])
+            XCTAssertEqual(root["operator"] as? String, expectedOperator)
+            XCTAssertTrue(overlay.contains(expectedValue))
+        }
+    }
+
     func testFinancedPaymentIsReadableWithoutEnablingManualRecording() async throws {
         let body = response().replacingOccurrences(of: "\"payments.method\":\"card\"", with: "\"payments.method\":\"financing\"")
         let api = APIClient(session: URLProtocolFixture.session([.init(200, body)]), baseURL: "https://app.thorbis.com")

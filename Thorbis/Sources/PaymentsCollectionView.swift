@@ -5,6 +5,9 @@ import SwiftUI
 struct PaymentsCollectionView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    private struct LoadKey: Equatable { let scope: ScopedRecordFavorites.Scope?; let filter: PaymentsCollectionFilter }
+    @State private var filter = PaymentsCollectionFilter.all
+    @State private var loadedFilter = PaymentsCollectionFilter.all
     @State private var loadedScope: ScopedRecordFavorites.Scope?
     @State private var items: [PaymentsCollectionItem] = []
     @State private var nextCursor: String?
@@ -18,7 +21,7 @@ struct PaymentsCollectionView: View {
               session.can("invoice.view", feature: "payments"), !session.isOffline else { return nil }
         return ScopedRecordFavorites.currentScope(session: session, api: api)
     }
-    private var visible: Bool { scope != nil && scope == loadedScope }
+    private var visible: Bool { scope != nil && scope == loadedScope && filter == loadedFilter }
 
     var body: some View {
         ScrollView {
@@ -29,7 +32,11 @@ struct PaymentsCollectionView: View {
                     ContentUnavailableView(session.isOffline ? "Connect to see payments" : "Payments unavailable",
                         systemImage: session.isOffline ? "wifi.slash" : "lock",
                         description: Text(session.isOffline ? "Payment history needs a connection." : "Your current access does not include payments."))
-                } else if visible {
+                } else {
+                    Picker("Payment type", selection: $filter) {
+                        ForEach(PaymentsCollectionFilter.allCases) { Text($0.rawValue).tag($0) }
+                    }.pickerStyle(.menu).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                    if visible {
                     if let error { ErrorBanner(message: error) { await loadMore(reset: items.isEmpty || needsRefresh) } }
                     if loading && items.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
                     if !loading && items.isEmpty && error == nil {
@@ -47,27 +54,29 @@ struct PaymentsCollectionView: View {
                         Button(loading ? "Loading…" : "Load more payments") { Task { await loadMore(reset: false) } }
                             .disabled(loading).frame(maxWidth: .infinity, minHeight: 48)
                     }
-                } else { ListRoomSkeleton(count: 5, threeLines: false) }
+                    } else { ListRoomSkeleton(count: 5, threeLines: false) }
+                }
             }.padding(.bottom, 24)
         }
         .background(Theme.canvas)
         .navigationTitle("").navigationBarTitleDisplayMode(.inline)
-        .task(id: scope) { await loadMore(reset: true) }
+        .task(id: LoadKey(scope: scope, filter: filter)) { await loadMore(reset: true) }
         .refreshable { await loadMore(reset: true) }
     }
 
     private func loadMore(reset: Bool) async {
         guard let current = scope else { items = []; loadedScope = nil; request = UUID(); return }
         if !reset && (loading || nextCursor == nil || loadedScope != current) { return }
+        let selectedFilter = filter
         let token = UUID(); request = token
-        if reset { items = []; nextCursor = nil; loadedScope = current; needsRefresh = false }
+        if reset { items = []; nextCursor = nil; loadedScope = current; loadedFilter = selectedFilter; needsRefresh = false }
         loading = true; error = nil
         let cursor = reset ? nil : nextCursor
         do {
-            let page = try await api.paymentsCollectionPage(cursor: cursor) {
-                scope == current && request == token
+            let page = try await api.paymentsCollectionPage(cursor: cursor, filter: selectedFilter) {
+                scope == current && filter == selectedFilter && request == token
             }
-            guard scope == current, request == token, !Task.isCancelled else { return }
+            guard scope == current, filter == selectedFilter, request == token, !Task.isCancelled else { return }
             let ids = Set(items.map { $0.id.lowercased() })
             guard page.items.allSatisfy({ !ids.contains($0.id.lowercased()) }) else {
                 needsRefresh = true
@@ -76,7 +85,7 @@ struct PaymentsCollectionView: View {
             items.append(contentsOf: page.items); nextCursor = page.nextCursor; loading = false
         } catch is CancellationError { }
         catch {
-            guard scope == current, request == token, !Task.isCancelled else { return }
+            guard scope == current, filter == selectedFilter, request == token, !Task.isCancelled else { return }
             self.error = needsRefresh ? "Payments changed. Refresh the list to see the latest payments." : "Payments couldn't be loaded. Check your connection and try again."
             loading = false
         }
