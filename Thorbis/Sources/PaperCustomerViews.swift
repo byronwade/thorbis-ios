@@ -270,6 +270,10 @@ struct CustomerDetailView: View {
     private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
+    /// Web parity: the customer's "Email job updates" switch. Nil until it loads (or on an older server).
+    @State private var jobEmails: Bool?
+    @State private var jobEmailsSaving = false
+    @State private var jobEmailsError: String?
     @State private var smsConsentKey = UUID().uuidString
     @State private var smsConsentChoice: Bool?
     @State private var smsConsentError: String?
@@ -362,6 +366,7 @@ struct CustomerDetailView: View {
         .deviceHandoffs($handoff)
         .task { await load() }
         .task { await loadSmsConsent() }
+        .task { await loadJobEmails() }
         .task(id: customer.id) { pricing = try? await api.memberPricing(customer.id) }
         .task { await loadActivity(reset: true) }
         .task(id: recordsScope) {
@@ -552,6 +557,7 @@ struct CustomerDetailView: View {
                     if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
                     if let terms = record.billingTerms { detailLine("Billing terms") { Text(terms) } }
                     if smsConsentLoaded { smsConsentRow.padding(.horizontal, PaperCardMetrics.inset) }
+                    if jobEmails != nil { jobEmailsRow.padding(.horizontal, PaperCardMetrics.inset) }
                 }
                 .padding(.vertical, PaperCardMetrics.edge)
             }
@@ -694,6 +700,46 @@ struct CustomerDetailView: View {
         }])
         .overlay(alignment: .bottomTrailing) {
             if let smsConsentError { Text(smsConsentError).font(Theme.font(12)).foregroundStyle(Theme.destructive).offset(y: 14) }
+        }
+    }
+
+    /// Job emails: booking, schedule and cancel emails to this customer. Texts and calls are separate.
+    private var jobEmailsRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: Binding(get: { jobEmails ?? true }, set: { next in Task { await saveJobEmails(next) } })) {
+                Text("Job emails").foregroundStyle(Theme.muted)
+            }
+            .tint(Theme.brand)
+            .disabled(!canEdit || jobEmailsSaving || session.isOffline)
+            .accessibilityHint("Booking, schedule and cancel emails to this customer")
+            if let jobEmailsError {
+                Text(jobEmailsError).font(Theme.font(12)).foregroundStyle(Theme.destructive)
+            }
+        }
+        .font(Theme.font(15))
+        .frame(minHeight: 44)
+    }
+
+    private func loadJobEmails() async {
+        guard session.can("customer.view", feature: "core_crm") else { return }
+        // An older server or no access: leave the row out rather than show a guess.
+        jobEmails = try? await api.customerJobEmailsEnabled(customer.id)
+    }
+
+    private func saveJobEmails(_ enabled: Bool) async {
+        let previous = jobEmails
+        jobEmails = enabled
+        jobEmailsSaving = true
+        defer { jobEmailsSaving = false }
+        do {
+            _ = try await api.setNoticePreference(NoticePreference(subjectKind: "customer", subjectKey: customer.id,
+                                                                   channel: "email", enabled: enabled))
+            jobEmailsError = nil
+        } catch is CancellationError {
+            jobEmails = previous
+        } catch {
+            jobEmails = previous
+            jobEmailsError = error.isConnectivityFailure ? "Needs a connection" : "Couldn\u{2019}t save. Pull to refresh and try again."
         }
     }
 
