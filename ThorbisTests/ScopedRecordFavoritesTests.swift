@@ -117,6 +117,19 @@ final class ScopedRecordFavoritesTests: XCTestCase {
         XCTAssertTrue(model.entries.isEmpty, "The owning API epoch clears its bound context")
     }
 
+    func testUnrelatedClientInvalidationDoesNotRetireSharedContext() {
+        let first = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        let second = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+        let context = scope(first)
+        let shared = ScopedRecordFavorites.shared
+        shared.bind(context)
+        defer { shared.bind(nil) }
+        second.invalidateRequests()
+        XCTAssertTrue(shared.isBound(to: context))
+        first.invalidateRequests()
+        XCTAssertFalse(shared.isBound(to: context))
+    }
+
     func testCapabilityLossPurgesEarlierResultsDuringMultiRecordRefresh() async throws {
         let secondID = "00000000-0000-4000-8000-000000000102"
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
