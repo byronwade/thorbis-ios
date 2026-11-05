@@ -505,6 +505,7 @@ struct InvoiceDetailView: View {
     /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
     @State private var collectAfterCustomer = false
     @State private var showPDF = false
+    @State private var showDiscount = false
     @State private var openCustomer: Customer?
 
     /// The commit at the bottom is the next step (Issue or Collect); the rest lives here.
@@ -516,6 +517,9 @@ struct InvoiceDetailView: View {
         }
         if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
             items.append(ThorbisMenuItem("Edit line items", icon: "pencil") { showEditDraft = true })
+        }
+        if record.status == "draft", !session.isOffline, session.can("invoice.discount", feature: "invoicing") {
+            items.append(ThorbisMenuItem("Add discount", icon: "tag") { showDiscount = true })
         }
         items.append(ThorbisMenuItem("View PDF", icon: "doc.text") { showPDF = true })
         if let application = financingApplications.first, application.isOpen,
@@ -610,6 +614,11 @@ struct InvoiceDetailView: View {
             CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar)
         }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+        .sheet(isPresented: $showDiscount) { SheetSurface {
+            if let record {
+                InvoiceDiscountSheet(invoice: record) { updated in _ = accept(updated) }
+            }
+        } }
         .sheet(isPresented: $showSignature) { SheetSurface {
             if let record, let jobID = record.jobId {
                 let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
@@ -1176,3 +1185,82 @@ func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
     return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD"))\u{00A0}owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
 }
 
+
+
+/// Web parity: discount a draft invoice. The amount and a reason the customer sees ("Discount —
+/// Loyalty"), checked here against the total so the server's refusal is the rare case.
+struct InvoiceDiscountSheet: View {
+    let invoice: InvoiceRecord
+    let applied: (InvoiceRecord) -> Void
+    @EnvironmentObject private var api: APIClient
+    @Environment(\.dismiss) private var dismiss
+    @State private var amount = ""
+    @State private var reason = ""
+    @State private var amountProblem: String?
+    @State private var reasonProblem: String?
+    @State private var error: String?
+    @State private var busy = false
+    @FocusState private var amountFocused: Bool
+
+    private var total: Int { invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount } }
+
+    /// "150", "150.5", "$1,250.00" → cents; nil when it isn't a plain amount.
+    private var cents: Int? {
+        let cleaned = amount.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Decimal(string: cleaned), value > 0 else { return nil }
+        var scaled = value * 100, rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        return NSDecimalNumber(decimal: rounded).intValue
+    }
+
+    var body: some View {
+        ThorbisModalSheet(title: "Add discount", onClose: busy ? nil : { dismiss() },
+                          commitTitle: "Apply discount", commitSymbol: "tag", busy: busy,
+                          commitIdentifier: "invoice-discount-apply", commit: { Task { await press() } }) {
+            FormField(label: "Amount", help: "Comes off the invoice total of \(money(total, currency: invoice.currency)).",
+                      error: amountProblem) {
+                TextField("", text: $amount, prompt: .placeholder("50.00"))
+                    .font(Theme.font(16)).monospacedDigit()
+                    .keyboardType(.decimalPad)
+                    .focused($amountFocused)
+                    .onChange(of: amount) { _, _ in amountProblem = nil }
+                    .accessibilityLabel("Discount amount in dollars")
+                    .fieldWell()
+            }
+            FormField(label: "Reason", help: "Shown on the invoice as \u{201C}Discount \u{2014} \(reason.isEmpty ? "Loyalty" : reason)\u{201D}.",
+                      error: reasonProblem) {
+                TextField("", text: $reason, prompt: .placeholder("Loyalty"))
+                    .font(Theme.font(16))
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .onSubmit { Task { await press() } }
+                    .onChange(of: reason) { _, _ in reasonProblem = nil }
+                    .accessibilityLabel("Reason")
+                    .fieldWell()
+            }
+            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+        }
+        .onAppear { amountFocused = true }
+        .interactiveDismissDisabled(busy || !amount.isEmpty || !reason.isEmpty)
+    }
+
+    /// Validate on commit: say what's missing under the field instead of locking the button.
+    private func press() async {
+        guard !busy else { return }
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let cents else { amountProblem = "Enter an amount, like 50.00."; return }
+        guard cents <= total else { amountProblem = "A discount can\u{2019}t be more than the invoice total."; return }
+        guard !trimmed.isEmpty else { reasonProblem = "Add a reason the customer will see, like Loyalty."; return }
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await api.discountFieldInvoice(invoice.id, amountCents: cents, reason: trimmed)
+            applied(updated)
+            dismiss()
+        } catch {
+            self.error = error.isConnectivityFailure ? "No signal. The discount wasn\u{2019}t applied; try again when you\u{2019}re back online."
+                                                     : error.localizedDescription
+        }
+    }
+}

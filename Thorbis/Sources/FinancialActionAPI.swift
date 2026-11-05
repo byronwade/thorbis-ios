@@ -268,6 +268,14 @@ extension APIClient {
                               body: Body(expectedLinesRevision: expectedLinesRevision))
     }
 
+    /// Web parity (invoice-detail): a draft takes a discount as one negative "Discount — reason" line.
+    /// The server refuses a sent invoice, a discount above the total, or one past the role's limit.
+    func discountFieldInvoice(_ id: String, amountCents: Int, reason: String) async throws -> InvoiceRecord {
+        struct Body: Encodable { let description: String; let amount: FieldMoney }
+        return try await send("POST", financialPath("/v1/invoices", id: id, suffix: "/discount"),
+                              body: Body(description: reason, amount: FieldMoney(amount: amountCents, currency: "USD")))
+    }
+
     func fieldPayments(_ invoiceID: String) async throws -> [FieldPaymentRecord] {
         try await fieldPaymentsWithProvenance(invoiceID).payments
     }
