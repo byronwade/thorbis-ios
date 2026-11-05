@@ -1126,6 +1126,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                        "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
             }]
         }
+        // The company equipment book: Danielle's home units, as the office and her page read them.
+        if path == "/v1/equipment" {
+            let c = PaperPreview.customerID, loc = PaperPreview.homeLocationID
+            return ["items": [
+                ["id": "00000000-0000-4000-8000-000000006101", "customerId": c, "locationId": loc, "name": "3-ton condenser",
+                 "brand": "Carrier", "model": "24ACC636", "serialNumber": "2419E04117", "installedOn": "2019-06-12",
+                 "warrantyExpiresOn": "2029-06-12", "customerName": "Danielle Marlowe", "locationLabel": "Home"],
+                ["id": "00000000-0000-4000-8000-000000006102", "customerId": c, "locationId": loc, "name": "50-gal gas water heater",
+                 "brand": "Rheem", "model": "XG50T06EC36U1", "installedOn": "2016-02-03", "warrantyExpiresOn": "2022-02-03",
+                 "customerName": "Danielle Marlowe", "locationLabel": "Home"],
+            ] as [[String: Any]]]
+        }
         if path.hasPrefix("/v1/notice-preferences/customer/") { return ["items": [[String: Any]]()] }
         if path == "/v1/notice-preferences" {
             return ["items": [["subjectKind": "role", "subjectKey": "technician", "channel": "email", "enabled": false]]]

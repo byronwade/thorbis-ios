@@ -67,18 +67,7 @@ struct CustomerEquipmentSection: View {
         } }
     }
 
-    private func row(_ unit: EquipmentRecord) -> some View {
-        let warranty = unit.warrantyEnd.map { end -> (String, Bool) in
-            let expired = end < Calendar.current.startOfDay(for: .now)
-            return ("\(expired ? "Warranty ended" : "Warranty until") \(end.formatted(date: .abbreviated, time: .omitted))", expired)
-        }
-        return PaperListRow(title: unit.name, subtitle: unit.detail.isEmpty ? nil : unit.detail,
-                            meta: warranty?.0, subtitleLines: 2) {
-            if let warranty {
-                StatusWord(text: warranty.1 ? "Out of warranty" : "In warranty", tint: warranty.1 ? nil : Theme.success)
-            }
-        }
-    }
+    private func row(_ unit: EquipmentRecord) -> some View { EquipmentUnitRow(unit: unit) }
 
     private func load() async {
         if let jobID, let context = try? await JobServiceContextLoader.load(jobID, api: api) {
@@ -458,5 +447,85 @@ struct MemberChip: View {
             }
         }
         .task(id: customerID) { pricing = try? await api.memberPricing(customerID) }
+    }
+}
+
+
+/// One unit: its name, brand · model · serial, the warranty date, and the warranty as a word.
+struct EquipmentUnitRow: View {
+    let unit: EquipmentRecord
+
+    var body: some View {
+        let warranty = unit.warrantyEnd.map { end -> (String, Bool) in
+            let expired = end < Calendar.current.startOfDay(for: .now)
+            return ("\(expired ? "Warranty ended" : "Warranty until") \(end.formatted(date: .abbreviated, time: .omitted))", expired)
+        }
+        PaperListRow(title: unit.name, subtitle: unit.detail.isEmpty ? nil : unit.detail,
+                     meta: warranty?.0, subtitleLines: 2) {
+            if let warranty {
+                StatusWord(text: warranty.1 ? "Out of warranty" : "In warranty", tint: warranty.1 ? nil : Theme.success)
+            }
+        }
+    }
+}
+
+/// Web parity (apps/web equipment.tsx): the company's equipment book from the server, the same rows
+/// the office and the customer page read, grouped under the site each unit lives at. A unit opens
+/// its customer, where it is edited. Hidden when the read is refused or the server is older.
+struct CompanyEquipmentBook: View {
+    var onLoaded: (Bool) -> Void = { _ in }
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var store: Store
+    @State private var items: [EquipmentRecord]?
+    @State private var openCustomer: Customer?
+
+    private var sites: [(id: String, label: String, units: [EquipmentRecord])] {
+        let grouped = Dictionary(grouping: items ?? []) { "\($0.customerId):\($0.locationId ?? "")" }
+        return grouped.map { key, units in
+            let first = units[0]
+            let customer = first.customerName ?? store.customerName(first.customerId)
+            let place = first.locationLabel ?? first.locationAddress
+            let label = [customer, place].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+            return (key, label, units.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
+        }
+        .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Color.clear.frame(width: 0, height: 0)
+            if let items, !items.isEmpty {
+                ForEach(sites, id: \.id) { site in
+                    PaperSection(site.label, count: site.units.count) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(site.units) { unit in
+                                Button { openCustomer = store.customers.first { $0.id == unit.customerId } } label: {
+                                    EquipmentUnitRow(unit: unit)
+                                }
+                                .buttonStyle(RowPressStyle())
+                                .accessibilityHint("Opens the customer")
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
+                    }
+                }
+            }
+        }
+        .task(id: session.generation) { await load() }
+        .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+    }
+
+    private func load() async {
+        guard session.can("customer.view", feature: "core_crm") else { onLoaded(false); return }
+        do {
+            let loaded = try await api.allEquipment()
+            items = loaded
+            onLoaded(!loaded.isEmpty)
+        } catch is CancellationError {
+        } catch {
+            items = nil
+            onLoaded(false)
+        }
     }
 }
