@@ -617,7 +617,8 @@ struct CommsThreadRow: View {
                             .foregroundStyle(lead.kind == .missed || lead.kind == .dropped ? Theme.destructive : Theme.muted)
                         Text(thread.line(in: section, alerted: alert != nil)).font(Theme.font(14))
                             .foregroundStyle(unread ? Theme.foreground : Theme.muted)
-                            .lineLimit(stacked ? nil : 2)
+                            // The thread holds the rest; a long summary shouldn't fill the screen.
+                            .lineLimit(stacked ? 4 : 2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: stacked ? nil : .infinity, alignment: .leading)
@@ -697,7 +698,7 @@ struct CommsLocalRow: View {
                 }
                 Text(thread.line).font(Theme.font(14))
                     .foregroundStyle(thread.unread ? Theme.foreground : Theme.muted)
-                    .lineLimit(stacked ? nil : 2)
+                    .lineLimit(stacked ? 4 : 2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
