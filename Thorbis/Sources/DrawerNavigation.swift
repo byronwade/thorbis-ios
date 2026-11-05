@@ -104,7 +104,11 @@ struct AppDrawer: View {
         VStack(spacing: 0) {
             // Closed, nothing is built: the header and an empty scroll view would still sit in the
             // accessibility tree behind the card.
-            if showsRows { header; rows } else { Spacer(minLength: 0) }
+            if showsRows {
+                header
+                if showsControls, let create { newMenu(create) }
+                rows
+            } else { Spacer(minLength: 0) }
             if showsControls { bottomControls }
         }
         .padding(.horizontal, 12)
@@ -151,13 +155,17 @@ struct AppDrawer: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text(title)
-                .font(Theme.font(18, weight: .medium)).tracking(-0.2)
-                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityFocused(titleFocus)
+            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Workspace, \(title)") {
+                HStack(spacing: 6) {
+                    Text(title).font(Theme.font(18, weight: .medium)).tracking(-0.2)
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1).truncationMode(.tail)
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("drawer-workspace-menu")
+            .accessibilityFocused(titleFocus)
             Button(action: search) { CreamCircleLabel(symbol: "magnifyingglass") }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("Search")
@@ -171,6 +179,28 @@ struct AppDrawer: View {
         }
         .padding(.leading, 12).padding(.trailing, 2)
         .padding(.top, 6).padding(.bottom, 4)
+    }
+
+    /// Web's New menu sits under the workspace; the existing direct New job shortcut remains below.
+    @ViewBuilder private func newMenu(_ create: PaperCreateAction) -> some View {
+        if !create.choices.isEmpty {
+            ThorbisMenu(items: create.choices.map { choice in
+                ThorbisMenuItem(choice.title, icon: choice.symbol, isDisabled: !choice.enabled, action: choice.run)
+            }, title: "New", accessibilityLabel: "New") {
+                Label("New", systemImage: "plus")
+                    .font(Theme.font(15, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 12).contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("drawer-new-menu")
+        } else {
+            Button(action: create.run) {
+                Label("New", systemImage: "plus")
+                    .font(Theme.font(15, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 12).contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityIdentifier("drawer-new-menu")
+        }
     }
 
     /// A recent record as plain words, like ChatGPT's recents. A job under way wears its status word.

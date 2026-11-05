@@ -11,6 +11,12 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.launch()
         if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
         let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        if !app.usesTabletLayout {
+            XCTAssertTrue(app.buttons["drawer-workspace-menu"].exists)
+            XCTAssertTrue(app.buttons["drawer-new-menu"].exists)
+            XCTAssertTrue(app.buttons["drawer-new"].exists, "The direct New job shortcut remains available")
+            XCTAssertTrue(app.buttons["drawer-settings"].exists)
+        }
         let jobs = app.buttons["\(prefix)-jobs"]
         let estimates = app.buttons["\(prefix)-estimates"]
         let invoices = app.buttons["\(prefix)-invoices"]
