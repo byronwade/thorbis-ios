@@ -274,12 +274,17 @@ struct CustomerRecordsView: View {
 
     private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false) -> some View {
         NavigationLink(value: PaperRoute.job(jobID)) {
-            HStack(spacing: 6) {
-                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
-                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(12)).foregroundStyle(Theme.muted)
+            // A quiet link to the job that groups the records under it, so it never reads as one of them.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 Spacer(minLength: 0)
             }.frame(minHeight: 44)
         }.buttonStyle(RowPressStyle())
+        .accessibilityLabel("Job: \(title), \(incomplete ? "partial" : "\(count)")")
+        .accessibilityHint("Opens the job")
     }
 
     private func moneyLink(_ row: CustomerMoneyRow) -> some View {
