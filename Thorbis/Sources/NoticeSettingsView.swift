@@ -15,6 +15,14 @@ extension APIClient {
         return page.items
     }
 
+    /// One customer's job-email switch (web customer record); no row means on.
+    func customerJobEmailsEnabled(_ customerID: String) async throws -> Bool {
+        struct Page: Decodable { let items: [NoticePreference] }
+        let key = customerID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? customerID
+        let page: Page = try await send("GET", "/v1/notice-preferences/customer/\(key)")
+        return page.items.first?.enabled ?? true
+    }
+
     func setNoticePreference(_ preference: NoticePreference) async throws -> NoticePreference {
         try await send("POST", "/v1/notice-preferences", body: preference)
     }
