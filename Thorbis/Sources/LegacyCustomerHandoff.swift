@@ -16,13 +16,17 @@ final class LegacyCustomerHandoff: ObservableObject, Identifiable {
     private let requestGeneration: UUID
     private let scopeRevision: UUID
     private let origin: String
+    private let capability: String
+    private let feature: String
 
     init?(lease: LegacyCustomerHandoffLease, content: AnyView, api: APIClient, session: SessionController,
+          capability: String = "estimate.view", feature: String = "estimates",
           onDismiss: @escaping @MainActor (Exit) -> Void) {
-        guard session.phase == .ready, let actor = session.user?.id,
+        guard session.can(capability, feature: feature), let actor = session.user?.id,
               let organization = session.activeOrganization?.id, let origin = api.normalizedOrigin else { return nil }
         self.lease = lease; self.content = content; self.onDismiss = onDismiss
         self.actor = actor; self.organization = organization; self.origin = origin
+        self.capability = capability; self.feature = feature
         sessionGeneration = session.generation; authorityRevision = session.authorityRevision
         requestGeneration = api.requestGeneration; scopeRevision = api.savedCopyScopeRevision
     }
@@ -30,7 +34,7 @@ final class LegacyCustomerHandoff: ObservableObject, Identifiable {
     func retire() { content = nil; onDismiss = nil }
 
     func isCurrent(api: APIClient, session: SessionController) -> Bool {
-        session.phase == .ready && session.user?.id == actor && session.activeOrganization?.id == organization &&
+        session.can(capability, feature: feature) && session.user?.id == actor && session.activeOrganization?.id == organization &&
         session.generation == sessionGeneration && session.authorityRevision == authorityRevision &&
         api.requestGeneration == requestGeneration && api.savedCopyScopeRevision == scopeRevision && api.normalizedOrigin == origin
     }

@@ -761,7 +761,7 @@ struct InvoiceDetailView: View {
         }
         guard let lease = customerView.claimLegacy() else { return }
         guard let handoff = LegacyCustomerHandoff(lease: lease, content: AnyView(customerInvoiceMode(record, lease: lease)), api: api, session: session,
-            onDismiss: { exit in
+            capability: "invoice.view", feature: "invoicing", onDismiss: { exit in
                 if case .collect = exit, paymentModel?.invoice?.id == record.id,
                    paymentModel?.canRecordPayment == true, session.can("invoice.payment.create", feature: "payments") {
                     showCollectPayment = true
