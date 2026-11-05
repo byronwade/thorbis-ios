@@ -313,11 +313,11 @@ struct JobDetailView: View {
             }
         } }
         .thorbisDestination(item: $documentInvoiceID) { id in
-            InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) })
+            InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $reviewInvoiceID) { id in
-            InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) })
+            InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $openEstimate) { opened in
@@ -528,7 +528,7 @@ struct JobDetailView: View {
            let job, let scope = scope(for: job), route.belongs(to: scope),
            session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
            session.can("invoice.payment.create", feature: "payments") {
-            InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice)
+            InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice, invoiceReference: route.reference)
                 .thorbisSheetSurface().presentationDetents([.large]).presentationDragIndicator(.visible)
                 #if DEBUG
                 .overlay(alignment: .topLeading) {
@@ -1242,7 +1242,10 @@ struct JobDetailView: View {
         if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") {
             PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
         } else if moneyBarCollects, let model = invoicePaymentModel {
-            PaperInvoiceCollectionFooter(model: model) { if let id = selectedInvoice?.id { presentPayment(for: id) } }
+            PaperInvoiceCollectionFooter(model: model,
+                invoiceReference: invoices.count > 1 ? selectedInvoice.map { jobInvoiceReference($0.id) } : nil) {
+                    if let id = selectedInvoice?.id { presentPayment(for: id) }
+                }
         } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
             PaperActionBar(title: "Show customer", symbol: "iphone") { openCustomerView(.estimates) }
                 .accessibilityIdentifier("job-customer-view-bar")
@@ -1517,7 +1520,7 @@ struct JobDetailView: View {
                     let due = TechJobFlow.due(invoice)
                     let (word, tint) = invoiceWord(invoice, due: due)
                     let amount = invoice.status == "issued" ? due : paperLinesTotal(invoice.lines)
-                    moneyLine("Invoice INV-\(invoice.id.suffix(4).uppercased())",
+                    moneyLine("Invoice \(jobInvoiceReference(invoice.id))",
                               amount: amount.map { jobShortMoney($0, currency: invoice.currency) }, word: word, tint: tint)
                 }
                 if estimates.isEmpty && bills.isEmpty {
@@ -2006,19 +2009,40 @@ struct JobDetailView: View {
                                 selectedInvoiceID = invoice.id
                                 documentInvoiceID = invoice.id
                             } label: {
-                                JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true).onWell()
+                                JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true,
+                                               invoiceReference: jobInvoiceReference(invoice.id)).onWell()
                             }
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("job-invoice-\(invoice.id)")
                             .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
+                            if let scope = scope(for: job),
+                               let step = JobInvoiceDirectPayment.step(invoice: invoice, scope: scope,
+                                   freshIDs: invoiceRead?.freshIDs ?? [],
+                                   canCollect: session.can("invoice.payment.create", feature: "payments")) {
+                                Button { run(step) } label: {
+                                    Label("Collect payment", systemImage: "creditcard")
+                                        .font(Theme.font(15, weight: .medium))
+                                        .frame(minHeight: 44)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(RowPressStyle())
+                                .accessibilityLabel("Collect payment for invoice \(jobInvoiceReference(invoice.id))")
+                                .accessibilityIdentifier("job-invoice-collect-\(invoice.id)")
+                            }
                             if !invoice.lines.isEmpty, invoiceRead?.freshIDs.contains(invoice.id) == true {
-                                JobInvoiceItemsDisclosure(invoice: invoice)
+                                JobInvoiceItemsDisclosure(invoice: invoice, reference: jobInvoiceReference(invoice.id))
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    private func jobInvoiceReference(_ id: String) -> String {
+        JobInvoiceReferences.reference(for: id, among: invoices.map(\.id))
     }
 
     private var selectedInvoice: InvoiceRecord? {
@@ -2621,10 +2645,12 @@ struct JobDetailView: View {
               session.can("invoice.view", feature: "invoicing"),
               session.can("invoice.payment.create", feature: "payments"),
               let job, let scope = scope(for: job), invoiceRead?.scope == scope,
+              invoiceRead?.freshIDs.contains(requestedID) == true,
               let route = JobInvoicePaymentRoute.make(requestedID: requestedID, selectedID: selectedInvoiceID,
                                                        selected: selectedInvoice, loadedID: loadedInvoiceModelID,
                                                        model: invoicePaymentModel, scope: scope,
-                                                       authorityToken: paymentAuthorityToken) else { return false }
+                                                       authorityToken: paymentAuthorityToken,
+                                                       reference: jobInvoiceReference(requestedID)) else { return false }
         paymentRoute = route
         return true
     }
@@ -2916,6 +2942,7 @@ struct JobDetailView: View {
 /// Keep each invoice scannable while leaving its line quantities and amounts a tap away.
 private struct JobInvoiceItemsDisclosure: View {
     let invoice: InvoiceRecord
+    let reference: String
     @State private var expanded = false
 
     private var itemCount: String {
@@ -2938,7 +2965,7 @@ private struct JobInvoiceItemsDisclosure: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(RowPressStyle())
-            .accessibilityLabel("\(expanded ? "Hide" : "Show") \(itemCount) for invoice INV-\(invoice.id.suffix(4).uppercased())")
+            .accessibilityLabel("\(expanded ? "Hide" : "Show") \(itemCount) for invoice \(reference)")
             .accessibilityValue(expanded ? "Expanded" : "Collapsed")
             .accessibilityIdentifier("job-invoice-items-\(invoice.id)")
             if expanded {

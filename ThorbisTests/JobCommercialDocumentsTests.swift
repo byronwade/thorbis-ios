@@ -8,6 +8,33 @@ final class JobCommercialDocumentsTests: XCTestCase {
         .init(jobID: id(job), organizationID: id(1), customerID: id(2), originEstimateID: origin.map(id))
     }
 
+    func testJobInvoiceReferencesExtendOnlyWhenSuffixesCollide() {
+        let first = "00000000-0000-4000-8000-000000001234"
+        let second = "00000000-0000-4000-8000-000000011234"
+        let third = "00000000-0000-4000-8000-000000005678"
+        let ids = [first, second, third]
+        XCTAssertEqual(JobInvoiceReferences.reference(for: first, among: ids), "INV-01234")
+        XCTAssertEqual(JobInvoiceReferences.reference(for: second, among: ids), "INV-11234")
+        XCTAssertEqual(JobInvoiceReferences.reference(for: third, among: ids), "INV-5678")
+    }
+
+    func testDirectPaymentActionOnlyOffersFreshPayableInvoiceForThisJob() throws {
+        let decoder = JSONDecoder()
+        let first = try decoder.decode(InvoiceRecord.self, from: Data(invoice(50).utf8))
+        let second = try decoder.decode(InvoiceRecord.self, from: Data(invoice(51).utf8))
+        let draft = try decoder.decode(InvoiceRecord.self, from: Data(invoice(52, status: "draft").utf8))
+        let paid = try decoder.decode(InvoiceRecord.self, from: Data(invoice(53, paid: 10000).utf8))
+        let foreign = try decoder.decode(InvoiceRecord.self, from: Data(invoice(54, job: 101).utf8))
+        let eligible = JobInvoiceDirectPayment.step(invoice: first, scope: scope(), freshIDs: [first.id, second.id], canCollect: true)
+        XCTAssertEqual(eligible, .collect(invoiceID: first.id, due: 10000, currency: "USD"))
+        XCTAssertEqual(JobInvoiceDirectPayment.step(invoice: second, scope: scope(), freshIDs: [first.id, second.id], canCollect: true), .collect(invoiceID: second.id, due: 10000, currency: "USD"))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: first, scope: scope(), freshIDs: [], canCollect: true))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: first, scope: scope(), freshIDs: [first.id], canCollect: false))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: draft, scope: scope(), freshIDs: [draft.id], canCollect: true))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: paid, scope: scope(), freshIDs: [paid.id], canCollect: true))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: foreign, scope: scope(), freshIDs: [foreign.id], canCollect: true))
+    }
+
     func testPaymentRouteNeverUsesAFormerOrMissingInvoice() async throws {
         let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#)])
         let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())

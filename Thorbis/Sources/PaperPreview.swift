@@ -163,7 +163,9 @@ enum PaperPreview {
         }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
         return [primary,
-         changed(original, ["id": "00000000-0000-4000-8000-000000002240", "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
+         changed(original, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
+                            ? "00000000-0000-4000-8000-000000012209" : "00000000-0000-4000-8000-000000002240",
+                           "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
                            "amountPaid": equalBalances ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),
          changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002241", "jobId": "00000000-0000-4000-8000-000000002215"])]

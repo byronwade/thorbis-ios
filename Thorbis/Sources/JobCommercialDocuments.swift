@@ -7,6 +7,7 @@ struct JobInvoicePaymentRoute: Identifiable {
     let model: InvoicePaymentCollectionModel
     let scope: JobDocumentScope
     let authorityToken: [String]
+    let reference: String
     var id: String { invoice.id }
 
     func belongs(to current: JobDocumentScope) -> Bool {
@@ -16,12 +17,37 @@ struct JobInvoicePaymentRoute: Identifiable {
 
     @MainActor static func make(requestedID: String, selectedID: String?, selected: InvoiceRecord?,
                      loadedID: String?, model: InvoicePaymentCollectionModel?,
-                     scope: JobDocumentScope, authorityToken: [String] = []) -> Self? {
+                     scope: JobDocumentScope, authorityToken: [String] = [],
+                     reference: String? = nil) -> Self? {
         guard selectedID == requestedID, loadedID == requestedID,
               let selected, selected.id == requestedID, scope.contains(selected),
               let model, let actual = model.invoice, actual.id == requestedID,
               scope.contains(actual), model.canRecordPayment else { return nil }
-        return Self(invoice: actual, model: model, scope: scope, authorityToken: authorityToken)
+        return Self(invoice: actual, model: model, scope: scope, authorityToken: authorityToken,
+                    reference: reference ?? "INV-\(actual.id.suffix(4).uppercased())")
+    }
+}
+
+/// Keep short familiar references when possible; expand them to distinguish this job's invoices.
+enum JobInvoiceReferences {
+    static func reference(for id: String, among ids: [String]) -> String {
+        let key = id.uppercased()
+        let others = Set(ids.map { $0.uppercased() }).subtracting([key])
+        var length = min(4, key.count)
+        while length < key.count && others.contains(where: { $0.hasSuffix(String(key.suffix(length))) }) {
+            length += 1
+        }
+        return "INV-\(key.suffix(length))"
+    }
+}
+
+/// A direct action only for the exact, freshly listed invoice on this job.
+enum JobInvoiceDirectPayment {
+    static func step(invoice: InvoiceRecord, scope: JobDocumentScope, freshIDs: Set<String>,
+                     canCollect: Bool) -> TechJobStep? {
+        guard canCollect, freshIDs.contains(invoice.id), scope.contains(invoice), invoice.status == "issued",
+              let due = TechJobFlow.due(invoice), due > 0 else { return nil }
+        return .collect(invoiceID: invoice.id, due: due, currency: invoice.currency)
     }
 }
 
