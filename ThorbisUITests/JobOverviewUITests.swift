@@ -7,6 +7,7 @@ final class JobOverviewUITests: XCTestCase {
         let app = preview("job", working: true)
         let money = app.buttons["job-section-money"]
         XCTAssertTrue(money.waitForExistence(timeout: 15)); money.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: money)], timeout: 10), .completed)
         let photos = app.buttons["job-section-photos"]
         XCTAssertTrue(photos.waitForExistence(timeout: 5))
         XCTAssertEqual(photos.label, "Photos")
@@ -85,6 +86,27 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "due"), object: money)], timeout: 15), .completed,
                        "The full balance remains spoken")
         XCTAssertTrue(money.label.contains("9,999,999,620.00"), money.label)
+    }
+
+    func testJobSectionsRemainTappableAtLargestStandardText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+        var previous: XCUIElement?
+        for section in ["overview", "money", "activity", "photos"] {
+            let button = app.buttons["job-section-\(section)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 15), section)
+            XCTAssertTrue(button.isHittable, section)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 43.5, section)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 43.5, section)
+            if let previous { XCTAssertLessThanOrEqual(previous.frame.maxX, button.frame.minX + 0.5, section) }
+            previous = button
+        }
+        let activity = app.buttons["job-section-activity"]
+        activity.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
     }
     /// iPad: the job is the detail column's first screen (picked from the list beside it, so nothing
     /// to go back to). A screen pushed from it — the customer — offers the same Back circle, which

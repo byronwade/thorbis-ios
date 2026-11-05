@@ -272,7 +272,7 @@ struct JobSectionControl: View {
     @Namespace private var pill
 
     var body: some View {
-        JobSectionRowLayout(spacing: 4, fills: false) {
+        JobSectionRowLayout(spacing: 4, fills: true, equalWidths: true) {
             ForEach(options, id: \.value) { option in
                 let isOn = option.value == selection
                 Button { withMotion(.snappy) { selection = option.value } } label: {
@@ -308,18 +308,19 @@ struct JobSectionControl: View {
     }
 }
 
-/// One row of segments that shares the width fairly: each segment gets what its whole label
-/// needs while the row has room (spare width split evenly); when it doesn't, every segment
-/// gives up width in proportion to what it asked for, so no one label is squeezed alone.
+/// One row of segments that shares available width. Job tabs use equal widths so loading
+/// a balance or activity count cannot move a target while someone is tapping it.
 struct JobSectionRowLayout: Layout {
     var spacing: CGFloat = 2
     /// False for text tabs: each keeps its own width, left-aligned, while the row has room.
     var fills = true
+    var equalWidths = false
 
     private func widths(_ subviews: Subviews, total: CGFloat) -> [CGFloat] {
         guard !subviews.isEmpty else { return [] }
         let ideal = subviews.map { $0.sizeThatFits(.unspecified).width }
         let available = max(0, total - spacing * CGFloat(subviews.count - 1))
+        if equalWidths { return ideal.map { _ in available / CGFloat(subviews.count) } }
         let wanted = ideal.reduce(0, +)
         if wanted <= available {
             guard fills else { return ideal }
