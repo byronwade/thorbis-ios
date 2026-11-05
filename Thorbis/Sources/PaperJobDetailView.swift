@@ -2630,11 +2630,21 @@ struct JobDetailView: View {
         let reportUncertain: @MainActor () -> Void = {
             guard !Task.isCancelled, let actorID, session.user?.id == actorID,
                   session.activeOrganization?.id == scope.organizationID,
+                  JobInvoiceRecoveryContext.matches(origin: origin, savedCopyRevision: copyRevision,
+                      currentOrigin: api.normalizedOrigin, currentSavedCopyRevision: api.savedCopyScopeRevision),
                   session.can("job.view", feature: "jobs"),
                   self.job.map({ self.scope(for: $0) == scope }) == true else { return }
             self.error = "Invoice may have been created. Refresh this job to check."
         }
         do {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invalidate-post") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    api.invalidateRequests()
+                }
+            }
+            #endif
             let invoice = try await api.ensureFieldCompletionInvoice(jobId)
             guard current() else { reportUncertain(); return nil }
             guard scope.contains(invoice) else {
@@ -2655,8 +2665,8 @@ struct JobDetailView: View {
             guard current() else { reportUncertain(); return nil }
             committed += 1
             return invoice
-        } catch is CancellationError { return nil } catch {
-            if current() { self.error = error.localizedDescription }
+        } catch is CancellationError { reportUncertain(); return nil } catch {
+            if current() { self.error = error.localizedDescription } else { reportUncertain() }
             return nil
         }
     }

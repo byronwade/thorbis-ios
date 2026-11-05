@@ -44,6 +44,18 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Invoice may have been created. Refresh this job to check."].waitForExistence(timeout: 10))
     }
 
+    func testInterruptedCreateShowsSafeRecoveryWithoutOpeningInvoice() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-create-invoice", "--paper-preview-create-invalidate-post"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let create = app.buttons["job-create-invoice"]
+        XCTAssertTrue(create.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(create)
+        create.tap()
+        XCTAssertTrue(app.staticTexts["Invoice may have been created. Refresh this job to check."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+    }
+
     func testCreatingInvoiceDoesNotOpenWhenInvoiceViewIsRevoked() {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-create-invoice", "--paper-preview-create-revoke-view"])

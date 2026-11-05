@@ -41,6 +41,13 @@ enum JobInvoiceReferences {
     }
 }
 
+/// A recovery hint belongs only to the API and saved-copy scope that received the request.
+enum JobInvoiceRecoveryContext {
+    static func matches(origin: String?, savedCopyRevision: UUID, currentOrigin: String?, currentSavedCopyRevision: UUID) -> Bool {
+        origin == currentOrigin && savedCopyRevision == currentSavedCopyRevision
+    }
+}
+
 /// A direct action only for the exact, freshly listed invoice on this job.
 enum JobInvoiceDirectPayment {
     static func step(invoice: InvoiceRecord, scope: JobDocumentScope, freshIDs: Set<String>,
