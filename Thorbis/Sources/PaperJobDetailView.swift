@@ -46,6 +46,7 @@ struct JobDetailView: View {
     @State private var selectedTab = "Overview"
     /// True while the job is scrolled past the top of its sections (the tabs are pinned).
     @State private var tabsPinned = false
+    @State private var measuredSectionWidth: CGFloat = 0
     @StateObject private var documents = JobDocumentCollections()
     @State private var documentGeneration: UUID?
     private var invoiceRead: JobDocumentRead<InvoiceRecord>? { documents.invoices }
@@ -1049,33 +1050,51 @@ struct JobDetailView: View {
     private func tabBar(_ job: JobRecord) -> some View {
         Group {
             if typeSize.isAccessibilitySize {
-                ThorbisMenu(items: tabs.map { tab in
-                    ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == shownJobSection) { selectJobSection(tab) }
-                }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(shownJobSection, job: job))") {
-                    HStack(spacing: 12) {
-                        Text(sectionLabel(shownJobSection, job: job)).font(Theme.font(15, weight: .medium))
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 8)
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 14).padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                }
-                .padding(.horizontal, Theme.gutter)
-                .accessibilityHint("Choose a job section")
-                .accessibilityIdentifier("job-section-chooser")
+                jobSectionMenu(job)
             } else {
-                JobSectionControl(options: tabs.map { ($0, sectionLabel($0, job: job), spokenSectionLabel($0, job: job)) },
-                                  selection: Binding(get: { shownJobSection }, set: { selectJobSection($0) }))
-                    .padding(.horizontal, Theme.gutter - 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                compactJobSections(job)
             }
         }
         .padding(.top, 2)
         .padding(.bottom, 6)
+    }
+
+    private func compactJobSections(_ job: JobRecord) -> some View {
+        Group {
+            if measuredSectionWidth >= 188 + 2 * (Theme.gutter - 8) {
+                jobSectionControl(job).padding(.horizontal, Theme.gutter - 8)
+            } else {
+                jobSectionMenu(job)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredSectionWidth = $0 }
+    }
+
+    private func jobSectionControl(_ job: JobRecord) -> some View {
+        let options = tabs.map { ($0, sectionLabel($0, job: job), spokenSectionLabel($0, job: job)) }
+        return JobSectionControl(options: options,
+                                 selection: Binding(get: { shownJobSection }, set: { selectJobSection($0) }))
+    }
+
+    private func jobSectionMenu(_ job: JobRecord) -> some View {
+        ThorbisMenu(items: tabs.map { tab in
+            ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == shownJobSection) { selectJobSection(tab) }
+        }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(shownJobSection, job: job))") {
+            HStack(spacing: 12) {
+                Text(sectionLabel(shownJobSection, job: job)).font(Theme.font(15, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 13, weight: .medium))
+            }
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        }
+        .padding(.horizontal, Theme.gutter)
+        .accessibilityHint("Choose a job section")
+        .accessibilityIdentifier("job-section-chooser")
     }
 
     @ViewBuilder private var primaryAction: some View {
