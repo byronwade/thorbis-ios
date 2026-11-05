@@ -1,0 +1,3 @@
+# Scoped record favorites
+
+Store only record kind and UUID per normalized API origin, actor and organization. Clear the visible projection synchronously on identity, authority or API generation changes. Resolve each record with a fresh authenticated job or customer read, validate its returned ID and organization, and publish a label only while the exact authority and API context remain current. Offline, denied, missing, changed-context and malformed responses fail closed. The sidebar integration must revalidate whenever it presents the records and bind every authority change. Test storage, isolation, denied/offline/fresh reads and delayed responses across scope changes.
