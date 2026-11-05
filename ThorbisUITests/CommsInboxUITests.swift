@@ -66,4 +66,19 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Sent"].exists)
         attach(app, "Text draft saved")
     }
+
+    /// New text and New email open with the first field ready to type.
+    func testComposeSheetsFocusTheirFirstField() {
+        for (section, pencil, field) in [("texts", "New text", "inbox-new-text-phone"), ("email", "New email", "inbox-mail-to")] {
+            let app = launch(["--paper-preview-inbox-section", section])
+            let button = app.buttons[pencil].firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 20), app.debugDescription)
+            button.tap()
+            let input = app.textFields[field]
+            XCTAssertTrue(input.waitForExistence(timeout: 10), app.debugDescription)
+            expectation(for: NSPredicate(format: "hasKeyboardFocus == true"), evaluatedWith: input)
+            waitForExpectations(timeout: 5)
+            app.terminate()
+        }
+    }
 }
