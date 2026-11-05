@@ -18,6 +18,17 @@ struct BookingCallRecord: Decodable, Equatable {
     let summary: Summary?
     let transcript: [Segment]
     let disclosure: String?
+    // The rest of the server's CallView (domains/communications calls.ts). Optional so older
+    // payloads and the job's booking call keep decoding; the Inbox reads them.
+    var direction: String? = nil
+    var lineId: String? = nil
+    var customerId: String? = nil
+    var linkedAt: String? = nil
+    /// none | live | complete | failed. Kept a string: an unknown value never breaks the list.
+    var transcriptStatus: String? = nil
+    /// Not sent by the server today: Thorbis records from answer, so an unanswered call has no
+    /// message. When the server starts marking voicemail, the Inbox's Voicemail section fills in.
+    var voicemail: Bool? = nil
 
     struct Recording: Decodable, Equatable {
         let status: String
@@ -28,6 +39,8 @@ struct BookingCallRecord: Decodable, Equatable {
     struct Summary: Decodable, Equatable {
         let text: String
         let reason: String?
+        /// model | deterministic.
+        var source: String? = nil
     }
 
     struct Segment: Decodable, Equatable, Identifiable {
@@ -41,6 +54,7 @@ struct BookingCallRecord: Decodable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case id, status, callerNumber, callerName, jobId, startedAt, endedAt, durationSeconds, recording, summary, transcript, disclosure
+        case direction, lineId, customerId, linkedAt, transcriptStatus, voicemail
     }
 
     init(from decoder: Decoder) throws {
@@ -57,6 +71,12 @@ struct BookingCallRecord: Decodable, Equatable {
         summary = try c.decodeIfPresent(Summary.self, forKey: .summary)
         transcript = (try c.decodeIfPresent([Segment].self, forKey: .transcript) ?? []).sorted { $0.sequence < $1.sequence }
         disclosure = try c.decodeIfPresent(String.self, forKey: .disclosure)
+        direction = try c.decodeIfPresent(String.self, forKey: .direction)
+        lineId = try c.decodeIfPresent(String.self, forKey: .lineId)
+        customerId = try c.decodeIfPresent(String.self, forKey: .customerId)
+        linkedAt = try c.decodeIfPresent(String.self, forKey: .linkedAt)
+        transcriptStatus = try c.decodeIfPresent(String.self, forKey: .transcriptStatus)
+        voicemail = try c.decodeIfPresent(Bool.self, forKey: .voicemail)
     }
 
     /// "Dana Ruiz", else the number, else "Unknown caller".

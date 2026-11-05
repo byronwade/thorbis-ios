@@ -55,6 +55,7 @@ struct ThorbisApp: App {
             DayPrefetch.shared.cancel()
             api?.savedCopyScope = nil
             SavedCopyStore.shared.clearAll()
+            CommsLocalStore.clearAll()
             store?.cache.clearAll()
             outbox?.clearAll()
             pendingMedia?.clearAll()
@@ -144,7 +145,7 @@ struct ThorbisApp: App {
             case .choosingWorkspace, .noWorkspace:
                 WorkspaceSelectionView()
             case .ready:
-                RootView().id(session.generation).businessSetupPrompt()
+                RootView().id(session.generation).businessSetupPrompt().inboxTextPresenter()
             }
         }
     }

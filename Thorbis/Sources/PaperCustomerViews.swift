@@ -9,6 +9,7 @@ struct CustomersView: View {
     @State private var showNew = false
     @State private var newJobFor: Customer?
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
     @State private var newName = ""
     @State private var selectedView = CustomerListScope.recent.rawValue
     @State private var stateFilter = "Any state"
@@ -113,7 +114,7 @@ struct CustomersView: View {
         .contextMenu {
             if let phone = customer.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 {
                 if let call = URL(string: "tel:\(phone)") { Button("Call", systemImage: "phone") { openURL(call) } }
-                if let text = URL(string: "sms:\(phone)") { Button("Text", systemImage: "message") { openURL(text) } }
+                if let text = URL(string: "sms:\(phone)") { Button("Text", systemImage: "message") { inboxText(text, name: customer.name, openURL: openURL) } }
             }
             if let address = customer.address, !address.isEmpty, let maps = Directions.url(address: address, coordinates: nil) {
                 Button("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") { openURL(maps) }
@@ -286,6 +287,7 @@ struct CustomerDetailView: View {
     @State private var jobRecords: [JobRecord] = []
     @State private var showAllPast = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
 
     /// Overview | Jobs · N | Money: the page's one selector row.
     private var jobsLabel: String { session.can("job.view", feature: "jobs") ? "Jobs · \(jobs.count)" : "Jobs" }
@@ -459,7 +461,7 @@ struct CustomerDetailView: View {
     @ViewBuilder private func actionCircleItems(dialable: String?, mail: MailDraft?) -> some View {
         if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
             PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
-            PaperLabeledCircle(symbol: "message", title: "Text") { openURL(text) }
+            PaperLabeledCircle(symbol: "message", title: "Text") { inboxText(text, name: customer.name, openURL: openURL) }
         }
         if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { handoff = .mail(mail) } }
         if let directionsURL {
@@ -615,7 +617,7 @@ struct CustomerDetailView: View {
         var items: [ThorbisMenuItem] = []
         if let phone = contactDialable(contact) {
             if let call = URL(string: "tel:\(phone)") { items.append(ThorbisMenuItem("Call", icon: "phone") { openURL(call) }) }
-            if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { openURL(text) }) }
+            if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { inboxText(text, name: contact.name, openURL: openURL) }) }
         }
         if let mail = MailDraft(recipient: contact.email) {
             items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
@@ -787,7 +789,7 @@ struct CustomerDetailView: View {
             HStack(spacing: 0) {
                 if let phone = contactDialable(contact), let call = URL(string: "tel:\(phone)"), let text = URL(string: "sms:\(phone)") {
                     PaperCircleButton(symbol: "phone", label: "Call \(contact.name)", size: 32) { openURL(call) }
-                    PaperCircleButton(symbol: "message", label: "Text \(contact.name)", size: 32) { openURL(text) }
+                    PaperCircleButton(symbol: "message", label: "Text \(contact.name)", size: 32) { inboxText(text, name: contact.name, openURL: openURL) }
                 }
                 ThorbisMenu(items: contactMenuItems(contact), accessibilityLabel: "Contact actions for \(contact.name)") {
                     Image(systemName: "ellipsis").foregroundStyle(Theme.muted)

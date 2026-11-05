@@ -766,7 +766,10 @@ struct PaperQuickActions: View {
     var phone: String?
     var email: String?
     var directions: URL?
+    /// Who the number belongs to, for the Inbox conversation Text opens.
+    var name: String? = nil
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var dialable: String? {
@@ -794,7 +797,7 @@ struct PaperQuickActions: View {
         return layout {
             if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
                 action("Call", symbol: "phone", label: "Call", stacked: stacked) { openURL(call) }
-                action("Text", symbol: "message", label: "Text", stacked: stacked) { openURL(text) }
+                action("Text", symbol: "message", label: "Text", stacked: stacked) { inboxText(text, name: name, openURL: openURL) }
             }
             if let mail { action("Email", symbol: "envelope", label: "Email", stacked: stacked) { openURL(mail) } }
             if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps", stacked: stacked) { openURL(directions) } }
