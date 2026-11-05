@@ -14,9 +14,12 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         XCTAssertTrue(lock.waitForExistence(timeout: 20))
         let replace = app.buttons["preview-replace-session"]
         XCTAssertTrue(replace.waitForExistence(timeout: 5)); replace.tap()
-        XCTAssertTrue(app.buttons["preview-session-replaced"].waitForExistence(timeout: 20), "Customer cover must survive session replacement")
-        XCTAssertTrue(lock.isHittable, "Staff hand-back must remain available")
-        lock.tap()
+        let retired = app.staticTexts["Please hand the device back to your technician."]
+        XCTAssertTrue(retired.waitForExistence(timeout: 20), "Customer cover must survive session replacement in a safe state")
+        XCTAssertFalse(app.buttons["Collect payment"].isHittable)
+        let handBack = app.buttons["customer-mode-owner-exit"]
+        XCTAssertTrue(handBack.isHittable, "Staff hand-back must remain available")
+        handBack.tap()
         let probe = app.buttons["preview-handoff-probe"]
         XCTAssertTrue(probe.waitForExistence(timeout: 20)); probe.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Handoff available"), object: probe)], timeout: 10), .completed)

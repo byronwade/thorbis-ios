@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import Thorbis
 
 final class JobEstimateHandoffSelectionTests: XCTestCase {
@@ -285,6 +286,47 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testRetiredLegacyCoverStaysOwnedUntilAuthenticatedDismissalAndDropsContent() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let legacy = LegacyCustomerPresenter()
+        let lease = try XCTUnwrap(documents.claimLegacy())
+        var callbackCount = 0
+        let owner = try XCTUnwrap(LegacyCustomerHandoff(lease: lease, content: AnyView(Text("private")), api: model.api, session: model.session,
+            onDismiss: { _ in callbackCount += 1 }))
+        XCTAssertTrue(legacy.present(owner))
+        model.api.invalidateRequests()
+        XCTAssertFalse(owner.isCurrent(api: model.api, session: model.session))
+        owner.retire()
+        XCTAssertNil(owner.content)
+        XCTAssertTrue(legacy.active === owner)
+        XCTAssertFalse(arbiter.claim(.photos))
+        legacy.authenticatedExit()
+        XCTAssertFalse(arbiter.claim(.photos), "Lease remains held until the cover dismisses")
+        legacy.completedDismissal(api: model.api, session: model.session)
+        XCTAssertEqual(callbackCount, 0, "A retired session must not resume staff actions")
+        XCTAssertTrue(arbiter.claim(.photos))
+    }
+
+    func testLegacyPayCallbackRunsOnlyAfterProtectedCoverDismisses() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let legacy = LegacyCustomerPresenter()
+        let lease = try XCTUnwrap(documents.claimLegacy())
+        var collected = false
+        let owner = try XCTUnwrap(LegacyCustomerHandoff(lease: lease, content: AnyView(Text("invoice")), api: model.api, session: model.session,
+            onDismiss: { exit in if case .collect = exit { collected = true } }))
+        XCTAssertTrue(legacy.present(owner))
+        legacy.authenticatedExit(.collect)
+        XCTAssertFalse(collected)
+        XCTAssertFalse(arbiter.claim(.photos))
+        legacy.completedDismissal(api: model.api, session: model.session)
+        XCTAssertTrue(collected)
+        XCTAssertTrue(arbiter.claim(.photos))
+    }
+
     func testDraftSendAttemptIsRetiredByInterveningHandoff() async throws {
         let gate = URLProtocolFixture.Gate()
         let model = try await ready([.init(200, record(a), gate: gate)])

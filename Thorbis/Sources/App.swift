@@ -19,6 +19,7 @@ struct ThorbisApp: App {
     @State private var lastSavedCopyCheck = Date.distantPast
     @StateObject private var estimateHandoff: JobEstimateHandoffPresenter
     @StateObject private var photoHandoff: CustomerPhotoPresenter
+    @StateObject private var legacyHandoff = LegacyCustomerPresenter()
     #if DEBUG
     @State private var previewHandoffProbe = ""
     #endif
@@ -189,6 +190,13 @@ struct ThorbisApp: App {
                     CustomerPhotoHandoffView(owner: owner) { photoHandoff.authenticatedExit() }
                 }
             }
+            .fullScreenCover(isPresented: Binding(get: { legacyHandoff.active != nil }, set: { _ in }), onDismiss: {
+                legacyHandoff.completedDismissal(api: api, session: session)
+            }) {
+                if let handoff = legacyHandoff.active {
+                    LegacyCustomerProtectedView(handoff: handoff, presenter: legacyHandoff)
+                }
+            }
             #if DEBUG
             .overlay(alignment: .topLeading) {
                 if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
@@ -202,6 +210,7 @@ struct ThorbisApp: App {
             .background(Theme.canvas)
             .environmentObject(estimateHandoff)
             .environmentObject(photoHandoff)
+            .environmentObject(legacyHandoff)
             .environmentObject(api)
             .environmentObject(store)
             .environmentObject(session)
