@@ -96,6 +96,8 @@ final class PrimaryNavigationTests: XCTestCase {
     }
 
     func testSidebarFollowsAccessAndHiddenPlaces() {
+        XCTAssertEqual(MenuItem.drafts.sidebarTitle("Message drafts"), "Message drafts · On this phone")
+        XCTAssertEqual(MenuItem.jobs.sidebarTitle("Jobs"), "Jobs")
         let noJobs = sections(.technician, opens: { ![.schedule, .jobs, .inbox].contains($0) && self.permitted(.technician)($0) })
         XCTAssertFalse(noJobs.places.contains(.jobs))
         XCTAssertTrue(noJobs.places.contains(.customers))
@@ -113,10 +115,17 @@ final class PrimaryNavigationTests: XCTestCase {
                                           opens: { _ in true })
         XCTAssertNotEqual(company.sections.first?.kind, .pinned, "A company layout made from the owner's defaults adds no Pinned section")
         let ordered = DrawerSections.make(order: [.customers, .jobs], opens: { _ in true })
-        XCTAssertTrue(ordered.places.contains(.customers))
-        XCTAssertTrue(ordered.places.contains(.jobs))
+        XCTAssertEqual(Array(ordered.places.prefix(2)), [.customers, .jobs], "Saved cross-group order is honored")
+        XCTAssertEqual(ordered.sections.first?.kind.rawValue, "Your places")
         let reordered = DrawerSections.make(order: [.invoices, .jobs], opens: { _ in true })
-        XCTAssertEqual(Array(reordered.sections.first { $0.kind.rawValue == "Work" }!.places.prefix(2)), [.invoices, .jobs], "Edit menu's order leads inside a section")
+        XCTAssertEqual(Array(reordered.places.prefix(2)), [.invoices, .jobs])
+        let filtered = DrawerSections.make(pins: [.estimates], explicitPins: true, hidden: [.customers],
+                                           order: [.customers, .jobs, .estimates, .invoices],
+                                           opens: { $0 != .invoices })
+        XCTAssertEqual(filtered.sections.first?.places, [.estimates])
+        XCTAssertEqual(filtered.sections.dropFirst().first?.places.first, .jobs)
+        XCTAssertFalse(filtered.places.contains(.customers))
+        XCTAssertFalse(filtered.places.contains(.invoices))
     }
 
     func testTodayNumbersCountLeftAndLate() {
