@@ -424,7 +424,7 @@ struct CommsInboxView: View {
         }
         return RowSwipeContainer(id: notice.id, leading: [open], state: swipes) {
             NavigationLink(value: PaperRoute.job(notice.jobId)) {
-                InboxRoomRow(title: notice.title, detail: notice.meta, time: timeLabel(notice.at), unread: !notice.read)
+                CommsNoticeRow(notice: notice)
             }
             .buttonStyle(RowPressStyle())
             .accessibilityElement(children: .combine)
@@ -635,6 +635,45 @@ struct CommsThreadRow: View {
                         StatusLabel(tone: lead.kind == .voicemail ? .dispatched : .attention, word: alert, emphasis: .quiet)
                             .fixedSize()
                     }
+                }
+            }
+        }
+        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+/// A job notice in the inbox, laid out like the call and message rows around it: a round mark in
+/// the avatar column (a job, not a person), the title with its age and dot, the job under it.
+struct CommsNoticeRow: View {
+    let notice: StaffNotice
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        let unread = !notice.read
+        HStack(alignment: .top, spacing: 12) {
+            if !stacked {
+                Image(systemName: "wrench.and.screwdriver").font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.subtle)
+                    .frame(width: 36, height: 36).background(Theme.fill, in: Circle())
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(notice.title).font(Theme.font(15, weight: unread ? .medium : .regular))
+                        .foregroundStyle(Theme.foreground)
+                        .lineLimit(stacked ? nil : 1)
+                    Spacer(minLength: 8)
+                    Text(CommsAge.compact(notice.at)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted).fixedSize()
+                    Circle().fill(unread ? Theme.brand : .clear).frame(width: 7, height: 7)
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                }
+                if !notice.meta.isEmpty {
+                    Text(notice.meta).font(Theme.font(14)).foregroundStyle(unread ? Theme.foreground : Theme.muted)
+                        .lineLimit(stacked ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
