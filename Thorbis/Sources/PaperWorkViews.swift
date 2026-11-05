@@ -1275,11 +1275,11 @@ struct JobsView: View {
     @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool) -> some View {
         if !jobs.isEmpty {
             ListGroupLabel(title: title, count: jobs.count, first: first)
-            ForEach(jobs) { job in jobRow(job) }
+            ForEach(jobs) { job in jobRow(job, group: title) }
         }
     }
 
-    private func jobRow(_ job: Job) -> some View {
+    private func jobRow(_ job: Job, group: String? = nil) -> some View {
         let customer = store.customerName(job.customerId)
         let needsTime = canSchedule && job.scheduledFor == nil && !["completed", "canceled"].contains(job.status)
             && !ScheduleLead.activeStatuses.contains(job.status)
@@ -1288,6 +1288,9 @@ struct JobsView: View {
         // The tech by name from the roster; "You" only where the roster can't name you, on a shared board.
         // Assigned is your own list, so naming you on every row is noise.
         let who = tab == "Assigned" && mine ? nil : assignee ?? (mine ? "You" : nil)
+        // Under "In progress" a row needn't say "In progress" again; it still says Late or a pending move.
+        let saysGroup = group.map { job.status.statusLabel.caseInsensitiveCompare($0) == .orderedSame } ?? false
+        let showsStatus = !needsTime && (isLate(job) || outbox.pendingStatus(for: job.id) != nil || !saysGroup)
         // Swipe right: Call, Directions. Swipe left: the next move the server allows.
         return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
             HStack(spacing: 0) {
@@ -1296,7 +1299,7 @@ struct JobsView: View {
                     JobRoomRow(job: job, street: addresses.street(job), customer: customer, when: when(job),
                                who: needsTime ? nil : who,
                                pendingStatus: outbox.pendingStatus(for: job.id),
-                               late: isLate(job), showsStatus: !needsTime)
+                               late: isLate(job), showsStatus: showsStatus)
                 }
                 .buttonStyle(RowPressStyle())
                 .jobContextMenu(job, customer: customer)
