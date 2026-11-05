@@ -135,7 +135,9 @@ source evidence; verify platform/API/version claims before relying on them.
    Thorbis web's organization. Show native personal destinations first, then
    Work, Customers, Money, Reports and Operations, with other native tools in
    Other. Keep device-only records under On this phone, and retain role access,
-   pins, hidden items, custom order and the person's chosen startup screen.
+   pins, hidden items, custom order and the person's chosen startup screen. A
+   customized global order is shown under Your places instead of being silently
+   rearranged into groups. Label message drafts as stored on this phone.
    Do not imply that device-only records are synced or add destinations that
    have no native implementation.
 7. **Match the surface to the task.** Durable job/customer/site/equipment/document
