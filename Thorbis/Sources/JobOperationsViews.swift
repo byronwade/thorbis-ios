@@ -316,14 +316,14 @@ struct JobCloseoutView: View {
                     ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
                         let step = CloseoutNextStep(requirement)
                         let waiting = waitingSatisfies(requirement)
+                        let canRecover = !waiting && !session.isOffline && step?.buttonTitle != nil
+                            && (step?.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) ?? false)
                         HStack(spacing: 12) {
+                            // The action stands in for "To do": one control at the edge, not a word and a button.
                             checklistRow(done: requirement.outcome != "blocked" || waiting, title: requirement.detail,
-                                         detail: waiting ? "Waiting to sync" : step?.detail)
-                            if !waiting, !session.isOffline, let step, let title = step.buttonTitle,
-                               step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
-                                Button { Task { await recover(step) } } label: { Text(title) }
-                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .frame(minHeight: 44).contentShape(Rectangle())
+                                         detail: waiting ? "Waiting to sync" : step?.detail, showsStatus: !canRecover)
+                            if canRecover, let step, let title = step.buttonTitle {
+                                Button { Task { await recover(step) } } label: { actionPill(title) }
                                     .buttonStyle(PressStyle())
                                     .disabled(busy)
                             }
@@ -333,12 +333,12 @@ struct JobCloseoutView: View {
                     ForEach(checks, id: \.key) { check in
                         let waiting = waitingChecks.contains(check.key)
                         let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key) || waiting
+                        let canConfirm = !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs")
                         HStack(spacing: 12) {
-                            checklistRow(done: acknowledged, title: check.label, detail: waiting ? "Waiting to sync" : nil)
-                            if !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs") {
-                                Button { Task { await acknowledge(check.key) } } label: { Text("Confirm") }
-                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .frame(minHeight: 44).contentShape(Rectangle())
+                            checklistRow(done: acknowledged, title: check.label, detail: waiting ? "Waiting to sync" : nil,
+                                         showsStatus: !canConfirm)
+                            if canConfirm {
+                                Button { Task { await acknowledge(check.key) } } label: { actionPill("Confirm") }
                                     .buttonStyle(PressStyle())
                                     .disabled(busy)
                                     .accessibilityHint(check.label)
@@ -472,7 +472,15 @@ struct JobCloseoutView: View {
         .thorbisConfirm("Cancel this job?", isPresented: $confirmCancel,
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
-    private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
+    /// A checklist item's own action, as a quiet pill (the Schedule pill's shape) with a 44pt target.
+    private func actionPill(_ title: String) -> some View {
+        Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 14).frame(minHeight: 34)
+            .background(Theme.fill, in: Capsule())
+            .frame(minHeight: 44).contentShape(Rectangle())
+    }
+
+    private func checklistRow(done: Bool, title: String, detail: String?, showsStatus: Bool = true) -> some View {
         // v2: the state is a word with its mark ("Done" / "To do"), not a tick's colour.
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
@@ -482,8 +490,10 @@ struct JobCloseoutView: View {
                 if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            StatusLabel(tone: done ? .done : .unscheduled, word: done ? "Done" : "To do", emphasis: done ? .quiet : .strong)
-                .fixedSize()
+            if showsStatus {
+                StatusLabel(tone: done ? .done : .unscheduled, word: done ? "Done" : "To do", emphasis: done ? .quiet : .strong)
+                    .fixedSize()
+            }
         }
         .padding(.vertical, 8)
         .frame(minHeight: 44)
