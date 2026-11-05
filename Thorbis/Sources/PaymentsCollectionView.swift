@@ -10,6 +10,7 @@ struct PaymentsCollectionView: View {
     @State private var nextCursor: String?
     @State private var loading = false
     @State private var error: String?
+    @State private var needsRefresh = false
     @State private var request = UUID()
 
     private var scope: ScopedRecordFavorites.Scope? {
@@ -29,7 +30,7 @@ struct PaymentsCollectionView: View {
                         systemImage: session.isOffline ? "wifi.slash" : "lock",
                         description: Text(session.isOffline ? "Payment history needs a connection." : "Your current access does not include payments."))
                 } else if visible {
-                    if let error { ErrorBanner(message: error) { await loadMore(reset: items.isEmpty) } }
+                    if let error { ErrorBanner(message: error) { await loadMore(reset: items.isEmpty || needsRefresh) } }
                     if loading && items.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
                     if !loading && items.isEmpty && error == nil {
                         ListRoomEmpty(title: "No payments to show.", message: "Payments available to you will appear here.")
@@ -59,7 +60,7 @@ struct PaymentsCollectionView: View {
         guard let current = scope else { items = []; loadedScope = nil; request = UUID(); return }
         if !reset && (loading || nextCursor == nil || loadedScope != current) { return }
         let token = UUID(); request = token
-        if reset { items = []; nextCursor = nil; loadedScope = current }
+        if reset { items = []; nextCursor = nil; loadedScope = current; needsRefresh = false }
         loading = true; error = nil
         let cursor = reset ? nil : nextCursor
         do {
@@ -69,13 +70,14 @@ struct PaymentsCollectionView: View {
             guard scope == current, request == token, !Task.isCancelled else { return }
             let ids = Set(items.map { $0.id.lowercased() })
             guard page.items.allSatisfy({ !ids.contains($0.id.lowercased()) }) else {
-                throw Problem(title: "Payments couldn't be verified", status: nil, detail: "Refresh the list to try again.")
+                needsRefresh = true
+                throw Problem(title: "Payments changed", status: nil, detail: "Refresh the list to see the latest payments.")
             }
             items.append(contentsOf: page.items); nextCursor = page.nextCursor; loading = false
         } catch is CancellationError { }
         catch {
             guard scope == current, request == token, !Task.isCancelled else { return }
-            self.error = "Payments couldn't be loaded. Check your connection and try again."
+            self.error = needsRefresh ? "Payments changed. Refresh the list to see the latest payments." : "Payments couldn't be loaded. Check your connection and try again."
             loading = false
         }
     }
