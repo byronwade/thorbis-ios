@@ -24,6 +24,74 @@ final class ScopedRecordFavoritesTests: XCTestCase {
         "{\"id\":\"\(id)\",\"organizationId\":\"\(organization ?? organizationID)\",\"customerId\":\"00000000-0000-4000-8000-000000000003\",\"title\":\"\(title)\",\"status\":\"scheduled\",\"createdAt\":\"2026-10-01T12:00:00Z\",\"updatedAt\":\"2026-10-01T12:00:00Z\"}"
     }
 
+    private func estimate(_ id: String, organization: String? = nil, title: String = "Private estimate") -> String {
+        "{\"id\":\"\(id)\",\"organizationId\":\"\(organization ?? organizationID)\",\"customerId\":\"00000000-0000-4000-8000-000000000003\",\"createdByUserId\":\"\(actorID)\",\"status\":\"sent\",\"title\":\"\(title)\",\"lines\":[],\"createdAt\":\"2026-10-01T12:00:00Z\",\"updatedAt\":\"2026-10-01T12:00:00Z\"}"
+    }
+    private func invoice(_ id: String, organization: String? = nil) -> String {
+        "{\"id\":\"\(id)\",\"organizationId\":\"\(organization ?? organizationID)\",\"customerId\":\"00000000-0000-4000-8000-000000000003\",\"createdByUserId\":\"\(actorID)\",\"origin\":\"manual\",\"sourceOperationKey\":\"favorite-test\",\"status\":\"issued\",\"lines\":[],\"linesRevision\":1,\"amountPaid\":0,\"currency\":\"USD\",\"createdAt\":\"2026-10-01T12:00:00Z\",\"updatedAt\":\"2026-10-01T12:00:00Z\"}"
+    }
+
+    func testFinancialFavoritesUseFreshAuthorizedReadsAndDistinctReferences() async {
+        let estimateID = "00000000-0000-4000-8000-000000002209"
+        let firstInvoiceID = "00000000-0000-4000-8000-000000012209"
+        let secondInvoiceID = "00000000-0000-4000-8000-000000022209"
+        let saved = defaults()
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, estimate(estimateID)), .init(200, invoice(firstInvoiceID)), .init(200, invoice(secondInvoiceID))
+        ]), baseURL: "https://app.thorbis.com")
+        let model = ScopedRecordFavorites(defaults: saved)
+        model.bind(scope(api))
+        XCTAssertTrue(model.toggle(.estimate, id: estimateID))
+        XCTAssertTrue(model.toggle(.invoice, id: firstInvoiceID))
+        XCTAssertTrue(model.toggle(.invoice, id: secondInvoiceID))
+        await model.refresh(api: api, canOpen: { _ in true }, isCurrent: { true })
+        XCTAssertEqual(model.visible.map(\.title), ["Private estimate · EST-2209", "Invoice · INV-12209", "Invoice · INV-22209"])
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertTrue(URLProtocolFixture.recorded.allSatisfy { $0.cachePolicy == .reloadIgnoringLocalCacheData && $0.header("Cache-Control") == "no-cache" })
+        XCTAssertFalse(String(data: saved.data(forKey: ScopedRecordFavorites.storageKey)!, encoding: .utf8)!.contains("Private estimate"))
+    }
+
+    func testFinancialFavoritesDenyWrongIdentityOrganizationAndOffline() async {
+        let id = "00000000-0000-4000-8000-000000002209"
+        let wrong = "00000000-0000-4000-8000-000000002210"
+        let otherOrg = "00000000-0000-4000-8000-000000000099"
+        for kind in [ScopedRecordFavorites.Kind.estimate, .invoice] {
+            let wrongID = kind == .estimate ? estimate(wrong) : invoice(wrong)
+            let wrongOrg = kind == .estimate ? estimate(id, organization: otherOrg) : invoice(id, organization: otherOrg)
+            for reply in [URLProtocolFixture.Reply(403), URLProtocolFixture.offline, .init(200, wrongID), .init(200, wrongOrg)] {
+                let api = APIClient(session: URLProtocolFixture.session([reply]), baseURL: "https://app.thorbis.com")
+                let model = ScopedRecordFavorites(defaults: defaults())
+                model.bind(scope(api)); XCTAssertTrue(model.toggle(kind, id: id))
+                await model.refresh(api: api, canOpen: { _ in true }, isCurrent: { true })
+                XCTAssertTrue(model.visible.isEmpty)
+            }
+            let api = APIClient(session: URLProtocolFixture.session([]), baseURL: "https://app.thorbis.com")
+            let model = ScopedRecordFavorites(defaults: defaults())
+            model.bind(scope(api)); XCTAssertTrue(model.toggle(kind, id: id))
+            await model.refresh(api: api, canOpen: { _ in false }, isCurrent: { true })
+            XCTAssertTrue(model.visible.isEmpty)
+            XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+        }
+    }
+
+    func testFinancialFavoritesDiscardDelayedReadAfterAuthorityChange() async throws {
+        let id = "00000000-0000-4000-8000-000000002209"
+        for kind in [ScopedRecordFavorites.Kind.estimate, .invoice] {
+            let gate = URLProtocolFixture.Gate()
+            let body = kind == .estimate ? estimate(id) : invoice(id)
+            let api = APIClient(session: URLProtocolFixture.session([.init(200, body, gate: gate)]), baseURL: "https://app.thorbis.com")
+            let model = ScopedRecordFavorites(defaults: defaults())
+            model.bind(scope(api)); XCTAssertTrue(model.toggle(kind, id: id))
+            var allowed = true
+            let task = Task { await model.refresh(api: api, canOpen: { _ in allowed }, isCurrent: { true }) }
+            for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+            allowed = false
+            gate.release(); await task.value
+            XCTAssertTrue(model.visible.isEmpty)
+        }
+    }
+
     func testOnlyFreshVerifiedRecordsExposeTitlesAndStorageContainsIDsOnly() async {
         let saved = defaults()
         let api = APIClient(session: URLProtocolFixture.session([.init(200, job(jobID))]), baseURL: "https://app.thorbis.com")

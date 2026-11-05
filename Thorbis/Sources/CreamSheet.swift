@@ -269,6 +269,8 @@ struct PlacesList: View {
         switch kind {
         case .job: session.can("job.view", feature: "jobs")
         case .customer: session.can("customer.view", feature: "core_crm")
+        case .estimate: session.can("estimate.view", feature: "estimates")
+        case .invoice: session.can("invoice.view", feature: "invoicing")
         }
     }
     private var safeFavorites: [ScopedRecordFavorites.Visible] {

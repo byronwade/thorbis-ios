@@ -54,6 +54,60 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertEqual(star.label, "Add to favorites")
     }
 
+    func testEstimateCanBeAddedAndRemovedFromFavorites() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002218"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-detail", "--paper-preview-role", "office"]
+        app.launch()
+        let star = app.buttons["record-favorite-estimate-\(id)"]
+        XCTAssertTrue(star.waitForExistence(timeout: 30))
+        if star.label == "Remove from favorites" { star.tap() }
+        XCTAssertEqual(star.label, "Add to favorites")
+        XCTAssertGreaterThanOrEqual(star.frame.height, 44)
+        star.tap(); XCTAssertEqual(star.label, "Remove from favorites")
+        star.tap(); XCTAssertEqual(star.label, "Add to favorites")
+    }
+
+    func testFavoriteEstimateOpensItsFreshlyAuthorizedDetail() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone navigation path") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002218"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-detail", "--paper-preview-role", "office"]
+        app.launch()
+        let star = app.buttons["record-favorite-estimate-\(id)"]
+        XCTAssertTrue(star.waitForExistence(timeout: 30))
+        if star.label == "Remove from favorites" { star.tap() }
+        star.tap(); XCTAssertEqual(star.label, "Remove from favorites")
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        app.openDrawer()
+        let disclosure = app.buttons["drawer-favorites-disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
+        if disclosure.value as? String == "Collapsed" { disclosure.tap() }
+        let favorite = app.buttons["drawer-favorite-record-\(id)"]
+        XCTAssertTrue(favorite.waitForExistence(timeout: 15))
+        favorite.tap()
+        XCTAssertTrue(star.waitForExistence(timeout: 15))
+        XCTAssertEqual(star.label, "Remove from favorites")
+        star.tap()
+    }
+
+    func testInvoiceCanBeAddedAndRemovedFromFavorites() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002209"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-role", "office"]
+        app.launch()
+        let star = app.buttons["record-favorite-invoice-\(id)"]
+        XCTAssertTrue(star.waitForExistence(timeout: 30))
+        if star.label == "Remove from favorites" { star.tap() }
+        XCTAssertEqual(star.label, "Add to favorites")
+        XCTAssertGreaterThanOrEqual(star.frame.height, 44)
+        star.tap(); XCTAssertEqual(star.label, "Remove from favorites")
+        star.tap(); XCTAssertEqual(star.label, "Add to favorites")
+    }
+
     func testCurrentCustomerCanBeAddedAndRemovedFromFavorites() {
         continueAfterFailure = false
         let app = XCUIApplication()

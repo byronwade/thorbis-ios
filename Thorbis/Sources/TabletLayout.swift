@@ -556,6 +556,14 @@ struct TabletRoot: View {
                 switch item.entry.kind {
                 case .job: store.requestedJobID = item.entry.id
                 case .customer: store.requestedRecord = .customer(item.entry.id)
+                case .estimate:
+                    guard let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
+                          ScopedRecordFavorites.shared.isBound(to: scope) else { return }
+                    store.requestedRecord = .favoriteEstimate(item.entry.id, scope)
+                case .invoice:
+                    guard let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
+                          ScopedRecordFavorites.shared.isBound(to: scope) else { return }
+                    store.requestedRecord = .favoriteInvoice(item.entry.id, scope)
                 }
             },
             search: { search = true },
@@ -722,8 +730,8 @@ struct TabletRoot: View {
         let root: String
         switch record {
         case .customer: root = "customers"
-        case .estimate: root = "estimates"
-        case .invoice: root = "invoices"
+        case .estimate, .favoriteEstimate: root = "estimates"
+        case .invoice, .favoriteInvoice: root = "invoices"
         }
         store.noteHandledNavigation(session: session.generation, root: root)
         switch record {
@@ -737,6 +745,14 @@ struct TabletRoot: View {
         case .invoice(let id):
             show(.place(.invoices))
             picks[.place(.invoices)] = TabletPick(id: id, value: PaperRoute.invoice(id))
+        case .favoriteEstimate(let id, let scope):
+            guard ScopedRecordFavorites.currentScope(session: session, api: api) == scope else { return }
+            show(.place(.estimates))
+            picks[.place(.estimates)] = TabletPick(id: id, value: PaperRoute.favoriteEstimate(id, scope))
+        case .favoriteInvoice(let id, let scope):
+            guard ScopedRecordFavorites.currentScope(session: session, api: api) == scope else { return }
+            show(.place(.invoices))
+            picks[.place(.invoices)] = TabletPick(id: id, value: PaperRoute.favoriteInvoice(id, scope))
         }
     }
 

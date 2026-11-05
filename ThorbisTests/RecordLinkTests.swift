@@ -10,6 +10,19 @@ final class RecordLinkTests: XCTestCase {
         }
     }
 
+    @MainActor func testFavoriteRoutesAreInternalAndRetainFinancialCapabilities() {
+        let scope = ScopedRecordFavorites.Scope(actorID: "actor", organizationID: "org", origin: "https://app.thorbis.com",
+            sessionGeneration: UUID(), authorityRevision: UUID(), apiGeneration: UUID(), savedCopyRevision: UUID())
+        let estimate = RecordLink.favoriteEstimate(id, scope)
+        let invoice = RecordLink.favoriteInvoice(id, scope)
+        XCTAssertNil(estimate.url)
+        XCTAssertNil(invoice.url)
+        XCTAssertEqual(estimate.access.capability, "estimate.view")
+        XCTAssertEqual(invoice.access.capability, "invoice.view")
+        XCTAssertNotEqual(estimate, .favoriteEstimate(id, .init(actorID: "actor", organizationID: "org", origin: "https://app.thorbis.com",
+            sessionGeneration: UUID(), authorityRevision: scope.authorityRevision, apiGeneration: scope.apiGeneration, savedCopyRevision: scope.savedCopyRevision)))
+    }
+
     func testOnlyThorbisSchemeAndRealIdsOpen() throws {
         XCTAssertNil(RecordLink(url: try XCTUnwrap(URL(string: "https://customer/\(id)"))))
         XCTAssertNil(RecordLink(url: try XCTUnwrap(URL(string: "thorbis://customer/not-an-id"))))

@@ -105,6 +105,8 @@ struct EstimateDetailView: View {
     /// Opened from the job's next step: hand it to the customer as soon as it loads (TF-05), and
     /// go back to the job once they approve, where the invoice is the next step (TF-06).
     var presentsOnOpen = false
+    /// Favorites carry the authority under which the record was verified.
+    var favoriteScope: ScopedRecordFavorites.Scope? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
@@ -242,7 +244,18 @@ struct EstimateDetailView: View {
         return items
     }
 
-    var body: some View {
+    private var favoriteAccessCurrent: Bool {
+        guard let favoriteScope else { return true }
+        return ScopedRecordFavorites.currentScope(session: session, api: api) == favoriteScope &&
+            session.can("estimate.view", feature: "estimates")
+    }
+
+    @ViewBuilder var body: some View {
+        if favoriteAccessCurrent { detailBody }
+        else { Text("This estimate is no longer available in this workspace.").foregroundStyle(Theme.muted) }
+    }
+
+    private var detailBody: some View {
         scrollContent
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
@@ -250,6 +263,11 @@ struct EstimateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
+            if let record, record.id == id {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    FavoriteRecordButton(kind: .estimate, id: record.id, organizationID: record.organizationId)
+                }
+            }
             if record != nil {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     ThorbisMenu(items: menuItems, title: "Estimate", accessibilityLabel: "Edit, approve or open the PDF") {
@@ -378,13 +396,17 @@ struct EstimateDetailView: View {
     }
     private func load() async {
         do {
-            let loaded = try await api.fieldEstimate(id)
+            guard favoriteAccessCurrent else { return }
+            if favoriteScope != nil { record = nil; memberPricing = nil }
+            let loaded = try await api.fieldEstimate(id, requireFresh: favoriteScope != nil)
+            guard favoriteAccessCurrent, loaded.id == id,
+                  favoriteScope.map({ $0.organizationID.caseInsensitiveCompare(loaded.organizationId) == .orderedSame }) != false else { return }
             record = loaded
             JobDetailCache.save(estimate: loaded)
             error = nil
             if let customer = record?.customerId { memberPricing = try? await api.memberPricing(customer) }
         }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
+        catch is CancellationError {} catch { if favoriteAccessCurrent { self.error = error.localizedDescription } }
     }
 }
 
@@ -480,6 +502,7 @@ struct InvoiceDetailView: View {
     /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
     var returnsWhenPaid = false
     var expectedJobScope: JobDocumentScope? = nil
+    var favoriteScope: ScopedRecordFavorites.Scope? = nil
     /// The job-scoped label is display only; the full id still controls every read and payment.
     var invoiceReference: String? = nil
     @EnvironmentObject var api: APIClient
@@ -526,7 +549,18 @@ struct InvoiceDetailView: View {
 
     @State private var financingApplications: [FinancingApplication] = []
     @State private var confirmCancelFinancing = false
-    var body: some View {
+    private var favoriteAccessCurrent: Bool {
+        guard let favoriteScope else { return true }
+        return ScopedRecordFavorites.currentScope(session: session, api: api) == favoriteScope &&
+            session.can("invoice.view", feature: "invoicing")
+    }
+
+    @ViewBuilder var body: some View {
+        if favoriteAccessCurrent { detailBody }
+        else { Text("This invoice is no longer available in this workspace.").foregroundStyle(Theme.muted) }
+    }
+
+    private var detailBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 OfflineBanner().padding(.horizontal, -Theme.gutter)
@@ -594,6 +628,11 @@ struct InvoiceDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
+            if let record, record.id == id {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    FavoriteRecordButton(kind: .invoice, id: record.id, organizationID: record.organizationId)
+                }
+            }
             if record != nil {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     ThorbisMenu(items: menuItems, title: "Invoice", accessibilityLabel: "Customer view, edit or open the PDF") {
@@ -807,19 +846,23 @@ struct InvoiceDetailView: View {
 
     private func load() async {
         let generation = session.generation
-        guard expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
+        guard favoriteAccessCurrent,
+              expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
             record = nil
             paymentModel = nil
             return
         }
         if paymentModel == nil {
-            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope)
+            paymentModel = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: expectedJobScope,
+                                                          expectedFavoriteOrganizationID: favoriteScope?.organizationID,
+                                                          isFavoriteCurrent: { favoriteAccessCurrent })
             paymentModel?.outbox = outbox
             paymentModel?.policyVersion = session.policyVersion ?? 0
         }
         guard let paymentModel else { return }
+        if favoriteScope != nil { record = nil }
         await paymentModel.load()
-        guard session.generation == generation else { return }
+        guard session.generation == generation, favoriteAccessCurrent else { record = nil; return }
         record = paymentModel.invoice
         if paymentModel.invoice != nil {
             error = nil

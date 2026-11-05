@@ -312,6 +312,14 @@ struct RootView: View {
                 switch item.entry.kind {
                 case .job: store.requestedJobID = item.entry.id
                 case .customer: store.requestedRecord = .customer(item.entry.id)
+                case .estimate:
+                    guard let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
+                          ScopedRecordFavorites.shared.isBound(to: scope) else { return }
+                    store.requestedRecord = .favoriteEstimate(item.entry.id, scope)
+                case .invoice:
+                    guard let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
+                          ScopedRecordFavorites.shared.isBound(to: scope) else { return }
+                    store.requestedRecord = .favoriteInvoice(item.entry.id, scope)
                 }
             },
             openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }
@@ -1032,6 +1040,12 @@ struct RootView: View {
             home = .customers
         case .estimate(let id): target.append(PaperRoute.estimate(id)); home = .estimates
         case .invoice(let id): target.append(PaperRoute.invoice(id)); home = .invoices
+        case .favoriteEstimate(let id, let scope):
+            guard ScopedRecordFavorites.currentScope(session: session, api: api) == scope else { return }
+            target.append(PaperRoute.favoriteEstimate(id, scope)); home = .estimates
+        case .favoriteInvoice(let id, let scope):
+            guard ScopedRecordFavorites.currentScope(session: session, api: api) == scope else { return }
+            target.append(PaperRoute.favoriteInvoice(id, scope)); home = .invoices
         }
         guard phone else { return }
         let root = home.permitted(session) ? home.rawValue : selectedTab
@@ -1180,6 +1194,8 @@ enum PaperRoute: Hashable {
     case notices
     case estimate(String)
     case invoice(String)
+    case favoriteEstimate(String, ScopedRecordFavorites.Scope)
+    case favoriteInvoice(String, ScopedRecordFavorites.Scope)
     case followUps(jobID: String)
     case customizeMenu
     case whatsNew
@@ -1248,6 +1264,8 @@ struct PaperRouteView: View {
         case .notices: NoticeSettingsView()
         case .estimate(let id): EstimateDetailView(id: id)
         case .invoice(let id): InvoiceDetailView(id: id)
+        case .favoriteEstimate(let id, let scope): EstimateDetailView(id: id, favoriteScope: scope)
+        case .favoriteInvoice(let id, let scope): InvoiceDetailView(id: id, favoriteScope: scope)
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)
         case .customizeMenu: CustomizeMenuView()
         case .whatsNew: WhatsNewHistoryView()

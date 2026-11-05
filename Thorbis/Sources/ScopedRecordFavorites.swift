@@ -5,7 +5,7 @@ import SwiftUI
 /// authorized read in the currently bound actor, workspace, origin and authority context.
 @MainActor
 final class ScopedRecordFavorites: ObservableObject {
-    enum Kind: String, Codable, Hashable { case job, customer }
+    enum Kind: String, Codable, Hashable { case job, customer, estimate, invoice }
     struct Entry: Codable, Hashable, Identifiable {
         let kind: Kind
         let id: String
@@ -16,7 +16,7 @@ final class ScopedRecordFavorites: ObservableObject {
         let title: String
         var id: String { entry.identity }
     }
-    struct Scope: Equatable {
+    struct Scope: Hashable {
         let actorID: String
         let organizationID: String
         let origin: String
@@ -141,6 +141,20 @@ final class ScopedRecordFavorites: ObservableObject {
                     guard canOpen(entry.kind), customer.id.lowercased() == entry.id,
                           customer.organizationId.lowercased() == expected.organizationID.lowercased() else { continue }
                     title = customer.name
+                case .estimate:
+                    let estimate = try await api.fieldEstimate(entry.id, requireFresh: true)
+                    guard current() else { discardIfCurrentRequest(); return }
+                    removeUnavailable()
+                    guard canOpen(entry.kind), estimate.id.lowercased() == entry.id,
+                          estimate.organizationId.lowercased() == expected.organizationID.lowercased() else { continue }
+                    title = "\(estimate.title) · \(reference(for: entry, prefix: "EST"))"
+                case .invoice:
+                    let invoice = try await api.fieldInvoice(entry.id, requireFresh: true)
+                    guard current() else { discardIfCurrentRequest(); return }
+                    removeUnavailable()
+                    guard canOpen(entry.kind), invoice.id.lowercased() == entry.id,
+                          invoice.organizationId.lowercased() == expected.organizationID.lowercased() else { continue }
+                    title = "Invoice · \(reference(for: entry, prefix: "INV"))"
                 }
                 guard current() else { discardIfCurrentRequest(); return }
                 removeUnavailable()
@@ -152,6 +166,15 @@ final class ScopedRecordFavorites: ObservableObject {
                 removeUnavailable()
             }
         }
+    }
+
+    /// Keep equal-suffix documents distinct within the saved set without inventing invoice numbers.
+    private func reference(for entry: Entry, prefix: String) -> String {
+        let id = entry.id.uppercased()
+        let peers = Set(entries.filter { $0.kind == entry.kind && $0.id != entry.id }.map { $0.id.uppercased() })
+        var length = min(4, id.count)
+        while length < id.count && peers.contains(where: { $0.hasSuffix(String(id.suffix(length))) }) { length += 1 }
+        return "\(prefix)-\(id.suffix(length))"
     }
 
     private func ownerKey(_ scope: Scope) -> String? {
@@ -177,6 +200,8 @@ struct FavoriteRecordButton: View {
         switch kind {
         case .job: return session.can("job.view", feature: "jobs")
         case .customer: return session.can("customer.view", feature: "core_crm")
+        case .estimate: return session.can("estimate.view", feature: "estimates")
+        case .invoice: return session.can("invoice.view", feature: "invoicing")
         }
     }
     private var selected: Bool {

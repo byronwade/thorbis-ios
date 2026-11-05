@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-favorite-estimates-invoices",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "star", title: "Save estimates and invoices",
+                      detail: "Star an estimate or invoice to find it again in Favorites."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-favorite-native-pages",
             date: "2026-11-05",
             highlights: [

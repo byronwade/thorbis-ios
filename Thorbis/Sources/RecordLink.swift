@@ -7,6 +7,9 @@ enum RecordLink: Hashable {
     case customer(String)
     case estimate(String)
     case invoice(String)
+    /// Internal favorite routes carry the exact authority snapshot and require live reads.
+    case favoriteEstimate(String, ScopedRecordFavorites.Scope)
+    case favoriteInvoice(String, ScopedRecordFavorites.Scope)
 
     init?(url: URL) {
         guard url.scheme == "thorbis", let host = url.host()?.lowercased(),
@@ -32,6 +35,7 @@ enum RecordLink: Hashable {
         case .customer(let id): URL(string: "thorbis://customer/\(id)")
         case .estimate(let id): URL(string: "thorbis://estimate/\(id)")
         case .invoice(let id): URL(string: "thorbis://invoice/\(id)")
+        case .favoriteEstimate, .favoriteInvoice: nil
         }
     }
 
@@ -39,8 +43,8 @@ enum RecordLink: Hashable {
     var access: (capability: String, feature: String) {
         switch self {
         case .customer: ("customer.view", "core_crm")
-        case .estimate: ("estimate.view", "estimates")
-        case .invoice: ("invoice.view", "invoicing")
+        case .estimate, .favoriteEstimate: ("estimate.view", "estimates")
+        case .invoice, .favoriteInvoice: ("invoice.view", "invoicing")
         }
     }
 }
