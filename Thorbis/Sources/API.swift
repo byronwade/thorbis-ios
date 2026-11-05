@@ -95,7 +95,10 @@ final class APIClient: ObservableObject {
 
     @Published var baseURL: String {
         didSet {
-            if baseURL != oldValue { invalidateRequests() }
+            if baseURL != oldValue {
+                ScopedRecordFavorites.shared.retireAPI(origin: Self.normalizedOrigin(oldValue), generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
+                invalidateRequests()
+            }
             #if DEBUG
             if Self.validatedOrigin(baseURL) != nil {
                 UserDefaults.standard.set(baseURL, forKey: "thorbis.apiBaseURL")
@@ -111,6 +114,7 @@ final class APIClient: ObservableObject {
     var onUnauthorized: (() -> Void)?
 
     func invalidateRequests() {
+        ScopedRecordFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
         requestGeneration = UUID()
         recentReads = [:]
         if !savedCopyPaths.isEmpty { savedCopyPaths = [:] }
@@ -122,7 +126,12 @@ final class APIClient: ObservableObject {
     /// while signed out, which turns saved copies off entirely.
     @Published private(set) var savedCopyScopeRevision = UUID()
     var savedCopyScope: String? {
-        didSet { if savedCopyScope != oldValue { savedCopyScopeRevision = UUID() } }
+        didSet {
+            if savedCopyScope != oldValue {
+                ScopedRecordFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
+                savedCopyScopeRevision = UUID()
+            }
+        }
     }
     /// Set while the session knows there is no signal: kept reads answer from the phone at once
     /// instead of waiting on a request that cannot finish.

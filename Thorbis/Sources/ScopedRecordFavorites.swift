@@ -1,5 +1,5 @@
 import Combine
-import Foundation
+import SwiftUI
 
 /// Device-local favorites contain record identities only. A label may appear only after a fresh
 /// authorized read in the currently bound actor, workspace, origin and authority context.
@@ -44,6 +44,29 @@ final class ScopedRecordFavorites: ObservableObject {
         self.defaults = defaults
         self.byOwner = defaults.data(forKey: Self.storageKey)
             .flatMap { try? JSONDecoder().decode([String: [Entry]].self, from: $0) } ?? [:]
+    }
+
+    static func currentScope(session: SessionController, api: APIClient) -> Scope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let origin = api.normalizedOrigin else { return nil }
+        return Scope(actorID: actor, organizationID: organization, origin: origin,
+                     sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                     apiGeneration: api.requestGeneration, savedCopyRevision: api.savedCopyScopeRevision)
+    }
+
+    func isBound(to expected: Scope?) -> Bool { expected != nil && scope == expected }
+
+    /// A different API client must not retire the active account's favorites.
+    func retireAPI(origin: String?, generation: UUID, savedCopyRevision: UUID) {
+        guard let scope, scope.origin == origin, scope.apiGeneration == generation,
+              scope.savedCopyRevision == savedCopyRevision else { return }
+        bind(nil)
+    }
+
+    /// Session epochs are unique to the owning controller; compare the old value before clearing.
+    func retireSession(generation: UUID, authority: UUID) {
+        guard let scope, scope.sessionGeneration == generation, scope.authorityRevision == authority else { return }
+        bind(nil)
     }
 
     /// Call on every verified identity, authority, API generation, origin or saved-copy scope change.
@@ -119,5 +142,44 @@ final class ScopedRecordFavorites: ObservableObject {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return (try? encoder.encode(owner))?.base64EncodedString()
+    }
+}
+
+/// A record may be saved from either device class; saved identities are reauthorized before display.
+struct FavoriteRecordButton: View {
+    let kind: ScopedRecordFavorites.Kind
+    let id: String
+    let organizationID: String
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @ObservedObject private var favorites = ScopedRecordFavorites.shared
+
+    private var context: ScopedRecordFavorites.Scope? { ScopedRecordFavorites.currentScope(session: session, api: api) }
+    private var allowed: Bool {
+        guard let context, context.organizationID.caseInsensitiveCompare(organizationID) == .orderedSame else { return false }
+        switch kind {
+        case .job: return session.can("job.view", feature: "jobs")
+        case .customer: return session.can("customer.view", feature: "core_crm")
+        }
+    }
+    private var selected: Bool {
+        favorites.isBound(to: context) && favorites.entries.contains { $0.kind == kind && $0.id == id.lowercased() }
+    }
+
+    var body: some View {
+        if allowed {
+            Button {
+                guard allowed, let context else { return }
+                favorites.bind(context)
+                favorites.toggle(kind, id: id)
+            } label: {
+                PaperCircleLabel(symbol: selected ? "star.fill" : "star", fill: Theme.card, bordered: true)
+            }
+            .buttonStyle(PressStyle())
+            .disabled(!favorites.isBound(to: context))
+            .accessibilityLabel(selected ? "Remove from favorites" : "Add to favorites")
+            .accessibilityIdentifier("record-favorite-\(kind.rawValue)-\(id)")
+            .onChange(of: context, initial: true) { favorites.bind(context) }
+        }
     }
 }

@@ -97,6 +97,26 @@ final class ScopedRecordFavoritesTests: XCTestCase {
         XCTAssertEqual(model.entries.map(\.id), [jobID])
     }
 
+    func testOnlyOwningApiAndSessionEpochsRetireFavorites() async {
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, job(jobID))]), baseURL: "https://app.thorbis.com")
+        let model = ScopedRecordFavorites(defaults: defaults())
+        let context = scope(api)
+        model.bind(context); XCTAssertTrue(model.toggle(.job, id: jobID))
+        await model.refresh(api: api, canOpen: { _ in true }, isCurrent: { true })
+        XCTAssertEqual(model.visible.count, 1)
+        model.retireAPI(origin: context.origin, generation: UUID(), savedCopyRevision: context.savedCopyRevision)
+        model.retireAPI(origin: "https://other.example", generation: context.apiGeneration, savedCopyRevision: context.savedCopyRevision)
+        model.retireSession(generation: UUID(), authority: context.authorityRevision)
+        XCTAssertEqual(model.visible.count, 1, "Unrelated clients cannot clear the active favorite")
+        model.retireSession(generation: context.sessionGeneration, authority: context.authorityRevision)
+        XCTAssertTrue(model.visible.isEmpty)
+        XCTAssertTrue(model.entries.isEmpty)
+        model.bind(context)
+        XCTAssertEqual(model.entries.map(\.id), [jobID])
+        model.retireAPI(origin: context.origin, generation: context.apiGeneration, savedCopyRevision: context.savedCopyRevision)
+        XCTAssertTrue(model.entries.isEmpty, "The owning API epoch clears its bound context")
+    }
+
     func testDelayedResponseCannotPublishAfterAuthorityChanges() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let api = APIClient(session: URLProtocolFixture.session([.init(200, job(jobID), gate: gate)]), baseURL: "https://app.thorbis.com")

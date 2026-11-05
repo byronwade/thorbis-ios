@@ -69,6 +69,9 @@ enum DrawerPlaces {
 /// Settings circle. The list fades at its bottom edge where it continues under the foot.
 struct AppDrawer: View {
     @AppStorage("thorbis.sidebar.recentCollapsed") private var recentCollapsed = false
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
+    @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
     let title: String
     let role: WorkRole
     /// The place showing (a MenuItem id or "local-<section>").
@@ -96,6 +99,7 @@ struct AppDrawer: View {
     let openPlace: (MenuItem) -> Void
     let openLocal: (LocalWorkspaceSection) -> Void
     let openRecent: (RecentItems.Item) -> Void
+    let openFavorite: (ScopedRecordFavorites.Visible) -> Void
     var openSavedWork: () -> Void = {}
 
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -124,7 +128,8 @@ struct AppDrawer: View {
                 PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: role) },
                            isCurrent: { current == $0.rawValue }, isCurrentLocal: { current == "local-\($0.rawValue)" },
                            count: count, idPrefix: "drawer", savedWork: savedWork,
-                           openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork)
+                           openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork,
+                           openFavorite: openFavorite)
                 if !recents.isEmpty {
                     Button { recentCollapsed.toggle() } label: {
                         HStack { Text("Recent"); Spacer(); Image(systemName: recentCollapsed ? "chevron.right" : "chevron.down") }
@@ -225,6 +230,16 @@ struct AppDrawer: View {
         .accessibilityHint(recent.item.kind == .job ? "Opens the job" : "Opens the customer")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("drawer-recent-\(recent.item.id)")
+        .contextMenu {
+            let kind: ScopedRecordFavorites.Kind = recent.item.kind == .job ? .job : .customer
+            let selected = recordFavorites.entries.contains { $0.kind == kind && $0.id == recent.item.id.lowercased() }
+            Button(selected ? "Remove from favorites" : "Add to favorites", systemImage: selected ? "star.slash" : "star") {
+                let scope = ScopedRecordFavorites.currentScope(session: session, api: api)
+                let allowed = kind == .job ? session.can("job.view", feature: "jobs") : session.can("customer.view", feature: "core_crm")
+                guard recordFavorites.isBound(to: scope), allowed else { return }
+                recordFavorites.toggle(kind, id: recent.item.id)
+            }
+        }
     }
 
     // MARK: Bottom

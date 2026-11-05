@@ -551,6 +551,13 @@ struct TabletRoot: View {
                 withAnimation(motion) { sidebarOpen = false }
                 store.requestedJobID = job.id
             },
+            openFavorite: { item in
+                withAnimation(motion) { sidebarOpen = false }
+                switch item.entry.kind {
+                case .job: store.requestedJobID = item.entry.id
+                case .customer: store.requestedRecord = .customer(item.entry.id)
+                }
+            },
             search: { search = true },
             create: { createMenuOpen = true },
             workspace: { workspace = true },
@@ -812,6 +819,7 @@ struct TabletSidebar: View {
     var savedWork: AppBottomBar.Sync? = nil
     let select: (TabletSection) -> Void
     let openJob: (Job) -> Void
+    let openFavorite: (ScopedRecordFavorites.Visible) -> Void
     let search: () -> Void
     let create: () -> Void
     let workspace: () -> Void
@@ -848,7 +856,7 @@ struct TabletSidebar: View {
                                isCurrentLocal: { current == .local($0) }, count: count, idPrefix: "sidebar",
                                phoneHeading: "On this iPad", savedWork: savedWork, savedWorkTitle: "Saved on this iPad",
                                openPlace: { select(section($0)) }, openLocal: { select(.local($0)) },
-                               openSavedWork: reviewSavedWork)
+                               openSavedWork: reviewSavedWork, openFavorite: openFavorite)
                     // The places' own row, so the gear and its word sit in the places' columns.
                     PlaceRow(title: "Settings", symbol: "gearshape", tint: Theme.markGrey, here: false,
                              count: nil, id: "sidebar-settings", action: settings)

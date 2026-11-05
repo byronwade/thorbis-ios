@@ -239,6 +239,9 @@ func compactMoney(_ cents: Int, currency: String = "USD") -> String {
 /// quiet hue (filled when it is the place), the word in body (lifted to ink when here) and a count in
 /// tabular figures at the trailing edge. The place showing sits on the selected fill.
 struct PlacesList: View {
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
+    @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
     @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
     @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
     let sections: DrawerSections
@@ -254,15 +257,59 @@ struct PlacesList: View {
     let openPlace: (MenuItem) -> Void
     let openLocal: (LocalWorkspaceSection) -> Void
     var openSavedWork: () -> Void = {}
+    var openFavorite: (ScopedRecordFavorites.Visible) -> Void = { _ in }
+
+    private struct FavoritesReload: Equatable {
+        let scope: ScopedRecordFavorites.Scope?
+        let entries: [ScopedRecordFavorites.Entry]
+    }
+    private var favoriteScope: ScopedRecordFavorites.Scope? { ScopedRecordFavorites.currentScope(session: session, api: api) }
+    private func canOpenFavorite(_ kind: ScopedRecordFavorites.Kind) -> Bool {
+        switch kind {
+        case .job: session.can("job.view", feature: "jobs")
+        case .customer: session.can("customer.view", feature: "core_crm")
+        }
+    }
+    private var safeFavorites: [ScopedRecordFavorites.Visible] {
+        guard recordFavorites.isBound(to: favoriteScope) else { return [] }
+        return recordFavorites.visible.filter { canOpenFavorite($0.entry.kind) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             let projection = WebSidebarProjection.make(places: sections.places, current: sections.places.first(where: isCurrent))
             ForEach(projection.personal) { item in place(item) }
-            if let pinned = sections.sections.first(where: { $0.kind == .pinned }), !pinned.places.isEmpty {
-                disclosureHeading("Favorites", collapsed: $favoritesCollapsed, id: "favorites", forceExpanded: pinned.places.contains(where: isCurrent))
-                if !favoritesCollapsed || pinned.places.contains(where: isCurrent) {
-                    ForEach(pinned.places) { item in place(item, prefix: "\(idPrefix)-favorite") }
+            let pins = sections.sections.first(where: { $0.kind == .pinned })?.places ?? []
+            let hasSavedRecords = recordFavorites.isBound(to: favoriteScope) && !recordFavorites.entries.isEmpty
+            if !pins.isEmpty || hasSavedRecords {
+                disclosureHeading("Favorites", collapsed: $favoritesCollapsed, id: "favorites", forceExpanded: pins.contains(where: isCurrent))
+                if !favoritesCollapsed || pins.contains(where: isCurrent) {
+                    ForEach(pins) { item in place(item, prefix: "\(idPrefix)-favorite") }
+                    ForEach(safeFavorites) { item in
+                        Button {
+                            guard recordFavorites.isBound(to: favoriteScope), canOpenFavorite(item.entry.kind),
+                                  recordFavorites.visible.contains(item) else { return }
+                            openFavorite(item)
+                        } label: {
+                            Label(item.title, systemImage: "star.fill")
+                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, 12).contentShape(Rectangle())
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .contextMenu {
+                            Button("Remove from favorites", role: .destructive) {
+                                guard recordFavorites.isBound(to: favoriteScope) else { return }
+                                recordFavorites.toggle(item.entry.kind, id: item.entry.id)
+                            }
+                        }
+                        .accessibilityIdentifier("\(idPrefix)-favorite-record-\(item.entry.id)")
+                    }
+                    if hasSavedRecords && safeFavorites.isEmpty {
+                        Text("Favorites appear after access is checked.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                    }
                 }
             }
             if let custom = sections.sections.first(where: { $0.kind == .customized }), !custom.places.isEmpty {
@@ -294,6 +341,13 @@ struct PlacesList: View {
                 heading(phoneHeading)
                 savedWorkRow(savedWork)
             }
+        }
+        .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
+        .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
+            let expected = favoriteScope
+            recordFavorites.bind(expected)
+            guard expected != nil else { return }
+            await recordFavorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
         }
     }
 

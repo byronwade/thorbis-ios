@@ -22,6 +22,8 @@ enum ReleaseNotes {
                       detail: "Your saved order is in Your places, which you can collapse when you don't need it."),
                 .init(symbol: "plus", title: "Create from the menu",
                       detail: "Choose a new item at the top of the menu; the New job shortcut is still at the bottom."),
+                .init(symbol: "star", title: "Favorite jobs and customers",
+                      detail: "Save records on this device and find them in Favorites when you have access."),
             ]
         ),
         ReleaseNote(
