@@ -75,21 +75,30 @@ final class PrimaryNavigationTests: XCTestCase {
             XCTAssertEqual(result.sections.last?.local, LocalWorkspaceSection.allCases, "On this phone lists the local places")
             XCTAssertFalse(result.sections.contains { $0.kind == .pinned }, "Role defaults never add a Pinned section")
         }
-        // Notification rules and Reports are places of their own now (Shop, Money).
+        // Notification rules and Reports remain reachable places of their own.
         XCTAssertTrue(sections(.owner).places.contains(.notices))
         XCTAssertTrue(sections(.owner).places.contains(.reports))
     }
 
     func testSidebarGroupsAndOrderFollowTheDesign() {
         let owner = sections(.owner)
-        XCTAssertEqual(owner.sections.map(\.kind), [.work, .money, .shop])
-        XCTAssertEqual(owner.sections[0].places, [.home, .schedule, .jobs, .customers, .properties, .inbox, .attention])
-        XCTAssertEqual(owner.sections[1].places, [.money, .estimates, .invoices, .billing, .reports, .scorecard, .priceBook])
-        XCTAssertEqual(owner.sections[2].places, [.team, .notices, .drafts])
-        XCTAssertEqual(sections(.technician).sections.map(\.kind), [.work, .money, .shop])
+        XCTAssertEqual(owner.sections.map { $0.kind.rawValue }, ["Personal", "Work", "Customers", "Money", "Reports", "Operations", "Other"])
+        XCTAssertEqual(owner.sections[0].places, [.home, .inbox, .schedule])
+        XCTAssertEqual(owner.sections[1].places, [.jobs, .estimates, .invoices, .team])
+        XCTAssertEqual(owner.sections[2].places, [.customers, .properties])
+        XCTAssertEqual(owner.sections[3].places, [.money, .billing])
+        XCTAssertEqual(owner.sections[4].places, [.reports, .scorecard])
+        XCTAssertEqual(owner.sections[5].places, [.priceBook])
+        XCTAssertEqual(owner.sections[6].places, [.attention, .notices, .drafts])
+        let technician = sections(.technician)
+        XCTAssertEqual(technician.sections.flatMap(\.places).filter { $0 == .schedule }.count, 1)
+        XCTAssertTrue(technician.places.contains(.jobs))
     }
 
     func testSidebarFollowsAccessAndHiddenPlaces() {
+        XCTAssertEqual(MenuItem.drafts.sidebarTitle("Message drafts", localHeading: "On this phone"), "Message drafts · On this phone")
+        XCTAssertEqual(MenuItem.drafts.sidebarTitle("Message drafts", localHeading: "On this iPad"), "Message drafts · On this iPad")
+        XCTAssertEqual(MenuItem.jobs.sidebarTitle("Jobs", localHeading: "On this iPad"), "Jobs")
         let noJobs = sections(.technician, opens: { ![.schedule, .jobs, .inbox].contains($0) && self.permitted(.technician)($0) })
         XCTAssertFalse(noJobs.places.contains(.jobs))
         XCTAssertTrue(noJobs.places.contains(.customers))
@@ -105,9 +114,19 @@ final class PrimaryNavigationTests: XCTestCase {
         let company = DrawerSections.make(pins: [.schedule, .money, .customers], explicitPins: true,
                                           roleDefaults: MenuLayout.defaultTabs(for: .owner, permitted: { _ in true }),
                                           opens: { _ in true })
-        XCTAssertEqual(company.sections.first?.kind, .work, "A company layout made from the owner's defaults adds no Pinned section")
+        XCTAssertNotEqual(company.sections.first?.kind, .pinned, "A company layout made from the owner's defaults adds no Pinned section")
         let ordered = DrawerSections.make(order: [.customers, .jobs], opens: { _ in true })
-        XCTAssertEqual(Array(ordered.sections[0].places.prefix(2)), [.customers, .jobs], "Edit menu's order leads inside a section")
+        XCTAssertEqual(Array(ordered.places.prefix(2)), [.customers, .jobs], "Saved cross-group order is honored")
+        XCTAssertEqual(ordered.sections.first?.kind.rawValue, "Your places")
+        let reordered = DrawerSections.make(order: [.invoices, .jobs], opens: { _ in true })
+        XCTAssertEqual(Array(reordered.places.prefix(2)), [.invoices, .jobs])
+        let filtered = DrawerSections.make(pins: [.estimates], explicitPins: true, hidden: [.customers],
+                                           order: [.customers, .jobs, .estimates, .invoices],
+                                           opens: { $0 != .invoices })
+        XCTAssertEqual(filtered.sections.first?.places, [.estimates])
+        XCTAssertEqual(filtered.sections.dropFirst().first?.places.first, .jobs)
+        XCTAssertFalse(filtered.places.contains(.customers))
+        XCTAssertFalse(filtered.places.contains(.invoices))
     }
 
     func testTodayNumbersCountLeftAndLate() {

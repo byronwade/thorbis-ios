@@ -3,29 +3,38 @@ import SwiftUI
 // MARK: - Cream sheet (owner-approved direction, 2026-11-01)
 //
 // The grammar the sidebar, Today and the job page share (C-Nav, C-Today, C-Job .dc.html): places are
-// grouped under plain headings (Work, Money, Shop, On this phone) and every place a role can reach is
+// grouped under plain headings and every place a role can reach is
 // listed; a numbers row instead of stat cards; a quiet map strip with a drive pill; labelled rimmed
 // buttons 12pt apart; clusters that are space, not a card per field; one ink commit. Light is the
 // cream sheet, dark the Linear greys; every colour comes from `Theme`.
 
 /// The headings the sidebar groups places under.
 enum PlaceSection: String, CaseIterable, Identifiable {
-    case pinned = "Pinned", work = "Work", money = "Money", shop = "Shop", phone = "On this phone"
+    case pinned = "Pinned", customized = "Your places", personal = "Personal", work = "Work", customers = "Customers"
+    case money = "Money", reports = "Reports", operations = "Operations", other = "Other", phone = "On this phone"
     var id: String { rawValue }
 
     /// The order places take inside their section (C-Nav.dc.html).
-    static let canonical: [MenuItem] = [.home, .schedule, .jobs, .customers, .properties, .inbox, .attention,
-                                        .money, .estimates, .invoices, .billing, .reports, .scorecard, .priceBook,
-                                        .team, .notices, .drafts]
+    static let canonical: [MenuItem] = [.home, .inbox, .schedule, .jobs, .estimates, .invoices, .team,
+                                        .customers, .properties, .money, .billing, .reports, .scorecard,
+                                        .priceBook, .attention, .notices, .drafts]
 }
 
 extension MenuItem {
+    func sidebarTitle(_ title: String, localHeading: String) -> String {
+        self == .drafts ? "\(title) · \(localHeading)" : title
+    }
+
     /// Where the place is listed in the sidebar.
     var placeSection: PlaceSection {
         switch self {
-        case .home, .schedule, .jobs, .customers, .properties, .inbox, .attention: .work
-        case .money, .estimates, .invoices, .billing, .reports, .scorecard, .priceBook: .money
-        case .team, .notices, .drafts: .shop
+        case .home, .inbox, .schedule: .personal
+        case .jobs, .estimates, .invoices, .team: .work
+        case .customers, .properties: .customers
+        case .money, .billing: .money
+        case .reports, .scorecard: .reports
+        case .priceBook: .operations
+        case .attention, .notices, .drafts: .other
         }
     }
 
@@ -64,7 +73,7 @@ struct DrawerSections: Equatable {
     ///   - explicitPins: true when the person or company chose pins; the role's own defaults never
     ///     count, so a role that never edited its menu sees no Pinned section.
     ///   - hidden: places the person or company turned off in Customize menu (none by default).
-    ///   - order: Edit menu's order; it leads inside each section.
+    ///   - order: Edit menu's global order; customized menus keep this order across groups.
     ///   - local: records kept on this phone (Fleet, Equipment, Agreements) this role may open.
     ///   - opens: whether this role can open the place.
     static func make(pins: [MenuItem] = [], explicitPins: Bool = false, roleDefaults: [MenuItem] = [],
@@ -74,10 +83,15 @@ struct DrawerSections: Equatable {
         let pinned = explicitPins ? unique(pins.filter { reachable($0) && !roleDefaults.contains($0) }) : []
         var sections: [Section] = []
         if !pinned.isEmpty { sections.append(Section(kind: .pinned, places: pinned)) }
-        for kind in [PlaceSection.work, .money, .shop] {
-            let members = PlaceSection.canonical.filter { $0.placeSection == kind && reachable($0) && !pinned.contains($0) }
-            let items = unique(order.filter(members.contains) + members)
-            if !items.isEmpty { sections.append(Section(kind: kind, places: items)) }
+        let available = PlaceSection.canonical.filter { reachable($0) && !pinned.contains($0) }
+        if !order.isEmpty {
+            let items = unique(order.filter(available.contains) + available)
+            if !items.isEmpty { sections.append(Section(kind: .customized, places: items)) }
+        } else {
+            for kind in [PlaceSection.personal, .work, .customers, .money, .reports, .operations, .other] {
+                let items = available.filter { $0.placeSection == kind }
+                if !items.isEmpty { sections.append(Section(kind: kind, places: items)) }
+            }
         }
         if !local.isEmpty { sections.append(Section(kind: .phone, places: [], local: local)) }
         return DrawerSections(sections: sections)
@@ -217,9 +231,9 @@ struct PlacesList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(sections.sections) { section in
-                heading(section.kind == .phone ? phoneHeading : section.kind.rawValue)
+                if section.kind != .personal { heading(section.kind == .phone ? phoneHeading : section.kind.rawValue) }
                 ForEach(section.places) { item in
-                    PlaceRow(title: title(item), symbol: item.symbol, tint: item.sidebarTint, here: isCurrent(item),
+                    PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint, here: isCurrent(item),
                              count: count(item), id: "\(idPrefix)-\(item.rawValue)") { openPlace(item) }
                 }
                 if section.kind == .phone {
