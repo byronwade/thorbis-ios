@@ -96,8 +96,9 @@ final class PrimaryNavigationTests: XCTestCase {
     }
 
     func testSidebarFollowsAccessAndHiddenPlaces() {
-        XCTAssertEqual(MenuItem.drafts.sidebarTitle("Message drafts"), "Message drafts · On this phone")
-        XCTAssertEqual(MenuItem.jobs.sidebarTitle("Jobs"), "Jobs")
+        XCTAssertEqual(MenuItem.drafts.sidebarTitle("Message drafts", localHeading: "On this phone"), "Message drafts · On this phone")
+        XCTAssertEqual(MenuItem.drafts.sidebarTitle("Message drafts", localHeading: "On this iPad"), "Message drafts · On this iPad")
+        XCTAssertEqual(MenuItem.jobs.sidebarTitle("Jobs", localHeading: "On this iPad"), "Jobs")
         let noJobs = sections(.technician, opens: { ![.schedule, .jobs, .inbox].contains($0) && self.permitted(.technician)($0) })
         XCTAssertFalse(noJobs.places.contains(.jobs))
         XCTAssertTrue(noJobs.places.contains(.customers))

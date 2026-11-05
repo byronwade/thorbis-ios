@@ -21,8 +21,8 @@ enum PlaceSection: String, CaseIterable, Identifiable {
 }
 
 extension MenuItem {
-    func sidebarTitle(_ title: String) -> String {
-        self == .drafts ? "\(title) · On this phone" : title
+    func sidebarTitle(_ title: String, localHeading: String) -> String {
+        self == .drafts ? "\(title) · \(localHeading)" : title
     }
 
     /// Where the place is listed in the sidebar.
@@ -233,7 +233,7 @@ struct PlacesList: View {
             ForEach(sections.sections) { section in
                 if section.kind != .personal { heading(section.kind == .phone ? phoneHeading : section.kind.rawValue) }
                 ForEach(section.places) { item in
-                    PlaceRow(title: item.sidebarTitle(title(item)), symbol: item.symbol, tint: item.sidebarTint, here: isCurrent(item),
+                    PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint, here: isCurrent(item),
                              count: count(item), id: "\(idPrefix)-\(item.rawValue)") { openPlace(item) }
                 }
                 if section.kind == .phone {
