@@ -113,7 +113,8 @@ struct ReportsView: View {
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true) }
+                // Text tabs, as on Customers, Team and the Inbox; wrapping keeps every report reachable.
+                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true, textTabs: true) }
                 if let error { ErrorBanner(message: error) }
                 Group {
                     if tabs.isEmpty {
