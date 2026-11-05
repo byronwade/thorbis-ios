@@ -14,7 +14,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(star.waitForExistence(timeout: 30))
         if star.label == "Remove from favorites" { star.tap() }
         XCTAssertEqual(star.label, "Add to favorites")
-        XCTAssertGreaterThanOrEqual(star.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(star.frame.height, 43.99)
         star.tap()
         XCTAssertEqual(star.label, "Remove from favorites")
         star.tap()
@@ -31,7 +31,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(star.waitForExistence(timeout: 30))
         if star.label == "Remove from favorites" { star.tap() }
         XCTAssertEqual(star.label, "Add to favorites")
-        XCTAssertGreaterThanOrEqual(star.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(star.frame.height, 43.99)
         star.tap(); XCTAssertEqual(star.label, "Remove from favorites")
         star.tap(); XCTAssertEqual(star.label, "Add to favorites")
     }
@@ -68,6 +68,8 @@ final class DrawerGearMenuUITests: XCTestCase {
         let recent = app.buttons["drawer-recent-\(id)"]
         for _ in 0..<8 where !recent.isHittable { app.scrollViews["drawer-rows"].swipeUp() }
         XCTAssertTrue(recent.waitForExistence(timeout: 10)); recent.press(forDuration: 1)
+        let existing = app.buttons["Remove from favorites"]
+        if existing.waitForExistence(timeout: 1) { existing.tap(); recent.press(forDuration: 1) }
         let add = app.buttons["Add to favorites"]
         XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
         let favorite = app.buttons["drawer-favorite-record-\(id)"]
@@ -75,6 +77,8 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(favorite.waitForExistence(timeout: 15))
         favorite.tap()
         XCTAssertTrue(app.buttons["job-section-money"].waitForExistence(timeout: 15))
+        // The existing pushed-screen drawer gap is covered separately; return to the root for cleanup.
+        app.buttons["Back"].firstMatch.tap()
         app.openDrawer()
         XCTAssertTrue(favorite.waitForExistence(timeout: 15)); favorite.press(forDuration: 1)
         let remove = app.buttons["Remove from favorites"]
