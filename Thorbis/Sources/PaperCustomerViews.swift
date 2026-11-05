@@ -344,6 +344,11 @@ struct CustomerDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            if let record, record.id == customer.id {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    FavoriteRecordButton(kind: .customer, id: record.id, organizationID: record.organizationId)
+                }
+            }
             let items = customerMenuItems
             if !items.isEmpty {
                 ThorbisToolbarItem(placement: .topBarTrailing) {

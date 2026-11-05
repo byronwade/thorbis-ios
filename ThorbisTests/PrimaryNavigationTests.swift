@@ -10,7 +10,8 @@ final class PrimaryNavigationTests: XCTestCase {
 
     func testScheduleIsTheInitialPrimaryDestination() {
         XCTAssertEqual(PrimaryTab.initial, .schedule)
-        XCTAssertEqual(DrawerPlaces.title(.schedule, role: .technician), "Today")
+        XCTAssertEqual(DrawerPlaces.title(.schedule, role: .technician), "Schedule")
+        XCTAssertEqual(DrawerPlaces.title(.home, role: .owner), "Today")
         XCTAssertEqual(DrawerPlaces.title(.schedule, role: .office), "Schedule", "The same screen reads as the schedule the office runs")
         XCTAssertEqual(DrawerPlaces.title(.inbox, role: .technician), "Inbox")
     }
@@ -49,6 +50,23 @@ final class PrimaryNavigationTests: XCTestCase {
 
     // MARK: Sidebar places (Cream sheet: every place a role can reach, grouped)
 
+    func testWebSidebarUsesActiveWorkspacesAndSingleDestinationRows() {
+        let projection = WebSidebarProjection.make(places: [.home, .inbox, .schedule, .jobs, .estimates, .invoices, .customers, .priceBook], current: .estimates)
+        XCTAssertEqual(projection.personal, [.home, .inbox, .schedule])
+        XCTAssertEqual(projection.groups.first { $0.section == .work }?.items, [.jobs, .estimates, .invoices])
+        XCTAssertEqual(projection.groups.first { $0.section == .work }?.expanded, true)
+        XCTAssertEqual(projection.groups.first { $0.section == .customers }?.items, [.customers])
+        XCTAssertEqual(projection.groups.first { $0.section == .customers }?.expanded, false)
+        XCTAssertEqual(projection.groups.first { $0.section == .operations }?.items, [.priceBook])
+        XCTAssertFalse(projection.groups.contains { $0.section == .money }, "Unauthorized workspaces do not appear")
+        XCTAssertFalse(projection.groups.contains { $0.items.contains(.team) }, "Unauthorized children do not appear")
+        let inactive = WebSidebarProjection.make(places: [.jobs, .estimates, .customers, .properties], current: .schedule)
+        XCTAssertTrue(inactive.groups.allSatisfy { !$0.expanded })
+        let limited = WebSidebarProjection.make(places: [.estimates], current: .estimates)
+        XCTAssertEqual(limited.groups.first?.items, [.estimates])
+        XCTAssertFalse(limited.groups.first?.expanded ?? true, "A lone child is rendered directly")
+    }
+
     /// A role's permissions, as the server grants them, by place.
     private func permitted(_ role: WorkRole) -> (MenuItem) -> Bool {
         switch role {
@@ -86,10 +104,10 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(owner.sections[0].places, [.home, .inbox, .schedule])
         XCTAssertEqual(owner.sections[1].places, [.jobs, .estimates, .invoices, .team])
         XCTAssertEqual(owner.sections[2].places, [.customers, .properties])
-        XCTAssertEqual(owner.sections[3].places, [.money, .billing])
-        XCTAssertEqual(owner.sections[4].places, [.reports, .scorecard])
+        XCTAssertEqual(owner.sections[3].places, [.money])
+        XCTAssertEqual(owner.sections[4].places, [.reports])
         XCTAssertEqual(owner.sections[5].places, [.priceBook])
-        XCTAssertEqual(owner.sections[6].places, [.attention, .notices, .drafts])
+        XCTAssertEqual(owner.sections[6].places, [.billing, .scorecard, .attention, .notices, .drafts])
         let technician = sections(.technician)
         XCTAssertEqual(technician.sections.flatMap(\.places).filter { $0 == .schedule }.count, 1)
         XCTAssertTrue(technician.places.contains(.jobs))

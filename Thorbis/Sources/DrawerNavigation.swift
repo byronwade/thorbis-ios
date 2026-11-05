@@ -52,10 +52,14 @@ struct DrawerRecent: Identifiable {
 
 /// The drawer's words for a place.
 enum DrawerPlaces {
-    /// Schedule is the same screen for everyone: technicians read it as their day ("Today"), office
-    /// and owners as the schedule they run.
+    /// Use the web's words for the shared destinations; Home is the owner's Today view.
     static func title(_ item: MenuItem, role: WorkRole) -> String {
-        item == .schedule ? (role == .technician ? "Today" : "Schedule") : item.title
+        switch item {
+        case .home: "Today"
+        case .schedule: "Schedule"
+        case .team: "Team"
+        default: item.title
+        }
     }
 }
 
@@ -64,6 +68,10 @@ enum DrawerPlaces {
 /// places from Edit menu lead), recent records, and at the foot the ink New job commit and the
 /// Settings circle. The list fades at its bottom edge where it continues under the foot.
 struct AppDrawer: View {
+    @AppStorage("thorbis.sidebar.recentCollapsed") private var recentCollapsed = false
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
+    @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
     let title: String
     let role: WorkRole
     /// The place showing (a MenuItem id or "local-<section>").
@@ -91,6 +99,7 @@ struct AppDrawer: View {
     let openPlace: (MenuItem) -> Void
     let openLocal: (LocalWorkspaceSection) -> Void
     let openRecent: (RecentItems.Item) -> Void
+    let openFavorite: (ScopedRecordFavorites.Visible) -> Void
     var openSavedWork: () -> Void = {}
 
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -99,7 +108,11 @@ struct AppDrawer: View {
         VStack(spacing: 0) {
             // Closed, nothing is built: the header and an empty scroll view would still sit in the
             // accessibility tree behind the card.
-            if showsRows { header; rows } else { Spacer(minLength: 0) }
+            if showsRows {
+                header
+                if showsControls, let create { newMenu(create) }
+                rows
+            } else { Spacer(minLength: 0) }
             if showsControls { bottomControls }
         }
         .padding(.horizontal, 12)
@@ -115,13 +128,18 @@ struct AppDrawer: View {
                 PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: role) },
                            isCurrent: { current == $0.rawValue }, isCurrentLocal: { current == "local-\($0.rawValue)" },
                            count: count, idPrefix: "drawer", savedWork: savedWork,
-                           openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork)
+                           openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork,
+                           openFavorite: openFavorite)
                 if !recents.isEmpty {
-                    Text("Recent")
-                        .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 4)
-                        .accessibilityAddTraits(.isHeader)
-                    ForEach(recents.prefix(5)) { recentRow($0) }
+                    Button { recentCollapsed.toggle() } label: {
+                        HStack { Text("Recent"); Spacer(); Image(systemName: recentCollapsed ? "chevron.right" : "chevron.down") }
+                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityValue(recentCollapsed ? "Collapsed" : "Expanded")
+                    .accessibilityIdentifier("drawer-recent-disclosure")
+                    if !recentCollapsed { ForEach(recents.prefix(5)) { recentRow($0) } }
                 }
             }
             .padding(.bottom, 24)
@@ -142,13 +160,17 @@ struct AppDrawer: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            Text(title)
-                .font(Theme.font(18, weight: .medium)).tracking(-0.2)
-                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityFocused(titleFocus)
+            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Workspace, \(title)") {
+                HStack(spacing: 6) {
+                    Text(title).font(Theme.font(18, weight: .medium)).tracking(-0.2)
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1).truncationMode(.tail)
+                    Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("drawer-workspace-menu")
+            .accessibilityFocused(titleFocus)
             Button(action: search) { CreamCircleLabel(symbol: "magnifyingglass") }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("Search")
@@ -162,6 +184,28 @@ struct AppDrawer: View {
         }
         .padding(.leading, 12).padding(.trailing, 2)
         .padding(.top, 6).padding(.bottom, 4)
+    }
+
+    /// Web's New menu sits under the workspace; the existing direct New job shortcut remains below.
+    @ViewBuilder private func newMenu(_ create: PaperCreateAction) -> some View {
+        if !create.choices.isEmpty {
+            ThorbisMenu(items: create.choices.map { choice in
+                ThorbisMenuItem(choice.title, icon: choice.symbol, isDisabled: !choice.enabled, action: choice.run)
+            }, title: "New", accessibilityLabel: "New") {
+                Label("New", systemImage: "plus")
+                    .font(Theme.font(15, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 12).contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("drawer-new-menu")
+        } else {
+            Button(action: create.run) {
+                Label("New", systemImage: "plus")
+                    .font(Theme.font(15, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .padding(.horizontal, 12).contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityIdentifier("drawer-new-menu")
+        }
     }
 
     /// A recent record as plain words, like ChatGPT's recents. A job under way wears its status word.
@@ -186,6 +230,17 @@ struct AppDrawer: View {
         .accessibilityHint(recent.item.kind == .job ? "Opens the job" : "Opens the customer")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("drawer-recent-\(recent.item.id)")
+        .contextMenu {
+            let kind: ScopedRecordFavorites.Kind = recent.item.kind == .job ? .job : .customer
+            let selected = recordFavorites.isBound(to: ScopedRecordFavorites.currentScope(session: session, api: api)) &&
+                recordFavorites.entries.contains { $0.kind == kind && $0.id == recent.item.id.lowercased() }
+            Button(selected ? "Remove from favorites" : "Add to favorites", systemImage: selected ? "star.slash" : "star") {
+                let scope = ScopedRecordFavorites.currentScope(session: session, api: api)
+                let allowed = kind == .job ? session.can("job.view", feature: "jobs") : session.can("customer.view", feature: "core_crm")
+                guard recordFavorites.isBound(to: scope), allowed else { return }
+                recordFavorites.toggle(kind, id: recent.item.id)
+            }
+        }
     }
 
     // MARK: Bottom

@@ -93,8 +93,12 @@ final class SessionController: ObservableObject {
 
     /// Changes before publishing new authority, even when the server policy version is unchanged.
     /// Visible media must reauthorize when this value changes.
-    @Published private(set) var authorityRevision = UUID()
-    private(set) var generation = UUID()
+    @Published private(set) var authorityRevision = UUID() {
+        didSet { ScopedRecordFavorites.shared.retireSession(generation: generation, authority: oldValue) }
+    }
+    private(set) var generation = UUID() {
+        didSet { ScopedRecordFavorites.shared.retireSession(generation: oldValue, authority: authorityRevision) }
+    }
     var onInvalidate: (() -> Void)?
     /// Called after verified policy publication when job access has been revoked.
     var onJobAuthorityRevoked: (() -> Void)?

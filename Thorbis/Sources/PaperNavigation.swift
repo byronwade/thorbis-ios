@@ -307,6 +307,13 @@ struct RootView: View {
                 closeDrawer(thenRun: nil)
                 openRecent(item)
             },
+            openFavorite: { item in
+                closeDrawer(thenRun: nil)
+                switch item.entry.kind {
+                case .job: store.requestedJobID = item.entry.id
+                case .customer: store.requestedRecord = .customer(item.entry.id)
+                }
+            },
             openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }
         )
         // VoiceOver: the drawer is a modal group while open; the escape gesture closes it. Closed, it

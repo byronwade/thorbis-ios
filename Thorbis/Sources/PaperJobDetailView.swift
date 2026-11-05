@@ -576,6 +576,9 @@ struct JobDetailView: View {
         }
         if let job {
             ThorbisToolbarItem(placement: .topBarTrailing) {
+                FavoriteRecordButton(kind: .job, id: job.id, organizationID: job.organizationId)
+            }
+            ThorbisToolbarItem(placement: .topBarTrailing) {
                 // One quiet circle (Job.dc.html): Share job sits in the menu with the rest, so it is always there.
                 ThorbisMenu(items: menuGroups(job).flatMap { $0 }.map { menuActionItem($0, job: job) } + [
                                 ThorbisMenuItem("Share job", icon: "square.and.arrow.up") {
