@@ -1377,6 +1377,8 @@ struct PaperListRow<Trailing: View>: View {
     /// A quieter third line (tech · photos · paid).
     var meta: String? = nil
     var subtitleLines = 1
+    /// Rows that give width to a trailing button (Schedule) let the title take a third line.
+    var titleLines = 2
     /// Compact previews can stay bounded when the complete text opens separately.
     var limitsSubtitleAtAccessibility = false
     /// A note-like supporting line (a past job's notes): folds at `subtitleLines` with "More"
@@ -1403,7 +1405,7 @@ struct PaperListRow<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 PaperHighlight.text(title, words: highlight).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
-                    .lineLimit(stacked ? nil : 2)
+                    .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty {
                     if expandsSubtitle {

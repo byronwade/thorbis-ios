@@ -960,8 +960,9 @@ struct TodayRow: View {
             }
             .frame(width: stacked ? nil : column, alignment: .leading)
             .padding(.top, stacked ? 10 : 0)
+            // Beside the Schedule button the row is narrow, so the title may take a third line.
             JobRoomRow(job: job, street: street, customer: customer, who: assignee, pendingStatus: pendingStatus,
-                       showsStatus: schedule == nil, inset: 0)
+                       showsStatus: schedule == nil, titleLines: schedule == nil ? 2 : 3, inset: 0)
         }
         .padding(.horizontal, ListRoom.gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1022,7 +1023,7 @@ struct ScheduleCompactRow: View {
             NavigationLink(value: job) {
                 PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
                              subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
-                             subtitleLines: 2, dimmed: job.status == "completed") {
+                             subtitleLines: 2, titleLines: schedule == nil ? 2 : 3, dimmed: job.status == "completed") {
                     if schedule == nil {
                         StatusWord(jobStatus: pendingStatus ?? job.status, pending: pendingStatus != nil)
                     }
