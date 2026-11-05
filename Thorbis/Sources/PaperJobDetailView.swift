@@ -2011,6 +2011,22 @@ struct JobDetailView: View {
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("job-invoice-\(invoice.id)")
                             .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
+                            if let scope = scope(for: job),
+                               let step = JobInvoiceDirectPayment.step(invoice: invoice, scope: scope,
+                                   freshIDs: invoiceRead?.freshIDs ?? [],
+                                   canCollect: session.can("invoice.payment.create", feature: "payments")) {
+                                Button { run(step) } label: {
+                                    Label("Collect payment", systemImage: "creditcard")
+                                        .font(Theme.font(15, weight: .medium))
+                                        .frame(minHeight: 44)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(RowPressStyle())
+                                .accessibilityLabel("Collect payment for invoice INV-\(invoice.id.suffix(4).uppercased())")
+                                .accessibilityIdentifier("job-invoice-collect-\(invoice.id)")
+                            }
                             if !invoice.lines.isEmpty, invoiceRead?.freshIDs.contains(invoice.id) == true {
                                 JobInvoiceItemsDisclosure(invoice: invoice)
                             }
@@ -2621,6 +2637,7 @@ struct JobDetailView: View {
               session.can("invoice.view", feature: "invoicing"),
               session.can("invoice.payment.create", feature: "payments"),
               let job, let scope = scope(for: job), invoiceRead?.scope == scope,
+              invoiceRead?.freshIDs.contains(requestedID) == true,
               let route = JobInvoicePaymentRoute.make(requestedID: requestedID, selectedID: selectedInvoiceID,
                                                        selected: selectedInvoice, loadedID: loadedInvoiceModelID,
                                                        model: invoicePaymentModel, scope: scope,

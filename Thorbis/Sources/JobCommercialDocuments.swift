@@ -25,6 +25,16 @@ struct JobInvoicePaymentRoute: Identifiable {
     }
 }
 
+/// A direct action only for the exact, freshly listed invoice on this job.
+enum JobInvoiceDirectPayment {
+    static func step(invoice: InvoiceRecord, scope: JobDocumentScope, freshIDs: Set<String>,
+                     canCollect: Bool) -> TechJobStep? {
+        guard canCollect, freshIDs.contains(invoice.id), scope.contains(invoice), invoice.status == "issued",
+              let due = TechJobFlow.due(invoice), due > 0 else { return nil }
+        return .collect(invoiceID: invoice.id, due: due, currency: invoice.currency)
+    }
+}
+
 /// Multiple job entry points may ask for the same model while its first read
 /// is in flight. Wait for that read instead of treating its loading state as a refusal.
 @MainActor
