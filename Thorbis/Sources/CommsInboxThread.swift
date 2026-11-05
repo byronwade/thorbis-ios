@@ -859,6 +859,7 @@ struct CommsComposeSheet: View {
     @State private var phone = ""
     @State private var name = ""
     @FocusState private var phoneFocused: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         switch kind {
@@ -885,7 +886,8 @@ struct CommsComposeSheet: View {
                 .buttonStyle(PressStyle())
                 .disabled(!ready)
             }
-            .thorbisSheetPresentation([.medium, .large])
+            // At accessibility sizes half a screen hides Start text, so it opens full height.
+            .thorbisSheetPresentation(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
             // Opened to text someone: the number is the first thing to type.
             .task { try? await Task.sleep(for: .milliseconds(400)); phoneFocused = true }
         }
