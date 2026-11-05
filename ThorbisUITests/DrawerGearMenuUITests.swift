@@ -19,13 +19,22 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(invoices.exists)
         XCTAssertLessThan(jobs.frame.minY, estimates.frame.minY)
         XCTAssertLessThan(estimates.frame.minY, invoices.frame.minY)
-        let drafts = app.buttons["\(prefix)-drafts"]
-        XCTAssertTrue(drafts.exists)
-        XCTAssertTrue(drafts.label.contains(app.usesTabletLayout ? "On this iPad" : "On this phone"), drafts.label)
+        let work = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(work.exists)
+        XCTAssertEqual(work.value as? String, "Expanded")
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Web-aligned sidebar"
         shot.lifetime = .keepAlways
         add(shot)
+        let other = app.buttons["\(prefix)-workspace-other"]
+        if other.exists {
+            if !app.usesTabletLayout { app.revealDrawerRow("workspace-other") }
+            other.tap()
+            if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        }
+        let drafts = app.buttons["\(prefix)-drafts"]
+        XCTAssertTrue(drafts.exists)
+        XCTAssertTrue(drafts.label.contains(app.usesTabletLayout ? "On this iPad" : "On this phone"), drafts.label)
     }
 
     /// The seeded saved work belongs to this test: reset it so its banner never reaches later tests.

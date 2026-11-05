@@ -52,10 +52,14 @@ struct DrawerRecent: Identifiable {
 
 /// The drawer's words for a place.
 enum DrawerPlaces {
-    /// Schedule is the same screen for everyone: technicians read it as their day ("Today"), office
-    /// and owners as the schedule they run.
+    /// Use the web's words for the shared destinations; Home is the owner's Today view.
     static func title(_ item: MenuItem, role: WorkRole) -> String {
-        item == .schedule ? (role == .technician ? "Today" : "Schedule") : item.title
+        switch item {
+        case .home: "Today"
+        case .schedule: "Schedule"
+        case .team: "Team"
+        default: item.title
+        }
     }
 }
 
@@ -64,6 +68,7 @@ enum DrawerPlaces {
 /// places from Edit menu lead), recent records, and at the foot the ink New job commit and the
 /// Settings circle. The list fades at its bottom edge where it continues under the foot.
 struct AppDrawer: View {
+    @AppStorage("thorbis.sidebar.recentCollapsed") private var recentCollapsed = false
     let title: String
     let role: WorkRole
     /// The place showing (a MenuItem id or "local-<section>").
@@ -117,11 +122,15 @@ struct AppDrawer: View {
                            count: count, idPrefix: "drawer", savedWork: savedWork,
                            openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork)
                 if !recents.isEmpty {
-                    Text("Recent")
-                        .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 4)
-                        .accessibilityAddTraits(.isHeader)
-                    ForEach(recents.prefix(5)) { recentRow($0) }
+                    Button { recentCollapsed.toggle() } label: {
+                        HStack { Text("Recent"); Spacer(); Image(systemName: recentCollapsed ? "chevron.right" : "chevron.down") }
+                            .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityValue(recentCollapsed ? "Collapsed" : "Expanded")
+                    .accessibilityIdentifier("drawer-recent-disclosure")
+                    if !recentCollapsed { ForEach(recents.prefix(5)) { recentRow($0) } }
                 }
             }
             .padding(.bottom, 24)

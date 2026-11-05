@@ -31,10 +31,10 @@ extension MenuItem {
         case .home, .inbox, .schedule: .personal
         case .jobs, .estimates, .invoices, .team: .work
         case .customers, .properties: .customers
-        case .money, .billing: .money
-        case .reports, .scorecard: .reports
+        case .money: .money
+        case .reports: .reports
         case .priceBook: .operations
-        case .attention, .notices, .drafts: .other
+        case .billing, .scorecard, .attention, .notices, .drafts: .other
         }
     }
 
@@ -99,6 +99,31 @@ struct DrawerSections: Equatable {
 
     private static func unique(_ items: [MenuItem]) -> [MenuItem] {
         items.reduce(into: [MenuItem]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+}
+
+/// Projects reachable native destinations into the web's personal tier and workspaces.
+/// The caller supplies only authorized, non-hidden items; unsupported web routes are absent.
+struct WebSidebarProjection {
+    struct Group: Identifiable {
+        let section: PlaceSection
+        let items: [MenuItem]
+        let expanded: Bool
+        var id: String { section.rawValue }
+    }
+    let personal: [MenuItem]
+    let groups: [Group]
+
+    static func make(places: [MenuItem], current: MenuItem?) -> Self {
+        let available = Set(places)
+        let canonical = PlaceSection.canonical.filter(available.contains)
+        let personal = canonical.filter { $0.placeSection == .personal }
+        let groups = [PlaceSection.work, .customers, .money, .reports, .operations, .other].compactMap { section -> Group? in
+            let items = canonical.filter { $0.placeSection == section }
+            guard !items.isEmpty else { return nil }
+            return Group(section: section, items: items, expanded: items.count > 1 && current.map(items.contains) == true)
+        }
+        return Self(personal: personal, groups: groups)
     }
 }
 
@@ -214,6 +239,8 @@ func compactMoney(_ cents: Int, currency: String = "USD") -> String {
 /// quiet hue (filled when it is the place), the word in body (lifted to ink when here) and a count in
 /// tabular figures at the trailing edge. The place showing sits on the selected fill.
 struct PlacesList: View {
+    @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
+    @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
     let sections: DrawerSections
     let title: (MenuItem) -> String
     let isCurrent: (MenuItem) -> Bool
@@ -230,16 +257,37 @@ struct PlacesList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(sections.sections) { section in
-                if section.kind != .personal { heading(section.kind == .phone ? phoneHeading : section.kind.rawValue) }
-                ForEach(section.places) { item in
-                    PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint, here: isCurrent(item),
-                             count: count(item), id: "\(idPrefix)-\(item.rawValue)") { openPlace(item) }
+            let projection = WebSidebarProjection.make(places: sections.places, current: sections.places.first(where: isCurrent))
+            ForEach(projection.personal) { item in place(item) }
+            if let pinned = sections.sections.first(where: { $0.kind == .pinned }), !pinned.places.isEmpty {
+                disclosureHeading("Favorites", collapsed: $favoritesCollapsed, id: "favorites", forceExpanded: pinned.places.contains(where: isCurrent))
+                if !favoritesCollapsed || pinned.places.contains(where: isCurrent) {
+                    ForEach(pinned.places) { item in place(item, prefix: "\(idPrefix)-favorite") }
                 }
-                if section.kind == .phone {
-                    localRows(section.local)
-                    if let savedWork { savedWorkRow(savedWork) }
+            }
+            if let custom = sections.sections.first(where: { $0.kind == .customized }), !custom.places.isEmpty {
+                disclosureHeading("Your places", collapsed: $customCollapsed, id: "custom")
+                if !customCollapsed {
+                    ForEach(custom.places) { item in place(item, prefix: "\(idPrefix)-custom") }
                 }
+            }
+            ForEach(projection.groups) { group in
+                if group.items.count == 1, let item = group.items.first {
+                    place(item)
+                } else if let first = group.items.first {
+                    PlaceRow(title: group.section.rawValue, symbol: first.symbol, tint: first.sidebarTint,
+                             here: false, count: nil, id: "\(idPrefix)-workspace-\(group.section.rawValue.lowercased())") { openPlace(first) }
+                        .accessibilityValue(group.expanded ? "Expanded" : "Collapsed")
+                        .accessibilityHint("Opens \(title(first))")
+                    if group.expanded {
+                        ForEach(group.items) { item in place(item).padding(.leading, 16) }
+                    }
+                }
+            }
+            if let phone = sections.sections.first(where: { $0.kind == .phone }) {
+                heading(phoneHeading)
+                localRows(phone.local)
+                if let savedWork { savedWorkRow(savedWork) }
             }
             // Saved work with no local places still gets its heading.
             if let savedWork, !sections.sections.contains(where: { $0.kind == .phone }) {
@@ -247,6 +295,22 @@ struct PlacesList: View {
                 savedWorkRow(savedWork)
             }
         }
+    }
+
+    private func place(_ item: MenuItem, prefix: String? = nil) -> some View {
+        PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint,
+                 here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)") { openPlace(item) }
+    }
+
+    private func disclosureHeading(_ text: String, collapsed: Binding<Bool>, id: String, forceExpanded: Bool = false) -> some View {
+        Button { collapsed.wrappedValue.toggle() } label: {
+            HStack { Text(text); Spacer(); Image(systemName: collapsed.wrappedValue && !forceExpanded ? "chevron.right" : "chevron.down") }
+                .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityValue(collapsed.wrappedValue && !forceExpanded ? "Collapsed" : "Expanded")
+        .accessibilityIdentifier("\(idPrefix)-\(id)-disclosure")
     }
 
     private func heading(_ text: String) -> some View {
