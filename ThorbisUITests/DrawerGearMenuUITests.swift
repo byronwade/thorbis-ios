@@ -4,6 +4,30 @@ import XCTest
 /// screen), and the closed drawer staying out of the accessibility tree.
 @MainActor
 final class DrawerGearMenuUITests: XCTestCase {
+    func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office"]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let jobs = app.buttons["\(prefix)-jobs"]
+        let estimates = app.buttons["\(prefix)-estimates"]
+        let invoices = app.buttons["\(prefix)-invoices"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 15))
+        XCTAssertTrue(estimates.exists)
+        XCTAssertTrue(invoices.exists)
+        XCTAssertLessThan(jobs.frame.minY, estimates.frame.minY)
+        XCTAssertLessThan(estimates.frame.minY, invoices.frame.minY)
+        let drafts = app.buttons["\(prefix)-drafts"]
+        XCTAssertTrue(drafts.exists)
+        XCTAssertTrue(drafts.label.contains(app.usesTabletLayout ? "On this iPad" : "On this phone"), drafts.label)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Web-aligned sidebar"
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     /// The seeded saved work belongs to this test: reset it so its banner never reaches later tests.
     private var cleanupArguments: [String]?
 
