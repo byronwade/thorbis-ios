@@ -496,7 +496,14 @@ struct CommsInboxView: View {
                 case .notices:
                     ListRoomEmpty(title: "No notices yet.", message: "New assignments and job changes land here.")
                 case .all:
-                    ListRoomEmpty(title: "Nothing waiting.", message: "Calls, texts, email and job notices land here as they come in.")
+                    // A first visit is usually empty: point at the way in rather than only explain.
+                    if access.workspace {
+                        ListRoomEmpty(title: "Nothing waiting.",
+                                      message: "Calls, texts, email and job notices land here. Text on a customer or job opens their conversation here too.",
+                                      actionTitle: "New text") { composing = .text }
+                    } else {
+                        ListRoomEmpty(title: "Nothing waiting.", message: "Calls, texts, email and job notices land here as they come in.")
+                    }
                 }
             }
         }
