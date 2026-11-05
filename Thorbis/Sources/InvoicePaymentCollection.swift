@@ -947,6 +947,7 @@ private struct InvoicePaymentRefundStatusPanel: View {
 struct InvoicePaymentCollectionSheet: View {
     @ObservedObject var model: InvoicePaymentCollectionModel
     let invoice: InvoiceRecord
+    let invoiceReference: String
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
@@ -968,9 +969,10 @@ struct InvoicePaymentCollectionSheet: View {
     @StateObject private var tapToPayController: TapToPayController
     private var tapToPay: TapToPayController? { tapToPayController }
 
-    init(model: InvoicePaymentCollectionModel, invoice: InvoiceRecord) {
+    init(model: InvoicePaymentCollectionModel, invoice: InvoiceRecord, invoiceReference: String? = nil) {
         self.model = model
         self.invoice = invoice
+        self.invoiceReference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
         let cents = model.pendingRequest?.amount.amount ?? min(model.collectableCents ?? 0, 1_000_000_000_000)
         _amountText = State(initialValue: paymentAmountText(cents))
         // MF-09: open on the way this phone last collected (cash, check or link); otherwise on
@@ -1092,7 +1094,7 @@ struct InvoicePaymentCollectionSheet: View {
     /// The amount being collected: who and which invoice, then the figure at 30pt, then what's due.
     private var amountHero: some View {
         VStack(spacing: 4) {
-            PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
+            PaperEyebrow(reference: invoiceReference, text: customerName)
                 .accessibilityIdentifier("collect-payment-invoice")
             // MF-01: the amount being collected is the screen.
             Text(money(amountCents ?? model.pendingRequest?.amount.amount ?? model.collectableCents ?? 0, currency: invoice.currency))

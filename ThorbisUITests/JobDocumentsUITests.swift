@@ -54,6 +54,44 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
     }
 
+    func testDirectCollectionOpensTheTappedJobInvoice() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-invoices-equal-balances", "--paper-preview-job-invoice-reference-collision"])
+        let collisionID = "00000000-0000-4000-8000-000000012209"
+        thorbisStableButton(app, "job-section-money").tap()
+        let jump = app.buttons["job-money-jump-invoices"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 15))
+        jump.tap()
+        let first = app.buttons["job-invoice-collect-\(invoiceA)"]
+        let second = app.buttons["job-invoice-collect-\(collisionID)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        XCTAssertTrue(second.exists)
+        XCTAssertEqual(first.label, "Collect payment for invoice INV-02209")
+        XCTAssertEqual(second.label, "Collect payment for invoice INV-12209")
+        XCTAssertTrue(app.buttons["job-invoice-\(invoiceA)"].label.contains("INV-02209"))
+        XCTAssertTrue(app.buttons["job-invoice-\(collisionID)"].label.contains("INV-12209"))
+        let selected = app.staticTexts["job-collect-selected-invoice"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        XCTAssertEqual(selected.label, "For INV-12209")
+        app.scrollClearOfFoot(first)
+        XCTAssertTrue(first.isHittable)
+        capture(app, "Job invoices with direct payment")
+        first.tap()
+        let identity = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertTrue(identity.label.contains("INV-02209"), identity.label)
+        app.buttons["Close"].tap()
+        XCTAssertTrue(second.waitForExistence(timeout: 10))
+        XCTAssertEqual(selected.label, "For INV-02209")
+        app.scrollClearOfFoot(second)
+        XCTAssertTrue(second.isHittable)
+        second.tap()
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertTrue(identity.label.contains("INV-12209"), identity.label)
+        capture(app, "Collecting the second job invoice")
+        app.buttons["Close"].tap()
+    }
+
     func testMoneyJumpsRemainReachableAtLargestText() {
         let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let chooser = app.buttons["job-section-chooser"]
