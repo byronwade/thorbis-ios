@@ -20,6 +20,8 @@ enum ReleaseNotes {
                       detail: "The menu now follows the web: open a workspace to see its pages."),
                 .init(symbol: "line.3.horizontal", title: "Keep your menu order",
                       detail: "Your saved order is in Your places, which you can collapse when you don't need it."),
+                .init(symbol: "plus", title: "Create from the menu",
+                      detail: "Choose a new item at the top of the menu; the New job shortcut is still at the bottom."),
             ]
         ),
         ReleaseNote(
