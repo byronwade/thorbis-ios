@@ -70,8 +70,12 @@ struct EstimatesView: View {
         .task(id: showAll) { await load() }
         .refreshable { await load() }
         .toolbar {
-            // Neutral like the back button beside it; blue stays for links and selection.
-            if session.can("estimate.create", feature: "estimates") { Button("New estimate", systemImage: "plus") { showCreate = true }.tint(Theme.foreground) }
+            // The same quiet + circle as the Jobs and Customers headers, not the stock glass button.
+            if session.can("estimate.create", feature: "estimates") {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    PaperCircleButton(symbol: "plus", label: "New estimate", size: 40, fill: Theme.fill) { showCreate = true }
+                }
+            }
         }
         .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { SheetSurface { NewEstimateView() } }
     }
