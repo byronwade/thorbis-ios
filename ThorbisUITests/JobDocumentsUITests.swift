@@ -8,6 +8,86 @@ final class JobDocumentsUITests: XCTestCase {
     private let estimateA = "00000000-0000-4000-8000-000000002218"
     private let addonA = "00000000-0000-4000-8000-000000002238"
 
+    func testCreatingFirstInvoiceOpensTheReturnedDraftOnlyOnce() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-create-invoice"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let create = app.buttons["job-create-invoice"]
+        XCTAssertTrue(create.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(create)
+        create.doubleTap()
+        let title = app.staticTexts["invoice-detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 15))
+        XCTAssertTrue(title.label.contains("2209"), title.label)
+        XCTAssertTrue(app.staticTexts["INV-2209"].exists)
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let count = app.staticTexts["preview-create-invoice-count"]
+        XCTAssertTrue(count.waitForExistence(timeout: 10))
+        XCTAssertEqual(count.label, "Create requests: 1")
+    }
+
+    func testCreatingInvoiceDoesNotOpenAfterRequestAuthorityChangesDuringRefresh() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-create-invoice", "--paper-preview-create-invalidate-refresh"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let create = app.buttons["job-create-invoice"]
+        XCTAssertTrue(create.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(create)
+        create.tap()
+        let count = app.staticTexts["preview-create-invoice-count"]
+        expectation(for: NSPredicate(format: "label == %@", "Create requests: 1"), evaluatedWith: count)
+        waitForExpectations(timeout: 15)
+        let state = app.staticTexts["preview-create-invoice-state"]
+        expectation(for: NSPredicate(format: "label == %@", "Finished"), evaluatedWith: state)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists, "A retired request must not navigate")
+        XCTAssertTrue(app.staticTexts["Invoice may have been created. Refresh this job to check."].waitForExistence(timeout: 10))
+    }
+
+    func testInterruptedCreateShowsSafeRecoveryWithoutOpeningInvoice() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-create-invoice", "--paper-preview-create-invalidate-post"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let create = app.buttons["job-create-invoice"]
+        XCTAssertTrue(create.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(create)
+        create.tap()
+        XCTAssertTrue(app.staticTexts["Invoice may have been created. Refresh this job to check."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+    }
+
+    func testCreatingInvoiceDoesNotOpenWhenInvoiceViewIsRevoked() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-create-invoice", "--paper-preview-create-revoke-view"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let create = app.buttons["job-create-invoice"]
+        XCTAssertTrue(create.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(create)
+        create.tap()
+        XCTAssertTrue(app.staticTexts["Invoice access is unavailable."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+    }
+
+    func testCreatingInvoiceNeverOpensForeignOrFailedResponse() {
+        for flag in ["--paper-preview-create-invoice-foreign", "--paper-preview-create-invoice-failure"] {
+            let app = preview(extra: ["--paper-preview-create-invoice", flag])
+            thorbisStableButton(app, "job-section-money").tap()
+            let create = app.buttons["job-create-invoice"]
+            XCTAssertTrue(create.waitForExistence(timeout: 15))
+            app.scrollClearOfFoot(create)
+            create.tap()
+            let count = app.staticTexts["preview-create-invoice-count"]
+            let once = NSPredicate(format: "label == %@", "Create requests: 1")
+            expectation(for: once, evaluatedWith: count)
+            waitForExpectations(timeout: 10)
+            let message = flag.contains("foreign") ? "Invoice could not be verified for this job" : "Sample invoice could not be created"
+            XCTAssertTrue(app.staticTexts[message].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+            XCTAssertTrue(create.exists)
+            app.terminate()
+        }
+    }
+
     func testMoneySectionJumpsReachInvoicesAndEstimates() {
         continueAfterFailure = false
         let app = preview()

@@ -18,6 +18,16 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(JobInvoiceReferences.reference(for: third, among: ids), "INV-5678")
     }
 
+    func testInvoiceRecoveryNoticeStaysInOriginalAPIAndSavedCopyScope() {
+        let revision = UUID()
+        XCTAssertTrue(JobInvoiceRecoveryContext.matches(origin: "https://one.example", savedCopyRevision: revision,
+            currentOrigin: "https://one.example", currentSavedCopyRevision: revision))
+        XCTAssertFalse(JobInvoiceRecoveryContext.matches(origin: "https://one.example", savedCopyRevision: revision,
+            currentOrigin: "https://two.example", currentSavedCopyRevision: revision))
+        XCTAssertFalse(JobInvoiceRecoveryContext.matches(origin: "https://one.example", savedCopyRevision: revision,
+            currentOrigin: "https://one.example", currentSavedCopyRevision: UUID()))
+    }
+
     func testDirectPaymentActionOnlyOffersFreshPayableInvoiceForThisJob() throws {
         let decoder = JSONDecoder()
         let first = try decoder.decode(InvoiceRecord.self, from: Data(invoice(50).utf8))
