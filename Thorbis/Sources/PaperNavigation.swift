@@ -747,7 +747,8 @@ struct RootView: View {
             return
         }
         if ["invoice-editor", "invoice-editor-line"].contains(PaperPreview.screen) { previewInvoiceEditor = true; return }
-        if PaperPreview.screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+        if PaperPreview.screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test"),
+           !ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-sheet") {
             previewPlace(.invoices, then: .invoice(PaperPreview.invoiceDetailPreviewID))
             return
         }

@@ -35,6 +35,18 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["lock"].waitForExistence(timeout: 15), "A new handoff must be available after exit")
     }
 
+    func testLegacyInvoiceCustomerViewCanOpenFromAnInvoiceSheet() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-working-job", "--paper-preview-legacy-handoff-test", "--paper-preview-legacy-sheet"]
+        app.launch()
+        let menu = app.buttons["Customer view, edit or open the PDF"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 20)); menu.tap()
+        let show = app.buttons["Customer view"].firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
+        XCTAssertTrue(app.buttons["lock"].waitForExistence(timeout: 20), "Customer view must open from an invoice sheet too")
+    }
+
     func testLegacyInvoicePayOpensItsInvoiceAfterHandBack() {
         continueAfterFailure = false
         let app = launch("invoice-detail")
