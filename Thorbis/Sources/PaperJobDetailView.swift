@@ -132,6 +132,7 @@ struct JobDetailView: View {
     /// Set once the stop card's Customer view has opened, so coming back never opens it again.
     @State private var openedCustomerViewOnArrival = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
     @Environment(\.dynamicTypeSize) private var typeSize
 
     /// Photos reuse Activity's job-scoped media view, but have their own direct section.
@@ -865,7 +866,7 @@ struct JobDetailView: View {
             .disabled(reach.call == nil)
             .accessibilityLabel("Call \(store.customerName(job.customerId))")
             .accessibilityIdentifier("job-call")
-            Button { if let text = reach.text { openURL(text) } } label: {
+            Button { if let text = reach.text { inboxText(text, name: store.customerName(job.customerId), openURL: openURL) } } label: {
                 RimmedButtonLabel(title: "Text", symbol: "message", enabled: reach.text != nil)
             }
             .buttonStyle(PressStyle())
