@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-web-aligned-menu",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Find work more easily",
+                      detail: "Jobs, estimates and invoices are together in the menu, like on the web."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-04-job-photos-section",
             date: "2026-11-04",
             highlights: [
