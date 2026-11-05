@@ -21,7 +21,7 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         XCTAssertTrue(handBack.isHittable, "Staff hand-back must remain available")
         handBack.tap()
         let probe = app.buttons["preview-handoff-probe"]
-        XCTAssertTrue(probe.waitForExistence(timeout: 20)); probe.tap()
+        XCTAssertTrue(probe.waitForExistence(timeout: 20))
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Handoff available"), object: probe)], timeout: 10), .completed)
     }
 
@@ -31,6 +31,8 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         let show = app.buttons["Show customer"]
         XCTAssertTrue(show.waitForExistence(timeout: 20)); show.tap()
         verifyProtectedSessionReplacement(app)
+        XCTAssertTrue(show.waitForExistence(timeout: 20)); show.tap()
+        XCTAssertTrue(app.buttons["lock"].waitForExistence(timeout: 15), "A new handoff must be available after exit")
     }
 
     func testLegacyInvoicePayOpensItsInvoiceAfterHandBack() {
@@ -61,5 +63,8 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         let show = app.buttons["Customer view"].firstMatch
         XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
         verifyProtectedSessionReplacement(app)
+        XCTAssertTrue(menu.waitForExistence(timeout: 20)); menu.tap()
+        XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
+        XCTAssertTrue(app.buttons["lock"].waitForExistence(timeout: 15), "A new handoff must be available after exit")
     }
 }

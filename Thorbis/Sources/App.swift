@@ -192,6 +192,11 @@ struct ThorbisApp: App {
             }
             .fullScreenCover(isPresented: Binding(get: { legacyHandoff.active != nil }, set: { _ in }), onDismiss: {
                 legacyHandoff.completedDismissal(api: api, session: session)
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+                    previewHandoffProbe = photoHandoff.availableRevision == nil ? "Handoff busy" : "Handoff available"
+                }
+                #endif
             }) {
                 if let handoff = legacyHandoff.active {
                     LegacyCustomerProtectedView(handoff: handoff, presenter: legacyHandoff)
