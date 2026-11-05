@@ -4,6 +4,27 @@ import XCTest
 /// screen), and the closed drawer staying out of the accessibility tree.
 @MainActor
 final class DrawerGearMenuUITests: XCTestCase {
+    func testPushedJobNavigationFitsAtLargestText() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002214"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "--paper-preview-drawer-open", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let recent = app.buttons["drawer-recent-\(id)"]
+        XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 30))
+        for _ in 0..<8 where !recent.isHittable { app.scrollViews["drawer-rows"].swipeUp() }
+        XCTAssertTrue(recent.waitForExistence(timeout: 10)); recent.tap()
+        let menu = app.buttons["drawer-menu"]
+        let back = app.navigationBars.buttons["Back"].firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 15))
+        XCTAssertTrue(menu.isHittable); XCTAssertTrue(back.isHittable)
+        XCTAssertGreaterThanOrEqual(menu.frame.height, 43.99)
+        XCTAssertGreaterThanOrEqual(back.frame.height, 43.99)
+        XCTAssertFalse(menu.frame.intersects(back.frame))
+        XCTAssertTrue(app.frame.contains(menu.frame)); XCTAssertTrue(app.frame.contains(back.frame))
+    }
     func testPushedJobHasDrawerAndBackSwipeAndCustomerModeHasNoDrawer() throws {
         guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
         continueAfterFailure = false
