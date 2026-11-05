@@ -73,7 +73,8 @@ struct DrawerSections: Equatable {
     ///   - explicitPins: true when the person or company chose pins; the role's own defaults never
     ///     count, so a role that never edited its menu sees no Pinned section.
     ///   - hidden: places the person or company turned off in Customize menu (none by default).
-    ///   - order: Edit menu's global order; customized menus keep this order across groups.
+    ///   - order: a chosen global order. Leftover lists from a company `moreMenu` or a pin
+    ///     toggle still group; only a rearranged list is shown under Your places.
     ///   - local: records kept on this phone (Fleet, Equipment, Agreements) this role may open.
     ///   - opens: whether this role can open the place.
     static func make(pins: [MenuItem] = [], explicitPins: Bool = false, roleDefaults: [MenuItem] = [],
@@ -84,7 +85,7 @@ struct DrawerSections: Equatable {
         var sections: [Section] = []
         if !pinned.isEmpty { sections.append(Section(kind: .pinned, places: pinned)) }
         let available = PlaceSection.canonical.filter { reachable($0) && !pinned.contains($0) }
-        if !order.isEmpty {
+        if isCustomOrder(order, among: available) {
             let items = unique(order.filter(available.contains) + available)
             if !items.isEmpty { sections.append(Section(kind: .customized, places: items)) }
         } else {
@@ -99,6 +100,29 @@ struct DrawerSections: Equatable {
 
     private static func unique(_ items: [MenuItem]) -> [MenuItem] {
         items.reduce(into: [MenuItem]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    /// True when `order` rearranges reachable places. Company `moreMenu` and pin-toggle leftovers
+    /// match `MenuItem.allCases` (sometimes with an unpinned place moved to the front).
+    private static func isCustomOrder(_ order: [MenuItem], among available: [MenuItem]) -> Bool {
+        let customized = unique(order.filter(available.contains))
+        guard !customized.isEmpty else { return false }
+        if customized == available.filter(customized.contains) { return false }
+        if customized == MenuItem.allCases.filter(customized.contains) { return false }
+        guard customized.count == available.count else { return true }
+        return !isLeftoverWithMovedPrefix(customized, usual: MenuItem.allCases.filter(available.contains))
+            && !isLeftoverWithMovedPrefix(customized, usual: available)
+    }
+
+    /// `usual` with one or more items pulled to the front — Edit menu's unpin, or a bar overflow.
+    private static func isLeftoverWithMovedPrefix(_ items: [MenuItem], usual: [MenuItem]) -> Bool {
+        guard items.count == usual.count, Set(items) == Set(usual) else { return false }
+        var rest = usual
+        for index in items.indices {
+            if items[index...].elementsEqual(rest) { return true }
+            rest.removeAll { $0 == items[index] }
+        }
+        return false
     }
 }
 

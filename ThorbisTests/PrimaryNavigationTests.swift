@@ -124,9 +124,36 @@ final class PrimaryNavigationTests: XCTestCase {
                                            order: [.customers, .jobs, .estimates, .invoices],
                                            opens: { $0 != .invoices })
         XCTAssertEqual(filtered.sections.first?.places, [.estimates])
-        XCTAssertEqual(filtered.sections.dropFirst().first?.places.first, .jobs)
+        XCTAssertTrue(filtered.places.contains(.jobs))
+        XCTAssertFalse(filtered.sections.contains { $0.kind == .customized },
+                       "A leftover that is only Jobs after pins and hidden places still groups")
         XCTAssertFalse(filtered.places.contains(.customers))
         XCTAssertFalse(filtered.places.contains(.invoices))
+    }
+
+    func testLeftoverMenuOrderKeepsWebGrouping() {
+        // Company moreMenu lists routed places only; Jobs, Schedule and Customers are omitted.
+        let companyMenu = MenuItem.allCases.filter { $0.route != nil && $0 != .home }
+        let company = DrawerSections.make(order: companyMenu, opens: { _ in true })
+        XCTAssertEqual(company.sections.map { $0.kind.rawValue },
+                       ["Personal", "Work", "Customers", "Money", "Reports", "Operations", "Other"])
+        XCTAssertEqual(company.sections.first { $0.kind == .work }?.places, [.jobs, .estimates, .invoices, .team],
+                       "Jobs stays with Estimates and Invoices when moreMenu omitted it")
+
+        let afterPin = DrawerSections.make(
+            pins: [.schedule, .jobs, .customers], explicitPins: true,
+            roleDefaults: [.schedule, .jobs, .customers],
+            order: MenuItem.allCases.filter { ![.schedule, .jobs, .customers].contains($0) },
+            opens: { _ in true })
+        XCTAssertFalse(afterPin.sections.contains { $0.kind == .customized })
+        XCTAssertEqual(afterPin.sections.first { $0.kind == .work }?.places, [.jobs, .estimates, .invoices, .team])
+
+        let afterUnpin = DrawerSections.make(
+            order: [.customers] + MenuItem.allCases.filter { $0 != .customers },
+            opens: { _ in true })
+        XCTAssertFalse(afterUnpin.sections.contains { $0.kind == .customized },
+                       "Unpinning writes the place at the front of the leftover list")
+        XCTAssertEqual(afterUnpin.sections.first { $0.kind == .customers }?.places, [.customers, .properties])
     }
 
     func testTodayNumbersCountLeftAndLate() {
