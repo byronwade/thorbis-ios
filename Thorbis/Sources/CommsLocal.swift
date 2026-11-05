@@ -172,6 +172,18 @@ final class CommsLocalStore: ObservableObject {
 
     private static var stores: [String: CommsLocalStore] = [:]
 
+    private static var folder: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("inbox", isDirectory: true)
+    }
+
+    /// Sign-out: the conversations, drafts and marks on this device go with the session, like the
+    /// other on-device copies (saved copies, the outbox).
+    static func clearAll() {
+        stores = [:]
+        if let folder { try? FileManager.default.removeItem(at: folder) }
+    }
+
     /// One store per person and workspace on this device.
     static func shared(actorID: String?, organizationID: String?) -> CommsLocalStore {
         let key = "\(organizationID?.lowercased() ?? "-")_\(actorID?.lowercased() ?? "-")"
@@ -186,8 +198,6 @@ final class CommsLocalStore: ObservableObject {
         }
         #endif
         let safe = key.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
-            .appendingPathComponent("inbox", isDirectory: true)
         if let folder { try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         store = CommsLocalStore(file: folder?.appendingPathComponent("\(safe).json"))
         stores[key] = store

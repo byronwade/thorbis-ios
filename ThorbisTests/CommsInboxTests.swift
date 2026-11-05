@@ -74,7 +74,8 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertEqual(thread.alert(seen: [], in: .all), "Missed call")
         XCTAssertTrue(thread.unread(seen: []))
         XCTAssertEqual(thread.line(in: .all), "Missed call")
-        XCTAssertEqual(thread.line(in: .all, alerted: true), "+15550100100")
+        XCTAssertEqual(thread.line(in: .all, alerted: true), "(555) 010-0100", "The number, formatted, stands in for what was said")
+        XCTAssertEqual(CommsCallGrouping.display("+44 20 7946 0958"), "+44 20 7946 0958")
         XCTAssertNil(thread.alert(seen: ["a"], in: .all))
         XCTAssertFalse(thread.unread(seen: ["a"]))
 

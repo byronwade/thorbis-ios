@@ -189,15 +189,16 @@ private struct CommsThreadHeader: View {
     let symbol: String
     let detail: String?
     let place: CommsFolder
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
-            CommsAvatar(initials: initials, symbol: symbol, size: 48)
+            if !typeSize.isAccessibilitySize { CommsAvatar(initials: initials, symbol: symbol, size: 48) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(Theme.font(24, weight: .medium)).tracking(-0.4)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
-                if let detail, !detail.isEmpty {
+                if let detail, !detail.isEmpty, detail != name {
                     Text(detail).font(Theme.monoFont(14)).foregroundStyle(Theme.muted).textSelection(.enabled)
                 }
                 if place != .inbox {
@@ -227,7 +228,7 @@ struct CommsCallThreadView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if let thread {
                     CommsThreadHeader(name: thread.name, initials: thread.initials, symbol: "phone.fill",
-                                      detail: thread.number, place: local.flags(threadID).place)
+                                      detail: thread.displayNumber, place: local.flags(threadID).place)
                         .padding(.bottom, 4)
                     ForEach(thread.calls, id: \.id) { call in
                         CommsCallCard(call: call, model: model, player: player,
@@ -274,16 +275,20 @@ struct CommsCallCard: View {
     @State private var choosingJob = false
     @State private var linking = false
     @State private var linkError: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let kind = call.kind
+        let headingLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                         : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            headingLayout {
                 Image(systemName: kind.symbol).font(.system(size: 13, weight: .medium))
                     .foregroundStyle(kind == .missed || kind == .dropped ? Theme.destructive : Theme.muted)
                     .accessibilityHidden(true)
                 Text(kind.heading).font(Theme.font(15, weight: .medium))
-                Spacer(minLength: 8)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 if let when = call.startedDate {
                     Text(when.stampLabel(year: false)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                 }
@@ -676,23 +681,19 @@ struct CommsTextComposer: View {
     @State private var scheduling = false
     @State private var managing = false
     @FocusState private var focused: Bool
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         let ready = !body_.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let stacked = typeSize.isAccessibilitySize
         VStack(alignment: .leading, spacing: 6) {
+            if stacked { field }
             HStack(alignment: .bottom, spacing: 8) {
                 ThorbisMenu(items: cannedItems, title: "Canned replies", accessibilityLabel: "Canned replies", arrowEdge: .bottom) {
                     PaperCircleLabel(symbol: "text.bubble", size: 36, fill: Theme.fill)
                 }
                 .accessibilityIdentifier("inbox-canned")
-                TextField("Message", text: $body_, prompt: .placeholder("Text \(thread.contactName)\u{2026}"), axis: .vertical)
-                    .lineLimit(1...6)
-                    .font(Theme.font(16))
-                    .focused($focused)
-                    .padding(.horizontal, 12).padding(.vertical, 10)
-                    .frame(minHeight: 44)
-                    .background(Theme.field, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    .accessibilityIdentifier("inbox-text-field")
+                if stacked { Spacer(minLength: 0) } else { field }
                 Button { scheduling = true } label: {
                     PaperCircleLabel(symbol: "clock", size: 36, fill: Theme.fill)
                 }
@@ -736,6 +737,17 @@ struct CommsTextComposer: View {
             } onClose: { scheduling = false }
         }
         .sheet(isPresented: $managing) { CommsCannedRepliesSheet(store: store) { managing = false } }
+    }
+
+    private var field: some View {
+        TextField("Message", text: $body_, prompt: .placeholder("Text \(thread.contactName)\u{2026}"), axis: .vertical)
+            .lineLimit(1...6)
+            .font(Theme.font(16))
+            .focused($focused)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .frame(minHeight: 44)
+            .background(Theme.field, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .accessibilityIdentifier("inbox-text-field")
     }
 
     private var cannedItems: [ThorbisMenuItem] {

@@ -19,7 +19,7 @@ enum ReleaseNotes {
                 .init(symbol: "phone", title: "Calls in the Inbox",
                       detail: "See calls to your business by caller, play the recording and link a call to its job."),
                 .init(symbol: "bubble.left", title: "Texts and email in the Inbox (beta)",
-                      detail: "Write texts and emails to customers. They stay as drafts on this phone until sending is connected."),
+                      detail: "Texts save as drafts and emails wait in Sent on this phone; nothing goes out yet."),
                 .init(symbol: "tray", title: "Sort your Inbox",
                       detail: "Switch between calls, texts, email and job notices, and archive or star conversations."),
             ]

@@ -158,10 +158,13 @@ struct CommsCallThread: Identifiable, Hashable {
     /// The newest name the server matched, else the number, else "Unknown caller".
     var name: String {
         if let named = calls.first(where: { !($0.callerName ?? "").isEmpty })?.callerName { return named }
-        return number ?? "Unknown caller"
+        return displayNumber ?? "Unknown caller"
     }
 
     var number: String? { calls.first(where: { !($0.callerNumber ?? "").isEmpty })?.callerNumber }
+
+    /// "(555) 010-0142" for a US number; anything else as the server sent it.
+    var displayNumber: String? { number.map(CommsCallGrouping.display) }
 
     /// Initials for the avatar; nil shows a person glyph.
     var initials: String? {
@@ -200,7 +203,7 @@ struct CommsCallThread: Identifiable, Hashable {
         let said = call.summary?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if alerted {
             switch call.kind {
-            case .missed: return said.isEmpty ? (number ?? "No message left") : said
+            case .missed: return said.isEmpty ? (displayNumber ?? "No message left") : said
             case .voicemail:
                 let length = call.length.map { BookingCallRecord.clock($0) }
                 return [length, said.isEmpty ? nil : "\u{201C}\(said)\u{201D}"].compactMap { $0 }.joined(separator: " · ")
@@ -216,6 +219,12 @@ struct CommsCallThread: Identifiable, Hashable {
 
 enum CommsCallGrouping {
     /// The digits that identify a caller; a US number with or without its leading 1 is one caller.
+    static func display(_ number: String) -> String {
+        guard let digits = key(number), digits.count == 10 else { return number }
+        let d = Array(digits)
+        return "(\(String(d[0..<3]))) \(String(d[3..<6]))-\(String(d[6..<10]))"
+    }
+
     static func key(_ number: String?) -> String? {
         let digits = (number ?? "").filter(\.isNumber)
         guard !digits.isEmpty else { return nil }

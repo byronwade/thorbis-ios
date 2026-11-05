@@ -55,6 +55,7 @@ struct ThorbisApp: App {
             DayPrefetch.shared.cancel()
             api?.savedCopyScope = nil
             SavedCopyStore.shared.clearAll()
+            CommsLocalStore.clearAll()
             store?.cache.clearAll()
             outbox?.clearAll()
             pendingMedia?.clearAll()
