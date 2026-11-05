@@ -1286,7 +1286,8 @@ struct JobsView: View {
         let mine = job.assignedToUserId != nil && job.assignedToUserId == session.user?.id
         let assignee = job.assignedToUserId.flatMap { roster[$0] }
         // The tech by name from the roster; "You" only where the roster can't name you, on a shared board.
-        let who = assignee ?? (tab != "Assigned" && mine ? "You" : nil)
+        // Assigned is your own list, so naming you on every row is noise.
+        let who = tab == "Assigned" && mine ? nil : assignee ?? (mine ? "You" : nil)
         // Swipe right: Call, Directions. Swipe left: the next move the server allows.
         return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
             HStack(spacing: 0) {

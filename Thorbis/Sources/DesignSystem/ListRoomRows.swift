@@ -75,11 +75,7 @@ struct JobRoomRow: View {
                     .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
                 whatLine(stacked: stacked)
-                if !meta.isEmpty {
-                    Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if !meta.isEmpty { metaLine(stacked: stacked) }
                 if let note, !note.isEmpty {
                     ExpandableNoteText(text: note, lines: 2, size: 13)
                         .padding(.top, 1)
@@ -119,6 +115,26 @@ struct JobRoomRow: View {
                 if let customer { customerText(customer, lines: stacked ? nil : 2) }
             }
         }
+    }
+
+    /// When and who: one line when it fits, otherwise the tech drops to its own line so the "·" never
+    /// dangles at a line end.
+    @ViewBuilder private func metaLine(stacked: Bool) -> some View {
+        let parts = [when, who].compactMap { $0 }.filter { !$0.isEmpty }
+        if parts.count == 2 && !stacked {
+            ViewThatFits(in: .horizontal) {
+                metaText(meta).fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) { ForEach(parts, id: \.self) { metaText($0) } }
+            }
+        } else {
+            metaText(meta)
+        }
+    }
+
+    private func metaText(_ text: String) -> some View {
+        Text(text).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func problemText(_ text: String, lines: Int?) -> some View {
