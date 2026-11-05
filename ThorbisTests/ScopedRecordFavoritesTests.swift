@@ -117,6 +117,36 @@ final class ScopedRecordFavoritesTests: XCTestCase {
         XCTAssertTrue(model.entries.isEmpty, "The owning API epoch clears its bound context")
     }
 
+    func testCapabilityLossPurgesEarlierResultsDuringMultiRecordRefresh() async throws {
+        let secondID = "00000000-0000-4000-8000-000000000102"
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, job(jobID)), .init(200, job(secondID), gate: gate)]), baseURL: "https://app.thorbis.com")
+        let model = ScopedRecordFavorites(defaults: defaults())
+        model.bind(scope(api)); XCTAssertTrue(model.toggle(.job, id: jobID)); XCTAssertTrue(model.toggle(.job, id: secondID))
+        var permitted = true
+        let task = Task { await model.refresh(api: api, canOpen: { _ in permitted }, isCurrent: { true }) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(model.visible.count, 1)
+        permitted = false
+        gate.release(); await task.value
+        XCTAssertTrue(model.visible.isEmpty, "Previously published titles must disappear when capability is lost")
+    }
+
+    func testDelayedResponseCannotPublishAfterCapabilityRevocation() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, job(jobID), gate: gate)]), baseURL: "https://app.thorbis.com")
+        let model = ScopedRecordFavorites(defaults: defaults())
+        model.bind(scope(api)); XCTAssertTrue(model.toggle(.job, id: jobID))
+        var permitted = true
+        let task = Task { await model.refresh(api: api, canOpen: { _ in permitted }, isCurrent: { true }) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        permitted = false
+        gate.release(); await task.value
+        XCTAssertTrue(model.visible.isEmpty)
+    }
+
     func testDelayedResponseCannotPublishAfterAuthorityChanges() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let api = APIClient(session: URLProtocolFixture.session([.init(200, job(jobID), gate: gate)]), baseURL: "https://app.thorbis.com")

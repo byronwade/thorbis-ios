@@ -113,27 +113,44 @@ final class ScopedRecordFavorites: ObservableObject {
                 api.normalizedOrigin == expected.origin && api.requestGeneration == expected.apiGeneration &&
                 api.savedCopyScopeRevision == expected.savedCopyRevision
         }
-        guard current() else { return }
+        func discardIfCurrentRequest() {
+            if request == token { visible = [] }
+        }
+        func removeUnavailable() {
+            visible.removeAll { !canOpen($0.entry.kind) }
+        }
+        guard current() else { discardIfCurrentRequest(); return }
         for entry in entries {
-            guard current() else { return }
+            guard current() else { discardIfCurrentRequest(); return }
+            removeUnavailable()
             guard canOpen(entry.kind) else { continue }
             do {
                 let title: String
                 switch entry.kind {
                 case .job:
                     let job = try await api.fieldJob(entry.id, requireFresh: true)
-                    guard job.id.lowercased() == entry.id, job.organizationId.lowercased() == expected.organizationID.lowercased() else { continue }
+                    guard current() else { discardIfCurrentRequest(); return }
+                    removeUnavailable()
+                    guard canOpen(entry.kind), job.id.lowercased() == entry.id,
+                          job.organizationId.lowercased() == expected.organizationID.lowercased() else { continue }
                     title = job.title
                 case .customer:
                     let customer = try await api.fieldCustomer(entry.id, requireFresh: true)
-                    guard customer.id.lowercased() == entry.id, customer.organizationId.lowercased() == expected.organizationID.lowercased() else { continue }
+                    guard current() else { discardIfCurrentRequest(); return }
+                    removeUnavailable()
+                    guard canOpen(entry.kind), customer.id.lowercased() == entry.id,
+                          customer.organizationId.lowercased() == expected.organizationID.lowercased() else { continue }
                     title = customer.name
                 }
-                guard current() else { return }
+                guard current() else { discardIfCurrentRequest(); return }
+                removeUnavailable()
                 guard canOpen(entry.kind) else { continue }
                 visible.append(Visible(entry: entry, title: title))
-            } catch is CancellationError { return }
-            catch { if !current() { return } }
+            } catch is CancellationError { discardIfCurrentRequest(); return }
+            catch {
+                guard current() else { discardIfCurrentRequest(); return }
+                removeUnavailable()
+            }
         }
     }
 
