@@ -47,6 +47,10 @@ struct JobMediaView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var pendingMedia: PendingMediaStore
+    @EnvironmentObject private var photoHandoff: CustomerPhotoPresenter
+    @EnvironmentObject private var estimateHandoff: JobEstimateHandoffPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.calendar) private var calendar
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -102,8 +106,10 @@ struct JobMediaView: View {
     @State private var selecting = false
     @State private var picked = Set<String>()
     @State private var confirmBulkArchive = false
+    @State private var customerPhotoRequest = UUID()
     @State private var shareFiles: MediaShareFiles?
     @State private var contentWidth: CGFloat = 353
+    @State private var selectionBarHeight: CGFloat = 0
     #if DEBUG
     @State private var previewStateApplied = false
     #endif
@@ -192,14 +198,18 @@ struct JobMediaView: View {
                     Text(videoNotice ?? "Photos, PDFs and video clips up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+            .padding(.horizontal, Theme.gutter).padding(.top, 8)
+            // The media grid is embedded in the job screen; reserve the actual selection-bar
+            // height in its own content so the final tile can scroll above the overlay.
+            .padding(.bottom, selecting ? max(24, selectionBarHeight) : 24)
             .onGeometryChange(for: CGFloat.self) { $0.size.width - Theme.gutter * 2 } action: { contentWidth = $0 }
         }
         .foregroundStyle(Theme.foreground)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .background(Theme.canvas)
         .safeAreaInset(edge: .bottom) {
             if selecting {
-                selectionBar
+                selectionBar.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { selectionBarHeight = $0 }
             } else if canAdd && !dynamicTypeSize.isAccessibilitySize {
                 captureControls
                     .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
@@ -324,7 +334,14 @@ struct JobMediaView: View {
                 shareFiles = nil
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { customerPhotoRequest = UUID() }
+        }
+        .onChange(of: picked) { _, _ in customerPhotoRequest = UUID() }
+        .onChange(of: filter) { _, _ in customerPhotoRequest = UUID() }
+        .onDisappear { customerPhotoRequest = UUID() }
         .onChange(of: readScope) { _, _ in
+            customerPhotoRequest = UUID()
             preview.clear(); previewScope = nil; previewRecord = nil; busy = false; justCaptured = nil; captureMarkup = nil
             viewer = nil; showCompare = false; endSelecting()
         }
@@ -392,7 +409,7 @@ struct JobMediaView: View {
             ThorbisMenuItem("Untagged photos", icon: "tag.slash", subtitle: "\(allPhotos.filter { mediaStageWord($0.tags) == nil }.count) loaded",
                             isSelected: filter == .untagged) { filter = .untagged },
         ]
-        if canAdd && !storedPhotos.isEmpty {
+        if readScope != nil && !storedPhotos.isEmpty {
             items.append(ThorbisMenuItem("Select photos", icon: "checkmark.circle") { startSelecting() })
         }
         if !befores.isEmpty && !afters.isEmpty {
@@ -533,7 +550,7 @@ struct JobMediaView: View {
             Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).monospacedDigit()
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
-            if first && canAdd && !storedPhotos.isEmpty {
+            if first && readScope != nil && !storedPhotos.isEmpty {
                 Button(selecting ? "Done" : "Select") { if selecting { endSelecting() } else { startSelecting() } }
                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .padding(.horizontal, 14).frame(minHeight: 44)
@@ -561,7 +578,9 @@ struct JobMediaView: View {
         return Button {
             if selecting {
                 guard stored else { return }
-                if isPicked { picked.remove(record.id) } else { picked.insert(record.id) }
+                var next = picked
+                if isPicked { next.remove(record.id) } else { next.insert(record.id) }
+                updatePicked(next)
             } else {
                 open(record)
             }
@@ -734,22 +753,33 @@ struct JobMediaView: View {
             HStack {
                 Text(count == 0 ? "Tap photos to choose them" : "\(count) chosen")
                     .font(Theme.font(15, weight: .medium)).monospacedDigit()
+                    .accessibilityIdentifier("job-media-selection-count")
                 Spacer()
                 Button(count == storedPhotos.count ? "Clear" : "Choose all") {
-                    picked = count == storedPhotos.count ? [] : Set(storedPhotos.map(\.id))
+                    updatePicked(count == storedPhotos.count ? [] : Set(storedPhotos.map(\.id)))
                 }
                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).frame(minHeight: 44)
                 .accessibilityIdentifier("job-media-choose-all")
             }
-            HStack(spacing: 8) {
-                MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
-                MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
-                MenuOrCircle(symbol: "tag.slash", label: "No stage") { Task { await retagPicked(.other) } }
-                MenuOrCircle(symbol: "square.and.arrow.up", label: "Share") { Task { await sharePicked() } }
-                MenuOrCircle(symbol: "trash", label: "Remove") { confirmBulkArchive = true }
-                    .accessibilityIdentifier("job-media-remove-picked")
+            Button("Show selected photos to customer") { Task { await prepareCustomerPhotos() } }
+                .font(Theme.font(15, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10))
+                .disabled(count == 0 || busy)
+                .accessibilityIdentifier("job-media-show-customer")
+            if canAdd {
+                HStack(spacing: 8) {
+                    MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
+                        .accessibilityIdentifier("job-media-tag-before")
+                    MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
+                        .accessibilityIdentifier("job-media-tag-after")
+                    MenuOrCircle(symbol: "tag.slash", label: "No stage") { Task { await retagPicked(.other) } }
+                    MenuOrCircle(symbol: "square.and.arrow.up", label: "Share") { Task { await sharePicked() } }
+                    MenuOrCircle(symbol: "trash", label: "Remove") { confirmBulkArchive = true }
+                        .accessibilityIdentifier("job-media-remove-picked")
+                }
+                .disabled(count == 0 || busy)
             }
-            .disabled(count == 0 || busy)
             if busy { ProgressView().frame(height: 20) }
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
@@ -781,15 +811,54 @@ struct JobMediaView: View {
         }
     }
 
+    private func prepareCustomerPhotos() async {
+        guard !busy, scenePhase == .active, let scope = readScope, sourceScope == scope,
+              let handoffRevision = photoHandoff.availableRevision else { return }
+        let chosen = pickedRecords
+        guard !chosen.isEmpty, chosen.count == picked.count else {
+            error = "Review the selected photos in this view and try again."
+            return
+        }
+        guard chosen.count <= CustomerPhotoSelection.maximumCount else {
+            error = "Choose up to 50 photos at a time to show the customer."
+            return
+        }
+        busy = true
+        error = nil
+        let request = UUID()
+        customerPhotoRequest = request
+        defer { busy = false }
+        do {
+            let selection = try CustomerPhotoSelection(jobID: scope.job, organizationID: scope.organization, selectedIDs: chosen.map(\.id))
+            try selection.validatePageMembership(ids: storedPhotos.map(\.id), jobID: scope.job, organizationID: scope.organization)
+            guard let owner = CustomerPhotoHandoff(selection: selection, api: api, session: session) else { throw CustomerPhotoSelection.Invalid.scope }
+            try await owner.prepare()
+            guard customerPhotoRequest == request, scenePhase == .active, owner.isCurrent,
+                  readScope == scope, sourceScope == scope, picked == Set(selection.selectedIDs),
+                  Set(pickedRecords.map(\.id)) == picked, !Task.isCancelled else {
+                throw CustomerPhotoSelection.Invalid.scope
+            }
+            guard estimateHandoff.active == nil, photoHandoff.present(owner, expectedRevision: handoffRevision, sourceWindow: customerWindowAnchor.window, api: api, session: session) else { throw CustomerPhotoSelection.Invalid.scope }
+        } catch {
+            self.error = "Couldn’t verify every selected photo. Check your connection, refresh this job and try again."
+        }
+    }
+
+    private func updatePicked(_ next: Set<String>) {
+        guard next != picked else { return }
+        customerPhotoRequest = UUID()
+        picked = next
+    }
+
     private func startSelecting() {
         filter = filter == .documents ? .all : filter
-        picked = []
+        updatePicked([])
         justCaptured = nil
         withMotion(.easeOut(duration: 0.2)) { selecting = true }
     }
 
     private func endSelecting() {
-        picked = []
+        updatePicked([])
         withMotion(.easeOut(duration: 0.2)) { selecting = false }
     }
 
@@ -815,7 +884,7 @@ struct JobMediaView: View {
     }
 
     private func retag(_ record: MediaAssetRecord, _ stage: MediaStage) async {
-        guard let scope = readScope, sourceScope == scope else { return }
+        guard let scope = readScope, sourceScope == scope, canAdd else { return }
         do {
             let updated = try await api.tagFieldMedia(record.id, tags: MediaStageTags.applying(stage, to: record.tags), caption: record.caption)
             guard readScope == scope, sourceScope == scope, updated.id == record.id, records.contains(where: { $0.id == record.id }),
@@ -831,7 +900,7 @@ struct JobMediaView: View {
 
     private func retagPicked(_ stage: MediaStage) async {
         let chosen = pickedRecords
-        guard !chosen.isEmpty, !busy else { return }
+        guard canAdd, !chosen.isEmpty, !busy else { return }
         busy = true
         defer { busy = false }
         for record in chosen {
@@ -858,7 +927,9 @@ struct JobMediaView: View {
                     return false
                 }
                 records.removeAll { $0.id == record.id }
-                picked.remove(record.id)
+                var remaining = picked
+                remaining.remove(record.id)
+                updatePicked(remaining)
             } catch is CancellationError {
                 return false
             } catch {
@@ -873,7 +944,7 @@ struct JobMediaView: View {
     /// Downloads the picked photos and opens the share sheet; the copies are deleted afterwards.
     private func sharePicked() async {
         let chosen = pickedRecords
-        guard !chosen.isEmpty, !busy else { return }
+        guard canAdd, !chosen.isEmpty, !busy else { return }
         busy = true
         defer { busy = false }
         var urls: [URL] = []
@@ -1135,7 +1206,7 @@ struct JobMediaView: View {
         case "tag": capture = MediaCaptureRequest(mode: .single, stage: "Before", held: sample.jpegData(compressionQuality: 0.8))
         case "select":
             startSelecting()
-            picked = Set(storedPhotos.prefix(3).map(\.id))
+            updatePicked(Set(storedPhotos.prefix(3).map(\.id)))
         case "markup": captureMarkup = sample.jpegData(compressionQuality: 0.8).map { PhotoMarkupTarget(data: $0, tags: ["Before"]) }
         case "measure": showMeasure = true
         case "untagged": filter = .untagged

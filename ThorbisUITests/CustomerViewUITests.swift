@@ -94,7 +94,13 @@ final class CustomerViewUITests: XCTestCase {
     func testChangedDetailsStillGoThroughStaffReviewAfterHandBack() {
         let app = launch()
         let door = app.buttons["job-customer-view"]
-        XCTAssertTrue(door.waitForExistence(timeout: 20)); door.tap()
+        XCTAssertTrue(door.waitForExistence(timeout: 20))
+        app.scrollClearOfFoot(door)
+        let money = app.buttons["job-section-money"]
+        XCTAssertTrue(door.isHittable)
+        if money.exists { XCTAssertGreaterThanOrEqual(door.frame.minY, money.frame.maxY, "Customer view must be clear of the pinned sections") }
+        door.tap()
+        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
         let details = app.buttons["customer-view-details"]
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         reveal(details, in: app)

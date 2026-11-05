@@ -124,9 +124,9 @@ final class MediaTransfer {
         return confirmed
     }
 
-    func download(mediaID: String, filename: String) async throws -> URL {
+    func download(mediaID: String, filename: String, requireFresh: Bool = false) async throws -> URL {
         let generation = api.requestGeneration
-        let target = try await api.mediaDownload(mediaID)
+        let target = try await api.mediaDownload(mediaID, requireFresh: requireFresh)
         try verify(generation)
         let allowedExtensions: Set<String> = ["jpg", "jpeg", "png", "webp", "heic", "pdf", "mp4", "mov"]
         let ext = (filename as NSString).pathExtension.lowercased()
@@ -147,6 +147,9 @@ final class MediaTransfer {
         } catch {
             throw Problem(title: "Media download failed", status: nil, detail: error.localizedDescription)
         }
+        // URLSession owns this staging file until it is moved; remove it on every
+        // error or cancellation as well as after a successful move.
+        defer { try? FileManager.default.removeItem(at: temporary) }
         try verify(generation)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw Problem(title: "Media download failed",
@@ -160,10 +163,15 @@ final class MediaTransfer {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true,
                                                 attributes: [.protectionKey: FileProtectionType.complete])
         let destination = folder.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
-        try FileManager.default.moveItem(at: temporary, to: destination)
-        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete],
-                                              ofItemAtPath: destination.path)
-        return destination
+        do {
+            try FileManager.default.moveItem(at: temporary, to: destination)
+            try FileManager.default.setAttributes([.protectionKey: FileProtectionType.complete],
+                                                  ofItemAtPath: destination.path)
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
     }
 
     private func verify(_ generation: UUID) throws {
@@ -195,12 +203,12 @@ final class MediaTransfer {
 
 @MainActor
 extension APIClient {
-    func mediaDownload(_ id: String) async throws -> MediaDownloadTarget {
+    func mediaDownload(_ id: String, requireFresh: Bool = false) async throws -> MediaDownloadTarget {
         guard UUID(uuidString: id) != nil else {
             throw Problem(title: "Invalid media ID", status: nil, detail: id)
         }
         struct Response: Decodable { let url: String; let expiresAt: String }
-        let reply: Response = try await send("GET", "/v1/media/\(id)/download")
+        let reply: Response = try await send("GET", "/v1/media/\(id)/download", requireFresh: requireFresh)
         return MediaDownloadTarget(url: try MediaTransfer.validatedStorageURL(reply.url),
                                    expiresAt: try MediaTransfer.validatedExpiry(reply.expiresAt))
     }

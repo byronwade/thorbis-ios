@@ -1,4 +1,6 @@
 import XCTest
+import SwiftUI
+import UIKit
 @testable import Thorbis
 
 final class JobEstimateHandoffSelectionTests: XCTestCase {
@@ -285,6 +287,389 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testSceneHostDefersExitBehindShieldUntilActivation() throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first(where: { $0.activationState == .foregroundActive }))
+        let source = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        let host = CustomerProtectedSceneWindow(); let id = UUID()
+        var exited = false
+        XCTAssertTrue(host.present(id: id, source: source, content: AnyView(Text("customer")), onDisconnect: { XCTFail("Scene did not disconnect") }))
+        NotificationCenter.default.post(name: UIScene.willDeactivateNotification, object: scene)
+        host.dismiss(id: id) { _ in exited = true }
+        XCTAssertFalse(exited, "No staff callback may run behind an inactive shield")
+        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
+        XCTAssertTrue(exited)
+        XCTAssertTrue(source.isKeyWindow, "The originating scene's prior key window must be restored")
+    }
+
+    func testSceneHostDisconnectDropsPendingExitAndIgnoresStaleOwner() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first(where: { $0.activationState == .foregroundActive }))
+        let source = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        let host = CustomerProtectedSceneWindow(); let id = UUID()
+        var exited = false; var disconnected = false
+        XCTAssertTrue(host.present(id: id, source: source, content: AnyView(Text("customer")), onDisconnect: { disconnected = true }))
+        NotificationCenter.default.post(name: UIScene.willDeactivateNotification, object: scene)
+        host.dismiss(id: id) { _ in exited = true }
+        NotificationCenter.default.post(name: UIScene.didDisconnectNotification, object: scene)
+        for _ in 0..<20 where !disconnected { await Task.yield() }
+        XCTAssertTrue(disconnected); XCTAssertFalse(exited); XCTAssertFalse(host.sceneActive)
+        host.dismiss(id: id) { _ in XCTFail("A stale owner cannot exit another handoff") }
+        source.makeKey()
+    }
+
+    func testJobCustomerOwnerRetiresWhenSavedScopeChangesAwayAndBack() async throws {
+        let model = try await ready([])
+        XCTAssertTrue(model.isCurrentJob)
+        model.api.savedCopyScope = "other"; model.api.savedCopyScope = nil
+        XCTAssertFalse(model.isCurrentJob, "An old customer document owner must not revive after scope replacement")
+    }
+
+    func testDeferredJobPayAfterNoOpRevalidationRequestsRetry() async throws {
+        let model = try await ready(photoRecoveryReplies([]))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first(where: { $0.activationState == .foregroundActive }))
+        let source = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        let presenter = JobEstimateHandoffPresenter(sceneWindow: CustomerProtectedSceneWindow(debugSuppressContent: true))
+        var result: CustomerViewExit?
+        presenter.present(model, start: .estimates, sourceWindow: source) { result = $0 }
+        XCTAssertTrue(presenter.active === model)
+        NotificationCenter.default.post(name: UIScene.willDeactivateNotification, object: scene)
+        presenter.authenticatedExit(from: model, .collect(invoiceID: "invoice"))
+        let oldRevision = model.session.authorityRevision
+        await model.session.revalidate()
+        XCTAssertNotEqual(model.session.authorityRevision, oldRevision, "The fixture must complete a no-op revalidation; requests=\(URLProtocolFixture.recorded.map { $0.url?.path ?? "?" })")
+        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
+        for _ in 0..<50 where result == nil { await Task.yield() }
+        XCTAssertEqual(result, .retryPayment(invoiceID: "invoice"))
+        XCTAssertNil(presenter.active); XCTAssertTrue(source.isKeyWindow)
+    }
+
+    func testDeferredJobPayDoesNotRunAfterSavedScopeChanges() async throws {
+        let model = try await ready([])
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first(where: { $0.activationState == .foregroundActive }))
+        let source = try XCTUnwrap(scene.windows.first(where: { $0.isKeyWindow }))
+        let presenter = JobEstimateHandoffPresenter(sceneWindow: CustomerProtectedSceneWindow())
+        var collected = false
+        presenter.present(model, start: .estimates, sourceWindow: source) { _ in collected = true }
+        XCTAssertTrue(presenter.active === model)
+        NotificationCenter.default.post(name: UIScene.willDeactivateNotification, object: scene)
+        presenter.authenticatedExit(from: model, .collect(invoiceID: "invoice"))
+        XCTAssertFalse(collected)
+        model.api.savedCopyScope = "other"; model.api.savedCopyScope = nil
+        NotificationCenter.default.post(name: UIScene.didActivateNotification, object: scene)
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertFalse(collected, "A delayed Pay must not escape into a changed scope")
+        XCTAssertNil(presenter.active)
+        XCTAssertTrue(source.isKeyWindow)
+    }
+
+    func testDocumentSceneHostRefusesMissingSourceWindowAndReleasesArbiter() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let presenter = JobEstimateHandoffPresenter(arbiter: arbiter, sceneWindow: CustomerProtectedSceneWindow())
+        presenter.present(model, start: .estimates, sourceWindow: nil) { _ in XCTFail("No handoff was shown") }
+        XCTAssertNil(presenter.active)
+        XCTAssertTrue(arbiter.claim(.photos))
+    }
+
+    func testLegacySceneHostRefusesMissingSourceWindow() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let presenter = LegacyCustomerPresenter()
+        let lease = try XCTUnwrap(documents.claimLegacy())
+        let handoff = try XCTUnwrap(LegacyCustomerHandoff(lease: lease, content: AnyView(Text("private")), api: model.api, session: model.session, onDismiss: { _ in XCTFail("No handoff was shown") }))
+        XCTAssertFalse(presenter.present(handoff, sourceWindow: nil, api: model.api, session: model.session))
+        XCTAssertNil(presenter.active)
+        lease.release()
+        XCTAssertTrue(arbiter.claim(.photos))
+    }
+
+    func testRetiredLegacyCoverStaysOwnedUntilAuthenticatedDismissalAndDropsContent() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let legacy = LegacyCustomerPresenter()
+        let lease = try XCTUnwrap(documents.claimLegacy())
+        var callbackCount = 0
+        let owner = try XCTUnwrap(LegacyCustomerHandoff(lease: lease, content: AnyView(Text("private")), api: model.api, session: model.session,
+            onDismiss: { _ in callbackCount += 1 }))
+        XCTAssertTrue(legacy.present(owner))
+        model.api.invalidateRequests()
+        XCTAssertFalse(owner.isCurrent(api: model.api, session: model.session))
+        owner.retire()
+        XCTAssertNil(owner.content)
+        XCTAssertTrue(legacy.active === owner)
+        XCTAssertFalse(arbiter.claim(.photos))
+        legacy.authenticatedExit(for: lease)
+        XCTAssertFalse(arbiter.claim(.photos), "Lease remains held until the cover dismisses")
+        legacy.completedDismissal(api: model.api, session: model.session)
+        XCTAssertEqual(callbackCount, 0, "A retired session must not resume staff actions")
+        XCTAssertTrue(arbiter.claim(.photos))
+    }
+
+    func testLateLegacyPayUnlockCannotExitNewHandoff() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let legacy = LegacyCustomerPresenter()
+        let oldLease = try XCTUnwrap(documents.claimLegacy())
+        let oldOwner = try XCTUnwrap(LegacyCustomerHandoff(lease: oldLease, content: AnyView(Text("old")), api: model.api, session: model.session, onDismiss: { _ in }))
+        XCTAssertTrue(legacy.present(oldOwner))
+        legacy.authenticatedExit(for: oldLease)
+        legacy.completedDismissal(api: model.api, session: model.session)
+        let newLease = try XCTUnwrap(documents.claimLegacy())
+        let newOwner = try XCTUnwrap(LegacyCustomerHandoff(lease: newLease, content: AnyView(Text("new")), api: model.api, session: model.session, onDismiss: { _ in XCTFail("Late unlock must not run the new callback") }))
+        XCTAssertTrue(legacy.present(newOwner))
+        legacy.authenticatedExit(for: oldLease, .collect)
+        XCTAssertTrue(legacy.active === newOwner)
+        XCTAssertFalse(arbiter.claim(.photos))
+    }
+
+    func testLegacyPayCallbackRunsOnlyAfterProtectedCoverDismisses() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let legacy = LegacyCustomerPresenter()
+        let lease = try XCTUnwrap(documents.claimLegacy())
+        var collected = false
+        let owner = try XCTUnwrap(LegacyCustomerHandoff(lease: lease, content: AnyView(Text("invoice")), api: model.api, session: model.session,
+            onDismiss: { exit in if case .collect = exit { collected = true } }))
+        XCTAssertTrue(legacy.present(owner))
+        legacy.authenticatedExit(for: lease, .collect)
+        XCTAssertFalse(collected)
+        XCTAssertFalse(arbiter.claim(.photos))
+        legacy.completedDismissal(api: model.api, session: model.session)
+        XCTAssertTrue(collected)
+        XCTAssertTrue(arbiter.claim(.photos))
+    }
+
+    func testDraftSendAttemptIsRetiredByInterveningHandoff() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready([.init(200, record(a), gate: gate)])
+        let arbiter = CustomerHandoffArbiter()
+        let presenter = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let attempt = try XCTUnwrap(presenter.captureAttempt(api: model.api, session: model.session))
+        let task = Task { try await model.api.sendFieldEstimate(a, expectedRevisionNumber: 1) }
+        defer { task.cancel(); gate.release() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(a)/send" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(a)/send" }))
+        let lease = try XCTUnwrap(presenter.claimLegacy())
+        presenter.releaseLegacy(lease)
+        gate.release()
+        _ = try await task.value
+        XCTAssertFalse(presenter.isCurrent(attempt, api: model.api, session: model.session))
+    }
+
+    func testDelayedPhotoPreparationCannotPresentAfterLegacyHandoff() async throws {
+        let model = try await ready([])
+        let arbiter = CustomerHandoffArbiter()
+        let documents = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let photos = CustomerPhotoPresenter(arbiter: arbiter)
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: [a])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        let revision = try XCTUnwrap(photos.availableRevision)
+        var continuation: CheckedContinuation<Void, Never>?
+        let task = Task { @MainActor in
+            _ = try await CustomerPhotoPreparation.prepare(selection: selection, isCurrent: { owner.isCurrent },
+                loadJob: { (self.jobID, self.org) }, loadAsset: { id in
+                    await withCheckedContinuation { continuation = $0 }
+                    return CustomerPhotoMetadata(id: id, jobId: self.jobID, kind: "photo", uploadState: "stored", archived: false)
+                })
+            return photos.present(owner, expectedRevision: revision)
+        }
+        for _ in 0..<100 where continuation == nil { try await Task.sleep(for: .milliseconds(10)) }
+        guard let continuation else { task.cancel(); XCTFail("Preparation did not reach the gated read"); return }
+        guard let lease = documents.claimLegacy() else {
+            continuation.resume(); task.cancel(); XCTFail("Legacy handoff did not acquire ownership"); return
+        }
+        documents.releaseLegacy(lease)
+        continuation.resume()
+        let presented = try await task.value
+        XCTAssertFalse(presented)
+        XCTAssertNil(photos.active)
+    }
+
+    private func photoRecoveryReplies(_ extra: [URLProtocolFixture.Reply]) -> [URLProtocolFixture.Reply] {
+        let sessionJSON = #"{"user":{"id":"\#(actor)","name":"Sample"},"session":{"userId":"\#(actor)","activeOrganizationId":"\#(org)","expiresAt":"2099-10-29T00:00:00Z"}}"#
+        let catalog = #"{"authority":{"actorId":"\#(actor)","organizationId":"\#(org)","policyVersion":1,"generation":"sample"},"capabilities":["job.view","estimate.view","estimate.send","estimate.approve"],"resources":[],"views":[]}"#
+        let features = #"{"organizationId":"\#(org)","evaluatedAt":"2026-10-29T00:00:00Z","features":{"jobs":{"enabled":true,"released":true,"entitled":true},"estimates":{"enabled":true,"released":true,"entitled":true}}}"#
+        return [.init(200, sessionJSON), .init(200, catalog), .init(200, features)] + extra
+    }
+
+    func testStoppedPhotoRecoveryCannotPublishAfterDelayedJobRead() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready(photoRecoveryReplies([.init(200, jobJSON, gate: gate)]))
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: ["00000000-0000-4000-8000-000000009301"])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        owner.pauseForBackground(); owner.foreground = true
+        await model.session.revalidate(); owner.refreshForCurrentAuthority()
+        defer { gate.release(); owner.stop() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+        owner.stop(); gate.release()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertFalse(owner.isCurrent)
+        XCTAssertNil(owner.image)
+        XCTAssertFalse(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/media/00000000-0000-4000-8000-000000009301" }))
+    }
+
+    func testPhotoRecoveryRejectsSavedScopeAwayAndBackDuringRead() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready(photoRecoveryReplies([.init(200, jobJSON, gate: gate)]))
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: ["00000000-0000-4000-8000-000000009301"])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        owner.pauseForBackground(); owner.foreground = true
+        await model.session.revalidate(); owner.refreshForCurrentAuthority()
+        defer { gate.release(); owner.stop() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+        model.api.savedCopyScope = "other"; model.api.savedCopyScope = nil
+        gate.release()
+        for _ in 0..<100 where owner.recovering { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(owner.isCurrent); XCTAssertNil(owner.image); XCTAssertFalse(owner.canRetryRecovery)
+        XCTAssertFalse(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/media/00000000-0000-4000-8000-000000009301" }))
+    }
+
+    func testDeniedPhotoRecoveryNeverRestoresSelectionOrOffersRetry() async throws {
+        let model = try await ready(photoRecoveryReplies([.init(200, jobJSON), .init(403, #"{"title":"Forbidden","status":403}"#)]))
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: ["00000000-0000-4000-8000-000000009301"])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        owner.pauseForBackground(); owner.foreground = true
+        await model.session.revalidate(); owner.refreshForCurrentAuthority()
+        for _ in 0..<100 where owner.recovering { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(owner.recovering); XCTAssertFalse(owner.isCurrent)
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/media/00000000-0000-4000-8000-000000009301" }))
+        XCTAssertFalse(owner.canRetryRecovery); XCTAssertNil(owner.image)
+        XCTAssertEqual(owner.message, "These photos are no longer available. Please hand the device back to your technician.")
+    }
+
+    func testTemporaryPhotoRecoveryFailureKeepsSelectionAndOffersRetry() async throws {
+        let model = try await ready(photoRecoveryReplies([.init(200, jobJSON), .init(503, #"{"title":"Unavailable","status":503}"#)]))
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: ["00000000-0000-4000-8000-000000009301"])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        owner.pauseForBackground(); owner.foreground = true
+        await model.session.revalidate(); owner.refreshForCurrentAuthority()
+        for _ in 0..<100 where owner.recovering { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertFalse(owner.recovering); XCTAssertFalse(owner.isCurrent)
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/media/00000000-0000-4000-8000-000000009301" }))
+        XCTAssertTrue(owner.canRetryRecovery, "\(owner.debugValidity); message=\(owner.message ?? "nil"); error=\(owner.debugRecoveryError); requests=\(URLProtocolFixture.recorded.map { $0.url?.path ?? "?" })"); XCTAssertNil(owner.image)
+        XCTAssertEqual(owner.selection.selectedIDs, ["00000000-0000-4000-8000-000000009301"])
+    }
+
+    func testTemporaryPhotoRecoveryFailureCanRetrySameSelection() async throws {
+        let photoID = "00000000-0000-4000-8000-000000009301"
+        let metadata = #"{"id":"\#(photoID)","jobId":"\#(jobID)","kind":"photo","uploadState":"stored","archived":false}"#
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready(photoRecoveryReplies([.init(200, jobJSON), .init(503, #"{"title":"Unavailable","status":503}"#),
+            .init(200, jobJSON), .init(200, metadata), .init(200, metadata, gate: gate)]))
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: [photoID])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        defer { owner.stop(); gate.release() }
+        owner.pauseForBackground(); owner.foreground = true
+        await model.session.revalidate(); owner.refreshForCurrentAuthority()
+        for _ in 0..<100 where owner.recovering { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(owner.canRetryRecovery)
+        owner.retryRecovery()
+        for _ in 0..<100 where !owner.isCurrent { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertTrue(owner.isCurrent); XCTAssertEqual(owner.selection.selectedIDs, [photoID])
+        XCTAssertFalse(owner.canRetryRecovery)
+    }
+
+    func testPhotoOwnerRejectsPermissionAwayAndBackAcrossRealRevalidation() async throws {
+        let sessionJSON = #"{"user":{"id":"\#(actor)","name":"Sample"},"session":{"userId":"\#(actor)","activeOrganizationId":"\#(org)","expiresAt":"2099-10-29T00:00:00Z"}}"#
+        func catalog(_ capabilities: String) -> String {
+            #"{"authority":{"actorId":"\#(actor)","organizationId":"\#(org)","policyVersion":1,"generation":"sample"},"capabilities":[\#(capabilities)],"resources":[],"views":[]}"#
+        }
+        let features = #"{"organizationId":"\#(org)","evaluatedAt":"2026-10-29T00:00:00Z","features":{"jobs":{"enabled":true,"released":true,"entitled":true},"estimates":{"enabled":true,"released":true,"entitled":true}}}"#
+        let model = try await ready([.init(200, sessionJSON), .init(200, catalog("\"estimate.view\"")), .init(200, features),
+            .init(200, sessionJSON), .init(200, catalog("\"job.view\",\"estimate.view\",\"estimate.send\",\"estimate.approve\"")), .init(200, features)])
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: ["00000000-0000-4000-8000-000000009301"])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        await model.session.revalidate(); await model.session.revalidate()
+        XCTAssertFalse(owner.materialAuthorityIntact, "Restoring permission must not revive the selection")
+        owner.refreshForCurrentAuthority()
+        XCTAssertFalse(owner.isCurrent); XCTAssertFalse(owner.canRetryRecovery)
+    }
+
+    func testPhotoOwnerRejectsPolicyAwayAndBackAcrossRealRevalidation() async throws {
+        let sessionJSON = #"{"user":{"id":"\#(actor)","name":"Sample"},"session":{"userId":"\#(actor)","activeOrganizationId":"\#(org)","expiresAt":"2099-10-29T00:00:00Z"}}"#
+        func catalog(_ version: Int, _ generation: String) -> String {
+            #"{"authority":{"actorId":"\#(actor)","organizationId":"\#(org)","policyVersion":\#(version),"generation":"\#(generation)"},"capabilities":["job.view","estimate.view","estimate.send","estimate.approve"],"resources":[],"views":[]}"#
+        }
+        let features = #"{"organizationId":"\#(org)","evaluatedAt":"2026-10-29T00:00:00Z","features":{"jobs":{"enabled":true,"released":true,"entitled":true},"estimates":{"enabled":true,"released":true,"entitled":true}}}"#
+        let model = try await ready([.init(200, sessionJSON), .init(200, catalog(2, "changed")), .init(200, features),
+                                     .init(200, sessionJSON), .init(200, catalog(1, "sample")), .init(200, features)])
+        let selection = try CustomerPhotoSelection(jobID: jobID, organizationID: org, selectedIDs: ["00000000-0000-4000-8000-000000009301"])
+        let owner = try XCTUnwrap(CustomerPhotoHandoff(selection: selection, api: model.api, session: model.session))
+        await model.session.revalidate(); await model.session.revalidate()
+        XCTAssertFalse(owner.materialAuthorityIntact, "A policy change away and back must permanently retire this selection")
+    }
+
+    func testDetachedDocumentSourceCannotPresentAfterDelayedJobRead() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready([.init(200, jobJSON, gate: gate)])
+        let presenter = JobEstimateHandoffPresenter()
+        var attached = true
+        let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+            customerName: "Sample", start: .estimates, api: model.api, session: model.session,
+            sourceStillAttached: { attached }, onExit: { _ in XCTFail("Detached source must not exit a handoff") }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+        attached = false; gate.release()
+        let result = await task.value
+        XCTAssertEqual(result, .superseded)
+        XCTAssertNil(presenter.active)
+    }
+
+    func testCancelledOrInvalidatedDocumentPreparationCannotFallBack() async throws {
+        for cancel in [false, true] {
+            let gate = URLProtocolFixture.Gate()
+            let model = try await ready([.init(200, jobJSON, gate: gate)])
+            let presenter = JobEstimateHandoffPresenter()
+            let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+                customerName: "Sample", start: .estimates, api: model.api, session: model.session, onExit: { _ in }) }
+            defer { gate.release(); task.cancel() }
+            for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+            if cancel { task.cancel() } else { model.api.invalidateRequests() }
+            gate.release()
+            let result = await task.value
+            XCTAssertEqual(result, .superseded)
+            XCTAssertNil(presenter.active)
+        }
+    }
+
+    func testDelayedDocumentHandoffIsSupersededEvenAfterPhotoHandBack() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready([.init(200, jobJSON, gate: gate)])
+        let arbiter = CustomerHandoffArbiter()
+        let presenter = JobEstimateHandoffPresenter(arbiter: arbiter)
+        let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+            customerName: "Sample", start: .estimates, api: model.api, session: model.session, onExit: { _ in }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+        XCTAssertTrue(arbiter.claim(.photos))
+        arbiter.release(.photos)
+        gate.release()
+        let result = await task.value
+        XCTAssertEqual(result, .superseded)
+        XCTAssertNil(presenter.active)
+        XCTAssertNil(arbiter.owner)
+    }
+
     func testResultAttributionUsesCanonicalSignerInsteadOfRetainedInput() async throws {
         let model = try await ready([.init(200, jobJSON), .init(200, membership([a])), .init(200, record(a)), .init(200, record(a)), .init(200, revision(a))])
         await model.refresh(); model.setSelected(a, selected: true); await model.reviewSelected()

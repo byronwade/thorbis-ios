@@ -1136,7 +1136,9 @@ extension APIClient {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await allFieldPages("/v1/invoices", queryItems: [URLQueryItem(name: "customerId", value: customerID)], isCurrent: isCurrent)
     }
-    func fieldInvoice(_ id: String) async throws -> InvoiceRecord { try await send("GET", fieldPath("/v1/invoices", id: id)) }
+    func fieldInvoice(_ id: String, requireFresh: Bool = false) async throws -> InvoiceRecord {
+        try await send("GET", fieldPath("/v1/invoices", id: id), requireFresh: requireFresh)
+    }
     func fieldInvoiceWithProvenance(_ id: String) async throws -> APIRead<InvoiceRecord> {
         try await sendWithProvenance(fieldPath("/v1/invoices", id: id))
     }
@@ -1160,6 +1162,10 @@ extension APIClient {
         var query = [URLQueryItem(name: "limit", value: "50")]
         if let kind { query.append(URLQueryItem(name: "kind", value: kind)) }
         return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: query, cursor: cursor)
+    }
+
+    func customerPhotoMetadata(_ mediaID: String) async throws -> CustomerPhotoMetadata {
+        try await send("GET", fieldPath("/v1/media", id: mediaID), requireFresh: true)
     }
 
     func registerFieldMedia(_ jobID: String, request: FieldMediaRegistrationRequest) async throws -> FieldMediaRegistration {

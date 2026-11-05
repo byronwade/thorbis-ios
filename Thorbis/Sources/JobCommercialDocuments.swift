@@ -1,6 +1,47 @@
 import Combine
 import Foundation
 
+/// A customer-requested retry must resolve the exact invoice inside a freshly verified job list.
+enum JobCustomerPaymentRetry {
+    /// A payment guard must not hide unrelated technician actions.
+    static func allowedNextStep(_ step: TechJobStep?, allowsCollection: (String) -> Bool) -> TechJobStep? {
+        if case .collect(let id, _, _) = step, !allowsCollection(id) { return nil }
+        return step
+    }
+    static func isVerified(requestedID: String, invoice: InvoiceRecord?, freshIDs: Set<String>, scope: JobDocumentScope) -> Bool {
+        guard let invoice, invoice.id == requestedID, freshIDs.contains(requestedID) else { return false }
+        return scope.contains(invoice)
+    }
+    static func isLiveModelValid(fresh: InvoiceRecord, loaded: InvoiceRecord?, offline: Bool, canRecord: Bool) -> Bool {
+        !offline && canRecord && loaded == fresh
+    }
+    /// Keep the already-verified footer mounted while its same model refreshes. The payment route
+    /// separately requires canRecordPayment, so an in-flight model cannot open collection.
+    static func isProofModelValid(fresh: InvoiceRecord, loaded: InvoiceRecord?, offline: Bool, loading: Bool, canRecord: Bool) -> Bool {
+        !offline && loaded == fresh && (loading || canRecord)
+    }
+}
+
+/// Proof is tied to the exact live record and model; later list/model changes invalidate it.
+@MainActor
+struct JobCustomerPaymentRetryProof {
+    let invoice: InvoiceRecord
+    let model: InvoicePaymentCollectionModel
+    let scope: JobDocumentScope
+    let authority: CustomerHandoffExitAuthority
+
+    func matches(requestedID: String, selectedID: String?, read: JobDocumentRead<InvoiceRecord>?,
+                 loadedID: String?, currentModel: InvoicePaymentCollectionModel?,
+                 currentScope: JobDocumentScope?, api: APIClient, session: SessionController) -> Bool {
+        guard requestedID == invoice.id, selectedID == invoice.id, loadedID == invoice.id,
+              currentModel === model, currentScope == scope, authority.isCurrent(api: api, session: session),
+              let read, read.scope == scope, read.isComplete, read.freshIDs.contains(invoice.id),
+              read.records.first(where: { $0.id == invoice.id }) == invoice else { return false }
+        return JobCustomerPaymentRetry.isProofModelValid(fresh: invoice, loaded: model.invoice,
+            offline: model.offlineCopy, loading: model.isLoading, canRecord: model.canRecordPayment)
+    }
+}
+
 /// One sheet owns one job invoice and the model that will record its payment.
 struct JobInvoicePaymentRoute: Identifiable {
     let invoice: InvoiceRecord

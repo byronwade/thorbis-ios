@@ -17,9 +17,18 @@ struct ThorbisApp: App {
     @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
     @State private var lastSavedCopyCheck = Date.distantPast
-    @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
+    @StateObject private var estimateHandoff: JobEstimateHandoffPresenter
+    @StateObject private var photoHandoff: CustomerPhotoPresenter
+    @StateObject private var legacyHandoff = LegacyCustomerPresenter()
+    #if DEBUG
+    @State private var previewHandoffProbe = ""
+    #endif
 
     init() {
+        let handoffArbiter = CustomerHandoffArbiter()
+        let sceneWindow = CustomerProtectedSceneWindow()
+        _estimateHandoff = StateObject(wrappedValue: JobEstimateHandoffPresenter(arbiter: handoffArbiter, sceneWindow: sceneWindow))
+        _photoHandoff = StateObject(wrappedValue: CustomerPhotoPresenter(arbiter: handoffArbiter, sceneWindow: sceneWindow))
         // Popovers put the keyboard away before opening; they need to know whether it is up.
         ThorbisKeyboard.watch()
         #if DEBUG
@@ -172,14 +181,20 @@ struct ThorbisApp: App {
                 #endif
             }
             }
-            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil }, set: { _ in })) {
-                if let model = estimateHandoff.active {
-                    JobEstimateProtectedOwner(model: model, presenter: estimateHandoff)
+            #if DEBUG
+            .overlay(alignment: .topLeading) {
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+                    Button(previewHandoffProbe.isEmpty ? "Check handoff" : previewHandoffProbe) {
+                        previewHandoffProbe = photoHandoff.availableRevision == nil ? "Handoff busy" : "Handoff available"
+                    }.frame(minHeight: 44).background(Theme.canvas).accessibilityIdentifier("preview-handoff-probe")
                 }
             }
+            #endif
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.canvas)
             .environmentObject(estimateHandoff)
+            .environmentObject(photoHandoff)
+            .environmentObject(legacyHandoff)
             .environmentObject(api)
             .environmentObject(store)
             .environmentObject(session)
