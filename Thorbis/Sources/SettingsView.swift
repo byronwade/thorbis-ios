@@ -233,7 +233,12 @@ struct SettingsView: View {
         HStack(alignment: .center, spacing: 12) {
             PlaceMark(symbol: symbol, tint: Self.markTint(symbol))
             PaperListRow(title: title) {
-                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.subtle).lineLimit(typeSize.isAccessibilitySize ? 3 : 1) }
+                // A long company name wraps to a second line rather than losing its end.
+                if let value {
+                    Text(value).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2).multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .environment(\.paperRowInset, 0)
         }
