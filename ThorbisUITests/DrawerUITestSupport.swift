@@ -25,6 +25,19 @@ extension XCUIApplication {
     /// Opens the drawer and picks a row in it, scrolling to it when it sits low in the list.
     func openFromDrawer(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
         openDrawer(file: file, line: line)
+        if !drawerRow(id).exists {
+            let workspace: String? = switch id {
+            case "jobs", "estimates", "invoices", "team": "work"
+            case "customers", "properties": "customers"
+            case "billing", "scorecard", "attention", "notices", "drafts": "other"
+            default: nil
+            }
+            if let workspace, drawerRow("workspace-\(workspace)").exists {
+                revealDrawerRow("workspace-\(workspace)")
+                drawerRow("workspace-\(workspace)").tap()
+                openDrawer(file: file, line: line)
+            }
+        }
         revealDrawerRow(id)
         let row = drawerRow(id)
         XCTAssertTrue(row.waitForExistence(timeout: 5), "No drawer row \(id)", file: file, line: line)

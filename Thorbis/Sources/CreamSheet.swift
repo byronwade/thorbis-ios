@@ -31,10 +31,10 @@ extension MenuItem {
         case .home, .inbox, .schedule: .personal
         case .jobs, .estimates, .invoices, .team: .work
         case .customers, .properties: .customers
-        case .money, .billing: .money
-        case .reports, .scorecard: .reports
+        case .money: .money
+        case .reports: .reports
         case .priceBook: .operations
-        case .attention, .notices, .drafts: .other
+        case .billing, .scorecard, .attention, .notices, .drafts: .other
         }
     }
 
@@ -99,6 +99,31 @@ struct DrawerSections: Equatable {
 
     private static func unique(_ items: [MenuItem]) -> [MenuItem] {
         items.reduce(into: [MenuItem]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+}
+
+/// Projects reachable native destinations into the web's personal tier and workspaces.
+/// The caller supplies only authorized, non-hidden items; unsupported web routes are absent.
+struct WebSidebarProjection {
+    struct Group: Identifiable {
+        let section: PlaceSection
+        let items: [MenuItem]
+        let expanded: Bool
+        var id: String { section.rawValue }
+    }
+    let personal: [MenuItem]
+    let groups: [Group]
+
+    static func make(places: [MenuItem], current: MenuItem?) -> Self {
+        let available = Set(places)
+        let canonical = PlaceSection.canonical.filter(available.contains)
+        let personal = canonical.filter { $0.placeSection == .personal }
+        let groups = [PlaceSection.work, .customers, .money, .reports, .operations, .other].compactMap { section -> Group? in
+            let items = canonical.filter { $0.placeSection == section }
+            guard !items.isEmpty else { return nil }
+            return Group(section: section, items: items, expanded: items.count > 1 && current.map(items.contains) == true)
+        }
+        return Self(personal: personal, groups: groups)
     }
 }
 
@@ -214,6 +239,11 @@ func compactMoney(_ cents: Int, currency: String = "USD") -> String {
 /// quiet hue (filled when it is the place), the word in body (lifted to ink when here) and a count in
 /// tabular figures at the trailing edge. The place showing sits on the selected fill.
 struct PlacesList: View {
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
+    @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
+    @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
+    @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
     let sections: DrawerSections
     let title: (MenuItem) -> String
     let isCurrent: (MenuItem) -> Bool
@@ -227,19 +257,84 @@ struct PlacesList: View {
     let openPlace: (MenuItem) -> Void
     let openLocal: (LocalWorkspaceSection) -> Void
     var openSavedWork: () -> Void = {}
+    var openFavorite: (ScopedRecordFavorites.Visible) -> Void = { _ in }
+
+    private struct FavoritesReload: Equatable {
+        let scope: ScopedRecordFavorites.Scope?
+        let entries: [ScopedRecordFavorites.Entry]
+    }
+    private var favoriteScope: ScopedRecordFavorites.Scope? { ScopedRecordFavorites.currentScope(session: session, api: api) }
+    private func canOpenFavorite(_ kind: ScopedRecordFavorites.Kind) -> Bool {
+        switch kind {
+        case .job: session.can("job.view", feature: "jobs")
+        case .customer: session.can("customer.view", feature: "core_crm")
+        }
+    }
+    private var safeFavorites: [ScopedRecordFavorites.Visible] {
+        guard recordFavorites.isBound(to: favoriteScope) else { return [] }
+        return recordFavorites.visible.filter { canOpenFavorite($0.entry.kind) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(sections.sections) { section in
-                if section.kind != .personal { heading(section.kind == .phone ? phoneHeading : section.kind.rawValue) }
-                ForEach(section.places) { item in
-                    PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint, here: isCurrent(item),
-                             count: count(item), id: "\(idPrefix)-\(item.rawValue)") { openPlace(item) }
+            let projection = WebSidebarProjection.make(places: sections.places, current: sections.places.first(where: isCurrent))
+            ForEach(projection.personal) { item in place(item) }
+            let pins = sections.sections.first(where: { $0.kind == .pinned })?.places ?? []
+            let hasSavedRecords = recordFavorites.isBound(to: favoriteScope) && !recordFavorites.entries.isEmpty
+            if !pins.isEmpty || hasSavedRecords {
+                disclosureHeading("Favorites", collapsed: $favoritesCollapsed, id: "favorites", forceExpanded: pins.contains(where: isCurrent))
+                if !favoritesCollapsed || pins.contains(where: isCurrent) {
+                    ForEach(pins) { item in place(item, prefix: "\(idPrefix)-favorite") }
+                    ForEach(safeFavorites) { item in
+                        Button {
+                            guard recordFavorites.isBound(to: favoriteScope), canOpenFavorite(item.entry.kind),
+                                  recordFavorites.visible.contains(item) else { return }
+                            openFavorite(item)
+                        } label: {
+                            Label(item.title, systemImage: "star.fill")
+                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, 12).contentShape(Rectangle())
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .contextMenu {
+                            Button("Remove from favorites", role: .destructive) {
+                                guard recordFavorites.isBound(to: favoriteScope) else { return }
+                                recordFavorites.toggle(item.entry.kind, id: item.entry.id)
+                            }
+                        }
+                        .accessibilityIdentifier("\(idPrefix)-favorite-record-\(item.entry.id)")
+                    }
+                    if hasSavedRecords && safeFavorites.isEmpty {
+                        Text("Favorites appear after access is checked.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                    }
                 }
-                if section.kind == .phone {
-                    localRows(section.local)
-                    if let savedWork { savedWorkRow(savedWork) }
+            }
+            if let custom = sections.sections.first(where: { $0.kind == .customized }), !custom.places.isEmpty {
+                disclosureHeading("Your places", collapsed: $customCollapsed, id: "custom")
+                if !customCollapsed {
+                    ForEach(custom.places) { item in place(item, prefix: "\(idPrefix)-custom") }
                 }
+            }
+            ForEach(projection.groups) { group in
+                if group.items.count == 1, let item = group.items.first {
+                    place(item)
+                } else if let first = group.items.first {
+                    PlaceRow(title: group.section.rawValue, symbol: first.symbol, tint: first.sidebarTint,
+                             here: false, count: nil, id: "\(idPrefix)-workspace-\(group.section.rawValue.lowercased())") { openPlace(first) }
+                        .accessibilityValue(group.expanded ? "Expanded" : "Collapsed")
+                        .accessibilityHint("Opens \(title(first))")
+                    if group.expanded {
+                        ForEach(group.items) { item in place(item).padding(.leading, 16) }
+                    }
+                }
+            }
+            if let phone = sections.sections.first(where: { $0.kind == .phone }) {
+                heading(phoneHeading)
+                localRows(phone.local)
+                if let savedWork { savedWorkRow(savedWork) }
             }
             // Saved work with no local places still gets its heading.
             if let savedWork, !sections.sections.contains(where: { $0.kind == .phone }) {
@@ -247,6 +342,29 @@ struct PlacesList: View {
                 savedWorkRow(savedWork)
             }
         }
+        .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
+        .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
+            let expected = favoriteScope
+            recordFavorites.bind(expected)
+            guard expected != nil else { return }
+            await recordFavorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
+        }
+    }
+
+    private func place(_ item: MenuItem, prefix: String? = nil) -> some View {
+        PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint,
+                 here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)") { openPlace(item) }
+    }
+
+    private func disclosureHeading(_ text: String, collapsed: Binding<Bool>, id: String, forceExpanded: Bool = false) -> some View {
+        Button { collapsed.wrappedValue.toggle() } label: {
+            HStack { Text(text); Spacer(); Image(systemName: collapsed.wrappedValue && !forceExpanded ? "chevron.right" : "chevron.down") }
+                .font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityValue(collapsed.wrappedValue && !forceExpanded ? "Collapsed" : "Expanded")
+        .accessibilityIdentifier("\(idPrefix)-\(id)-disclosure")
     }
 
     private func heading(_ text: String) -> some View {

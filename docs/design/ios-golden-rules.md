@@ -140,6 +140,11 @@ source evidence; verify platform/API/version claims before relying on them.
    rearranged into groups. Label message drafts as stored on this phone.
    Do not imply that device-only records are synced or add destinations that
    have no native implementation.
+   **Web hierarchy correction:** Workspace names are actionable rows, not static
+   headings. Multi-page workspaces reveal indented destinations when active;
+   a workspace with one available destination shows that destination directly.
+   Favorites and Recent can be collapsed independently. Preserve saved global
+   order in the Your places disclosure and distinguish device-only records.
 7. **Match the surface to the task.** Durable job/customer/site/equipment/document
    records belong in navigation destinations. Assignment, payment and completion
    are focused transactions. Small local choices use native menus/pickers;
