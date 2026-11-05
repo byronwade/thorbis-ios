@@ -162,6 +162,8 @@ struct CommsInboxView: View {
     @State private var section: CommsInboxSection
     @State private var folder: CommsFolder = .inbox
     @State private var filter = CommsQuickFilter.all.rawValue
+    /// The folder glyph grows with its 15pt label, capped so it never outweighs the word.
+    @ScaledMetric(relativeTo: .subheadline) private var folderGlyph: CGFloat = 13
     @State private var open: CommsOpen?
     @State private var openingJob: String?
     @State private var composing: CommsComposeKind?
@@ -264,7 +266,7 @@ struct CommsInboxView: View {
                 }, accessibilityLabel: "Folder, \(folder.title)") {
                     // The folder's icon keeps "Inbox" here from reading as a second title.
                     HStack(spacing: 6) {
-                        Image(systemName: folder.symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                        Image(systemName: folder.symbol).font(.system(size: min(folderGlyph, 28), weight: .medium)).foregroundStyle(Theme.muted)
                             .accessibilityHidden(true)
                         Text(folder.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
                         Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
