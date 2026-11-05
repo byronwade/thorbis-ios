@@ -747,6 +747,10 @@ struct RootView: View {
             return
         }
         if ["invoice-editor", "invoice-editor-line"].contains(PaperPreview.screen) { previewInvoiceEditor = true; return }
+        if PaperPreview.screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
+            previewPlace(.invoices, then: .invoice(PaperPreview.invoiceDetailPreviewID))
+            return
+        }
         if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
         if ["estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line"].contains(PaperPreview.screen) { previewEstimateRevision = true; return }
         switch PaperPreview.screen {
