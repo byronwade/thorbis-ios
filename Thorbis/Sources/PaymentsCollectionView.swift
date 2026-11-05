@@ -35,7 +35,7 @@ struct PaymentsCollectionView: View {
                 } else {
                     Picker("Payment type", selection: $filter) {
                         ForEach(PaymentsCollectionFilter.allCases) { Text($0.rawValue).tag($0) }
-                    }.pickerStyle(.menu).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                    }.pickerStyle(.menu).accessibilityIdentifier("payments-filter").padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                     if visible {
                     if let error { ErrorBanner(message: error) { await loadMore(reset: items.isEmpty || needsRefresh) } }
                     if loading && items.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
@@ -48,11 +48,13 @@ struct PaymentsCollectionView: View {
                                 InvoiceDetailView(id: item.invoiceID, paymentsScope: loadedScope).thorbisBackButton()
                             } label: { PaymentsCollectionRow(item: item) }
                             .buttonStyle(RowPressStyle())
+                            .accessibilityIdentifier("payment-row-\(item.id)")
                         }
                     }
                     if nextCursor != nil {
                         Button(loading ? "Loading…" : "Load more payments") { Task { await loadMore(reset: false) } }
                             .disabled(loading).frame(maxWidth: .infinity, minHeight: 48)
+                            .accessibilityIdentifier("payments-load-more")
                     }
                     } else { ListRoomSkeleton(count: 5, threeLines: false) }
                 }

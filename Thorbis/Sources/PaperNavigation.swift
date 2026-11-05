@@ -818,6 +818,7 @@ struct RootView: View {
         case "inbox": previewPlace(.inbox)
         case "estimates": previewPlace(.estimates)
         case "invoices": previewPlace(.invoices)
+        case "payments-ledger": previewPlace(.paymentsLedger)
         case "price-book": previewPlace(.priceBook)
         case "drafts": previewPlace(.drafts)
         case "local-fleet": openLocal(.fleet)

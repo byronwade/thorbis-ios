@@ -1316,6 +1316,28 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": matchingCustomer([waiting], queryItems: queryItems)]
         case "/v1/query":
+            if PaperPreview.screen == "payments-ledger", queryItems.first(where: { $0.name == "resourceId" })?.value == "payments" {
+                let firstID = "00000000-0000-4000-8000-000000009501"
+                let secondID = "00000000-0000-4000-8000-000000009502"
+                func row(_ id: String, method: String, refunded: Int) -> [String: Any] {
+                    ["id": id, "resourceId": "payments", "fields": ["payments.id": id,
+                     "payments.invoice_id": PaperPreview.issuedInvoice.id, "payments.status": "recorded",
+                     "payments.method": method, "payments.recorded_at": "2026-10-26T12:30:00Z",
+                     "payments.amount": "12500", "payments.refunded_amount": String(refunded),
+                     "payments.net_amount": String(12500 - refunded)]]
+                }
+                let overlay = queryItems.first(where: { $0.name == "filter" })?.value ?? ""
+                let cursor = queryItems.first(where: { $0.name == "cursor" })?.value
+                let result: [[String: Any]]
+                let next: Any
+                if overlay.contains("cash") { result = [row(secondID, method: "cash", refunded: 0)]; next = NSNull() }
+                else if overlay.contains("card") || overlay.contains("refunded_amount") {
+                    result = [row(firstID, method: "card", refunded: 2500)]; next = NSNull()
+                } else if cursor == nil { result = [row(firstID, method: "card", refunded: 2500)]; next = firstID }
+                else { result = [row(secondID, method: "cash", refunded: 0)]; next = NSNull() }
+                return ["schemaVersion": 1, "resourceId": "payments", "purpose": "collection",
+                        "localMode": "online_required", "items": result, "nextCursor": next]
+            }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-long"),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
                 let id = "00000000-0000-4000-8000-000000009201"
