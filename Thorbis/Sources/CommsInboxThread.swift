@@ -601,7 +601,7 @@ struct CommsLocalThreadView: View {
                             .strokeBorder(Theme.hairline, style: StrokeStyle(lineWidth: 1, dash: message.status == .draft ? [4, 3] : []))
                     }
                 }
-            HStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let status = statusLine(message) { StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet, size: 12) }
                 if let when = JobFiltering.date(message.at) {
                     Text(when.tradeTime).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
@@ -713,6 +713,8 @@ struct CommsTextComposer: View {
                 .accessibilityLabel("Save draft")
                 .accessibilityIdentifier("inbox-save-draft")
             }
+            // A footnote, not content: capped so at the largest sizes it doesn't take the room the
+            // conversation needs.
             HStack {
                 Text("Drafts stay on this device").font(Theme.font(12)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 8)
@@ -720,6 +722,7 @@ struct CommsTextComposer: View {
                     Text(counter).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
                 }
             }
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             .padding(.horizontal, 4)
         }
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
