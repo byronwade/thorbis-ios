@@ -404,9 +404,17 @@ struct NewJobSheet: View {
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(person.name).font(Theme.font(16, weight: .medium)).lineLimit(2)
-                    let detail = [person.phone, person.address].compactMap({ $0 }).filter({ !$0.isEmpty }).joined(separator: " · ")
-                    if !detail.isEmpty {
-                        Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted).lineLimit(2)
+                    // Phone · street on one line when both fit; otherwise each on its own, so a street
+                    // never breaks between its number and its name.
+                    let parts = [person.phone, person.address].compactMap({ $0 }).filter({ !$0.isEmpty })
+                    if !parts.isEmpty {
+                        ViewThatFits(in: .horizontal) {
+                            Text(parts.joined(separator: " · ")).fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(parts, id: \.self) { Text($0).lineLimit(2) }
+                            }
+                        }
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
                     }
                     if let last = lastJobLine(person.id) {
                         Text(last).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
