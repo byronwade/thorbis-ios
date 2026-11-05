@@ -45,8 +45,8 @@ struct NoticeSettingsView: View {
                 .padding(.bottom, 12)
                 if PushNotifications.receivesMorningDigest(session) {
                     // TG-11: one push at 6:30, the off switch lives here. Per phone, saved offline.
-                    PaperGroupHeader(title: "This phone").padding(.top, 6)
-                    Toggle(isOn: Binding(get: { morningDigest }, set: { next in
+                    PaperGroupHeader(title: "This phone").padding(.top, 14)
+                    PaperCard { Toggle(isOn: Binding(get: { morningDigest }, set: { next in
                         morningDigest = next
                         PushNotifications.shared.setMorningDigest(next)
                     })) {
@@ -57,34 +57,45 @@ struct NoticeSettingsView: View {
                         }
                     }
                     .tint(Theme.brand)
-                    .frame(minHeight: 52)
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                    .frame(minHeight: 52) }
                 }
                 if managesRoles {
                     if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
                     if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
                     if loaded {
+                        // One panel per role, as in Settings; the header names the role, so the rows don't.
                         ForEach(roles, id: \.0) { role, label in
-                            PaperGroupHeader(title: label).padding(.top, 6)
-                            ForEach(channels, id: \.0) { channel, channelName in
+                            PaperGroupHeader(title: label).padding(.top, 14)
+                            PaperCard {
+                            ForEach(Array(channels.enumerated()), id: \.element.0) { index, pair in
+                                let (channel, channelName) = pair
                                 let key = "\(role):\(channel)"
+                                if index > 0 { WellDivider(leading: PaperCardMetrics.inset) }
                                 Toggle(isOn: Binding(get: { isOn(role, channel) }, set: { next in Task { await save(role, channel, next) } })) {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(channelName).font(Theme.font(15, weight: .medium))
-                                        Text(channel == "email" ? "\(label) email for booked, changed and canceled jobs" : "\(label) in-app feed for the same updates")
+                                        Text(channel == "email" ? "When a job is booked, changed or canceled" : "The same updates, in the app")
                                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
                                     }
                                 }
                                 .tint(Theme.brand)
                                 .disabled(saving == key)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
                                 .frame(minHeight: 52)
+                                .accessibilityLabel("\(label) \(channelName.lowercased())")
+                            }
                             }
                         }
                     }
-                    PaperGroupHeader(title: "History").padding(.top, 6)
-                    NavigationLink { NoticeDeliveryLogView() } label: {
-                        PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
+                    PaperGroupHeader(title: "History").padding(.top, 14)
+                    PaperCard {
+                        NavigationLink { NoticeDeliveryLogView() } label: {
+                            PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+                        }
+                        .buttonStyle(RowPressStyle())
                     }
-                    .buttonStyle(RowPressStyle())
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
