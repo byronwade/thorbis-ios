@@ -4,7 +4,7 @@ import XCTest
 final class LegacyCustomerHandoffUITests: XCTestCase {
     private func launch(_ screen: String) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", screen, "--paper-preview-working-job", "--paper-preview-legacy-handoff-test"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", screen, "--paper-preview-working-job", "--paper-preview-legacy-handoff-test", "--paper-preview-owner-auth", "approved"]
         app.launch()
         return app
     }

@@ -716,6 +716,13 @@ struct InvoiceDetailView: View {
         }
     }
 
+    private func authenticateForCustomerPayment() async -> Bool {
+        #if DEBUG
+        if let authenticate = PaperPreview.ownerAuthentication { return await authenticate("Unlock to take payment") }
+        #endif
+        return await StaffUnlock.unlock(reason: "Unlock to take payment")
+    }
+
     private func customerInvoiceMode(_ record: InvoiceRecord, lease: LegacyCustomerHandoffLease) -> some View {
         CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }) { handBack in
             CustomerInvoicePresentation(
@@ -723,7 +730,7 @@ struct InvoiceDetailView: View {
                 canSign: session.can("invoice.edit", feature: "invoicing"),
                 onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments") ? {
                     Task {
-                        if await StaffUnlock.unlock(reason: "Unlock to take payment") {
+                        if await authenticateForCustomerPayment() {
                             legacyHandoff.authenticatedExit(for: lease, .collect)
                         }
                     }

@@ -71,12 +71,19 @@ struct LegacyCustomerProtectedView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
 
+    private func authenticateOwner() async -> Bool {
+        #if DEBUG
+        if let authenticate = PaperPreview.ownerAuthentication { return await authenticate("Unlock to leave customer mode") }
+        #endif
+        return await StaffUnlock.unlock()
+    }
+
     var body: some View {
         Group {
             if handoff.isCurrent(api: api, session: session), let content = handoff.content {
                 content
             } else {
-                CustomerModeContainer(onUnlocked: { presenter.authenticatedExit(for: handoff.lease) }, ownerControlTitle: "Hand back") { handBack in
+                CustomerModeContainer(onUnlocked: { presenter.authenticatedExit(for: handoff.lease) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
                     VStack(spacing: 20) {
                         Image(systemName: "lock.shield").font(.system(size: 44)).accessibilityHidden(true)
                         Text("Please hand the device back to your technician.")
