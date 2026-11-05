@@ -1037,7 +1037,9 @@ extension APIClient {
         let query = includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : []
         return try await allFieldPages("/v1/customers", queryItems: query)
     }
-    func fieldCustomer(_ id: String) async throws -> CustomerRecord { try await send("GET", fieldPath("/v1/customers", id: id)) }
+    func fieldCustomer(_ id: String, requireFresh: Bool = false) async throws -> CustomerRecord {
+        try await send("GET", fieldPath("/v1/customers", id: id), requireFresh: requireFresh)
+    }
     func fieldCustomerHistory(_ id: String, cursor: String? = nil) async throws -> CustomerHistoryPage {
         try await send("GET", fieldPath("/v1/customers", id: id, suffix: "/history"),
                        queryItems: [URLQueryItem(name: "limit", value: "50")], cursor: cursor)
