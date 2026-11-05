@@ -994,11 +994,16 @@ struct DocumentLinesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
-                if !lines.isEmpty && !typeSize.isAccessibilitySize {
-                    Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
+            // The column hint only when the label fits beside it on one line; a long option name
+            // ("Option 1 · Full system replacement") keeps the row to itself instead of wrapping.
+            ViewThatFits(in: .horizontal) {
+                SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
+                    if !lines.isEmpty && !typeSize.isAccessibilitySize {
+                        Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                            .accessibilityHidden(true)
+                    }
                 }
+                SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) { EmptyView() }
             }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.bottom, 2)
