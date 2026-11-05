@@ -10,6 +10,33 @@ enum PaperPreview {
     static let organizationID = "00000000-0000-4000-8000-000000000002"
     static let jobID = "00000000-0000-4000-8000-000000002214"
     static let customerID = "00000000-0000-4000-8000-000000000412"
+
+    /// The Inbox preview's call log (GET /v1/calls items), newest first, relative to now.
+    static func inboxCalls() -> [[String: Any]] {
+        func ago(_ minutes: Double) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(-minutes * 60)) }
+        let base = "00000000-0000-4000-8000-00000000"
+        return [
+            ["id": base + "9701", "direction": "inbound", "status": "missed", "lineId": "line-1", "callerNumber": "+15550100142",
+             "callerName": "Marcus Bell", "startedAt": ago(18), "endedAt": ago(17.5), "durationSeconds": 0,
+             "recording": ["status": "none"], "transcriptStatus": "none"],
+            ["id": base + "9702", "direction": "inbound", "status": "completed", "lineId": "line-1", "callerNumber": "+15550100100",
+             "callerName": "Dana Ruiz", "customerId": customerID, "jobId": jobID, "linkedAt": ago(170), "startedAt": ago(190), "endedAt": ago(186.8),
+             "durationSeconds": 192, "recording": ["status": "available", "durationSeconds": 192, "contentPath": "/v1/calls/\(base)9702/recording"],
+             "summary": ["text": "Water heater leaking at the base since this morning. Call 30 minutes ahead; side gate code 4471.", "reason": "Water heater leak", "source": "model"],
+             "disclosure": "Thanks for calling. This call may be recorded and transcribed so we can serve you better.",
+             "transcriptStatus": "complete"],
+            ["id": base + "9703", "direction": "inbound", "status": "missed", "lineId": "line-1", "callerNumber": "+15550100177",
+             "callerName": "Priya Shah", "startedAt": ago(26 * 60), "endedAt": ago(26 * 60 - 1), "durationSeconds": 42, "voicemail": true,
+             "recording": ["status": "available", "durationSeconds": 42, "contentPath": "/v1/calls/\(base)9703/recording"],
+             "summary": ["text": "Wants a quote to replace two upstairs windows before winter. Home after 4.", "source": "model"],
+             "transcriptStatus": "complete"],
+            ["id": base + "9704", "direction": "inbound", "status": "completed", "lineId": "line-1", "callerNumber": "(555) 010-0100",
+             "callerName": "Dana Ruiz", "customerId": customerID, "startedAt": ago(3 * 24 * 60), "endedAt": ago(3 * 24 * 60 - 1),
+             "durationSeconds": 64, "recording": ["status": "none"],
+             "summary": ["text": "Asked whether we install tankless water heaters.", "source": "deterministic"],
+             "transcriptStatus": "none"],
+        ]
+    }
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--paper-preview") }
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
@@ -1102,6 +1129,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if path == "/v1/notice-preferences" {
             return ["items": [["subjectKind": "role", "subjectKey": "technician", "channel": "email", "enabled": false]]]
         }
+        // The Inbox's call log: a missed call, a caller who rang twice (one answered call with a
+        // summary and a recording, one shorter), and a voicemail. The server does not mark
+        // voicemail yet (it records from answer); the sample shows how one reads once it does.
+        if PaperPreview.screen == "inbox", path == "/v1/calls" || path.hasPrefix("/v1/calls/") {
+            let calls = PaperPreview.inboxCalls()
+            if path == "/v1/calls" { return ["items": calls, "nextCursor": NSNull()] as [String: Any] }
+            let id = path.split(separator: "/").dropFirst(2).first.map(String.init) ?? ""
+            if var call = calls.first(where: { $0["id"] as? String == id }) {
+                call["transcript"] = id.hasSuffix("9702") ? [
+                    ["sequence": 1, "speaker": "business", "text": "Acme HVAC, this is Maria."],
+                    ["sequence": 2, "speaker": "caller", "text": "Hi, my water heater is leaking at the bottom. There's a puddle in the garage."],
+                    ["sequence": 3, "speaker": "business", "text": "We can be out tomorrow morning. Any gate code or pets?"],
+                    ["sequence": 4, "speaker": "caller", "text": "Side gate is 4471. The dog is friendly. Please call half an hour before."],
+                ] : [Any]()
+                return call
+            }
+        }
         if path == "/v1/staff/notices", PaperPreview.screen == "inbox" || PaperPreview.role != nil {
             var notices: [[String: Any]] = [
                 ["id": "preview-notice-new", "jobId": PaperPreview.jobID, "title": "A visit is ready", "meta": "Water heater install", "at": now, "read": false],
@@ -1279,6 +1323,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
+            if PaperPreview.screen == "inbox", !ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-no-calls") { enabledFeatures.append("call_recording") }
             if PaperPreview.role != nil { enabledFeatures.append("job_booking_notices") }
             if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
             let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })

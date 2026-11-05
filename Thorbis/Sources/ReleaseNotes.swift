@@ -13,6 +13,18 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-inbox-calls-texts-email",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "phone", title: "Calls in the Inbox",
+                      detail: "See calls to your business by caller, play the recording and link a call to its job."),
+                .init(symbol: "bubble.left", title: "Texts and email in the Inbox (beta)",
+                      detail: "Write texts and emails to customers. They stay as drafts on this phone until sending is connected."),
+                .init(symbol: "tray", title: "Sort your Inbox",
+                      detail: "Switch between calls, texts, email and job notices, and archive or star conversations."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-web-sidebar-workspaces",
             date: "2026-11-05",
             highlights: [
