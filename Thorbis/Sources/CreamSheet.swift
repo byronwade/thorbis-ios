@@ -242,6 +242,7 @@ struct PlacesList: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
     @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
+    @ObservedObject private var pageFavorites = ScopedPageFavorites.shared
     @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
     @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
     let sections: DrawerSections
@@ -275,16 +276,59 @@ struct PlacesList: View {
         return recordFavorites.visible.filter { canOpenFavorite($0.entry.kind) }
     }
 
+    private func canOpenPage(_ page: ScopedPageFavorites.Page) -> Bool {
+        guard pageFavorites.isBound(to: favoriteScope) else { return false }
+        switch page.kind {
+        case .menu:
+            guard let item = MenuItem(rawValue: page.value) else { return false }
+            return sections.places.contains(item) && item.permitted(session)
+        case .local:
+            guard let item = LocalWorkspaceSection(rawValue: page.value) else { return false }
+            return sections.sections.flatMap(\.local).contains(item) && session.can(item.requiredCapability, feature: item.requiredFeature)
+        }
+    }
+    private func togglePage(_ page: ScopedPageFavorites.Page) {
+        guard pageFavorites.isBound(to: favoriteScope) else { return }
+        pageFavorites.toggle(page, allowed: canOpenPage)
+    }
+    private func openPage(_ page: ScopedPageFavorites.Page) {
+        guard pageFavorites.pages.contains(page), canOpenPage(page) else { return }
+        switch page.kind {
+        case .menu: if let item = MenuItem(rawValue: page.value) { openPlace(item) }
+        case .local: if let item = LocalWorkspaceSection(rawValue: page.value) { openLocal(item) }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             let projection = WebSidebarProjection.make(places: sections.places, current: sections.places.first(where: isCurrent))
             ForEach(projection.personal) { item in place(item) }
             let pins = sections.sections.first(where: { $0.kind == .pinned })?.places ?? []
             let hasSavedRecords = recordFavorites.isBound(to: favoriteScope) && !recordFavorites.entries.isEmpty
-            if !pins.isEmpty || hasSavedRecords {
-                disclosureHeading("Favorites", collapsed: $favoritesCollapsed, id: "favorites", forceExpanded: pins.contains(where: isCurrent))
-                if !favoritesCollapsed || pins.contains(where: isCurrent) {
+            let favoritePages = pageFavorites.visible(allowed: canOpenPage).filter { page in
+                page.kind != .menu || !pins.contains(where: { $0.rawValue == page.value })
+            }
+            let activeFavorite = pins.contains(where: isCurrent) || favoritePages.contains { page in
+                switch page.kind {
+                case .menu: MenuItem(rawValue: page.value).map(isCurrent) ?? false
+                case .local: LocalWorkspaceSection(rawValue: page.value).map(isCurrentLocal) ?? false
+                }
+            }
+            if !pins.isEmpty || !favoritePages.isEmpty || hasSavedRecords {
+                disclosureHeading("Favorites", collapsed: $favoritesCollapsed, id: "favorites", forceExpanded: activeFavorite)
+                if !favoritesCollapsed || activeFavorite {
                     ForEach(pins) { item in place(item, prefix: "\(idPrefix)-favorite") }
+                    ForEach(favoritePages) { page in
+                        Button { openPage(page) } label: {
+                            Label(pageTitle(page), systemImage: "star.fill")
+                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .padding(.horizontal, 12).contentShape(Rectangle())
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .contextMenu { Button("Remove from favorites", role: .destructive) { togglePage(page) } }
+                        .accessibilityIdentifier("\(idPrefix)-favorite-page-\(page.id)")
+                    }
                     ForEach(safeFavorites) { item in
                         Button {
                             guard recordFavorites.isBound(to: favoriteScope), canOpenFavorite(item.entry.kind),
@@ -342,7 +386,10 @@ struct PlacesList: View {
                 savedWorkRow(savedWork)
             }
         }
-        .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
+        .onChange(of: favoriteScope, initial: true) {
+            recordFavorites.bind(favoriteScope)
+            pageFavorites.bind(favoriteScope)
+        }
         .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
             let expected = favoriteScope
             recordFavorites.bind(expected)
@@ -351,9 +398,33 @@ struct PlacesList: View {
         }
     }
 
+    private func pageTitle(_ page: ScopedPageFavorites.Page) -> String {
+        switch page.kind {
+        case .menu: MenuItem(rawValue: page.value).map { $0.sidebarTitle(title($0), localHeading: phoneHeading) } ?? ""
+        case .local: LocalWorkspaceSection(rawValue: page.value).map { "\($0.title) · \(phoneHeading)" } ?? ""
+        }
+    }
+
+    private func pageStar(_ page: ScopedPageFavorites.Page) -> some View {
+        let selected = pageFavorites.isBound(to: favoriteScope) && pageFavorites.pages.contains(page)
+        return Button { togglePage(page) } label: {
+            Image(systemName: selected ? "star.fill" : "star")
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(selected ? "Remove current page from favorites" : "Add current page to favorites")
+        .accessibilityIdentifier("\(idPrefix)-favorite-current-page")
+    }
+
     private func place(_ item: MenuItem, prefix: String? = nil) -> some View {
-        PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint,
-                 here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)") { openPlace(item) }
+        let page = ScopedPageFavorites.Page(kind: .menu, value: item.rawValue)
+        let selected = pageFavorites.isBound(to: favoriteScope) && pageFavorites.pages.contains(page)
+        return HStack(spacing: 0) {
+            PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint,
+                     here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)") { openPlace(item) }
+            if prefix == nil && isCurrent(item) { pageStar(page) }
+        }
+        .contextMenu { Button(selected ? "Remove page from favorites" : "Add page to favorites") { togglePage(page) } }
     }
 
     private func disclosureHeading(_ text: String, collapsed: Binding<Bool>, id: String, forceExpanded: Bool = false) -> some View {
@@ -379,8 +450,14 @@ struct PlacesList: View {
 
     @ViewBuilder private func localRows(_ local: [LocalWorkspaceSection]) -> some View {
         ForEach(local, id: \.self) { section in
-            PlaceRow(title: section.title, symbol: section.moreSymbol, tint: Theme.markGrey, here: isCurrentLocal(section),
-                     count: nil, id: "\(idPrefix)-local-\(section.rawValue)") { openLocal(section) }
+            let page = ScopedPageFavorites.Page(kind: .local, value: section.rawValue)
+            let selected = pageFavorites.isBound(to: favoriteScope) && pageFavorites.pages.contains(page)
+            HStack(spacing: 0) {
+                PlaceRow(title: section.title, symbol: section.moreSymbol, tint: Theme.markGrey, here: isCurrentLocal(section),
+                         count: nil, id: "\(idPrefix)-local-\(section.rawValue)") { openLocal(section) }
+                if isCurrentLocal(section) { pageStar(page) }
+            }
+            .contextMenu { Button(selected ? "Remove page from favorites" : "Add page to favorites") { togglePage(page) } }
         }
     }
 

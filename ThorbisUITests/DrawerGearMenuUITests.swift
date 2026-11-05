@@ -4,6 +4,39 @@ import XCTest
 /// screen), and the closed drawer staying out of the accessibility tree.
 @MainActor
 final class DrawerGearMenuUITests: XCTestCase {
+    func testCurrentPageCanBeFavoritedOpenedAndRemoved() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office"]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let star = app.buttons["\(prefix)-favorite-current-page"]
+        XCTAssertTrue(star.waitForExistence(timeout: 30))
+        XCTAssertGreaterThanOrEqual(star.frame.height, 44)
+        if star.label == "Remove current page from favorites" { star.tap() }
+        XCTAssertEqual(star.label, "Add current page to favorites")
+        star.tap()
+        XCTAssertEqual(star.label, "Remove current page from favorites")
+        let favorite = app.buttons["\(prefix)-favorite-page-menu|jobs"]
+        XCTAssertTrue(favorite.waitForExistence(timeout: 10))
+        let schedule = app.buttons["\(prefix)-schedule"]
+        XCTAssertTrue(schedule.waitForExistence(timeout: 10)); schedule.tap()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let disclosure = app.buttons["\(prefix)-favorites-disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
+        if disclosure.value as? String == "Expanded" { disclosure.tap() }
+        XCTAssertTrue(favorite.waitForNonExistence(timeout: 10))
+        let work = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(work.waitForExistence(timeout: 10)); work.tap()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        XCTAssertTrue(favorite.waitForExistence(timeout: 10), "An active saved page expands Favorites")
+        XCTAssertTrue(star.waitForExistence(timeout: 10))
+        XCTAssertEqual(star.label, "Remove current page from favorites")
+        star.tap()
+        XCTAssertTrue(favorite.waitForNonExistence(timeout: 10))
+    }
+
     func testCurrentJobCanBeAddedAndRemovedFromFavorites() {
         continueAfterFailure = false
         let app = XCUIApplication()

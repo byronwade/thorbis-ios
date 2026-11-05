@@ -97,6 +97,7 @@ final class APIClient: ObservableObject {
         didSet {
             if baseURL != oldValue {
                 ScopedRecordFavorites.shared.retireAPI(origin: Self.normalizedOrigin(oldValue), generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
+                ScopedPageFavorites.shared.retireAPI(origin: Self.normalizedOrigin(oldValue), generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
                 invalidateRequests()
             }
             #if DEBUG
@@ -115,6 +116,7 @@ final class APIClient: ObservableObject {
 
     func invalidateRequests() {
         ScopedRecordFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
+        ScopedPageFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
         requestGeneration = UUID()
         recentReads = [:]
         if !savedCopyPaths.isEmpty { savedCopyPaths = [:] }
@@ -129,6 +131,7 @@ final class APIClient: ObservableObject {
         didSet {
             if savedCopyScope != oldValue {
                 ScopedRecordFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
+                ScopedPageFavorites.shared.retireAPI(origin: normalizedOrigin, generation: requestGeneration, savedCopyRevision: savedCopyScopeRevision)
                 savedCopyScopeRevision = UUID()
             }
         }

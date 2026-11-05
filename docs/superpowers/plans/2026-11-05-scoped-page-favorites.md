@@ -1,0 +1,3 @@
+# Native page favorites
+
+Support favoriting the existing native sidebar destinations and device-local pages without removing pinned places or record favorites. Store only whitelisted native page identifiers, scoped by normalized API origin, actor and organization. Bind to the current session and authority epochs and filter by current reachable destinations when displaying or opening. Provide a visible star on the current destination and context actions on rows. Validate persistence, scope changes, unknown identifiers and permission loss; verify phone and iPad interaction before release. Web supports additional pages that have no native destination and remain out of scope until implemented.

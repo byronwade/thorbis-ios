@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-favorite-native-pages",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "star", title: "Save pages you use often",
+                      detail: "Star a page in the sidebar to find it again under Favorites."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-web-sidebar-workspaces",
             date: "2026-11-05",
             highlights: [
