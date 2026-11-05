@@ -46,6 +46,7 @@ struct JobDetailView: View {
     @State private var selectedTab = "Overview"
     /// True while the job is scrolled past the top of its sections (the tabs are pinned).
     @State private var tabsPinned = false
+    @State private var measuredSectionWidth: CGFloat = 0
     @StateObject private var documents = JobDocumentCollections()
     @State private var documentGeneration: UUID?
     private var invoiceRead: JobDocumentRead<InvoiceRecord>? { documents.invoices }
@@ -1059,12 +1060,15 @@ struct JobDetailView: View {
     }
 
     private func compactJobSections(_ job: JobRecord) -> some View {
-        ViewThatFits(in: .horizontal) {
-            jobSectionControl(job)
-                .frame(minWidth: 188, idealWidth: 188, maxWidth: .infinity)
-                .padding(.horizontal, Theme.gutter - 8)
-            jobSectionMenu(job)
+        Group {
+            if measuredSectionWidth >= 188 + 2 * (Theme.gutter - 8) {
+                jobSectionControl(job).padding(.horizontal, Theme.gutter - 8)
+            } else {
+                jobSectionMenu(job)
+            }
         }
+        .frame(maxWidth: .infinity)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measuredSectionWidth = $0 }
     }
 
     private func jobSectionControl(_ job: JobRecord) -> some View {
