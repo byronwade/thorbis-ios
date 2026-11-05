@@ -1,5 +1,4 @@
 import SwiftUI
-import ImageIO
 
 /// Owned above the app's session/navigation branches, so losing a job screen cannot
 /// reveal staff UI while a device is in customer hands.
@@ -114,14 +113,9 @@ final class CustomerPhotoHandoff: ObservableObject, Identifiable {
             let latest = try await api.customerPhotoMetadata(assetID)
             guard isCurrent, current == loadID, !Task.isCancelled else { throw CancellationError() }
             _ = try CustomerPhotoSelection(jobID: selection.jobID, organizationID: selection.organizationID, selectedIDs: [assetID]).validateFresh([latest])
-            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 2048]
-            guard let source = CGImageSourceCreateWithURL(file as CFURL, nil),
-                  let thumbnail = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                throw CustomerPhotoSelection.Invalid.records
-            }
+            let thumbnail = try await CustomerPhotoThumbnail.load(file)
             guard isCurrent, current == loadID, !Task.isCancelled else { throw CancellationError() }
-            image = UIImage(cgImage: thumbnail); loading = false
+            image = UIImage(cgImage: thumbnail.image); loading = false
         } catch {
             guard current == loadID else { return }
             image = nil; loading = false
