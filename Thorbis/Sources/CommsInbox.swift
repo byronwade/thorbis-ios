@@ -262,7 +262,10 @@ struct CommsInboxView: View {
                 ThorbisMenu(items: folders.map { item in
                     ThorbisMenuItem(item.title, icon: item.symbol, isSelected: item == folder) { folder = item }
                 }, accessibilityLabel: "Folder, \(folder.title)") {
-                    HStack(spacing: 4) {
+                    // The folder's icon keeps "Inbox" here from reading as a second title.
+                    HStack(spacing: 6) {
+                        Image(systemName: folder.symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                            .accessibilityHidden(true)
                         Text(folder.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
                         Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
                             .accessibilityHidden(true)
@@ -641,19 +644,24 @@ struct CommsAvatar: View {
         ZStack {
             Circle().fill(Theme.fill)
             if let initials {
-                Text(initials).font(Theme.font(size * 0.38, weight: .medium)).foregroundStyle(Theme.subtle)
+                // The circle is a fixed size, so its letters can't follow Dynamic Type past it
+                // or the channel badge covers them.
+                Text(initials).font(Theme.font(size * 0.36, weight: .medium)).foregroundStyle(Theme.subtle)
+                    .lineLimit(1).minimumScaleFactor(0.6)
+                    .dynamicTypeSize(...DynamicTypeSize.large)
+                    .offset(x: -1, y: -1)
             } else {
                 Image(systemName: "person.fill").font(.system(size: size * 0.42)).foregroundStyle(Theme.muted)
             }
         }
         .frame(width: size, height: size)
         .overlay(alignment: .bottomTrailing) {
-            Image(systemName: symbol).font(.system(size: size * 0.24, weight: .semibold))
+            Image(systemName: symbol).font(.system(size: size * 0.22, weight: .semibold))
                 .foregroundStyle(Theme.muted)
-                .frame(width: size * 0.46, height: size * 0.46)
+                .frame(width: size * 0.42, height: size * 0.42)
                 .background(Theme.card, in: Circle())
                 .overlay(Circle().stroke(Theme.background, lineWidth: 1.5))
-                .offset(x: 3, y: 3)
+                .offset(x: 5, y: 5)
         }
         .accessibilityHidden(true)
     }
