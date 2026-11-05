@@ -28,6 +28,64 @@ final class JobCommercialDocumentsTests: XCTestCase {
             currentOrigin: "https://one.example", currentSavedCopyRevision: UUID()))
     }
 
+    func testReturnedInvoiceStaysBoundThroughOrdinaryAuthorityRefresh() {
+        let session = UUID(), authority = UUID(), request = UUID(), copy = UUID()
+        let original = JobInvoiceCreationScope(actorID: "actor", organizationID: "org", sessionGeneration: session,
+                                               authorityRevision: authority, requestGeneration: request,
+                                               savedCopyRevision: copy, origin: "https://app.thorbis.com")
+        let refreshed = JobInvoiceCreationScope(actorID: "actor", organizationID: "org", sessionGeneration: session,
+                                                authorityRevision: UUID(), requestGeneration: request,
+                                                savedCopyRevision: copy, origin: original.origin)
+        XCTAssertNotEqual(original, refreshed)
+        XCTAssertTrue(original.sameIdentityAndTransport(as: refreshed),
+                      "A catalog refresh must not rebind a draft already returned by the write")
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(
+            actorID: "other", organizationID: "org", sessionGeneration: session, authorityRevision: authority,
+            requestGeneration: request, savedCopyRevision: copy, origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(
+            actorID: "actor", organizationID: "other", sessionGeneration: session, authorityRevision: authority,
+            requestGeneration: request, savedCopyRevision: copy, origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(
+            actorID: "actor", organizationID: "org", sessionGeneration: UUID(), authorityRevision: authority,
+            requestGeneration: request, savedCopyRevision: copy, origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(
+            actorID: "actor", organizationID: "org", sessionGeneration: session, authorityRevision: authority,
+            requestGeneration: UUID(), savedCopyRevision: copy, origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(
+            actorID: "actor", organizationID: "org", sessionGeneration: session, authorityRevision: authority,
+            requestGeneration: request, savedCopyRevision: UUID(), origin: original.origin)))
+        XCTAssertFalse(original.sameIdentityAndTransport(as: .init(
+            actorID: "actor", organizationID: "org", sessionGeneration: session, authorityRevision: authority,
+            requestGeneration: request, savedCopyRevision: copy, origin: "https://other.example")))
+    }
+
+    func testInvoiceRecoveryPromptRequiresInvoiceViewAndSurvivesAJobRead() {
+        let revision = UUID()
+        func prompt(actor: String? = "actor", organization: String? = "org",
+                    origin: String? = "https://one.example", savedCopy: UUID? = nil,
+                    canViewJob: Bool = true, canViewInvoice: Bool = true, jobMatches: Bool = true) -> Bool {
+            JobInvoiceRecoveryContext.canPromptRefresh(
+                actorID: actor, currentActorID: "actor",
+                organizationID: "org", currentOrganizationID: organization,
+                origin: "https://one.example", currentOrigin: origin,
+                savedCopyRevision: revision, currentSavedCopyRevision: savedCopy ?? revision,
+                canViewJob: canViewJob, canViewInvoice: canViewInvoice, jobMatches: jobMatches)
+        }
+        XCTAssertTrue(prompt())
+        XCTAssertFalse(prompt(canViewInvoice: false), "Refresh cannot surface an invoice the role can no longer view")
+        XCTAssertFalse(prompt(canViewJob: false))
+        XCTAssertFalse(prompt(actor: nil))
+        XCTAssertFalse(prompt(actor: "other"))
+        XCTAssertFalse(prompt(organization: "other"))
+        XCTAssertFalse(prompt(origin: "https://two.example"))
+        XCTAssertFalse(prompt(savedCopy: UUID()))
+        XCTAssertFalse(prompt(jobMatches: false))
+        XCTAssertEqual(JobInvoiceRecoveryContext.errorAfterVerifiedJobRead(JobInvoiceRecoveryContext.uncertainMessage),
+                       JobInvoiceRecoveryContext.uncertainMessage)
+        XCTAssertNil(JobInvoiceRecoveryContext.errorAfterVerifiedJobRead("Job could not be verified"))
+        XCTAssertNil(JobInvoiceRecoveryContext.errorAfterVerifiedJobRead(nil))
+    }
+
     func testDirectPaymentActionOnlyOffersFreshPayableInvoiceForThisJob() throws {
         let decoder = JSONDecoder()
         let first = try decoder.decode(InvoiceRecord.self, from: Data(invoice(50).utf8))

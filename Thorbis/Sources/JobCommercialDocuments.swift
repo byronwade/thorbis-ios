@@ -43,8 +43,49 @@ enum JobInvoiceReferences {
 
 /// A recovery hint belongs only to the API and saved-copy scope that received the request.
 enum JobInvoiceRecoveryContext {
+    static let uncertainMessage = "Invoice may have been created. Refresh this job to check."
+
     static func matches(origin: String?, savedCopyRevision: UUID, currentOrigin: String?, currentSavedCopyRevision: UUID) -> Bool {
         origin == currentOrigin && savedCopyRevision == currentSavedCopyRevision
+    }
+
+    /// Refresh can only surface the invoice when this role can still see the job and its invoices.
+    static func canPromptRefresh(
+        actorID: String?, currentActorID: String?,
+        organizationID: String, currentOrganizationID: String?,
+        origin: String?, currentOrigin: String?,
+        savedCopyRevision: UUID, currentSavedCopyRevision: UUID,
+        canViewJob: Bool, canViewInvoice: Bool, jobMatches: Bool
+    ) -> Bool {
+        actorID != nil && actorID == currentActorID && currentOrganizationID == organizationID &&
+            matches(origin: origin, savedCopyRevision: savedCopyRevision,
+                    currentOrigin: currentOrigin, currentSavedCopyRevision: currentSavedCopyRevision) &&
+            canViewJob && canViewInvoice && jobMatches
+    }
+
+    /// A verified job read must not hide an interrupted create that still needs a refresh.
+    static func errorAfterVerifiedJobRead(_ current: String?) -> String? {
+        current == uncertainMessage ? uncertainMessage : nil
+    }
+}
+
+/// Identity and transport at the completion-invoice write; a returned draft belongs only to this scope.
+struct JobInvoiceCreationScope: Equatable {
+    let actorID: String?
+    let organizationID: String?
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let requestGeneration: UUID
+    let savedCopyRevision: UUID
+    let origin: String?
+
+    /// Ordinary authority refresh may be rechecked, but must not rebind a returned draft.
+    func sameIdentityAndTransport(as other: Self) -> Bool {
+        actorID == other.actorID && organizationID == other.organizationID &&
+            sessionGeneration == other.sessionGeneration &&
+            requestGeneration == other.requestGeneration &&
+            savedCopyRevision == other.savedCopyRevision &&
+            origin == other.origin
     }
 }
 

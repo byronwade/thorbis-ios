@@ -420,6 +420,7 @@ struct JobDetailView: View {
             #endif
         }
         .refreshable {
+            if error == JobInvoiceRecoveryContext.uncertainMessage { error = nil }
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
                 if let job { await loadContacts(job) }
@@ -2579,6 +2580,7 @@ struct JobDetailView: View {
     /// Try again re-runs every load this page has attempted, so a failed invoice or estimate
     /// fetch is retried too, not just the job.
     private func retry() async {
+        if error == JobInvoiceRecoveryContext.uncertainMessage { error = nil }
         await load()
         if invoicesLoaded { await loadInvoices() }
         if estimatesLoaded, let job { await loadJobEstimates(job) }
@@ -2619,22 +2621,32 @@ struct JobDetailView: View {
         let apiGeneration = api.requestGeneration
         let copyRevision = api.savedCopyScopeRevision
         let origin = api.normalizedOrigin
+        let submitted = JobInvoiceCreationScope(
+            actorID: actorID, organizationID: scope.organizationID, sessionGeneration: generation,
+            authorityRevision: authority, requestGeneration: apiGeneration, savedCopyRevision: copyRevision,
+            origin: origin)
         let current: @MainActor () -> Bool = {
-            !Task.isCancelled && session.user?.id == actorID && session.generation == generation &&
-                session.authorityRevision == authority && api.requestGeneration == apiGeneration &&
-                api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
-                session.activeOrganization?.id == scope.organizationID &&
-                session.can("job.view", feature: "jobs") && session.can("invoice.create", feature: "invoicing") &&
+            !Task.isCancelled &&
+                submitted.sameIdentityAndTransport(as: .init(
+                    actorID: session.user?.id, organizationID: session.activeOrganization?.id,
+                    sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                    requestGeneration: api.requestGeneration, savedCopyRevision: api.savedCopyScopeRevision,
+                    origin: api.normalizedOrigin)) &&
+                session.can("job.view", feature: "jobs") &&
                 self.job.map { self.scope(for: $0) == scope } == true
         }
         let reportUncertain: @MainActor () -> Void = {
-            guard !Task.isCancelled, let actorID, session.user?.id == actorID,
-                  session.activeOrganization?.id == scope.organizationID,
-                  JobInvoiceRecoveryContext.matches(origin: origin, savedCopyRevision: copyRevision,
-                      currentOrigin: api.normalizedOrigin, currentSavedCopyRevision: api.savedCopyScopeRevision),
-                  session.can("job.view", feature: "jobs"),
-                  self.job.map({ self.scope(for: $0) == scope }) == true else { return }
-            self.error = "Invoice may have been created. Refresh this job to check."
+            guard !Task.isCancelled,
+                  JobInvoiceRecoveryContext.canPromptRefresh(
+                      actorID: actorID, currentActorID: session.user?.id,
+                      organizationID: scope.organizationID, currentOrganizationID: session.activeOrganization?.id,
+                      origin: origin, currentOrigin: api.normalizedOrigin,
+                      savedCopyRevision: copyRevision, currentSavedCopyRevision: api.savedCopyScopeRevision,
+                      canViewJob: session.can("job.view", feature: "jobs"),
+                      canViewInvoice: session.can("invoice.view", feature: "invoicing"),
+                      jobMatches: self.job.map({ self.scope(for: $0) == scope }) == true)
+            else { return }
+            self.error = JobInvoiceRecoveryContext.uncertainMessage
         }
         do {
             #if DEBUG
@@ -2750,7 +2762,7 @@ struct JobDetailView: View {
             guard session.generation == generation else { return }
             notes = loadedNotes
             JobDetailCache.save(notes: loadedNotes, jobID: jobId)
-            error = nil
+            error = JobInvoiceRecoveryContext.errorAfterVerifiedJobRead(error)
             await loadBrief()
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
@@ -2758,7 +2770,7 @@ struct JobDetailView: View {
                 // No signal: the last copy of this job, or what the schedule already knows.
                 if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
                 if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
-                if job != nil { self.error = nil; return }
+                if job != nil { self.error = JobInvoiceRecoveryContext.errorAfterVerifiedJobRead(self.error); return }
             }
             self.error = error.localizedDescription
         }
