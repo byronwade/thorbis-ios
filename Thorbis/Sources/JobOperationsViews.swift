@@ -1065,25 +1065,32 @@ struct JobFollowUpsView: View {
         let meta = [record.kind.statusLabel,
                     record.scheduling.map { $0.appointment != nil ? "Visit booked" : "Waiting for office review" }]
             .compactMap { $0 }.joined(separator: " · ")
-        // The status and the menu sit beside the reason only; the next step and the meta take the row's
-        // full width, so "Next:" isn't squeezed into a column beside an empty gutter.
+        let stacked = typeSize.isAccessibilitySize
+        let heading = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+        // The status and the menu sit beside the reason only at standard sizes; the next step and
+        // the meta take the row's full width, so "Next:" isn't squeezed into a column beside an
+        // empty gutter. At accessibility sizes they stack under the reason so a long return-visit
+        // reason isn't a thin wrapping column beside the status word and the 44pt menu.
         return VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            heading {
                 Text(record.reason).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                StatusWord(text: record.status.statusLabel, tint: record.status == "open" ? Theme.warning : Theme.success)
-                if !actions.isEmpty {
-                    ThorbisMenu(items: actions, accessibilityLabel: "Follow-up actions") {
-                        Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                            .frame(width: 44, height: 32).contentShape(Rectangle())
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    StatusWord(text: record.status.statusLabel, tint: record.status == "open" ? Theme.warning : Theme.success)
+                    if !actions.isEmpty {
+                        ThorbisMenu(items: actions, accessibilityLabel: "Follow-up actions") {
+                            Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                                .frame(width: 44, height: 32).contentShape(Rectangle())
+                        }
+                        .padding(.trailing, -12)
                     }
-                    .padding(.trailing, -12)
                 }
             }
             Text("Next: \(record.nextAction)").font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                .lineLimit(typeSize.isAccessibilitySize ? nil : 3)
+                .lineLimit(stacked ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
             if !meta.isEmpty {
                 Text(meta).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 1)
