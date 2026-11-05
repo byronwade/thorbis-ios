@@ -302,7 +302,7 @@ struct OwnerHomeView: View {
                     NavigationLink(value: PaperRoute.revenue) {
                         moneyRow(symbol: "arrow.down.circle", tint: Theme.markForest,
                                  title: "Collected in \(Self.monthName(month.month))",
-                                 subtitle: "Month so far · from Reports",
+                                 subtitle: "Month so far",
                                  amount: money(month.collected, currency: "USD"))
                     }.buttonStyle(RowPressStyle())
                 }
