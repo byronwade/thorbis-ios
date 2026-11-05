@@ -67,6 +67,17 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertFalse(limited.groups.first?.expanded ?? true, "A lone child is rendered directly")
     }
 
+    func testWebSidebarProjectionOmitsPinnedPlaces() {
+        let technician = sections(.technician, pins: [.inbox, .estimates], explicit: true)
+        XCTAssertEqual(technician.sections.first?.places, [.inbox, .estimates])
+        let projection = WebSidebarProjection.make(sections: technician, current: .inbox)
+        XCTAssertFalse(projection.personal.contains(.inbox), "A pinned personal place stays in Favorites only")
+        XCTAssertFalse(projection.groups.contains { $0.items.contains(.estimates) }, "A pinned workspace place stays in Favorites only")
+        XCTAssertTrue(projection.personal.contains(.schedule))
+        XCTAssertTrue(projection.groups.contains { $0.items.contains(.jobs) })
+        XCTAssertFalse(projection.groups.contains { $0.expanded }, "A pin being current does not expand its former group")
+    }
+
     /// A role's permissions, as the server grants them, by place.
     private func permitted(_ role: WorkRole) -> (MenuItem) -> Bool {
         switch role {

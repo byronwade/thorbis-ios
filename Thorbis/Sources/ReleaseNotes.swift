@@ -13,6 +13,16 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-menu-favorites-once",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "star", title: "See each place once",
+                      detail: "A pinned place stays in Favorites and is not listed again in its group."),
+                .init(symbol: "star", title: "Favorites stay visible",
+                      detail: "Favorite jobs and customers stay listed when you open the menu again."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-web-sidebar-workspaces",
             date: "2026-11-05",
             highlights: [

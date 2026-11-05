@@ -125,6 +125,12 @@ struct WebSidebarProjection {
         }
         return Self(personal: personal, groups: groups)
     }
+
+    /// Pinned destinations stay in Favorites; they are not listed again in personal or workspace groups.
+    static func make(sections: DrawerSections, current: MenuItem?) -> Self {
+        let pinned = Set(sections.sections.first { $0.kind == .pinned }?.places ?? [])
+        return make(places: sections.places.filter { !pinned.contains($0) }, current: current)
+    }
 }
 
 /// What a place row says at its trailing edge: a count in tabular figures, or the accent dot.
@@ -277,9 +283,9 @@ struct PlacesList: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            let projection = WebSidebarProjection.make(places: sections.places, current: sections.places.first(where: isCurrent))
-            ForEach(projection.personal) { item in place(item) }
             let pins = sections.sections.first(where: { $0.kind == .pinned })?.places ?? []
+            let projection = WebSidebarProjection.make(sections: sections, current: sections.places.first(where: isCurrent))
+            ForEach(projection.personal) { item in place(item) }
             let hasSavedRecords = recordFavorites.isBound(to: favoriteScope) && !recordFavorites.entries.isEmpty
             if !pins.isEmpty || hasSavedRecords {
                 disclosureHeading("Favorites", collapsed: $favoritesCollapsed, id: "favorites", forceExpanded: pins.contains(where: isCurrent))

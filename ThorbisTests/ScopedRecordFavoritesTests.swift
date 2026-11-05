@@ -173,4 +173,19 @@ final class ScopedRecordFavoritesTests: XCTestCase {
         gate.release(); await task.value
         XCTAssertTrue(model.visible.isEmpty)
     }
+
+    func testUnchangedRemountRefreshKeepsAlreadyAuthorizedTitles() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, job(jobID)), .init(200, job(jobID), gate: gate)]), baseURL: "https://app.thorbis.com")
+        let model = ScopedRecordFavorites(defaults: defaults())
+        model.bind(scope(api)); XCTAssertTrue(model.toggle(.job, id: jobID))
+        await model.refresh(api: api, canOpen: { _ in true }, isCurrent: { true })
+        XCTAssertEqual(model.visible.map(\.title), ["Private job"])
+        let task = Task { await model.refresh(api: api, canOpen: { _ in true }, isCurrent: { true }) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(model.visible.map(\.title), ["Private job"], "A remount refresh must not wipe already-authorized titles")
+        gate.release(); await task.value
+        XCTAssertEqual(model.visible.map(\.title), ["Private job"])
+    }
 }
