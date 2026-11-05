@@ -401,10 +401,10 @@ struct CommsInboxView: View {
     private func localRow(_ thread: CommsLocalThread) -> some View {
         let swipe = swipeActions(thread.id, name: thread.contactName)
         return RowSwipeContainer(id: thread.id, leading: swipe.leading, trailing: swipe.trailing, state: swipes) {
-            Button { open = .local(thread.id) } label: { CommsLocalRow(thread: thread) }
+            Button { open = .local(thread.id) } label: { CommsLocalRow(thread: thread, folder: folder) }
                 .buttonStyle(RowPressStyle())
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel([thread.contactName, thread.channel == .email ? "Email" : "Text", thread.line,
+                .accessibilityLabel([thread.contactName, thread.channel == .email ? "Email" : "Text", thread.line(in: folder),
                                      JobFiltering.date(thread.latestAt)?.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)),
                                      thread.flags.starredAt != nil ? "Starred" : nil,
                                      thread.unread ? "Unread" : nil].compactMap { $0 }.joined(separator: ", "))
@@ -611,9 +611,9 @@ struct CommsThreadRow: View {
                     Circle().fill(unread ? Theme.brand : .clear).frame(width: 7, height: 7)
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                 }
-                let lineLayout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                         : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-                lineLayout {
+                // The status word sits under the line, not beside it, so a voicemail's words get
+                // the full width instead of half of it.
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Image(systemName: lead.kind.symbol).font(.system(size: 12, weight: .medium))
                             .foregroundStyle(lead.kind == .missed || lead.kind == .dropped ? Theme.destructive : Theme.muted)
@@ -623,7 +623,7 @@ struct CommsThreadRow: View {
                             .lineLimit(stacked ? 4 : 2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(maxWidth: stacked ? nil : .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     if let alert {
                         StatusLabel(tone: lead.kind == .voicemail ? .dispatched : .attention, word: alert, emphasis: .quiet)
                             .fixedSize()
@@ -675,6 +675,7 @@ struct CommsAvatar: View {
 /// an email's subject. Ours and unsent says so ("Draft:", "Queued:").
 struct CommsLocalRow: View {
     let thread: CommsLocalThread
+    var folder: CommsFolder = .inbox
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -698,7 +699,7 @@ struct CommsLocalRow: View {
                     Circle().fill(thread.unread ? Theme.brand : .clear).frame(width: 7, height: 7)
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                 }
-                Text(thread.line).font(Theme.font(14))
+                Text(thread.line(in: folder)).font(Theme.font(14))
                     .foregroundStyle(thread.unread ? Theme.foreground : Theme.muted)
                     .lineLimit(stacked ? 4 : 2)
                     .fixedSize(horizontal: false, vertical: true)
