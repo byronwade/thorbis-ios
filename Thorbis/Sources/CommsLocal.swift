@@ -114,6 +114,15 @@ struct CommsLocalThread: Codable, Identifiable, Equatable {
         case .queued: return "Queued: \(latest.body)"
         }
     }
+
+    /// In Drafts a text row leads with the draft itself, so you can tell which one you're opening.
+    func line(in folder: CommsFolder) -> String {
+        guard folder == .drafts, channel == .sms else { return line }
+        let typed = (composing ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return "Draft: \(typed)" }
+        if let draft = messages.last(where: { $0.status == .draft }) { return "Draft: \(draft.body)" }
+        return line
+    }
 }
 
 /// A saved reply (web CannedReply), kept on this device.

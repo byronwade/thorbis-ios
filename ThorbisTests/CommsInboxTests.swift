@@ -254,4 +254,18 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertEqual(CommsCallSeen(defaults: defaults, actorID: "a", organizationID: "o").ids, ["x"])
         XCTAssertTrue(CommsCallSeen(defaults: defaults, actorID: "b", organizationID: "o").ids.isEmpty)
     }
+
+    func testDraftsRowLeadsWithTheDraft() {
+        let received = CommsLocalMessage(id: "1", channel: .sms, direction: .outbound, at: "2026-11-05T07:04:00Z",
+                                         body: "Confirming tomorrow 9-11.", status: .draft)
+        let reply = CommsLocalMessage(id: "2", channel: .sms, direction: .inbound, at: "2026-11-05T09:32:00Z",
+                                      body: "Thanks!", status: .received)
+        var thread = CommsLocalThread(id: "t", contactName: "Dana", phone: "5550100", channel: .sms, unread: false,
+                                      flags: CommsThreadFlags(), messages: [received, reply], composing: nil)
+        XCTAssertEqual(thread.line, "Thanks!")
+        XCTAssertEqual(thread.line(in: .inbox), "Thanks!")
+        XCTAssertEqual(thread.line(in: .drafts), "Draft: Confirming tomorrow 9-11.")
+        thread.composing = "On my way"
+        XCTAssertEqual(thread.line(in: .drafts), "Draft: On my way")
+    }
 }
