@@ -11,12 +11,14 @@ final class CommsInboxScreenshotUITests: XCTestCase {
                           "Set TEST_RUNNER_INBOX_SHOTS_DIR to capture the Inbox screenshots.")
     }
 
-    private func capture(_ name: String, _ arguments: [String], wait identifier: String? = nil, text: String? = nil) {
+    private func capture(_ name: String, _ arguments: [String], wait identifier: String? = nil, text: String? = nil,
+                         then step: ((XCUIApplication) -> Void)? = nil) {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "inbox"] + arguments
         app.launch()
         if let identifier { _ = app.descendants(matching: .any)[identifier].waitForExistence(timeout: 30) }
         if let text { _ = app.staticTexts[text].firstMatch.waitForExistence(timeout: 30) }
+        step?(app)
         sleep(2)
         let shot = app.screenshot()
         let attachment = XCTAttachment(screenshot: shot)
@@ -51,5 +53,18 @@ final class CommsInboxScreenshotUITests: XCTestCase {
         capture("xxxl-calls", ["-thorbis.appearance", "light", "--paper-preview-inbox-section", "calls"] + big, wait: "inbox-section-menu")
         capture("xxxl-call-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "calls"] + big, text: "Incoming call")
         capture("xxxl-text-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "text"] + big, wait: "inbox-text-field")
+    }
+
+    /// The New text and New email sheets, opened from the pencil on Texts and Email.
+    func testComposeSheets() {
+        for (section, label) in [("texts", "New text"), ("email", "New email")] {
+            for (mode, extra) in [("light", [String]()), ("xxxl", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])] {
+                capture("\(mode)-compose-\(section)", ["-thorbis.appearance", "light", "--paper-preview-inbox-section", section] + extra,
+                        wait: "inbox-section-menu") { app in
+                    let pencil = app.buttons[label].firstMatch
+                    if pencil.waitForExistence(timeout: 10) { pencil.tap() }
+                }
+            }
+        }
     }
 }
