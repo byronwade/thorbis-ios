@@ -921,6 +921,7 @@ struct JobScheduleView: View {
 }
 
 struct JobFollowUpsView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let jobID: String
     /// The job screen's Return visit tool opens the form already on "Schedule a return visit".
     init(jobID: String, initialKind: FieldFollowUpRequest.Kind = .notifyOffice) {
@@ -1064,18 +1065,33 @@ struct JobFollowUpsView: View {
         let meta = [record.kind.statusLabel,
                     record.scheduling.map { $0.appointment != nil ? "Visit booked" : "Waiting for office review" }]
             .compactMap { $0 }.joined(separator: " · ")
-        return HStack(alignment: .top, spacing: 0) {
-            PaperListRow(title: record.reason, subtitle: "Next: \(record.nextAction)", meta: meta, subtitleLines: 3) {
+        // The status and the menu sit beside the reason only; the next step and the meta take the row's
+        // full width, so "Next:" isn't squeezed into a column beside an empty gutter.
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(record.reason).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 StatusWord(text: record.status.statusLabel, tint: record.status == "open" ? Theme.warning : Theme.success)
-            }
-            if !actions.isEmpty {
-                ThorbisMenu(items: actions, accessibilityLabel: "Follow-up actions") {
-                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                if !actions.isEmpty {
+                    ThorbisMenu(items: actions, accessibilityLabel: "Follow-up actions") {
+                        Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                            .frame(width: 44, height: 32).contentShape(Rectangle())
+                    }
+                    .padding(.trailing, -12)
                 }
-                .padding(.trailing, 4).padding(.top, 4)
+            }
+            Text("Next: \(record.nextAction)").font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+            if !meta.isEmpty {
+                Text(meta).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 1)
             }
         }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     private func load() async {
