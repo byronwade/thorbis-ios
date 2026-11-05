@@ -4,6 +4,37 @@ import XCTest
 /// screen), and the closed drawer staying out of the accessibility tree.
 @MainActor
 final class DrawerGearMenuUITests: XCTestCase {
+    func testTopNewMenuOpensPermittedCustomerCreate() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office"]
+        app.launch(); app.openDrawer()
+        let new = app.buttons["drawer-new-menu"]
+        XCTAssertGreaterThanOrEqual(new.frame.height, 44)
+        new.tap()
+        let customer = app.buttons.matching(NSPredicate(format: "label == %@", "New customer")).firstMatch
+        XCTAssertTrue(customer.waitForExistence(timeout: 5)); customer.tap()
+        XCTAssertTrue(app.staticTexts["New customer"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.scrollViews["drawer-rows"].exists, "The drawer closes before the sheet opens")
+    }
+
+    func testTopWorkspaceMenuOpensSettings() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch(); app.openDrawer()
+        let workspace = app.buttons["drawer-workspace-menu"]
+        XCTAssertGreaterThanOrEqual(workspace.frame.height, 44)
+        workspace.tap()
+        let settings = app.buttons.matching(NSPredicate(format: "label == %@", "Settings")).firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 5)); settings.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.scrollViews["drawer-rows"].exists)
+    }
+
     func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
         continueAfterFailure = false
         let app = XCUIApplication()
