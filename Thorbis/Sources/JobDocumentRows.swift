@@ -176,8 +176,8 @@ extension JobDocumentRow {
         self.symbol = "doc.text"
     }
 
-    init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false) {
-        reference = "INV-\(invoice.id.suffix(4).uppercased())"
+    init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false, invoiceReference: String? = nil) {
+        reference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
         title = invoice.origin == "estimate_deposit" ? "Deposit" : "Invoice"
         status = invoice.status
         amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }
