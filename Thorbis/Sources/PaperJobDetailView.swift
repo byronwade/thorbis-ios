@@ -1969,6 +1969,14 @@ struct JobDetailView: View {
 
     private func invoiceContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 15) {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") {
+                Text("Create requests: \(PaperPreviewProtocol.sampleCompletionCreates)")
+                    .accessibilityIdentifier("preview-create-invoice-count")
+                Text(creatingInvoice ? "Pending" : "Finished")
+                    .accessibilityIdentifier("preview-create-invoice-state")
+            }
+            #endif
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
@@ -1979,12 +1987,13 @@ struct JobDetailView: View {
                     if session.can("invoice.create", feature: "invoicing") || (job.estimateId != nil && session.can("invoice.create", feature: "progress_billing")) {
                         JobPanel {
                             if session.can("invoice.create", feature: "invoicing") {
-                                Button { Task { await createInvoice() } } label: {
+                                Button { run(.createInvoice) } label: {
                                     PaperMenuRow(creatingInvoice ? "Creating…" : "Create invoice", symbol: "doc.plaintext",
                                                  subtitle: "Lines come from the approved estimate; edit them before sending")
                                         .padding(.horizontal, 16)
                                 }
                                 .buttonStyle(RowPressStyle())
+                                .accessibilityIdentifier("job-create-invoice")
                                 .disabled(creatingInvoice)
                             }
                             if job.estimateId != nil, session.can("invoice.create", feature: "progress_billing") {
@@ -2504,7 +2513,10 @@ struct JobDetailView: View {
         case .createInvoice:
             Task {
                 // TF-08: one tap makes the invoice from the approved work and opens it for review.
-                if let invoice = await createInvoice() { reviewInvoiceID = invoice.id }
+                if let invoice = await createInvoice(), session.can("invoice.view", feature: "invoicing"),
+                   let job, let scope = scope(for: job), scope.contains(invoice) {
+                    reviewInvoiceID = invoice.id
+                }
             }
         case .reviewInvoice(let id): reviewInvoiceID = id
         case .collect(let invoiceID, _, _):
@@ -2602,18 +2614,51 @@ struct JobDetailView: View {
         creatingInvoice = true
         defer { creatingInvoice = false }
         let generation = session.generation
+        let authority = session.authorityRevision
+        let actorID = session.user?.id
+        let apiGeneration = api.requestGeneration
+        let copyRevision = api.savedCopyScopeRevision
+        let origin = api.normalizedOrigin
+        let current: @MainActor () -> Bool = {
+            !Task.isCancelled && session.user?.id == actorID && session.generation == generation &&
+                session.authorityRevision == authority && api.requestGeneration == apiGeneration &&
+                api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
+                session.activeOrganization?.id == scope.organizationID &&
+                session.can("job.view", feature: "jobs") && session.can("invoice.create", feature: "invoicing") &&
+                self.job.map { self.scope(for: $0) == scope } == true
+        }
+        let reportUncertain: @MainActor () -> Void = {
+            guard !Task.isCancelled, let actorID, session.user?.id == actorID,
+                  session.activeOrganization?.id == scope.organizationID,
+                  session.can("job.view", feature: "jobs"),
+                  self.job.map({ self.scope(for: $0) == scope }) == true else { return }
+            self.error = "Invoice may have been created. Refresh this job to check."
+        }
         do {
             let invoice = try await api.ensureFieldCompletionInvoice(jobId)
-            guard session.generation == generation, session.activeOrganization?.id == scope.organizationID else { return nil }
+            guard current() else { reportUncertain(); return nil }
             guard scope.contains(invoice) else {
                 throw Problem(title: "Invoice could not be verified for this job", status: nil, detail: nil)
             }
             JobInvoiceMemory.remember(invoice.id, jobID: jobId)
             selectedInvoiceID = invoice.id
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invalidate-refresh") {
+                api.invalidateRequests()
+            }
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-revoke-view") {
+                PaperPreviewProtocol.revokeInvoiceViewForCreate()
+                await session.revalidate()
+            }
+            #endif
             await loadInvoices()
+            guard current() else { reportUncertain(); return nil }
             committed += 1
             return invoice
-        } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }
+        } catch is CancellationError { return nil } catch {
+            if current() { self.error = error.localizedDescription }
+            return nil
+        }
     }
 
     private func finishCustomerDocuments() async {
