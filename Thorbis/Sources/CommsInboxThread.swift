@@ -858,6 +858,7 @@ struct CommsComposeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var phone = ""
     @State private var name = ""
+    @FocusState private var phoneFocused: Bool
 
     var body: some View {
         switch kind {
@@ -868,6 +869,7 @@ struct CommsComposeSheet: View {
                 PaperFormField("Phone number") {
                     TextField("Phone number", text: $phone, prompt: .placeholder("(555) 010-0100"))
                         .keyboardType(.phonePad).textContentType(.telephoneNumber).font(Theme.font(16)).fieldWell()
+                        .focused($phoneFocused)
                         .accessibilityIdentifier("inbox-new-text-phone")
                 }
                 PaperFormField("Name", note: "Optional") {
@@ -884,6 +886,8 @@ struct CommsComposeSheet: View {
                 .disabled(!ready)
             }
             .thorbisSheetPresentation([.medium, .large])
+            // Opened to text someone: the number is the first thing to type.
+            .task { try? await Task.sleep(for: .milliseconds(400)); phoneFocused = true }
         }
     }
 }
@@ -937,6 +941,7 @@ struct CommsMailSheet: View {
     let onSaved: (String) -> Void
     let onClose: () -> Void
     @State private var showCopies = false
+    @FocusState private var toFocused: Bool
 
     var body: some View {
         let ready = !draft.mail.to.isEmpty
@@ -945,6 +950,7 @@ struct CommsMailSheet: View {
                 TextField("To", text: $draft.to, prompt: .placeholder("name@example.com"))
                     .keyboardType(.emailAddress).textContentType(.emailAddress).textInputAutocapitalization(.never)
                     .autocorrectionDisabled().font(Theme.font(16)).fieldWell()
+                    .focused($toFocused)
                     .accessibilityIdentifier("inbox-mail-to")
             }
             if showCopies || !draft.cc.isEmpty || !draft.bcc.isEmpty {
@@ -966,7 +972,7 @@ struct CommsMailSheet: View {
                 .buttonStyle(PressStyle())
             }
             PaperFormField("Subject") {
-                TextField("Subject", text: $draft.subject, prompt: .placeholder("Subject")).font(Theme.font(16)).fieldWell()
+                TextField("Subject", text: $draft.subject, prompt: .placeholder("What it\u{2019}s about")).font(Theme.font(16)).fieldWell()
             }
             PaperFormField("Message") {
                 TextField("Message", text: $draft.body, prompt: .placeholder("Write your email"), axis: .vertical)
@@ -990,6 +996,12 @@ struct CommsMailSheet: View {
             }
         }
         .thorbisSheetPresentation([.large])
+        // A new email starts at To; a reply or a saved draft already has one.
+        .task {
+            guard draft.to.isEmpty else { return }
+            try? await Task.sleep(for: .milliseconds(400))
+            toFocused = true
+        }
     }
 
     private func commit(send: Bool) {
