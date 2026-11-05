@@ -313,11 +313,11 @@ struct JobDetailView: View {
             }
         } }
         .thorbisDestination(item: $documentInvoiceID) { id in
-            InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) })
+            InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $reviewInvoiceID) { id in
-            InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) })
+            InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $openEstimate) { opened in

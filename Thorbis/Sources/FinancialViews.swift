@@ -480,6 +480,8 @@ struct InvoiceDetailView: View {
     /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
     var returnsWhenPaid = false
     var expectedJobScope: JobDocumentScope? = nil
+    /// The job-scoped label is display only; the full id still controls every read and payment.
+    var invoiceReference: String? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
@@ -535,7 +537,7 @@ struct InvoiceDetailView: View {
                     // now at 30pt; the quiet properties; the lines with their totals; then payments.
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                     let due = max(total - record.amountPaid, 0)
-                    EvidenceHeader(title: "Invoice \(record.id.suffix(4).uppercased())", status: DocumentStatus(invoice: record),
+                    EvidenceHeader(title: "Invoice \(displayReference(record).dropFirst(4))", status: DocumentStatus(invoice: record),
                                    figureLabel: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
                                    cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency,
                                    statusIdentifier: "invoice-chip-status", titleIdentifier: "invoice-detail-title")
@@ -701,7 +703,7 @@ struct InvoiceDetailView: View {
         }
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
-                InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
+                InvoicePaymentCollectionSheet(model: paymentModel, invoice: record, invoiceReference: displayReference(record))
                     .thorbisSheetSurface()
                     .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -738,8 +740,12 @@ struct InvoiceDetailView: View {
                 EvidenceProperty(label: "Financing",
                                  value: "\(words) · \(money(application.amount.amount, currency: application.amount.currency))")
             }
-            EvidenceProperty(label: "Reference", value: "INV-\(record.id.suffix(4).uppercased())")
+            EvidenceProperty(label: "Reference", value: displayReference(record))
         }
+    }
+
+    private func displayReference(_ invoice: InvoiceRecord) -> String {
+        invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
     }
 
     /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
