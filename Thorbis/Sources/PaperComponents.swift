@@ -642,6 +642,17 @@ extension EnvironmentValues {
     }
 }
 
+private struct PaperPushedDrawerKey: EnvironmentKey {
+    static let defaultValue: PaperDrawerControl? = nil
+}
+extension EnvironmentValues {
+    /// The staff drawer for pushed phone screens. Customer mode explicitly clears it.
+    var paperPushedDrawer: PaperDrawerControl? {
+        get { self[PaperPushedDrawerKey.self] }
+        set { self[PaperPushedDrawerKey.self] = newValue }
+    }
+}
+
 private struct PaperShowMenuKey: EnvironmentKey {
     static let defaultValue: @Sendable () -> Void = {}
 }

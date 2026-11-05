@@ -4,6 +4,34 @@ import XCTest
 /// screen), and the closed drawer staying out of the accessibility tree.
 @MainActor
 final class DrawerGearMenuUITests: XCTestCase {
+    func testPushedJobHasDrawerAndBackSwipeAndCustomerModeHasNoDrawer() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002214"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved",
+                               "--paper-preview-drawer-open"]
+        app.launch()
+        let recent = app.buttons["drawer-recent-\(id)"]
+        XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 30))
+        for _ in 0..<8 where !recent.isHittable { app.scrollViews["drawer-rows"].swipeUp() }
+        XCTAssertTrue(recent.waitForExistence(timeout: 10)); recent.tap()
+        let door = app.buttons["job-customer-view"]
+        XCTAssertTrue(door.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["drawer-menu"].isHittable)
+        XCTAssertTrue(app.navigationBars.buttons["Back"].isHittable)
+        door.tap()
+        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["drawer-menu"].exists, "Customer mode must not expose staff navigation")
+        app.buttons["customer-mode-owner-exit"].firstMatch.tap()
+        XCTAssertTrue(door.waitForExistence(timeout: 15))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: end)
+        XCTAssertTrue(app.buttons["drawer-menu"].waitForExistence(timeout: 10))
+        XCTAssertFalse(door.exists, "Edge swipe returns to the job list")
+    }
     func testCurrentJobCanBeAddedAndRemovedFromFavorites() {
         continueAfterFailure = false
         let app = XCUIApplication()

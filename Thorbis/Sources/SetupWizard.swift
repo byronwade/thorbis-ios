@@ -346,7 +346,7 @@ struct SetupWizardView: View {
                 factField("email_sender_name", "Name on emails", placeholder: "Wade Plumbing")
                 factField("email_sender_address", "Replies go to", placeholder: "office@company.com")
                 if session.can("organization.settings.edit", feature: "job_booking_notices") {
-                    NavigationLink { NoticeSettingsView() } label: {
+                    NavigationLink { NoticeSettingsView().thorbisBackButton() } label: {
                         PaperMenuRow("Who hears about jobs", symbol: "bell.badge", subtitle: "Email and in-app alerts for booked, changed and canceled jobs")
                     }
                     .buttonStyle(RowPressStyle())

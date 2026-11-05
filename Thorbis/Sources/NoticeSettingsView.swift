@@ -81,7 +81,7 @@ struct NoticeSettingsView: View {
                         }
                     }
                     PaperGroupHeader(title: "History").padding(.top, 6)
-                    NavigationLink { NoticeDeliveryLogView() } label: {
+                    NavigationLink { NoticeDeliveryLogView().thorbisBackButton() } label: {
                         PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
                     }
                     .buttonStyle(RowPressStyle())

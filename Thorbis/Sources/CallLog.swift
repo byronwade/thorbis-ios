@@ -83,7 +83,7 @@ struct CallLogList: View {
                     NavigationLink {
                         CallDetailView(callID: call.id) { updated in
                             if let index = calls.firstIndex(where: { $0.id == updated.id }) { calls[index] = updated }
-                        }
+                        }.thorbisBackButton()
                     } label: { row(call) }
                     .buttonStyle(PressStyle())
                 }

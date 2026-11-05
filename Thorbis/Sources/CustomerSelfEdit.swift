@@ -396,6 +396,7 @@ struct CustomerModeContainer<Content: View>: View {
         .environment(\.customerModeUnlock, { await unlock() })
         // Customers never get the staff drawer, even on screens pushed inside customer mode.
         .environment(\.paperDrawer, nil)
+        .environment(\.paperPushedDrawer, nil)
 
         #if DEBUG
         .overlay {

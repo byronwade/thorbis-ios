@@ -28,15 +28,21 @@ struct ThorbisBackButton: View {
 
 private struct ThorbisBackButtonModifier: ViewModifier {
     let isEnabled: Bool
+    @Environment(\.paperPushedDrawer) private var drawer
+    @Environment(\.thorbisSheetCanvas) private var inSheet
 
-    /// Pushed screens keep Back alone (C-Job.dc.html): the drawer lives on the place's root, one
-    /// Back or edge swipe away, so the bar never stacks two circles at its leading edge.
+    /// Staff can open the drawer without leaving a pushed screen. Sheets keep their own navigation.
     func body(content: Content) -> some View {
         if isEnabled {
             content
                 .navigationBarBackButtonHidden(true)
                 .toolbar {
-                    ThorbisToolbarItem(placement: .topBarLeading) { ThorbisBackButton() }
+                    ThorbisToolbarItem(placement: .topBarLeading) {
+                        HStack(spacing: 8) {
+                            if let drawer, !inSheet { DrawerMenuCircle(control: drawer) }
+                            ThorbisBackButton()
+                        }
+                    }
                 }
         } else {
             content
