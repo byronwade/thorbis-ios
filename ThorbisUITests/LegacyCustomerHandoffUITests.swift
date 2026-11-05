@@ -44,6 +44,8 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         XCTAssertTrue(menu.waitForExistence(timeout: 20)); menu.tap()
         let show = app.buttons["Customer view"].firstMatch
         XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
+        let state = app.staticTexts["preview-legacy-owner-state"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Legacy active"), object: state)], timeout: 10), .completed, "The customer handoff must be claimed")
         XCTAssertTrue(app.buttons["lock"].waitForExistence(timeout: 20), "Customer view must open from an invoice sheet too")
     }
 
