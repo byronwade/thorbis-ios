@@ -90,6 +90,20 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(identity.label.contains("INV-12209"), identity.label)
         capture(app, "Collecting the second job invoice")
         app.buttons["Close"].tap()
+        let detail = app.buttons["job-invoice-\(collisionID)"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 10))
+        app.scrollClearOfFoot(detail)
+        detail.tap()
+        let title = app.staticTexts["invoice-detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertTrue(title.label.contains("12209"), title.label)
+        XCTAssertTrue(app.staticTexts["INV-12209"].exists)
+        let detailCollect = app.buttons["Collect payment"]
+        XCTAssertTrue(detailCollect.waitForExistence(timeout: 10))
+        detailCollect.tap()
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertTrue(identity.label.contains("INV-12209"), identity.label)
+        app.buttons["Close"].tap()
     }
 
     func testMoneyJumpsRemainReachableAtLargestText() {
