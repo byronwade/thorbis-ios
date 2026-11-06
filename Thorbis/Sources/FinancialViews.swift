@@ -150,6 +150,7 @@ struct EstimateDetailView: View {
                                              total: option.totalAmount, currency: option.currency,
                                              memberLine: memberLine(option.lines, currency: option.currency))
                     }
+                    RecordActivitySection(recordType: "estimate", recordID: record.id)
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
             .padding(.horizontal, 20)
@@ -587,6 +588,7 @@ struct InvoiceDetailView: View {
                             onInvoiceUpdated: { _ = accept($0) }
                         )
                     }
+                    RecordActivitySection(recordType: "invoice", recordID: record.id)
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
             .padding(.horizontal, 20)
