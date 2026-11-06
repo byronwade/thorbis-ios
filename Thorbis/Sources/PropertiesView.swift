@@ -69,26 +69,22 @@ struct PropertiesView: View {
                 ForEach(shown) { row in
                     // Web parity: a property opens its own page (property-detail.tsx), not the customer.
                     Button { opened = row } label: {
-                        HStack(alignment: .top, spacing: 14) {
-                            Image(systemName: row.location.kind == "billing" ? "envelope" : "house")
-                                .font(.system(size: 17)).foregroundStyle(Theme.markOlive)
-                                .frame(width: 22).padding(.top, 2)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.location.address).font(Theme.font(15, weight: .medium)).lineLimit(2)
-                                Text([row.customer.name, row.location.label, row.kindLabel]
-                                    .filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                            PaperDisclosure()
+                        // A plain list-room row, as Customers and Jobs: the address, then whose and what kind.
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.location.address).font(Theme.font(15, weight: .medium)).lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text([row.customer.name, row.location.label, row.kindLabel]
+                                .filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+                                .font(Theme.font(14)).foregroundStyle(Theme.muted).lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                        .frame(minHeight: 56)
+                        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityElement(children: .combine)
-                    Divider().padding(.leading, Theme.gutter + 36)
+                    .accessibilityHint("Opens the property")
                 }
                 if loaded && (capped || failedCustomers > 0) {
                     Text(footnote)
@@ -143,6 +139,10 @@ struct PropertiesView: View {
             if index % 8 == 7, !loaded { rows = PropertiesUnion.rows(pairs) }
         }
         rows = PropertiesUnion.rows(pairs)
+        #if DEBUG
+        // `--paper-preview-screen property-detail`: open the first property once the list has loaded.
+        if PaperPreview.enabled, PaperPreview.screen == "property-detail", opened == nil { opened = rows.first }
+        #endif
         capped = isCapped
         failedCustomers = failures
         loaded = true
