@@ -74,9 +74,8 @@ struct NoticeDeliveryLogView: View {
                         Text(item.subject).font(Theme.font(15, weight: .medium)).lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                         // The day only when there is one: today's notices read "Sent", not "Sent ·".
-                        Text([item.summary, relativeDay(item.updatedAt)].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+                        DotLine(DotLine(item.summary).parts + [relativeDay(item.updatedAt)])
                             .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)

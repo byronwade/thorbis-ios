@@ -73,10 +73,8 @@ struct PropertiesView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.location.address).font(Theme.font(15, weight: .medium)).lineLimit(2)
                                 .fixedSize(horizontal: false, vertical: true)
-                            Text([row.customer.name, row.location.label, row.kindLabel]
-                                .filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
-                                .font(Theme.font(14)).foregroundStyle(Theme.muted).lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
+                            DotLine([row.customer.name, row.location.label, row.kindLabel])
+                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
                         }
                         .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)

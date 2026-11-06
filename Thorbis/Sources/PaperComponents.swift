@@ -46,6 +46,7 @@ struct PaperHeader: View {
     @Environment(\.paperMenuButton) private var menuButtonSetting
     /// Set by the phone shell on a place's root only, so pushed screens never offer the drawer.
     @Environment(\.paperDrawer) private var drawer
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var showsMenuButton: Bool { menuButtonSetting || drawer != nil }
 
@@ -77,9 +78,10 @@ struct PaperHeader: View {
                     createButton
                 }
             }
+            // At accessibility sizes the whole subtitle shows; two lines would cut it mid-sentence.
             Text(subtitle)
                 .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .lineLimit(2)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 .frame(minHeight: 20, alignment: .leading)
         }
         .foregroundStyle(Theme.foreground)
@@ -389,9 +391,13 @@ struct PaperGroupHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
     @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // At accessibility sizes the trailing figure drops under the title instead of squeezing it.
+        let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        row {
             // "Later today  3": the word, then the count beside it, as every list room reads.
             PaperSection<EmptyView, EmptyView>.label(title, count: count)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1744,5 +1750,26 @@ struct ExpandableNoteText: View {
                 .accessibilityIdentifier("note-more")
             }
         }
+    }
+}
+
+/// A " · " line that never strands a dot at the start of a line: the whole line when it fits,
+/// else one part per line. VoiceOver reads the parts as one phrase.
+struct DotLine: View {
+    let parts: [String]
+    init(_ parts: [String]) { self.parts = parts.filter { !$0.isEmpty } }
+    init(_ text: String) { self.init(text.components(separatedBy: " \u{00B7} ")) }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            Text(parts.joined(separator: " \u{00B7} ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { part in
+                    Text(part.element).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(parts.joined(separator: ", "))
     }
 }

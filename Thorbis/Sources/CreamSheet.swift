@@ -744,9 +744,8 @@ struct CreamPlaceHeader<Trailing: View>: View {
                             .lineLimit(1).minimumScaleFactor(0.7)
                             .accessibilityAddTraits(.isHeader)
                             .modifier(OptionalIdentifier(identifier: titleIdentifier))
-                        Text(subtitle)
+                        DotLine(subtitle)
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
