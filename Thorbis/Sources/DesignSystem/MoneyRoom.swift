@@ -28,10 +28,14 @@ struct EvidenceHeader: View {
     /// The title's identifier (the room hides the navigation bar title, so tests find it here).
     var titleIdentifier = "document-title"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        // At accessibility sizes the status goes under the title, so "Estimate 2218" never splits around it.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            layout {
                 Text(title).font(Theme.font(20, weight: .medium)).tracking(-0.2)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
