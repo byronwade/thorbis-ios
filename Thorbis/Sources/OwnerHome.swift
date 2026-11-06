@@ -135,6 +135,7 @@ struct OwnerHomeView: View {
     @State private var loaded = false
     @State private var error: String?
     @State private var reviewScope: SavedWorkScope?
+    @State private var showPayments = false
 
     private var canInvoices: Bool { session.can("invoice.view", feature: "invoicing") }
     private var canEstimates: Bool { session.can("estimate.view", feature: "estimates") }
@@ -179,6 +180,7 @@ struct OwnerHomeView: View {
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
         .task(id: session.generation) { await load() }
+        .thorbisDestination(isPresented: $showPayments) { CompanyPaymentsView() }
         .refreshable {
             _ = await store.refresh(api)
             await SavedCopies.$liveOnly.withValue(true) { await load() }
@@ -320,6 +322,12 @@ struct OwnerHomeView: View {
                                  title: "Invoiced today",
                                  subtitle: issuedToday.isEmpty ? "No invoices sent yet today" : "\(issuedToday.count) invoice\(issuedToday.count == 1 ? "" : "s")",
                                  amount: invoiced.isEmpty ? money(0, currency: "USD") : invoiced.text)
+                    }.buttonStyle(RowPressStyle())
+                    WellDivider(leading: Self.moneyDivider)
+                    // Web parity: every payment collected, by card, cash or refunded.
+                    Button { showPayments = true } label: {
+                        moneyRow(symbol: "creditcard", tint: Theme.markForest, title: "Payments",
+                                 subtitle: "Every payment, by card or cash", amount: "")
                     }.buttonStyle(RowPressStyle())
                 }
                 if loaded && canEstimates {

@@ -1162,6 +1162,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                  "customerName": "Danielle Marlowe", "locationLabel": "Home"],
             ] as [[String: Any]]]
         }
+        // Company payments (payments.all): a card payment today, cash yesterday, one refunded.
+        if path == "/v1/query", queryItems.contains(where: { $0.name == "resourceId" && $0.value == "payments" }) {
+            let day: (Double) -> String = { ISO8601DateFormatter().string(from: Date().addingTimeInterval(-$0 * 86_400)) }
+            return ["resourceId": "payments", "items": [
+                ["id": "p1", "resourceId": "payments", "fields": ["payments.invoice_id": PaperPreview.invoice.id, "payments.amount": "34000",
+                 "payments.method": "card", "payments.status": "succeeded", "payments.refunded_amount": "0", "payments.recorded_at": day(0)]],
+                ["id": "p2", "resourceId": "payments", "fields": ["payments.invoice_id": PaperPreview.invoice.id, "payments.amount": 12000,
+                 "payments.method": "cash", "payments.status": "succeeded", "payments.refunded_amount": 0, "payments.recorded_at": day(1)]],
+                ["id": "p3", "resourceId": "payments", "fields": ["payments.invoice_id": PaperPreview.invoice.id, "payments.amount": "9500",
+                 "payments.method": "card", "payments.status": "refunded", "payments.refunded_amount": "9500", "payments.recorded_at": day(6)]],
+            ] as [[String: Any]]]
+        }
         if path.hasPrefix("/v1/notice-preferences/customer/") { return ["items": [[String: Any]]()] }
         if path == "/v1/notice-preferences" {
             return ["items": [["subjectKind": "role", "subjectKey": "technician", "channel": "email", "enabled": false]]]
