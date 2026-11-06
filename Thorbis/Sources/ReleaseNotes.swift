@@ -18,7 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "doc.badge.plus", title: "New estimate like other forms",
                       detail: "A new estimate opens with the same title and close button as the other forms."),
-            ]
+            ],
+            fixes: 1
         ),
         ReleaseNote(
             id: "2026-11-05-job-notices-and-tabs",
