@@ -4,6 +4,8 @@ import SwiftUI
 /// who to chase first. Figures come from the whole invoice book and the payments tape; when either
 /// read is partial the totals say so instead of printing a smaller, wrong number.
 struct MoneyOverviewView: View {
+    /// Inside Money's Overview tab: the screen's header, scroll and refresh belong to Money.
+    var embedded = false
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
@@ -54,25 +56,35 @@ struct MoneyOverviewView: View {
     private static let tints: [Color] = [Theme.success, Theme.warning, Theme.markPumpkin, Theme.destructive]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                PaperHeader(title: "Money", subtitle: "What's owed, collected and billed")
-                    .environment(\.paperMenuButton, false)
-                    .environment(\.paperDrawer, nil)
-                    .padding(.horizontal, -Theme.gutter)
-                if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
-                if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
-                if loaded {
-                    figures
-                    aging
-                    chasingList
+        if embedded {
+            content.padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    PaperHeader(title: "Money", subtitle: "What's owed, collected and billed")
+                        .environment(\.paperMenuButton, false)
+                        .environment(\.paperDrawer, nil)
+                        .padding(.horizontal, -Theme.gutter)
+                    content
                 }
+                .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
             }
-            .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+            .background(Theme.canvas)
+            .navigationBarTitleDisplayMode(.inline)
+            .refreshable { await load() }
         }
-        .background(Theme.canvas)
-        .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await load() }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
+            if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
+            if loaded {
+                figures
+                aging
+                chasingList
+            }
+        }
         .task(id: session.generation) { await load() }
         .thorbisDestination(item: $openInvoice) { InvoiceDetailView(id: $0.id).thorbisBackButton() }
     }
