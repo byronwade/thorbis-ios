@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-new-customer-sheet",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "person.badge.plus", title: "New customer like other forms",
+                      detail: "Adding a customer opens the same sheet as the other forms: a title, the close button and one Save."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-equipment-sheet",
             date: "2026-11-05",
             highlights: [

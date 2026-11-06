@@ -35,13 +35,16 @@ struct NewCustomerSheet: View {
     private var valid: Bool { !trimmedName.isEmpty && trimmedName.count <= 200 && emailValid && phone.count <= 30 && address.count <= 500 }
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        let canCreate = session.can("customer.create", feature: "core_crm")
+        // The shared modal (Add equipment, Add discount): the title row with Cancel, the form, and one
+        // ink commit that is never pre-disabled unless the role can't add customers (and says so).
+        ThorbisModalSheet(title: "New customer", closeLabel: "Cancel", onClose: busy ? nil : { dismiss() },
+                          detents: [.large], commitTitle: "Save customer", commitSymbol: "person.badge.plus", busy: busy,
+                          commitDisabledReason: canCreate ? nil : "Your role can't add customers. Ask your office.",
+                          commit: { Task { await commit() } }) {
                 // v2 form: the label stays above, examples as placeholders, help under the field and
                 // the error in its place, related fields clustered by space, optional fields marked.
                 VStack(alignment: .leading, spacing: 32) {
-                    Text("New customer").font(Theme.font(24, weight: .medium)).tracking(-0.3)
-                        .accessibilityAddTraits(.isHeader)
                     FormCluster(title: "Who") {
                         FormField(label: "Name", help: "As it goes on the invoice.", error: nameProblem) {
                             input($request.name, prompt: "Danielle Marlowe", focus: .name, label: "Name")
@@ -79,19 +82,8 @@ struct NewCustomerSheet: View {
                     }
                     if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
             }
-            .scrollDismissesKeyboard(.interactively)
-            .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
-            .safeAreaInset(edge: .bottom) {
-                // Not pre-disabled: pressed with a problem, it says what under the field.
-                PaperActionBar(title: "Save customer", symbol: "person.badge.plus", busy: busy,
-                               disabled: !session.can("customer.create", feature: "core_crm"),
-                               disabledReason: session.can("customer.create", feature: "core_crm") ? nil : "Your role can't add customers. Ask your office.") { Task { await commit() } }
-            }
             .onAppear {
                 if request.name.isEmpty { request.name = initialName.trimmingCharacters(in: .whitespacesAndNewlines) }
                 if phone.isEmpty { phone = initialPhone.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -115,7 +107,6 @@ struct NewCustomerSheet: View {
             #endif
             // MA-16: typed details aren't lost to a stray swipe; Cancel still leaves.
             .interactiveDismissDisabled(busy || !trimmedName.isEmpty || !phone.isEmpty || !email.isEmpty || !address.isEmpty)
-        }
     }
 
     /// A text input in the sunk well (design.thorbis.com Depth: the field sinks).
