@@ -58,26 +58,29 @@ struct NoticeDeliveryLogView: View {
 
     var body: some View {
         ScrollView {
+            // The list room, as Payments and Billing: the header, plain rows on the canvas, no rules.
             LazyVStack(alignment: .leading, spacing: 0) {
-                Text("Recent job notices. Addresses and message text stay off this screen.")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                PaperHeader(title: "Delivery log", subtitle: "Recent job notices. Addresses and message text stay off this screen.")
+                    .environment(\.paperMenuButton, false)
+                    .environment(\.paperDrawer, nil)
                 if let error { ErrorBanner(message: error) { await load() } }
-                if !loaded && error == nil { SkeletonRows(count: 6, leading: false) }
-                if loaded && items.isEmpty {
-                    PaperEmptyState(symbol: "envelope", title: "Nothing sent yet",
-                                    message: "Each email or in-app update about a booked, changed or canceled job shows here.")
+                if !loaded && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
+                if loaded && items.isEmpty && error == nil {
+                    ListRoomEmpty(title: "Nothing sent yet.",
+                                  message: "Each email or in-app update about a booked, changed or canceled job shows here.")
                 }
                 ForEach(items) { item in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.subject).font(Theme.font(15, weight: .medium)).lineLimit(2)
-                        Text("\(item.summary) · \(relativeDay(item.updatedAt))")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        // The day only when there is one: today's notices read "Sent", not "Sent ·".
+                        Text([item.summary, relativeDay(item.updatedAt)].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                    .padding(.horizontal, Theme.gutter)
                     .accessibilityElement(children: .combine)
-                    Divider().padding(.leading, Theme.gutter)
                 }
                 if nextCursor != nil {
                     Button { Task { await loadMore() } } label: {
@@ -85,20 +88,17 @@ struct NoticeDeliveryLogView: View {
                             if loadingMore { ProgressView() }
                             Text("Show older notices")
                         }
-                        .font(Theme.font(15, weight: .medium))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .frame(minHeight: 44).padding(.horizontal, ListRoom.gutter).contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())
                     .disabled(loadingMore)
-                    .padding(Theme.gutter)
                 }
             }
             .padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
-        .navigationTitle("Delivery log")
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }

@@ -851,7 +851,7 @@ struct RootView: View {
         case "reports": previewPlace(.reports)
         case "scorecard": previewPlace(.scorecard)
         case "billing": previewPlace(.billing)
-        case "notices": previewPlace(.notices)
+        case "notices", "notice-log": previewPlace(.notices)
         case "payments": schedulePath.append(PaperRoute.payments)
         case "billing-detail": previewPlace(.billing, then: .billingSchedule("00000000-0000-4000-8000-000000009501"))
         case "new-customer": primaryTab = .customers; previewNewCustomer = true

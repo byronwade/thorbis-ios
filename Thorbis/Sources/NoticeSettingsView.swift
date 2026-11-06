@@ -36,6 +36,7 @@ struct NoticeSettingsView: View {
     @State private var loaded = false
     @State private var saving: String?
     @State private var error: String?
+    @State private var openLog = false
     @State private var morningDigest = PushNotifications.morningDigest
 
     private var managesRoles: Bool { session.can("organization.settings.edit", feature: "job_booking_notices") }
@@ -98,7 +99,7 @@ struct NoticeSettingsView: View {
                     }
                     PaperGroupHeader(title: "History").padding(.top, 14)
                     PaperCard {
-                        NavigationLink { NoticeDeliveryLogView() } label: {
+                        Button { openLog = true } label: {
                             PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
                                 .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
                         }
@@ -111,7 +112,12 @@ struct NoticeSettingsView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
+        .thorbisDestination(isPresented: $openLog) { NoticeDeliveryLogView() }
         .refreshable { if managesRoles { await load() } }
+        #if DEBUG
+        // `--paper-preview-screen notice-log`: Notification rules, then straight into the log.
+        .task { if PaperPreview.enabled, PaperPreview.screen == "notice-log" { openLog = true } }
+        #endif
         .task { if managesRoles { await load() } }
     }
 
