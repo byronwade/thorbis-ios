@@ -1126,6 +1126,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                        "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
             }]
         }
+        // A job's booking notices: the customer's email went out, the tech's in-app one did too.
+        if path.hasPrefix("/v1/jobs/"), path.hasSuffix("/notices") {
+            let soon = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3_600))
+            let ago = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86_400))
+            return ["admission": "recorded", "items": [
+                ["id": "n1", "role": "customer", "channel": "email", "status": "sent", "scheduledFor": soon, "currentCycle": true, "createdAt": ago],
+                ["id": "n2", "role": "technician", "channel": "in_app", "status": "sent", "scheduledFor": soon, "currentCycle": true, "createdAt": ago],
+                ["id": "n3", "role": "customer", "channel": "email", "stage": "en_route", "status": "missing_contact", "scheduledFor": soon, "currentCycle": true,
+                 "createdAt": ISO8601DateFormatter().string(from: Date())],
+            ] as [[String: Any]]]
+        }
         // An estimate's or invoice's audit trail.
         if path.hasPrefix("/v1/activity/") {
             return ["items": [

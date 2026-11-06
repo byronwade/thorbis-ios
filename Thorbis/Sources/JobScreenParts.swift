@@ -272,7 +272,9 @@ struct JobSectionControl: View {
     @Namespace private var pill
 
     var body: some View {
-        JobSectionRowLayout(spacing: 4, fills: false) {
+        // Each tab keeps its whole word; when four don't fit one row they flow onto a second, as
+        // Money's tabs do, instead of every tab shrinking to "Overvi…" and "Pho…".
+        FlowRow(spacing: 4, lineSpacing: 0) {
             ForEach(options, id: \.value) { option in
                 let isOn = option.value == selection
                 Button { withMotion(.snappy) { selection = option.value } } label: {

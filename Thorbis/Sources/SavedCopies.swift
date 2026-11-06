@@ -101,12 +101,14 @@ final class SavedCopyStore: @unchecked Sendable {
 /// "Saved on this phone · 9:41 AM", the same quiet line the property history uses.
 struct SavedCopyNote: View {
     let savedAt: Date?
+    @EnvironmentObject private var session: SessionController
 
     var body: some View {
         if let savedAt {
             HStack(spacing: 6) {
                 Image(systemName: "iphone").font(.system(size: 12, weight: .medium)).accessibilityHidden(true)
-                Text("Saved on this phone · \(Self.label(savedAt))")
+                // Offline, the banner above already says "saved on this phone"; this line only says when.
+                Text(session.isOffline ? "Last updated \(Self.label(savedAt))" : "Saved on this phone · \(Self.label(savedAt))")
             }
             .font(Theme.font(13)).foregroundStyle(Theme.muted)
             .frame(maxWidth: .infinity, alignment: .leading)
