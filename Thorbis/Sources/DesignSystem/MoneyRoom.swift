@@ -223,11 +223,7 @@ struct MoneyListRow: View {
                     .foregroundStyle(status.tone == .cancelled ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if let subtitle, !subtitle.isEmpty { subtitleLines(subtitle, stacked: stacked) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: stacked ? .leading : .trailing, spacing: 3) {
@@ -244,6 +240,32 @@ struct MoneyListRow: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, subtitle, word, amount].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+    }
+
+    /// "INV-2209 · balance due" on one line when it fits; otherwise each part on its own line, so a
+    /// "·" never ends a line (as JobRoomRow does for problem · customer).
+    @ViewBuilder private func subtitleLines(_ subtitle: String, stacked: Bool) -> some View {
+        let parts = subtitle.components(separatedBy: " \u{00B7} ")
+        if parts.count > 1 && !stacked {
+            ViewThatFits(in: .horizontal) {
+                subtitleText(subtitle, lines: 1).fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(parts.enumerated()), id: \.offset) { subtitleText($0.element, lines: 2) }
+                }
+            }
+        } else if parts.count > 1 {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { subtitleText($0.element, lines: nil) }
+            }
+        } else {
+            subtitleText(subtitle, lines: stacked ? nil : 2)
+        }
+    }
+
+    private func subtitleText(_ text: String, lines: Int?) -> some View {
+        Text(text).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            .lineLimit(lines)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
