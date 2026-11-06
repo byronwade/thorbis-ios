@@ -1301,6 +1301,8 @@ struct JobDetailView: View {
                                           visits: visits, visitsLoaded: visitsLoaded)
             }
             followUpsPanel
+            // Web parity: whether the booking and on-the-way notices reached the customer.
+            JobNoticesSection(jobID: job.id)
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
             if session.can("customer.view", feature: "core_crm") {

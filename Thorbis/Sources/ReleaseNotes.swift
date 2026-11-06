@@ -13,6 +13,17 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-job-notices-and-tabs",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "bell", title: "See if booking notices went out",
+                      detail: "A job lists who was emailed or told in the app about the booking, and whether it was sent."),
+                .init(symbol: "rectangle.split.3x1", title: "Job tabs show whole words",
+                      detail: "Job sections never cut off as “Overvi…”; at larger text they wrap onto a second line."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
             id: "2026-11-05-new-customer-sheet",
             date: "2026-11-05",
             highlights: [
