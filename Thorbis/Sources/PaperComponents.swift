@@ -89,7 +89,10 @@ struct PaperHeader: View {
     /// The tab root's +. Several creates open the create menu; a long press lists them directly.
     @ViewBuilder private var createButton: some View {
         if showsCreate, let create {
-            PaperCircleButton(symbol: "plus", label: create.label, size: 40, fill: Theme.fill, action: create.run)
+            // One create button app-wide: the cream sheet's ink circle (Today, Board, Map and every list).
+            Button(action: create.run) { CreamCircleLabel(symbol: "plus", ink: true) }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel(create.label)
                 .contextMenu {
                     ForEach(create.choices) { choice in
                         Button(action: choice.run) { Label(choice.title, systemImage: choice.symbol) }

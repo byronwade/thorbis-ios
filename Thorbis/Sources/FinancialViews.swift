@@ -73,7 +73,9 @@ struct EstimatesView: View {
             // The same quiet + circle as the Jobs and Customers headers, not the stock glass button.
             if session.can("estimate.create", feature: "estimates") {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
-                    PaperCircleButton(symbol: "plus", label: "New estimate", size: 40, fill: Theme.fill) { showCreate = true }
+                    Button { showCreate = true } label: { CreamCircleLabel(symbol: "plus", ink: true) }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("New estimate")
                 }
             }
         }
