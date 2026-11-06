@@ -1754,7 +1754,7 @@ struct ExpandableNoteText: View {
 }
 
 /// A " · " line that never strands a dot at the start of a line: the whole line when it fits,
-/// else one part per line. VoiceOver reads the parts as one phrase.
+/// then the first two parts over the rest, else one part per line. VoiceOver reads it as one phrase.
 struct DotLine: View {
     let parts: [String]
     init(_ parts: [String]) { self.parts = parts.filter { !$0.isEmpty } }
@@ -1763,6 +1763,12 @@ struct DotLine: View {
     var body: some View {
         ViewThatFits(in: .horizontal) {
             Text(parts.joined(separator: " \u{00B7} ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+            if parts.count > 2 {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(parts.prefix(2).joined(separator: " \u{00B7} ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Text(parts.dropFirst(2).joined(separator: " \u{00B7} ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
+            }
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(parts.enumerated()), id: \.offset) { part in
                     Text(part.element).fixedSize(horizontal: false, vertical: true)
