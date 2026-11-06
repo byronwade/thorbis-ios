@@ -128,11 +128,13 @@ struct InboxLocalDraftView: View {
                         .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 }
                 if bound {
-                    PaperSection("Drafts and queued", count: inbox.messages.isEmpty ? nil : inbox.messages.count) {
-                        if inbox.messages.isEmpty {
-                            Text("No drafts in this session").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
-                        } else {
+                    // Empty: the shared empty state, not a label over a one-line card.
+                    if inbox.messages.isEmpty {
+                        ListRoomEmpty(title: "No drafts yet.", message: "Start one with New draft below.")
+                            .padding(.horizontal, -PaperCardMetrics.margin)
+                    } else {
+                    PaperSection("Drafts and queued", count: inbox.messages.count) {
+                        Group {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(inbox.messages) { message in
                                     HStack(alignment: .top, spacing: 0) {
@@ -162,6 +164,7 @@ struct InboxLocalDraftView: View {
                             }
                             .padding(.vertical, PaperCardMetrics.edge)
                         }
+                    }
                     }
                 }
                 Text("Drafts and queued messages are not sent. Scheduling here does not start a timer or notify the recipient.")

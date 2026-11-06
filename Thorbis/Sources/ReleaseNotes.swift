@@ -19,7 +19,7 @@ enum ReleaseNotes {
                 .init(symbol: "ipad", title: "iPad Schedule matches Jobs",
                       detail: "On iPad, Schedule's list uses the same tabs and plain rows as the Jobs list beside it."),
             ],
-            fixes: 14
+            fixes: 15
         ),
         ReleaseNote(
             id: "2026-11-05-section-counts",
