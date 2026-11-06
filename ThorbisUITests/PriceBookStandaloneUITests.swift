@@ -177,7 +177,7 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(all.waitForExistence(timeout: 5))
         all.tap()
         XCTAssertTrue(all.waitForNonExistence(timeout: 5))
-        let search = app.textFields["Search price book"]
+        let search = app.searchFields["Search price book"]
         search.tap()
         search.typeText("not in loaded items")
         XCTAssertTrue(app.staticTexts["No loaded items match. Load more items to search the rest."].waitForExistence(timeout: 10))
@@ -189,7 +189,7 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Material, 1")).firstMatch.tap()
         XCTAssertFalse(title.exists)
-        let search = app.textFields["Search price book"]
+        let search = app.searchFields["Search price book"]
         search.tap()
         search.typeText("PEX")
         XCTAssertTrue(title.waitForExistence(timeout: 10))
