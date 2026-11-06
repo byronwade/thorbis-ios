@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-forms-read-the-same",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "list.bullet.rectangle", title: "Forms read the same",
+                      detail: "Optional fields are marked the same way in every form, and equipment fields show real examples."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-money-overview-tab",
             date: "2026-11-05",
             highlights: [

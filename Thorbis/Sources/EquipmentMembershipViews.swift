@@ -121,15 +121,15 @@ struct EquipmentEditor: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     PaperFormField("What it is", error: nameProblem) {
-                        TextField("e.g. 50-gal gas water heater", text: $input.name, prompt: .placeholder("e.g. 50-gal gas water heater")).font(Theme.font(16)).fieldWell()
+                        TextField("What it is", text: $input.name, prompt: .placeholder("50-gal gas water heater")).font(Theme.font(16)).fieldWell()
                             .focused($nameFocused)
                             .onChange(of: input.name) { _, _ in nameProblem = nil }
                     }
                     PaperFormField("Type", note: "Optional") { TextField("Water heater", text: binding(\.kind), prompt: .placeholder("Water heater")).font(Theme.font(16)).fieldWell() }
-                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand), prompt: .placeholder("Brand")).font(Theme.font(16)).fieldWell() }
-                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model), prompt: .placeholder("Model")).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand), prompt: .placeholder("Rheem")).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model), prompt: .placeholder("XG50T06EC36U1")).font(Theme.font(16)).fieldWell() }
                     PaperFormField("Serial number", note: "Optional") {
-                        TextField("Serial number", text: binding(\.serialNumber), prompt: .placeholder("Serial number")).textInputAutocapitalization(.characters)
+                        TextField("Serial number", text: binding(\.serialNumber), prompt: .placeholder("Q1924A12345")).textInputAutocapitalization(.characters)
                             .font(Theme.font(16)).fieldWell()
                     }
                     if !locations.isEmpty {
