@@ -115,10 +115,20 @@ struct EquipmentEditor: View {
     private static let nameMissing = "Say what it is, like \u{201C}50-gal gas water heater.\u{201D}"
 
     var body: some View {
-        NavigationStack {
-            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit
-            // above the keyboard (it was the toolbar's Save), Cancel stays in the toolbar.
-            ScrollView {
+        // The shared modal (Add discount, Invite to team): the title row with Cancel, one column of
+        // field wells, and one ink commit that is never pre-disabled.
+        ThorbisModalSheet(title: existing == nil ? "Add equipment" : "Equipment", closeLabel: "Cancel",
+                          onClose: busy ? nil : { dismiss() }, detents: [.large],
+                          commitTitle: existing == nil ? "Add equipment" : "Save equipment", busy: busy,
+                          commitIdentifier: "equipment-commit", commit: {
+                              // Pressed without a name, it says so under the field.
+                              if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                  nameProblem = Self.nameMissing
+                                  nameFocused = true
+                              } else {
+                                  Task { await save() }
+                              }
+                          }) {
                 VStack(alignment: .leading, spacing: 18) {
                     PaperFormField("What it is", error: nameProblem) {
                         TextField("What it is", text: $input.name, prompt: .placeholder("50-gal gas water heater")).font(Theme.font(16)).fieldWell()
@@ -162,26 +172,6 @@ struct EquipmentEditor: View {
                         .disabled(busy)
                     }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(Theme.canvas)
-            .navigationTitle(existing == nil ? "Add equipment" : "Equipment")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-            }
-            .safeAreaInset(edge: .bottom) {
-                // Never pre-disabled: pressed without a name, it says so under the field.
-                PaperActionBar(title: existing == nil ? "Add equipment" : "Save equipment", busy: busy,
-                               identifier: "equipment-commit") {
-                    if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        nameProblem = Self.nameMissing
-                        nameFocused = true
-                    } else {
-                        Task { await save() }
-                    }
-                }
             }
             .thorbisConfirm("Remove this equipment?", isPresented: $confirmRemove,
                             actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await remove() } }])
@@ -194,7 +184,6 @@ struct EquipmentEditor: View {
                 nameProblem = Self.nameMissing
             }
             #endif
-        }
     }
 
     private func binding(_ key: WritableKeyPath<EquipmentInput, String?>) -> Binding<String> {
