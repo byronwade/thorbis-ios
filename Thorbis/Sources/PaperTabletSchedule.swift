@@ -87,16 +87,22 @@ struct PaperTabletSchedule: View {
         let date = JobFiltering.date(job.scheduledFor)
         let time = date?.tradeTime ?? "No time"
         // The column reads 10:30, 12:15, 1:00: the period under the time only where it changes.
-        let leading: PaperRowLeading = date.map { .clock($0.columnTime, period: showsPeriod ? $0.periodMark : nil, accessibility: $0.tradeTime) }
-            ?? .text(time)
         return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
             Button { selectedID = job.id } label: {
-                PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
-                             subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
-                             subtitleLines: 2, dimmed: job.status == "completed") {
-                    StatusWord(jobStatus: job.status)
+                // The phone's Today row: the time column, then the list room's job row, whose problem
+                // and customer share a line only when both fit (no "·" left at a line end).
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(date?.columnTime ?? time).font(Theme.font(13, weight: .medium)).monospacedDigit()
+                        if showsPeriod, let period = date?.periodMark {
+                            Text(period).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .frame(width: 44, alignment: .leading)
+                    JobRoomRow(job: job, street: street, customer: customer, inset: 0)
                 }
-                .environment(\.paperRowInset, 12)
+                .padding(.horizontal, 12)
+                .opacity(job.status == "completed" ? 0.7 : 1)
                 .background {
                     if selected { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface) }
                 }
