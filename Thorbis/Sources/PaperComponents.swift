@@ -1420,6 +1420,20 @@ struct PaperListRow<Trailing: View>: View {
                 if let subtitle, !subtitle.isEmpty {
                     if expandsSubtitle {
                         ExpandableNoteText(text: subtitle, lines: subtitleLines, size: 14)
+                    } else if highlight.isEmpty, subtitleLines > 1, !stacked, subtitle.contains(" \u{00B7} ") {
+                        // "AC not cooling · Danielle Marlowe" on one line when it fits; otherwise each part
+                        // on its own line, so a "·" never ends a line (as MoneyListRow and JobRoomRow do).
+                        let parts = subtitle.components(separatedBy: " \u{00B7} ")
+                        ViewThatFits(in: .horizontal) {
+                            Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(parts.enumerated()), id: \.offset) { part in
+                                    Text(part.element).font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
                     } else {
                         PaperHighlight.text(subtitle, words: highlight).font(Theme.font(14)).foregroundStyle(Theme.subtle)
                             .lineLimit(stacked && !limitsSubtitleAtAccessibility ? nil : subtitleLines)
