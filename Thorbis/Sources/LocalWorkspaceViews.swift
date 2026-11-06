@@ -217,7 +217,11 @@ struct LocalWorkspaceView: View {
     @State private var actionError: String?
     /// Equipment: whether the company's server book has units, so the phone's own notes read as a second list.
     @State private var hasServerEquipment = false
-    private var sharedEquipment: Bool { section == .equipment && hasServerEquipment }
+    @State private var hasServerAgreements = false
+    /// Equipment and Agreements: the company's server book is showing, so this phone's notes are second.
+    private var sharedEquipment: Bool {
+        (section == .equipment && hasServerEquipment) || (section == .agreements && hasServerAgreements)
+    }
 
     private var identityKey: String { "\(actorID.lowercased())|\(organizationID.lowercased())" }
 
@@ -235,7 +239,7 @@ struct LocalWorkspaceView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(section.title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
                         .accessibilityAddTraits(.isHeader)
-                    Text(section == .equipment && hasServerEquipment ? "Shared with your team" : "On this device · Not synced")
+                    Text(sharedEquipment ? "Shared with your team" : "On this device · Not synced")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
@@ -246,17 +250,20 @@ struct LocalWorkspaceView: View {
                 if section == .equipment {
                     CompanyEquipmentBook { hasServerEquipment = $0 }
                 }
+                if section == .agreements {
+                    CompanyAgreementsBook { hasServerAgreements = $0 }
+                }
                 if bound {
                     let rows = model.rows(section)
                     // Empty: the shared empty state, not a label repeating the title over a one-line card.
-                    if rows.isEmpty && section == .equipment && hasServerEquipment {
+                    if rows.isEmpty && sharedEquipment {
                         EmptyView()
                     } else if rows.isEmpty {
                         ListRoomEmpty(title: "Nothing here yet.",
                                       message: "Add to \(section.title.lowercased()) with the button below.")
                             .padding(.horizontal, -PaperCardMetrics.margin)
                     } else {
-                    PaperSection(section == .equipment && hasServerEquipment ? "Notes on this phone" : section.title, count: rows.count) {
+                    PaperSection(sharedEquipment ? "Notes on this phone" : section.title, count: rows.count) {
                         Group {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(rows) { row in
@@ -288,7 +295,8 @@ struct LocalWorkspaceView: View {
                     SkeletonRows(count: 3, leading: false, inset: 0)
                 }
                 // With the shared book showing, units are added where they belong: on the customer.
-                Text(sharedEquipment ? "Add or edit a unit on its customer\u{2019}s page; it shows here for the whole team."
+                Text(sharedEquipment ? (section == .equipment ? "Add or edit a unit on its customer\u{2019}s page; it shows here for the whole team."
+                                                              : "Add or cancel an agreement on its customer\u{2019}s page; it shows here for the whole team.")
                                      : "These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
