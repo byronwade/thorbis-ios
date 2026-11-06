@@ -332,9 +332,18 @@ struct PlacesList: View {
                 }
             }
             if let phone = sections.sections.first(where: { $0.kind == .phone }) {
-                heading(phoneHeading)
-                localRows(phone.local)
-                if let savedWork { savedWorkRow(savedWork) }
+                // Equipment and Agreements read the company's shared books now; only the rest is the phone's.
+                let shared = phone.local.filter { $0 == .equipment || $0 == .agreements }
+                let phoneOnly = phone.local.filter { $0 != .equipment && $0 != .agreements }
+                if !shared.isEmpty {
+                    heading("Records")
+                    localRows(shared)
+                }
+                if !phoneOnly.isEmpty || savedWork != nil {
+                    heading(phoneHeading)
+                    localRows(phoneOnly)
+                    if let savedWork { savedWorkRow(savedWork) }
+                }
             }
             // Saved work with no local places still gets its heading.
             if let savedWork, !sections.sections.contains(where: { $0.kind == .phone }) {
