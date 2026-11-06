@@ -136,6 +136,7 @@ struct OwnerHomeView: View {
     @State private var error: String?
     @State private var reviewScope: SavedWorkScope?
     @State private var showPayments = false
+    @State private var showMoney = false
 
     private var canInvoices: Bool { session.can("invoice.view", feature: "invoicing") }
     private var canEstimates: Bool { session.can("estimate.view", feature: "estimates") }
@@ -181,6 +182,7 @@ struct OwnerHomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: session.generation) { await load() }
         .thorbisDestination(isPresented: $showPayments) { CompanyPaymentsView() }
+        .thorbisDestination(isPresented: $showMoney) { MoneyOverviewView() }
         .refreshable {
             _ = await store.refresh(api)
             await SavedCopies.$liveOnly.withValue(true) { await load() }
@@ -322,6 +324,12 @@ struct OwnerHomeView: View {
                                  title: "Invoiced today",
                                  subtitle: issuedToday.isEmpty ? "No invoices sent yet today" : "\(issuedToday.count) invoice\(issuedToday.count == 1 ? "" : "s")",
                                  amount: invoiced.isEmpty ? money(0, currency: "USD") : invoiced.text)
+                    }.buttonStyle(RowPressStyle())
+                    WellDivider(leading: Self.moneyDivider)
+                    // Web parity: outstanding, aging and who to chase (money.tsx).
+                    Button { showMoney = true } label: {
+                        moneyRow(symbol: "chart.bar", tint: Theme.markAccent, title: "Money overview",
+                                 subtitle: "Outstanding, aging and who to chase", amount: "")
                     }.buttonStyle(RowPressStyle())
                     WellDivider(leading: Self.moneyDivider)
                     // Web parity: every payment collected, by card, cash or refunded.
