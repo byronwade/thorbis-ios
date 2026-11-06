@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-section-counts",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "number", title: "Section counts read the same",
+                      detail: "Every list and report shows a section's count the same way, the number beside the label."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-new-estimate-header",
             date: "2026-11-05",
             highlights: [
