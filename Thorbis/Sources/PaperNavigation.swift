@@ -825,6 +825,7 @@ struct RootView: View {
         case "local-agreements": openLocal(.agreements)
         case "team": previewPlace(.team)
         case "customize-menu": schedulePath.append(PaperRoute.customizeMenu)
+        case "properties", "property-detail": schedulePath.append(PaperRoute.properties)
         case "signature": previewSignature = true
         case "job-schedule", "equipment-editor", "equipment-sections": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
         case "new-job", "book-job", "book-job-filled": createJob = true
