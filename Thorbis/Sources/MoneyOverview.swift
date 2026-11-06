@@ -15,6 +15,7 @@ struct MoneyOverviewView: View {
     @State private var loaded = false
     @State private var error: String?
     @State private var openInvoice: OpenedInvoice?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private struct OpenedInvoice: Identifiable, Hashable { let id: String }
 
@@ -92,15 +93,21 @@ struct MoneyOverviewView: View {
     /// The vital numbers, two by two (the Today strip's figure and word).
     private var figures: some View {
         let collection = billed > 0 && paymentsComplete ? "\(Int((Double(collected) / Double(billed) * 100).rounded()))%" : "\u{2014}"
-        return Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 16) {
-            GridRow {
-                figure(money(outstanding, currency: "USD"), "outstanding",
-                       tint: outstanding > 0 ? Theme.foreground : Theme.muted)
-                figure(paymentsComplete ? money(collected, currency: "USD") : "\u{2014}", "collected")
-            }
-            GridRow {
-                figure(money(billed, currency: "USD"), "billed")
-                figure(collection, "of billed collected")
+        let cells = [(money(outstanding, currency: "USD"), "outstanding", outstanding > 0 ? Theme.foreground : Theme.muted),
+                     (paymentsComplete ? money(collected, currency: "USD") : "\u{2014}", "collected", Theme.foreground),
+                     (money(billed, currency: "USD"), "billed", Theme.foreground),
+                     (collection, "of billed collected", Theme.foreground)]
+        // Two by two; one column at accessibility sizes, so no word breaks mid-way ("outstandi-ng").
+        return Group {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(cells, id: \.1) { figure($0.0, $0.1, tint: $0.2) }
+                }
+            } else {
+                Grid(alignment: .topLeading, horizontalSpacing: 16, verticalSpacing: 16) {
+                    GridRow { figure(cells[0].0, cells[0].1, tint: cells[0].2); figure(cells[1].0, cells[1].1) }
+                    GridRow { figure(cells[2].0, cells[2].1); figure(cells[3].0, cells[3].1) }
+                }
             }
         }
     }
@@ -119,7 +126,10 @@ struct MoneyOverviewView: View {
         let buckets = Self.buckets(chasing)
         return VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "Aging", horizontalPadding: 0) {
-                if outstanding > 0 { Text("days since created").font(Theme.font(13)) }
+                if outstanding > 0 && !typeSize.isAccessibilitySize { Text("days since created").font(Theme.font(13)) }
+            }
+            if outstanding > 0 && typeSize.isAccessibilitySize {
+                Text("Days since the invoice was created").font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
             if outstanding == 0 {
                 Text("Nothing outstanding. Every issued invoice is collected.")
