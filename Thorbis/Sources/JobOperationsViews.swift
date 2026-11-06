@@ -162,6 +162,7 @@ enum WrapUpList {
 }
 
 struct JobCloseoutView: View {
+    @Environment(\.dynamicTypeSize) private var closeoutTypeSize
     let jobID: String
     /// The job's street when the opener already knows it (street first, the ID after it).
     var place: String? = nil
@@ -318,7 +319,7 @@ struct JobCloseoutView: View {
                         let waiting = waitingSatisfies(requirement)
                         let canRecover = !waiting && !session.isOffline && step?.buttonTitle != nil
                             && (step?.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) ?? false)
-                        HStack(spacing: 12) {
+                        checklistLayout {
                             // The action stands in for "To do": one control at the edge, not a word and a button.
                             checklistRow(done: requirement.outcome != "blocked" || waiting, title: requirement.detail,
                                          detail: waiting ? "Waiting to sync" : step?.detail, showsStatus: !canRecover)
@@ -334,7 +335,7 @@ struct JobCloseoutView: View {
                         let waiting = waitingChecks.contains(check.key)
                         let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key) || waiting
                         let canConfirm = !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs")
-                        HStack(spacing: 12) {
+                        checklistLayout {
                             checklistRow(done: acknowledged, title: check.label, detail: waiting ? "Waiting to sync" : nil,
                                          showsStatus: !canConfirm)
                             if canConfirm {
@@ -472,9 +473,16 @@ struct JobCloseoutView: View {
         .thorbisConfirm("Cancel this job?", isPresented: $confirmCancel,
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
+    /// Item and action side by side; at accessibility sizes the action goes under the words, whole.
+    private var checklistLayout: AnyLayout {
+        closeoutTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                              : AnyLayout(HStackLayout(spacing: 12))
+    }
+
     /// A checklist item's own action, as a quiet pill (the Schedule pill's shape) with a 44pt target.
     private func actionPill(_ title: String) -> some View {
         Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+            .fixedSize()
             .padding(.horizontal, 14).frame(minHeight: 34)
             .background(Theme.fill, in: Capsule())
             .frame(minHeight: 44).contentShape(Rectangle())
@@ -1077,8 +1085,10 @@ struct JobFollowUpsView: View {
             .compactMap { $0 }.joined(separator: " · ")
         // The status and the menu sit beside the reason only; the next step and the meta take the row's
         // full width, so "Next:" isn't squeezed into a column beside an empty gutter.
+        let stacked = typeSize.isAccessibilitySize
         return VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            // At accessibility sizes the status and menu go under the reason, so it keeps whole words.
+            (stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))) {
                 Text(record.reason).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
