@@ -996,7 +996,7 @@ struct TabletWeekBoard: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 12)
-            PaperTabs(options: PaperTabletSchedule.ranges, selection: $range)
+            PaperTabs(options: PaperTabletSchedule.ranges, selection: $range, textTabs: true)
                 .frame(maxWidth: 420, alignment: .leading)
                 .padding(.bottom, 8)
             GeometryReader { geometry in

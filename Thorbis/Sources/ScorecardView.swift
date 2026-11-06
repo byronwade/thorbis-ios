@@ -23,7 +23,7 @@ struct ScorecardView: View {
                     Text("Your own work, credited by who the job was assigned to").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-                PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period)
+                PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period, wrapOverflow: true, textTabs: true)
                 if let error, card == nil { ErrorBanner(message: error) { await load() } }
                 Group {
                     if let card, loadedPeriod == selected { content(card) } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
