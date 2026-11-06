@@ -1126,6 +1126,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                        "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
             }]
         }
+        // An estimate's or invoice's audit trail.
+        if path.hasPrefix("/v1/activity/") {
+            return ["items": [
+                ["id": "a3", "action": "invoice.issued", "description": "Ramon Marlowe issued the invoice", "actorType": "user",
+                 "occurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3_600))],
+                ["id": "a2", "action": "invoice.lines_replaced", "description": "Ramon Marlowe changed 2 line items", "actorType": "user",
+                 "occurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7_200)),
+                 "clientOccurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-9_000))],
+                ["id": "a1", "action": "invoice.created", "description": "Invoice created from the job", "actorType": "system",
+                 "occurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-90_000))],
+            ] as [[String: Any]]]
+        }
         // The company agreements book: one active maintenance plan and one cancelled membership.
         if path == "/v1/memberships" {
             let c = PaperPreview.customerID
