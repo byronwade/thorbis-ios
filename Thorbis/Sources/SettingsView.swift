@@ -34,8 +34,9 @@ struct SettingsView: View {
                             Text(session.user?.name ?? "Account").font(Theme.font(17, weight: .medium))
                                 .fixedSize(horizontal: false, vertical: true)
                             if let email = session.user?.email {
+                                // An address breaks mid-word when it wraps, so it shrinks on one line instead.
                                 Text(email).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .lineLimit(1).minimumScaleFactor(0.6).truncationMode(.middle)
                             }
                         }
                         Spacer(minLength: 0)
@@ -241,7 +242,7 @@ struct SettingsView: View {
                     if parts.count > 1 {
                         ViewThatFits(in: .horizontal) {
                             valueText(value).fixedSize(horizontal: true, vertical: false)
-                            VStack(alignment: .trailing, spacing: 0) {
+                            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 0) {
                                 ForEach(Array(parts.enumerated()), id: \.offset) { valueText($0.element) }
                             }
                         }
@@ -258,7 +259,9 @@ struct SettingsView: View {
 
     private func valueText(_ text: String) -> some View {
         Text(text).font(Theme.font(15)).foregroundStyle(Theme.subtle)
-            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2).multilineTextAlignment(.trailing)
+            // Stacked under its setting at accessibility sizes, the value reads from the left like the title.
+            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+            .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
             .fixedSize(horizontal: false, vertical: true)
     }
 
