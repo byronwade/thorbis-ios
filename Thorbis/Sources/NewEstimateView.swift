@@ -88,6 +88,11 @@ struct NewEstimateView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // The shared sheet header (Add equipment, New customer): the title and its close, with
+                // the same discard check the toolbar Cancel had.
+                ThorbisSheetHeader(title: created == nil ? "New estimate" : "Estimate saved",
+                                   closeLabel: created == nil ? "Cancel" : "Close",
+                                   onClose: busy ? nil : { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } })
                 ScrollViewReader { proxy in
                     ScrollView { builder }
                     .scrollDismissesKeyboard(.interactively)
@@ -134,10 +139,9 @@ struct NewEstimateView: View {
                     }
                 }
                 #endif
-                ThorbisToolbarItem(placement: .cancellationAction) {
-                    Button(created == nil ? "Cancel" : "Close") { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } }.disabled(busy)
-                }
             }
+            // The header above closes the sheet; the bar stays only for the debug recovery sample.
+            .toolbar(Self.showsPreviewBar ? .visible : .hidden, for: .navigationBar)
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
             .sheet(item: $picker) { target in SheetSurface {
                 PriceBookCartPicker(
@@ -177,6 +181,14 @@ struct NewEstimateView: View {
                 memberPricing = pricing
             }
         }
+    }
+
+    private static var showsPreviewBar: Bool {
+        #if DEBUG
+        return EstimateRecoveryPreview.enabled
+        #else
+        return false
+        #endif
     }
 
     private var builderFooter: some View {
@@ -220,7 +232,8 @@ struct NewEstimateView: View {
     private var builder: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
-                PaperEyebrow(reference: jobID.map { "JOB-\($0.suffix(4).uppercased())" }, text: "New estimate")
+                // The header says "New estimate"; the eyebrow names the job it's for.
+                if let jobID { PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())") }
                 // The label stays above the field; the placeholder is only an example.
                 Text("Title").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                     .padding(.top, 6).accessibilityHidden(true)
