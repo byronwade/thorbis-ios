@@ -325,13 +325,7 @@ struct CustomerMembershipSection: View {
         })
     }
 
-    private func membershipDetail(_ membership: MembershipRecord) -> String {
-        var parts: [String] = []
-        if membership.discountPercent > 0 { parts.append("\(membership.discountPercent)% off") }
-        if let cadence = membership.cadence, !cadence.isEmpty { parts.append(cadence) }
-        if let renews = membership.renewsOn.flatMap(EquipmentRecord.day) { parts.append("Renews \(renews.formatted(date: .abbreviated, time: .omitted))") }
-        return parts.isEmpty ? membership.kind.capitalized : parts.joined(separator: " · ")
-    }
+    private func membershipDetail(_ membership: MembershipRecord) -> String { membership.detail }
 
     private var planPicker: some View {
         NavigationStack {
@@ -520,6 +514,83 @@ struct CompanyEquipmentBook: View {
         guard session.can("customer.view", feature: "core_crm") else { onLoaded(false); return }
         do {
             let loaded = try await api.allEquipment()
+            items = loaded
+            onLoaded(!loaded.isEmpty)
+        } catch is CancellationError {
+        } catch {
+            items = nil
+            onLoaded(false)
+        }
+    }
+}
+
+
+extension MembershipRecord {
+    /// "15% off · Twice a year · Renews Mar 1, 2027", or the kind when nothing else is known.
+    var detail: String {
+        var parts: [String] = []
+        if discountPercent > 0 { parts.append("\(discountPercent)% off") }
+        if let cadence, !cadence.isEmpty { parts.append(cadence) }
+        if let renews = renewsOn.flatMap(EquipmentRecord.day) { parts.append("Renews \(renews.formatted(date: .abbreviated, time: .omitted))") }
+        return parts.isEmpty ? kind.capitalized : parts.joined(separator: " \u{00B7} ")
+    }
+}
+
+/// Web parity (apps/web agreements.tsx): the company's agreements from the server, grouped by kind
+/// as on the web (Maintenance, Membership), cancelled ones last. A row opens its customer, where
+/// agreements are sold and cancelled. Hidden when the read is refused or the server is older.
+struct CompanyAgreementsBook: View {
+    var onLoaded: (Bool) -> Void = { _ in }
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var store: Store
+    @State private var items: [MembershipRecord]?
+    @State private var openCustomer: Customer?
+
+    private var groups: [(title: String, rows: [MembershipRecord])] {
+        let all = items ?? []
+        let live = all.filter { $0.status != "cancelled" }
+        let byName: (MembershipRecord, MembershipRecord) -> Bool = {
+            customer($0).localizedStandardCompare(customer($1)) == .orderedAscending
+        }
+        return [("Maintenance", live.filter { $0.kind == "maintenance" }.sorted(by: byName)),
+                ("Membership", live.filter { $0.kind != "maintenance" }.sorted(by: byName)),
+                ("Cancelled", all.filter { $0.status == "cancelled" }.sorted(by: byName))]
+            .filter { !$0.rows.isEmpty }
+    }
+
+    private func customer(_ row: MembershipRecord) -> String { row.customerName ?? store.customerName(row.customerId) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Color.clear.frame(width: 0, height: 0)
+            ForEach(groups, id: \.title) { group in
+                PaperSection(group.title, count: group.rows.count) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(group.rows) { row in
+                            Button { openCustomer = store.customers.first { $0.id == row.customerId } } label: {
+                                PaperListRow(title: customer(row), subtitle: "\(row.planName ?? row.name) \u{00B7} \(row.detail)",
+                                             subtitleLines: 2, dimmed: row.status == "cancelled") {
+                                    StatusWord(text: row.status == "cancelled" ? "Cancelled" : "Active",
+                                               tint: row.status == "cancelled" ? nil : Theme.success)
+                                }
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityHint("Opens the customer")
+                        }
+                    }
+                    .padding(.vertical, PaperCardMetrics.edge)
+                }
+            }
+        }
+        .task(id: session.generation) { await load() }
+        .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+    }
+
+    private func load() async {
+        guard session.can("customer.view", feature: "core_crm") else { onLoaded(false); return }
+        do {
+            let loaded = try await api.allMemberships()
             items = loaded
             onLoaded(!loaded.isEmpty)
         } catch is CancellationError {

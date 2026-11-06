@@ -1126,6 +1126,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                        "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
             }]
         }
+        // The company agreements book: one active maintenance plan and one cancelled membership.
+        if path == "/v1/memberships" {
+            let c = PaperPreview.customerID
+            return ["items": [
+                ["id": "00000000-0000-4000-8000-000000009101", "customerId": c, "name": "Comfort Club", "kind": "maintenance",
+                 "cadence": "Twice a year", "startsOn": "2025-03-01", "renewsOn": "2027-03-01", "status": "active",
+                 "discountPercent": 15, "customerName": "Danielle Marlowe", "planName": "Comfort Club"],
+                ["id": "00000000-0000-4000-8000-000000009102", "customerId": "00000000-0000-4000-8000-000000000413",
+                 "name": "Priority membership", "kind": "membership", "status": "cancelled", "discountPercent": 10,
+                 "customerName": "David Chen", "planName": "Priority membership"],
+            ] as [[String: Any]]]
+        }
         // The company equipment book: Danielle's home units, as the office and her page read them.
         if path == "/v1/equipment" {
             let c = PaperPreview.customerID, loc = PaperPreview.homeLocationID
