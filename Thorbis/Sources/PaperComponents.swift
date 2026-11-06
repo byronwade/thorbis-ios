@@ -393,11 +393,8 @@ struct PaperGroupHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             // "Later today  3": the word, then the count beside it, as every list room reads.
-            Text(title).font(Theme.font(13, weight: .medium))
-            if let count, count > 0 {
-                Text("\(count)").font(Theme.font(13)).monospacedDigit()
-            }
-            Spacer(minLength: 0)
+            PaperSection<EmptyView, EmptyView>.label(title, count: count)
+                .frame(maxWidth: .infinity, alignment: .leading)
             trailing
         }
         .foregroundStyle(Theme.muted)
@@ -1520,6 +1517,13 @@ extension PaperListRow where Trailing == Text {
 
 /// One section: a 13/500 label (with " · count") above one white panel of rows.
 struct PaperSection<Content: View, Accessory: View>: View {
+    /// "By month  6": the label in 13 Medium and its count in 13 Regular, as one text that wraps whole.
+    static func label(_ title: String, count: Int?) -> Text {
+        let word = Text(title).font(Theme.font(13, weight: .medium))
+        guard let count, count > 0 else { return word }
+        return word + Text("  \(count)").font(Theme.font(13)).monospacedDigit()
+    }
+
     let title: String?
     var count: Int? = nil
     @ViewBuilder var content: Content
@@ -1533,15 +1537,12 @@ struct PaperSection<Content: View, Accessory: View>: View {
                 SectionHeader(title: title, count: count) { accessory }.padding(.bottom, 2)
             } else if let title {
                 // The list grammar's count ("By month  6"): the number beside the word, not after a dot.
+                // One text, so at large sizes the count wraps with the words instead of floating mid-label.
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(title)
-                        .font(Theme.font(13, weight: .medium))
+                    Self.label(title, count: count)
                         .foregroundStyle(Theme.muted)
                         .accessibilityAddTraits(.isHeader)
-                    if let count, count > 0 {
-                        Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 0)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     accessory
                 }
                 .frame(minHeight: 28)
