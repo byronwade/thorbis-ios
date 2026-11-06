@@ -234,16 +234,32 @@ struct SettingsView: View {
             PlaceMark(symbol: symbol, tint: Self.markTint(symbol))
             PaperListRow(title: title) {
                 // A long company name wraps to a second line rather than losing its end.
+                // A value in " · " parts shares one line when it fits, otherwise each part takes its own,
+                // so no line starts with the dot.
                 if let value {
-                    Text(value).font(Theme.font(15)).foregroundStyle(Theme.subtle)
-                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2).multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: false, vertical: true)
+                    let parts = value.components(separatedBy: " \u{00B7} ")
+                    if parts.count > 1 {
+                        ViewThatFits(in: .horizontal) {
+                            valueText(value).fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .trailing, spacing: 0) {
+                                ForEach(Array(parts.enumerated()), id: \.offset) { valueText($0.element) }
+                            }
+                        }
+                    } else {
+                        valueText(value)
+                    }
                 }
             }
             .environment(\.paperRowInset, 0)
         }
         .padding(.horizontal, PaperCardMetrics.inset)
         .contentShape(Rectangle())
+    }
+
+    private func valueText(_ text: String) -> some View {
+        Text(text).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2).multilineTextAlignment(.trailing)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The hairline between rows starts under the words, past the place mark.
