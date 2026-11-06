@@ -730,17 +730,18 @@ struct JobDetailView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("job-title")
             if let subtitle = headerSubtitle(job) {
-                Text(subtitle)
+                Text(headerLines(subtitle))
                     .font(Theme.font(15))
                     .foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
-            Text(metaLine(job))
+            metaLines(metaParts(job))
                 .font(Theme.font(13)).monospacedDigit()
                 .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(metaParts(job).joined(separator: ", "))
                 .accessibilityIdentifier("job-number")
                 // A long press copies the full ID (also in •••).
                 .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
@@ -771,7 +772,7 @@ struct JobDetailView: View {
     }
 
     /// "10:30 a.m. · Ramon M. · JOB-2214 · Member 15% off": when, who, the job number, membership.
-    private func metaLine(_ job: JobRecord) -> String {
+    private func metaParts(_ job: JobRecord) -> [String] {
         let arrived = isOnSite && outbox.pendingStatus(for: job.id) == nil ? JobFiltering.date(job.arrivedAt) : nil
         var parts: [String] = []
         if let arrived {
@@ -790,7 +791,31 @@ struct JobDetailView: View {
         if let memberPricing, memberPricing.isMember {
             parts.append(memberPricing.discountPercent > 0 ? "Member \(memberPricing.discountPercent)% off" : "Member")
         }
-        return parts.joined(separator: " · ")
+        return parts
+    }
+
+    /// One line when it fits; else when · who over number · membership; else a part per line,
+    /// so a "·" never ends a wrapped line.
+    @ViewBuilder private func metaLines(_ parts: [String]) -> some View {
+        let all = parts.joined(separator: " · ")
+        let one = Text(all).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+        let each = VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(parts.enumerated()), id: \.offset) { Text($0.element).fixedSize(horizontal: false, vertical: true) }
+        }
+        if typeSize.isAccessibilitySize {
+            each
+        } else if parts.count > 2 {
+            ViewThatFits(in: .horizontal) {
+                one
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(parts.prefix(2).joined(separator: " · ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Text(parts.dropFirst(2).joined(separator: " · ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
+                each
+            }
+        } else {
+            ViewThatFits(in: .horizontal) { one; each }
+        }
     }
 
     /// Where this job sits, for the bar: "Today · Stop 3 of 6" on the person's day, else when it is.
@@ -802,6 +827,11 @@ struct JobDetailView: View {
         let stops = TodayStopOrder.ordered(visits) { outbox.pendingStatus(for: $0.id) ?? $0.status }
         guard let at = stops.firstIndex(where: { $0.id == job.id }) else { return "Today" }
         return "Today · Stop \(at + 1) of \(stops.count)"
+    }
+
+    /// At accessibility sizes each " · " part gets its own line, so a "·" never ends a wrapped line.
+    private func headerLines(_ text: String) -> String {
+        typeSize.isAccessibilitySize ? text.replacingOccurrences(of: " \u{00B7} ", with: "\n") : text
     }
 
     /// The problem and who it is for, under the street.
