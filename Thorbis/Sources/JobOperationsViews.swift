@@ -490,7 +490,10 @@ struct JobCloseoutView: View {
 
     private func checklistRow(done: Bool, title: String, detail: String?, showsStatus: Bool = true) -> some View {
         // v2: the state is a word with its mark ("Done" / "To do"), not a tick's colour.
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        // At accessibility sizes the word sits under the item, so the item keeps the full width.
+        let row = closeoutTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return row {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
                     .foregroundStyle(done ? Theme.muted : Theme.foreground)
