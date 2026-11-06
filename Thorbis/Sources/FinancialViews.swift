@@ -13,6 +13,8 @@ struct EstimatesView: View {
     @State private var error: String?
     @State private var search = ""
     @State private var showCreate = false
+    /// iPad's toolbar already carries the one create +; the list doesn't add a second.
+    @Environment(\.horizontalSizeClass) private var sizeClass
     /// Title, customer or reference, so "EST-4F2A" or a customer's name finds it too.
     private var visible: [EstimateRecord] {
         let query = search.trimmingCharacters(in: .whitespaces)
@@ -71,7 +73,7 @@ struct EstimatesView: View {
         .refreshable { await load() }
         .toolbar {
             // The same quiet + circle as the Jobs and Customers headers, not the stock glass button.
-            if session.can("estimate.create", feature: "estimates") {
+            if session.can("estimate.create", feature: "estimates"), sizeClass != .regular {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     Button { showCreate = true } label: { CreamCircleLabel(symbol: "plus", ink: true) }
                         .buttonStyle(PressStyle())
