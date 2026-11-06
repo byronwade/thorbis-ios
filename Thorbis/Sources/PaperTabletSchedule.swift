@@ -38,25 +38,20 @@ struct PaperTabletSchedule: View {
                 Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 12)
-            // design 2026-10-30: the one segmented selector.
-            PaperTabs(options: Self.ranges, selection: $range)
+            // Text tabs, as the Jobs column beside it and every phone list use.
+            PaperTabs(options: Self.ranges, selection: $range, textTabs: true)
                 .padding(.bottom, 8)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let error = store.error { ErrorBanner(message: error) }
                     if let problem = swipes.problem { ErrorBanner(message: problem) }
                     if !jobs.isEmpty {
+                        // Plain rows on the canvas, as in the Jobs column: no card around the day.
                         VStack(spacing: 0) {
                             ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
                                 scheduleRow(job, showsPeriod: TimeColumn.showsPeriod(jobs, at: index))
                             }
                         }
-                            // The rows' swipe ground is the canvas; here they sit on the panel, so they
-                            // take the panel's tone and read as one list, not a stack of cards.
-                            .environment(\.thorbisSheetCanvas, true)
-                            .padding(4)
-                            .panelBackground(cornerRadius: Theme.cardRadius)
-                            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
                     }
                     if jobs.isEmpty && !store.loading {
                         PaperEmptyState(symbol: "calendar", title: "Nothing booked today",
@@ -64,7 +59,7 @@ struct PaperTabletSchedule: View {
                     }
                     if store.loading && jobs.isEmpty { SkeletonRows(count: 5, leading: false) }
                 }
-                .padding(.horizontal, 12).padding(.bottom, 16)
+                .padding(.horizontal, Theme.gutter - 12).padding(.bottom, 16)
             }
             .refreshable { await store.refresh(api) }
             .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
@@ -96,8 +91,8 @@ struct PaperTabletSchedule: View {
             ?? .text(time)
         return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
             Button { selectedID = job.id } label: {
-                PaperListRow(leading: leading, title: street ?? job.title,
-                             subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
+                PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
+                             subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
                              subtitleLines: 2, dimmed: job.status == "completed") {
                     StatusWord(jobStatus: job.status)
                 }
