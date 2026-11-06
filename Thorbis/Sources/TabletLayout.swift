@@ -518,8 +518,9 @@ struct TabletRoot: View {
     }
 
     private var createButton: some View {
+        // The same create control as every phone list and Today: the cream sheet's ink circle.
         Button { createMenuOpen = true } label: {
-            PaperCircleLabel(symbol: "plus", size: 40, fill: Theme.card, bordered: true)
+            CreamCircleLabel(symbol: "plus", ink: true)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Create")
