@@ -182,7 +182,7 @@ struct OwnerHomeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: session.generation) { await load() }
         .thorbisDestination(isPresented: $showPayments) { CompanyPaymentsView() }
-        .thorbisDestination(isPresented: $showMoney) { MoneyOverviewView() }
+        .thorbisDestination(isPresented: $showMoney) { ReportsView(includesRevenue: true, initialTab: "Overview") }
         .refreshable {
             _ = await store.refresh(api)
             await SavedCopies.$liveOnly.withValue(true) { await load() }

@@ -209,6 +209,14 @@ struct PaperTabs: View {
                 // Accessibility sizes: the job screen's chooser. Three words at XXXL never fit one
                 // row, and a row of fixed-width words would widen the whole screen past its edges.
                 accessibleChooser
+            } else if textTabs && wrapOverflow {
+                // Text tabs that don't fit one row flow onto a second, each word whole and spaced
+                // (a plain row squeezed them into one run: "OverviewRevenueOperations").
+                FlowRow(spacing: 4, lineSpacing: 0) {
+                    ForEach(options, id: \.self) { option in tab(option, padding: 12) }
+                }
+                .padding(.horizontal, Theme.gutter - 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else if textTabs {
                 HStack(spacing: 4) {
                     ForEach(options, id: \.self) { option in tab(option, padding: 12) }
