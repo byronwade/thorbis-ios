@@ -257,7 +257,8 @@ struct FormField<Content: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                if optional { Text("Optional").font(Theme.font(13)).foregroundStyle(Theme.muted) }
+                // Same marker as PaperFormField ("Notes for the tech · Optional"), one form grammar.
+                if optional { Text("\u{00B7} Optional").font(Theme.font(13)).foregroundStyle(Theme.muted.opacity(0.8)) }
             }
             .accessibilityHidden(true)
             content
