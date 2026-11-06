@@ -445,17 +445,23 @@ struct MemberChip: View {
 }
 
 
-/// One unit: its name, brand · model · serial, the warranty date, and the warranty as a word.
+/// One unit: its name, brand · model, then the serial and the warranty date each on their own line
+/// (so neither breaks mid-number), and the warranty as a word.
 struct EquipmentUnitRow: View {
     let unit: EquipmentRecord
 
     var body: some View {
         let warranty = unit.warrantyEnd.map { end -> (String, Bool) in
             let expired = end < Calendar.current.startOfDay(for: .now)
-            return ("\(expired ? "Warranty ended" : "Warranty until") \(end.formatted(date: .abbreviated, time: .omitted))", expired)
+            // The date stays whole ("Feb 3, 2022"), never "Feb" / "3, 2022".
+            let day = end.formatted(date: .abbreviated, time: .omitted).replacingOccurrences(of: " ", with: "\u{00A0}")
+            return ("\(expired ? "Warranty ended" : "Warranty until") \(day)", expired)
         }
-        PaperListRow(title: unit.name, subtitle: unit.detail.isEmpty ? nil : unit.detail,
-                     meta: warranty?.0, subtitleLines: 2) {
+        let made = [unit.brand, unit.model].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        let serial = unit.serialNumber.flatMap { $0.isEmpty ? nil : "SN \($0)" }
+        let meta = [serial, warranty?.0].compactMap { $0 }.joined(separator: "\n")
+        PaperListRow(title: unit.name, subtitle: made.isEmpty ? nil : made,
+                     meta: meta.isEmpty ? nil : meta, subtitleLines: 2) {
             if let warranty {
                 StatusWord(text: warranty.1 ? "Out of warranty" : "In warranty", tint: warranty.1 ? nil : Theme.success)
             }
