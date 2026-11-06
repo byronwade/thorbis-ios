@@ -391,10 +391,12 @@ struct PaperGroupHeader<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(spacing: 8) {
-            // "Later today · 3": one label, the count in the same voice.
-            Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
-                .font(Theme.font(13, weight: .medium)).monospacedDigit()
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            // "Later today  3": the word, then the count beside it, as every list room reads.
+            Text(title).font(Theme.font(13, weight: .medium))
+            if let count, count > 0 {
+                Text("\(count)").font(Theme.font(13)).monospacedDigit()
+            }
             Spacer(minLength: 0)
             trailing
         }
@@ -1530,11 +1532,15 @@ struct PaperSection<Content: View, Accessory: View>: View {
             if let title, wells {
                 SectionHeader(title: title, count: count) { accessory }.padding(.bottom, 2)
             } else if let title {
-                HStack(spacing: 8) {
-                    Text(count.map { "\(title) · \($0)" } ?? title)
-                        .font(Theme.font(13, weight: .medium)).monospacedDigit()
+                // The list grammar's count ("By month  6"): the number beside the word, not after a dot.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title)
+                        .font(Theme.font(13, weight: .medium))
                         .foregroundStyle(Theme.muted)
                         .accessibilityAddTraits(.isHeader)
+                    if let count, count > 0 {
+                        Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
                     Spacer(minLength: 0)
                     accessory
                 }
