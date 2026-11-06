@@ -360,11 +360,13 @@ private struct TeamRoomRow<Trailing: View>: View {
         layout {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .lineLimit(stacked ? nil : 2)
+                    .lineLimit(stacked && !Self.isAddress(title) ? nil : Self.isAddress(title) ? 1 : 2)
+                    .addressFit(Self.isAddress(title))
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail, !detail.isEmpty {
                     Text(detail).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                        .lineLimit(stacked ? nil : 1).truncationMode(.tail)
+                        .lineLimit(stacked && !Self.isAddress(detail) ? nil : 1).truncationMode(.tail)
+                        .addressFit(Self.isAddress(detail))
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -374,6 +376,15 @@ private struct TeamRoomRow<Trailing: View>: View {
         .padding(.leading, ListRoom.gutter).padding(.trailing, trailingInset).padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    /// An email address breaks mid-word when it wraps, so it stays on one line and shrinks instead.
+    static func isAddress(_ text: String) -> Bool { text.contains("@") && !text.contains(" ") }
+}
+
+private extension View {
+    @ViewBuilder func addressFit(_ isAddress: Bool) -> some View {
+        if isAddress { self.minimumScaleFactor(0.6).truncationMode(.middle) } else { self }
     }
 }
 

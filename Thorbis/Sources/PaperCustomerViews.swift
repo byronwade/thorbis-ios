@@ -659,11 +659,14 @@ struct CustomerDetailView: View {
         // Captured so dismissing the confirm (which clears smsConsentChoice) can't blank the choice
         // before the action reads it.
         let pendingGrant = smsConsentChoice
-        return HStack {
+        // At accessibility sizes the choice sits under its label instead of squeezing beside it.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout())
+        return layout {
             Text("Job texts").foregroundStyle(Theme.muted)
                 // The menu below says "Job texts" itself, so VoiceOver doesn't stop on the label alone.
                 .accessibilityHidden(canEdit)
-            Spacer()
+            if !stacked { Spacer() }
             let granted = smsConsent?.decision == "grant"
             if canEdit {
                 ThorbisMenu(items: [
@@ -677,7 +680,7 @@ struct CustomerDetailView: View {
                     .foregroundStyle(Theme.foreground)
                     // A real 44pt target: the frame alone left VoiceOver and the hit test on the
                     // ~18pt words, so the shape covers the whole box for both, with room either side.
-                    .padding(.leading, 12)
+                    .padding(.leading, stacked ? 0 : 12)
                     .frame(minHeight: 44)
                     .contentShape([.interaction, .accessibility], Rectangle())
                 }
