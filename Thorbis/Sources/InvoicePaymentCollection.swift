@@ -1103,8 +1103,10 @@ struct InvoicePaymentCollectionSheet: View {
                 .contentTransition(.numericText())
                 .padding(.top, 4)
                 .accessibilityLabel("Collecting \(money(amountCents ?? model.collectableCents ?? 0, currency: invoice.currency))")
+            // Centred like the figure above, so at large text "Balance due" sits squarely over the amount.
             Text("Balance due \(money(model.outstandingCents ?? 0, currency: invoice.currency))")
                 .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.center)
             if model.waitingCents > 0 {
                 // OF-08: what's waiting to record isn't paid yet, but it can't be collected twice.
                 WaitingToSyncLabel(text: "\(money(model.waitingCents, currency: invoice.currency)) waiting to record")
