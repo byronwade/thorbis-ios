@@ -120,7 +120,7 @@ struct InboxLocalDraftView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Message drafts").font(Theme.font(30, weight: .medium)).tracking(-0.6)
                         .accessibilityAddTraits(.isHeader)
-                    Text("On this device · Current session only").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    DotLine(["On this device", "Current session only"]).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 if let actionError {
