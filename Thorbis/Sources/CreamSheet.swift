@@ -748,8 +748,10 @@ struct CreamPlaceHeader<Trailing: View>: View {
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     }
                 }
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                HStack(spacing: 4) { trailing }
+                // The title column takes every point the circles leave (a Spacer would split the
+                // room with it, and the subtitle would wrap with half the row empty).
+                .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) { trailing }.fixedSize()
             }
             .padding(.leading, Theme.gutter).padding(.trailing, 14)
             .padding(.top, 14)
