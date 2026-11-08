@@ -78,11 +78,17 @@ struct PaperHeader: View {
                     createButton
                 }
             }
-            // At accessibility sizes the whole subtitle shows; two lines would cut it mid-sentence.
-            Text(subtitle)
-                .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                .frame(minHeight: 20, alignment: .leading)
+            // At accessibility sizes the whole subtitle shows; two lines would cut it mid-sentence,
+            // and a " · " list breaks between its parts so no line ends on a dot.
+            Group {
+                if typeSize.isAccessibilitySize && subtitle.contains(" \u{00B7} ") {
+                    DotLine(subtitle)
+                } else {
+                    Text(subtitle).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                }
+            }
+            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            .frame(minHeight: 20, alignment: .leading)
         }
         .foregroundStyle(Theme.foreground)
         .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 12)
