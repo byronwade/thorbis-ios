@@ -13,6 +13,8 @@ struct EstimatesView: View {
     @State private var error: String?
     @State private var search = ""
     @State private var showCreate = false
+    /// iPad's toolbar already carries the one create +; the list doesn't add a second.
+    @Environment(\.horizontalSizeClass) private var sizeClass
     /// Title, customer or reference, so "EST-4F2A" or a customer's name finds it too.
     private var visible: [EstimateRecord] {
         let query = search.trimmingCharacters(in: .whitespaces)
@@ -70,8 +72,14 @@ struct EstimatesView: View {
         .task(id: showAll) { await load() }
         .refreshable { await load() }
         .toolbar {
-            // Neutral like the back button beside it; blue stays for links and selection.
-            if session.can("estimate.create", feature: "estimates") { Button("New estimate", systemImage: "plus") { showCreate = true }.tint(Theme.foreground) }
+            // The same quiet + circle as the Jobs and Customers headers, not the stock glass button.
+            if session.can("estimate.create", feature: "estimates"), sizeClass != .regular {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    Button { showCreate = true } label: { CreamCircleLabel(symbol: "plus", ink: true) }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("New estimate")
+                }
+            }
         }
         .sheet(isPresented: $showCreate, onDismiss: { Task { await load() } }) { SheetSurface { NewEstimateView() } }
     }
@@ -146,6 +154,7 @@ struct EstimateDetailView: View {
                                              total: option.totalAmount, currency: option.currency,
                                              memberLine: memberLine(option.lines, currency: option.currency))
                     }
+                    RecordActivitySection(recordType: "estimate", recordID: record.id)
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
             .padding(.horizontal, 20)
@@ -404,8 +413,8 @@ struct InvoicesView: View {
         let query = search.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return records }
         return records.filter { record in
-            [store.customerName(record.customerId), "INV-\(record.id.suffix(4).uppercased())"]
-                .contains { $0.localizedCaseInsensitiveContains(query) }
+            InvoiceReferenceSearch.matches(query: query, invoiceID: record.id,
+                                           customerName: store.customerName(record.customerId))
         }
     }
     /// Redesign phase 3: the 34pt title with what's owed, then grouped wells by status (Draft,
@@ -480,6 +489,8 @@ struct InvoiceDetailView: View {
     /// Opened from the job's next step: once it's paid, go back to the job for wrap up (TF-09).
     var returnsWhenPaid = false
     var expectedJobScope: JobDocumentScope? = nil
+    /// The job-scoped label is display only; the full id still controls every read and payment.
+    var invoiceReference: String? = nil
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
@@ -499,6 +510,7 @@ struct InvoiceDetailView: View {
     /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
     @State private var collectAfterCustomer = false
     @State private var showPDF = false
+    @State private var showDiscount = false
     @State private var openCustomer: Customer?
 
     /// The commit at the bottom is the next step (Issue or Collect); the rest lives here.
@@ -510,6 +522,9 @@ struct InvoiceDetailView: View {
         }
         if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
             items.append(ThorbisMenuItem("Edit line items", icon: "pencil") { showEditDraft = true })
+        }
+        if record.status == "draft", !session.isOffline, session.can("invoice.discount", feature: "invoicing") {
+            items.append(ThorbisMenuItem("Add discount", icon: "tag") { showDiscount = true })
         }
         items.append(ThorbisMenuItem("View PDF", icon: "doc.text") { showPDF = true })
         if let application = financingApplications.first, application.isOpen,
@@ -535,7 +550,7 @@ struct InvoiceDetailView: View {
                     // now at 30pt; the quiet properties; the lines with their totals; then payments.
                     let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
                     let due = max(total - record.amountPaid, 0)
-                    EvidenceHeader(title: "Invoice \(record.id.suffix(4).uppercased())", status: DocumentStatus(invoice: record),
+                    EvidenceHeader(title: "Invoice \(displayReference(record).dropFirst(4))", status: DocumentStatus(invoice: record),
                                    figureLabel: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
                                    cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency,
                                    statusIdentifier: "invoice-chip-status", titleIdentifier: "invoice-detail-title")
@@ -577,6 +592,7 @@ struct InvoiceDetailView: View {
                             onInvoiceUpdated: { _ = accept($0) }
                         )
                     }
+                    RecordActivitySection(recordType: "invoice", recordID: record.id)
                 } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
             }
             .padding(.horizontal, 20)
@@ -604,6 +620,11 @@ struct InvoiceDetailView: View {
             CommercialDocumentView(path: "/v1/invoices/\(id)/document").toolbar(.visible, for: .navigationBar)
         }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+        .sheet(isPresented: $showDiscount) { SheetSurface {
+            if let record {
+                InvoiceDiscountSheet(invoice: record) { updated in _ = accept(updated) }
+            }
+        } }
         .sheet(isPresented: $showSignature) { SheetSurface {
             if let record, let jobID = record.jobId {
                 let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
@@ -701,7 +722,7 @@ struct InvoiceDetailView: View {
         }
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
-                InvoicePaymentCollectionSheet(model: paymentModel, invoice: record)
+                InvoicePaymentCollectionSheet(model: paymentModel, invoice: record, invoiceReference: displayReference(record))
                     .thorbisSheetSurface()
                     .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
@@ -738,8 +759,12 @@ struct InvoiceDetailView: View {
                 EvidenceProperty(label: "Financing",
                                  value: "\(words) · \(money(application.amount.amount, currency: application.amount.currency))")
             }
-            EvidenceProperty(label: "Reference", value: "INV-\(record.id.suffix(4).uppercased())")
+            EvidenceProperty(label: "Reference", value: displayReference(record))
         }
+    }
+
+    private func displayReference(_ invoice: InvoiceRecord) -> String {
+        invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
     }
 
     /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
@@ -984,11 +1009,16 @@ struct DocumentLinesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
-                if !lines.isEmpty && !typeSize.isAccessibilitySize {
-                    Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
+            // The column hint only when the label fits beside it on one line; a long option name
+            // ("Option 1 · Full system replacement") keeps the row to itself instead of wrapping.
+            ViewThatFits(in: .horizontal) {
+                SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
+                    if !lines.isEmpty && !typeSize.isAccessibilitySize {
+                        Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                            .accessibilityHidden(true)
+                    }
                 }
+                SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) { EmptyView() }
             }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.bottom, 2)
@@ -1060,11 +1090,7 @@ struct LineText: Equatable {
 /// line after the others with their sum, so no price is hidden and the lines still add up to the
 /// total. The server's PDF and approval link fold the same way.
 func customerEstimateLines(_ lines: [FieldLine]) -> [FieldLine] {
-    let hidden = lines.filter { $0.showToCustomer == false }
-    guard let first = hidden.first, let sum = paperLinesTotal(hidden) else { return lines }
-    return lines.filter { $0.showToCustomer != false }
-        + [FieldLine(id: first.id, description: "Materials", quantity: 1,
-                     unitPrice: FieldMoney(amount: sum, currency: first.unitPrice.currency), source: nil)]
+    customerEstimateProjection(lines, currency: lines.first?.unitPrice.currency ?? "USD") ?? []
 }
 
 func paperLinesTotal(_ lines: [FieldLine]) -> Int? {
@@ -1165,3 +1191,82 @@ func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
     return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD"))\u{00A0}owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
 }
 
+
+
+/// Web parity: discount a draft invoice. The amount and a reason the customer sees ("Discount —
+/// Loyalty"), checked here against the total so the server's refusal is the rare case.
+struct InvoiceDiscountSheet: View {
+    let invoice: InvoiceRecord
+    let applied: (InvoiceRecord) -> Void
+    @EnvironmentObject private var api: APIClient
+    @Environment(\.dismiss) private var dismiss
+    @State private var amount = ""
+    @State private var reason = ""
+    @State private var amountProblem: String?
+    @State private var reasonProblem: String?
+    @State private var error: String?
+    @State private var busy = false
+    @FocusState private var amountFocused: Bool
+
+    private var total: Int { invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount } }
+
+    /// "150", "150.5", "$1,250.00" → cents; nil when it isn't a plain amount.
+    private var cents: Int? {
+        let cleaned = amount.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        guard let value = Decimal(string: cleaned), value > 0 else { return nil }
+        var scaled = value * 100, rounded = Decimal()
+        NSDecimalRound(&rounded, &scaled, 0, .plain)
+        return NSDecimalNumber(decimal: rounded).intValue
+    }
+
+    var body: some View {
+        ThorbisModalSheet(title: "Add discount", onClose: busy ? nil : { dismiss() },
+                          commitTitle: "Apply discount", commitSymbol: "tag", busy: busy,
+                          commitIdentifier: "invoice-discount-apply", commit: { Task { await press() } }) {
+            FormField(label: "Amount", help: "Comes off the invoice total of \(money(total, currency: invoice.currency)).",
+                      error: amountProblem) {
+                TextField("", text: $amount, prompt: .placeholder("50.00"))
+                    .font(Theme.font(16)).monospacedDigit()
+                    .keyboardType(.decimalPad)
+                    .focused($amountFocused)
+                    .onChange(of: amount) { _, _ in amountProblem = nil }
+                    .accessibilityLabel("Discount amount in dollars")
+                    .fieldWell()
+            }
+            FormField(label: "Reason", help: "Shown on the invoice as \u{201C}Discount \u{2014} \(reason.isEmpty ? "Loyalty" : reason)\u{201D}.",
+                      error: reasonProblem) {
+                TextField("", text: $reason, prompt: .placeholder("Loyalty"))
+                    .font(Theme.font(16))
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .onSubmit { Task { await press() } }
+                    .onChange(of: reason) { _, _ in reasonProblem = nil }
+                    .accessibilityLabel("Reason")
+                    .fieldWell()
+            }
+            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+        }
+        .onAppear { amountFocused = true }
+        .interactiveDismissDisabled(busy || !amount.isEmpty || !reason.isEmpty)
+    }
+
+    /// Validate on commit: say what's missing under the field instead of locking the button.
+    private func press() async {
+        guard !busy else { return }
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let cents else { amountProblem = "Enter an amount, like 50.00."; return }
+        guard cents <= total else { amountProblem = "A discount can\u{2019}t be more than the invoice total."; return }
+        guard !trimmed.isEmpty else { reasonProblem = "Add a reason the customer will see, like Loyalty."; return }
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await api.discountFieldInvoice(invoice.id, amountCents: cents, reason: trimmed)
+            applied(updated)
+            dismiss()
+        } catch {
+            self.error = error.isConnectivityFailure ? "No signal. The discount wasn\u{2019}t applied; try again when you\u{2019}re back online."
+                                                     : error.localizedDescription
+        }
+    }
+}

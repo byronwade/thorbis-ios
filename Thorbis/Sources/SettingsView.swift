@@ -7,9 +7,11 @@ import UserNotifications
 /// Native grouped lists per D-025 (Apple HIG for settings), Thorbis tokens for color.
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
+    @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var pendingMedia: PendingMediaStore
+    @State private var startupDestination: StartupDestination = .automatic
     @State private var confirmSignOut = false
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -32,8 +34,9 @@ struct SettingsView: View {
                             Text(session.user?.name ?? "Account").font(Theme.font(17, weight: .medium))
                                 .fixedSize(horizontal: false, vertical: true)
                             if let email = session.user?.email {
+                                // An address breaks mid-word when it wraps, so it shrinks on one line instead.
                                 Text(email).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                                    .fixedSize(horizontal: false, vertical: true)
+                                    .lineLimit(1).minimumScaleFactor(0.6).truncationMode(.middle)
                             }
                         }
                         Spacer(minLength: 0)
@@ -113,6 +116,18 @@ struct SettingsView: View {
                                     value: appearance == "light" ? "Light" : appearance == "dark" ? "Dark" : "System")
                             }
                             WellDivider(leading: Self.rowDivider)
+                            if let scope = StartupDestination.scope(session: session, api: api) {
+                                ThorbisMenu(items: StartupDestination.allCases.filter { $0.permitted(session) }.map { destination in
+                                    ThorbisMenuItem(destination.displayTitle, isSelected: startupDestination == destination) {
+                                        StartupDestinationPreferences().set(destination, for: scope)
+                                        startupDestination = destination
+                                    }
+                                }, title: "Open app to") {
+                                    row("Open app to", symbol: "rectangle.on.rectangle", value: startupDestination.permitted(session) ? startupDestination.displayTitle : "Automatic")
+                                }
+                                .accessibilityHint("Applies the next time you open the app on this device")
+                                WellDivider(leading: Self.rowDivider)
+                            }
                             Button {
                                 Task { await notificationsTapped() }
                             } label: {
@@ -176,6 +191,9 @@ struct SettingsView: View {
                             isPresented: $confirmSignOut,
                             actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
             .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
+            .task(id: StartupDestination.scope(session: session, api: api)?.key) {
+                startupDestination = StartupDestination.scope(session: session, api: api).map { StartupDestinationPreferences().get(for: $0) } ?? .automatic
+            }
         }
     }
 
@@ -216,12 +234,35 @@ struct SettingsView: View {
         HStack(alignment: .center, spacing: 12) {
             PlaceMark(symbol: symbol, tint: Self.markTint(symbol))
             PaperListRow(title: title) {
-                if let value { Text(value).font(Theme.font(15)).foregroundStyle(Theme.subtle).lineLimit(typeSize.isAccessibilitySize ? 3 : 1) }
+                // A long company name wraps to a second line rather than losing its end.
+                // A value in " · " parts shares one line when it fits, otherwise each part takes its own,
+                // so no line starts with the dot.
+                if let value {
+                    let parts = value.components(separatedBy: " \u{00B7} ")
+                    if parts.count > 1 {
+                        ViewThatFits(in: .horizontal) {
+                            valueText(value).fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 0) {
+                                ForEach(Array(parts.enumerated()), id: \.offset) { valueText($0.element) }
+                            }
+                        }
+                    } else {
+                        valueText(value)
+                    }
+                }
             }
             .environment(\.paperRowInset, 0)
         }
         .padding(.horizontal, PaperCardMetrics.inset)
         .contentShape(Rectangle())
+    }
+
+    private func valueText(_ text: String) -> some View {
+        Text(text).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+            // Stacked under its setting at accessibility sizes, the value reads from the left like the title.
+            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
+            .multilineTextAlignment(typeSize.isAccessibilitySize ? .leading : .trailing)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The hairline between rows starts under the words, past the place mark.

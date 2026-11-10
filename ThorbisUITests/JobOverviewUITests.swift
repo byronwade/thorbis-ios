@@ -2,6 +2,90 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testPhotosAreDirectlyReachableFromMoneyAndActivityStillOpens() {
+        continueAfterFailure = false
+        let app = preview("job", working: true)
+        let money = app.buttons["job-section-money"]
+        XCTAssertTrue(money.waitForExistence(timeout: 15)); money.tap()
+        let photos = app.buttons["job-section-photos"]
+        XCTAssertTrue(photos.waitForExistence(timeout: 5))
+        XCTAssertEqual(photos.label, "Photos")
+        for section in ["overview", "money", "activity", "photos"] {
+            let button = app.buttons["job-section-\(section)"]
+            XCTAssertGreaterThanOrEqual(button.frame.width, 43.5, section)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 43.5, section)
+        }
+        photos.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: photos)], timeout: 5), .completed)
+        let filter = app.buttons["activity-filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 10))
+        XCTAssertTrue(filter.label.lowercased().contains("photos"), filter.label)
+        capture(app, name: "Job direct Photos section")
+        let activity = app.buttons["job-section-activity"]
+        XCTAssertTrue(activity.isHittable); activity.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "all"), object: filter)], timeout: 5), .completed)
+        XCTAssertTrue(money.isHittable); money.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: money)], timeout: 5), .completed)
+    }
+
+    func testDirectPhotosSectionIsInTheLargeTextChooser() {
+        continueAfterFailure = false
+        let app = preview("job", accessibleText: true, working: true)
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
+        let photos = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Photos", "job-section-chooser")).firstMatch
+        XCTAssertTrue(photos.waitForExistence(timeout: 5)); photos.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Photos"), object: chooser)], timeout: 10), .completed, chooser.label)
+        let filter = app.buttons["activity-filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 10))
+        XCTAssertTrue(filter.label.lowercased().contains("photos"), filter.label)
+        capture(app, name: "Job Photos large text chooser")
+    }
+
+    func testReturningFromPhotosKeepsThePreviousActivityFilter() {
+        continueAfterFailure = false
+        let app = preview("job", working: true)
+        let activity = app.buttons["job-section-activity"]
+        XCTAssertTrue(activity.waitForExistence(timeout: 15)); activity.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
+        let filter = app.buttons["activity-filter"]
+        let content = app.scrollViews.firstMatch
+        for _ in 0..<6 where !filter.isHittable { content.swipeUp() }
+        XCTAssertTrue(filter.isHittable); filter.tap()
+        menuRow(app, "Notes").tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
+        let photos = app.buttons["job-section-photos"]
+        XCTAssertTrue(photos.waitForExistence(timeout: 5)); photos.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "photos"), object: filter)], timeout: 5), .completed)
+        let money = app.buttons["job-section-money"]
+        XCTAssertTrue(money.isHittable); money.tap()
+        XCTAssertTrue(activity.isHittable)
+        activity.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
+    }
+
+    func testLongInvoiceBalanceKeepsAllFourJobSectionsTappable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-extreme-invoice"]
+        app.launch()
+        var previous: XCUIElement?
+        for section in ["overview", "money", "activity", "photos"] {
+            let button = app.buttons["job-section-\(section)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 15), section)
+            for _ in 0..<5 where !button.isHittable { app.swipeUp() }
+            XCTAssertTrue(button.isHittable, section)
+            XCTAssertGreaterThanOrEqual(button.frame.width, 43.5, section)
+            XCTAssertGreaterThanOrEqual(button.frame.height, 43.5, section)
+            if let previous { XCTAssertLessThanOrEqual(previous.frame.maxX, button.frame.minX + 0.5, "\(section) overlaps the previous section") }
+            previous = button
+        }
+        let money = app.buttons["job-section-money"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "due"), object: money)], timeout: 15), .completed,
+                       "The full balance remains spoken")
+        XCTAssertTrue(money.label.contains("9,999,999,620.00"), money.label)
+    }
     /// iPad: the job is the detail column's first screen (picked from the list beside it, so nothing
     /// to go back to). A screen pushed from it — the customer — offers the same Back circle, which
     /// returns to the job, and a swipe in from the detail column's own leading edge (beside the
@@ -318,6 +402,19 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Wrap up this job"].waitForExistence(timeout: 5))
     }
 
+    func testInProgressJobPaymentStepOpensItsInvoice() {
+        continueAfterFailure = false
+        let app = preview("job", working: true)
+        let collect = button(startingWith: "Collect ", in: app)
+        XCTAssertTrue(collect.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !collect.isHittable { app.swipeUp() }
+        XCTAssertTrue(collect.isHittable)
+        collect.tap()
+        let invoice = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        XCTAssertTrue(invoice.label.contains("INV-2209"), invoice.label)
+    }
+
     func testAccessibleTextKeepsContactActionsSeparateAndThePrimaryActionReadable() {
         continueAfterFailure = false
         let app = preview("job", accessibleText: true)
@@ -387,7 +484,7 @@ final class JobOverviewUITests: XCTestCase {
         menuRow(app, "Photos").tap()
         XCTAssertTrue(chooser.waitForExistence(timeout: 10))
         XCTAssertTrue(chooser.isHittable, "The chooser must remain reachable on Photos")
-        XCTAssertTrue(chooser.label.contains("Activity"))
+        XCTAssertTrue(chooser.label.contains("Photos"))
         XCTAssertTrue(filter.waitForExistence(timeout: 5))
         XCTAssertTrue(filter.label.contains("photos"), filter.label)
         for _ in 0..<5 where !filter.isHittable { content.swipeUp() }

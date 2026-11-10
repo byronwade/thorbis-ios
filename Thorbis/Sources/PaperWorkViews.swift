@@ -960,8 +960,9 @@ struct TodayRow: View {
             }
             .frame(width: stacked ? nil : column, alignment: .leading)
             .padding(.top, stacked ? 10 : 0)
+            // Beside the Schedule button the row is narrow, so the title may take a third line.
             JobRoomRow(job: job, street: street, customer: customer, who: assignee, pendingStatus: pendingStatus,
-                       showsStatus: schedule == nil, inset: 0)
+                       showsStatus: schedule == nil, titleLines: schedule == nil ? 2 : 3, inset: 0)
         }
         .padding(.horizontal, ListRoom.gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1020,9 +1021,9 @@ struct ScheduleCompactRow: View {
         // The Schedule button sits beside the row's link, not inside it, so each is its own target.
         HStack(alignment: .center, spacing: 0) {
             NavigationLink(value: job) {
-                PaperListRow(leading: leading, title: street ?? job.title,
-                             subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
-                             subtitleLines: 2, dimmed: job.status == "completed") {
+                PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
+                             subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
+                             subtitleLines: 2, titleLines: schedule == nil ? 2 : 3, dimmed: job.status == "completed") {
                     if schedule == nil {
                         StatusWord(jobStatus: pendingStatus ?? job.status, pending: pendingStatus != nil)
                     }
@@ -1275,18 +1276,22 @@ struct JobsView: View {
     @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool) -> some View {
         if !jobs.isEmpty {
             ListGroupLabel(title: title, count: jobs.count, first: first)
-            ForEach(jobs) { job in jobRow(job) }
+            ForEach(jobs) { job in jobRow(job, group: title) }
         }
     }
 
-    private func jobRow(_ job: Job) -> some View {
+    private func jobRow(_ job: Job, group: String? = nil) -> some View {
         let customer = store.customerName(job.customerId)
         let needsTime = canSchedule && job.scheduledFor == nil && !["completed", "canceled"].contains(job.status)
             && !ScheduleLead.activeStatuses.contains(job.status)
         let mine = job.assignedToUserId != nil && job.assignedToUserId == session.user?.id
         let assignee = job.assignedToUserId.flatMap { roster[$0] }
         // The tech by name from the roster; "You" only where the roster can't name you, on a shared board.
-        let who = assignee ?? (tab != "Assigned" && mine ? "You" : nil)
+        // Assigned is your own list, so naming you on every row is noise.
+        let who = tab == "Assigned" && mine ? nil : assignee ?? (mine ? "You" : nil)
+        // Under "In progress" a row needn't say "In progress" again; it still says Late or a pending move.
+        let saysGroup = group.map { job.status.statusLabel.caseInsensitiveCompare($0) == .orderedSame } ?? false
+        let showsStatus = !needsTime && (isLate(job) || outbox.pendingStatus(for: job.id) != nil || !saysGroup)
         // Swipe right: Call, Directions. Swipe left: the next move the server allows.
         return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
             HStack(spacing: 0) {
@@ -1295,7 +1300,7 @@ struct JobsView: View {
                     JobRoomRow(job: job, street: addresses.street(job), customer: customer, when: when(job),
                                who: needsTime ? nil : who,
                                pendingStatus: outbox.pendingStatus(for: job.id),
-                               late: isLate(job), showsStatus: !needsTime)
+                               late: isLate(job), showsStatus: showsStatus)
                 }
                 .buttonStyle(RowPressStyle())
                 .jobContextMenu(job, customer: customer)

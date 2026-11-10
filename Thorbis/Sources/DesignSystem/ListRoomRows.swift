@@ -38,6 +38,12 @@ extension ListGroupLabel where Trailing == EmptyView {
 /// A job in a list room. Street (15 Medium), then the problem · customer, then when and who; the
 /// status word and its mark trail. Finished work reads quieter. The problem stays its own text so a
 /// row can be found by it. A row is one VoiceOver stop (its button combines the words).
+extension String {
+    /// "Kitchen sink backup — Petrov": a no-break space before the dash, so a wrap leaves the dash at the
+    /// end of a line ("backup —" / "Petrov") instead of opening the next one with it.
+    var dashKeptWithWordBefore: String { replacingOccurrences(of: " \u{2014} ", with: "\u{00A0}\u{2014} ") }
+}
+
 struct JobRoomRow: View {
     let job: Job
     /// The street the tech drives to; nil leads with the problem.
@@ -70,16 +76,12 @@ struct JobRoomRow: View {
                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
         layout {
             VStack(alignment: .leading, spacing: 2) {
-                Text(street ?? job.title).font(Theme.font(15, weight: .medium))
+                Text((street ?? job.title).dashKeptWithWordBefore).font(Theme.font(15, weight: .medium))
                     .foregroundStyle(finished ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
                 whatLine(stacked: stacked)
-                if !meta.isEmpty {
-                    Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if !meta.isEmpty { metaLine(stacked: stacked) }
                 if let note, !note.isEmpty {
                     ExpandableNoteText(text: note, lines: 2, size: 13)
                         .padding(.top, 1)
@@ -121,8 +123,28 @@ struct JobRoomRow: View {
         }
     }
 
+    /// When and who: one line when it fits, otherwise the tech drops to its own line so the "·" never
+    /// dangles at a line end.
+    @ViewBuilder private func metaLine(stacked: Bool) -> some View {
+        let parts = [when, who].compactMap { $0 }.filter { !$0.isEmpty }
+        if parts.count == 2 && !stacked {
+            ViewThatFits(in: .horizontal) {
+                metaText(meta).fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) { ForEach(parts, id: \.self) { metaText($0) } }
+            }
+        } else {
+            metaText(meta)
+        }
+    }
+
+    private func metaText(_ text: String) -> some View {
+        Text(text).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private func problemText(_ text: String, lines: Int?) -> some View {
-        Text(text).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+        Text(text.dashKeptWithWordBefore).font(Theme.font(14)).foregroundStyle(Theme.subtle)
             .lineLimit(lines)
             .fixedSize(horizontal: false, vertical: true)
     }

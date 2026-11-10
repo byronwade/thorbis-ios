@@ -21,6 +21,18 @@ final class CustomerEstimateReviewTests: XCTestCase {
         ])
     }
 
+    func testRetainedDetailsRejectSameEstimateAfterRevisionChanges() throws {
+        let issued = try decodedRevision()
+        XCTAssertTrue(issued.matchesDetails(for: try localEstimate()))
+        var replaced = aggregate
+        replaced["currentRevisionNumber"] = 3
+        let newer = try JSONDecoder().decode(EstimateRecord.self, from: Data(json(replaced).utf8))
+        XCTAssertFalse(issued.matchesDetails(for: newer))
+        replaced["organizationId"] = "00000000-0000-4000-8000-000000000999"
+        let foreign = try JSONDecoder().decode(EstimateRecord.self, from: Data(json(replaced).utf8))
+        XCTAssertFalse(issued.matchesDetails(for: foreign))
+    }
+
     func testForeignAggregateIdentityCannotStartRevisionRead() async throws {
         for field in ["id", "organizationId", "customerId", "locationId"] {
             var foreign = aggregate
@@ -103,6 +115,21 @@ final class CustomerEstimateReviewTests: XCTestCase {
         let mint = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(URLProtocolFixture.recorded[1].body)) as? [String: Any])
         XCTAssertEqual(mint["revisionNumber"] as? Int, 2)
         XCTAssertEqual(mint["contentHash"] as? String, paperHash)
+    }
+
+    func testSigningMatchesProjectedMaterialsAndRejectsRawHiddenDetails() async throws {
+        var object = revision
+        object["lines"] = [["id": "line-1", "description": "Private material detail", "quantity": 2,
+                            "unitPrice": ["amount": 6600, "currency": "USD"], "showToCustomer": false]]
+        let review = try decodedRevision(object)
+        var projected = action
+        projected["scopeLines"] = [["id": "line-1", "description": "Materials", "quantity": 1, "unitPrice": 13_200]]
+        let api = client([.init(200, try json(paper)), .init(200, #"{"token":"customer-token"}"#), .init(200, try json(projected))])
+        _ = try await api.openInPersonEstimateApproval(review)
+        var raw = action
+        raw["scopeLines"] = [["id": "line-1", "description": "Private material detail", "quantity": 2, "unitPrice": 6600]]
+        let mismatch = client([.init(200, try json(paper)), .init(200, #"{"token":"customer-token"}"#), .init(200, try json(raw))])
+        await rejects { _ = try await mismatch.openInPersonEstimateApproval(review) }
     }
 
     func testForeignPaperSourceOrRevisionStopsBeforeMinting() async throws {

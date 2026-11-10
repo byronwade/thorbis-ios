@@ -10,11 +10,38 @@ enum PaperPreview {
     static let organizationID = "00000000-0000-4000-8000-000000000002"
     static let jobID = "00000000-0000-4000-8000-000000002214"
     static let customerID = "00000000-0000-4000-8000-000000000412"
+
+    /// The Inbox preview's call log (GET /v1/calls items), newest first, relative to now.
+    static func inboxCalls() -> [[String: Any]] {
+        func ago(_ minutes: Double) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(-minutes * 60)) }
+        let base = "00000000-0000-4000-8000-00000000"
+        return [
+            ["id": base + "9701", "direction": "inbound", "status": "missed", "lineId": "line-1", "callerNumber": "+15550100142",
+             "callerName": "Marcus Bell", "startedAt": ago(18), "endedAt": ago(17.5), "durationSeconds": 0,
+             "recording": ["status": "none"], "transcriptStatus": "none"],
+            ["id": base + "9702", "direction": "inbound", "status": "completed", "lineId": "line-1", "callerNumber": "+15550100100",
+             "callerName": "Dana Ruiz", "customerId": customerID, "jobId": jobID, "linkedAt": ago(170), "startedAt": ago(190), "endedAt": ago(186.8),
+             "durationSeconds": 192, "recording": ["status": "available", "durationSeconds": 192, "contentPath": "/v1/calls/\(base)9702/recording"],
+             "summary": ["text": "Water heater leaking at the base since this morning. Call 30 minutes ahead; side gate code 4471.", "reason": "Water heater leak", "source": "model"],
+             "disclosure": "Thanks for calling. This call may be recorded and transcribed so we can serve you better.",
+             "transcriptStatus": "complete"],
+            ["id": base + "9703", "direction": "inbound", "status": "missed", "lineId": "line-1", "callerNumber": "+15550100177",
+             "callerName": "Priya Shah", "startedAt": ago(26 * 60), "endedAt": ago(26 * 60 - 1), "durationSeconds": 42, "voicemail": true,
+             "recording": ["status": "available", "durationSeconds": 42, "contentPath": "/v1/calls/\(base)9703/recording"],
+             "summary": ["text": "Wants a quote to replace two upstairs windows before winter. Home after 4.", "source": "model"],
+             "transcriptStatus": "complete"],
+            ["id": base + "9704", "direction": "inbound", "status": "completed", "lineId": "line-1", "callerNumber": "(555) 010-0100",
+             "callerName": "Dana Ruiz", "customerId": customerID, "startedAt": ago(3 * 24 * 60), "endedAt": ago(3 * 24 * 60 - 1),
+             "durationSeconds": 64, "recording": ["status": "none"],
+             "summary": ["text": "Asked whether we install tankless water heaters.", "source": "deterministic"],
+             "transcriptStatus": "none"],
+        ]
+    }
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--paper-preview") }
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "builder-options", "builder-picker", "builder-line", "invoice-editor-line", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "search-empty", "search-phone", "search-actions", "search-street", "search-offline", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "book-job", "book-job-filled", "dispatch-board", "owner-home", "glance-widgets", "glance-lock", "glance-island", "present-estimate-financing", "present-invoice-pay"].contains(args[index + 1]) else { return "schedule" }
+              ["schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "builder-options", "builder-picker", "builder-line", "invoice-editor-line", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "search-empty", "search-phone", "search-actions", "search-street", "search-offline", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "book-job", "book-job-filled", "dispatch-board", "owner-home", "glance-widgets", "glance-lock", "glance-island", "present-estimate-financing", "present-invoice-pay", "properties", "property-detail", "notice-log", "scorecard", "payments"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup | onboard-trade | onboard-wizard.
@@ -73,6 +100,8 @@ enum PaperPreview {
     static func replacedDescriptionEstimate(_ estimate: EstimateRecord) -> EstimateRecord {
         changed(estimate, ["currentRevisionNumber": (estimate.currentRevisionNumber ?? 0) + 1])
     }
+    /// Set once a document's Description sheet has opened; the preview's document changes wait for it.
+    @MainActor static var descriptionOpened = false
     @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
         let args = ProcessInfo.processInfo.arguments
         guard isJobDocumentsPreview, args.contains("--paper-preview-description-expire-session") || args.contains("--paper-preview-description-revoke-permission") || args.contains("--paper-preview-description-replace-session") else { return }
@@ -163,7 +192,9 @@ enum PaperPreview {
         }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
         return [primary,
-         changed(original, ["id": "00000000-0000-4000-8000-000000002240", "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
+         changed(original, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
+                            ? "00000000-0000-4000-8000-000000012209" : "00000000-0000-4000-8000-000000002240",
+                           "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
                            "amountPaid": equalBalances ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),
          changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002241", "jobId": "00000000-0000-4000-8000-000000002215"])]
@@ -177,6 +208,13 @@ enum PaperPreview {
             "amount": ["amount": 5_000, "currency": "USD"], "method": "cash", "status": "recorded",
             "idempotencyKey": "paper-preview-job-cash", "recordedAt": "2026-10-28T13:00:00Z",
             "netAmount": ["amount": 5_000, "currency": "USD"]])
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-payments-many") {
+            let firstCash = changed(cash, ["amount": ["amount": 2_500, "currency": "USD"],
+                                           "netAmount": ["amount": 2_500, "currency": "USD"]])
+            let secondCash = changed(firstCash, ["id": "00000000-0000-4000-8000-000000002252",
+                                                 "idempotencyKey": "paper-preview-job-cash-second"])
+            return [card, firstCash, secondCash]
+        }
         return [card, cash]
     }
     private static func changed<T: Codable>(_ value: T, _ fields: [String: Any]) -> T {
@@ -279,8 +317,13 @@ enum PaperPreview {
     }
     static var issuedInvoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":null,"voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
-        let fixture = ProcessInfo.processInfo.arguments.contains("--paper-preview-large-invoice")
-            ? json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789") : json
+        let args = ProcessInfo.processInfo.arguments
+        let fixture: String
+        if args.contains("--paper-preview-extreme-invoice") {
+            fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":999999940000")
+        } else if args.contains("--paper-preview-large-invoice") {
+            fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789")
+        } else { fixture = json }
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8))
     }
     /// The issued invoice with a condenser replacement on it, inside the lender's range.
@@ -645,11 +688,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
         var setupPaymentReads = 0
+        var documentHistoryRestored = false
+        var paymentPermissionRevoked = false
         var invoiceReads = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
         var documentStatusesChanged = false
+        var completionCreates = 0
+        var completionCreated = false
+        var completionViewRevoked = false
         var savedWorkOffline = false
         var savedWorkWorkspaceChanged = false
         var savedWorkEditingRevoked = false
@@ -664,8 +712,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
+    static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
+    static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
     static func beginSavedWorkOffline() -> Bool {
         scenario.lock.withLock {
             guard !scenario.savedWorkOffline else { return false }
@@ -673,6 +723,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
+    static func revokePaymentPermission() { scenario.lock.withLock { scenario.paymentPermissionRevoked = true } }
+    static func restoreDocumentHistory() { scenario.lock.withLock { scenario.documentHistoryRestored = true } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
@@ -762,7 +814,22 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if request.httpMethod != nil && request.httpMethod != "GET" {
+        if PaperPreview.isJobDocumentsPreview,
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
+           request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
+            let foreign = ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice-foreign")
+            let failed = ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice-failure")
+            Self.scenario.lock.withLock { Self.scenario.completionCreates += 1; Self.scenario.completionCreated = !foreign && !failed }
+            if failed {
+                status = 503
+                payload = ["status": 503, "title": "Sample invoice could not be created"]
+            } else {
+                var draft = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.invoice)) as! [String: Any]
+                if foreign { draft["jobId"] = "00000000-0000-4000-8000-000000002215" }
+                status = 200
+                payload = draft
+            }
+        } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
@@ -776,6 +843,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   Self.scenario.lock.withLock({ !Self.scenario.reviewConnectionRestored }) {
             status = 503
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
+        } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-job-history-fail-once"),
+                  url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments",
+                  Self.scenario.lock.withLock({ !Self.scenario.documentHistoryRestored }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample payment history unavailable"]
         } else if PaperPreview.isJobDocumentsPreview,
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-deposit-history-failure"),
                   url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments" {
@@ -817,9 +890,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         do {
             let body = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys, .fragmentsAllowed])
             let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json", "X-Thorbis-Design-Preview": "sample-data"])!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: body)
-            client?.urlProtocolDidFinishLoading(self)
+            let deliver: @Sendable () -> Void = { [weak self] in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                self.client?.urlProtocol(self, didLoad: body)
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if PaperPreview.isJobDocumentsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
+               request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: deliver)
+            } else { deliver() }
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
     override func stopLoading() {}
@@ -932,7 +1013,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }]
             }
             if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") {
+                    return ["items": scenario.lock.withLock { scenario.completionCreated } ? [jsonObject(PaperPreview.invoice)!] : []]
+                }
                 return ["items": invoices.filter { $0.jobId == PaperPreview.jobID }.map { jsonObject($0)! }]
+            }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
+               scenario.lock.withLock({ scenario.completionCreated }), path == "/v1/invoices/\(PaperPreview.invoice.id)" {
+                return jsonObject(PaperPreview.invoice)
             }
             if path == "/v1/estimates" { return ["items": estimates.map { jsonObject($0)! }] }
             if path == "/v1/invoices" {
@@ -967,13 +1055,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances") { return ["items": []] }
                 var payment = jsonObject(PaperPreview.refundPayment) as! [String: Any]
                 payment["invoiceId"] = invoices[1].id
-                payment["amount"] = ["amount": 34000, "currency": "USD"]
-                payment["netAmount"] = ["amount": 34000, "currency": "USD"]
+                let staleHistory = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-history-mismatch-once") &&
+                    scenario.lock.withLock { !scenario.documentHistoryRestored }
+                let received = staleHistory ? 33000 : 34000
+                payment["amount"] = ["amount": received, "currency": "USD"]
+                payment["netAmount"] = ["amount": received, "currency": "USD"]
                 return ["items": [payment]]
             }
         }
         if path == "/v1/public/document-actions/preview-estimate" {
-            return [
+            let discount = ProcessInfo.processInfo.arguments.contains("--paper-preview-public-estimate-discount")
+            var sample: [String: Any] = [
                 "kind": "estimate",
                 "title": "AC not cooling — Compressor replacement",
                 "status": "sent",
@@ -981,20 +1073,23 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 "contentHash": "preview-issued-content-hash-2026",
                 "allowedActions": ["approve", "decline", "request_changes"],
                 "nonce": "preview-decision-nonce-2026",
-                "totalAmount": 1575.00,
+                "totalAmount": discount ? 9500 : 157500,
                 "currency": "USD",
                 "html": """
                 <!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><style>body{font:15px -apple-system,BlinkMacSystemFont,sans-serif;color:#201b14;background:#fff;margin:22px;line-height:1.5}.eyebrow{font-size:11px;color:#59544d;letter-spacing:.08em;text-transform:uppercase}h1{font-size:24px;margin:6px 0 16px}.line{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid #e5e2dc}.total{display:flex;justify-content:space-between;font-weight:700;padding-top:18px}.note{margin-top:22px;padding:12px;background:#f7f4ee;border-radius:10px}</style></head><body><div class=\"eyebrow\">Estimate · Revision 2</div><h1>AC not cooling — Compressor replacement</h1><p>Prepared for Danielle Marlowe</p><div class=\"line\"><span>Compressor diagnostic</span><span>$120.00</span></div><div class=\"line\"><span>Replace compressor</span><span>$1,455.00</span></div><div class=\"total\"><span>Estimate total</span><span>$1,575.00</span></div><div class=\"note\">This sample estimate is for design review only.</div></body></html>
                 """,
-                "approvalWithoutSignatureAllowed": false,
-                "scopeLines": [],
-                "options": [
-                    ["id": "00000000-0000-4000-8000-000000000101", "title": "Compressor repair", "description": "Replace the failed compressor and verify system operation.", "totalAmount": 1575.00, "currency": "USD"],
-                    ["id": "00000000-0000-4000-8000-000000000102", "title": "Full system replacement", "description": "Install a new high-efficiency system with a two-year labor warranty.", "totalAmount": 4850.00, "currency": "USD"]
+                "approvalWithoutSignatureAllowed": discount,
+                "scopeLines": discount ? [["id": "repair", "description": "Repair", "quantity": 1, "unitPrice": 10000], ["id": "discount", "description": "Discount", "quantity": 1, "unitPrice": -500]] : [],
+                "options": discount ? [] : [
+                    ["id": "00000000-0000-4000-8000-000000000101", "title": "Compressor repair", "description": "Replace the failed compressor and verify system operation.", "totalAmount": 157500, "currency": "USD"],
+                    ["id": "00000000-0000-4000-8000-000000000102", "title": "Full system replacement", "description": "Install a new high-efficiency system with a two-year labor warranty.", "totalAmount": 485000, "currency": "USD"]
                 ],
                 "consentVersion": "estimate-approval-v1",
                 "consentText": "I understand that typing my name records my electronic signature and approval of the selected estimate option."
-            ] as [String: Any]
+            ]
+            if discount { sample.removeValue(forKey: "html") }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-public-estimate-unsupported-currency") { sample["currency"] = "EUR" }
+            return sample
         }
         if path == "/v1/invoices/\(PaperPreview.refundInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.refundInvoice))
@@ -1033,8 +1128,108 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                        "role": ["roleId": "r\(index)", "currentRevision": 1, "name": person.3, "description": ""]]] as [String: Any]
             }]
         }
+        // A job's booking notices: the customer's email went out, the tech's in-app one did too.
+        if path.hasPrefix("/v1/jobs/"), path.hasSuffix("/notices") {
+            let soon = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3_600))
+            let ago = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-86_400))
+            return ["admission": "recorded", "items": [
+                ["id": "n1", "role": "customer", "channel": "email", "status": "sent", "scheduledFor": soon, "currentCycle": true, "createdAt": ago],
+                ["id": "n2", "role": "technician", "channel": "in_app", "status": "sent", "scheduledFor": soon, "currentCycle": true, "createdAt": ago],
+                ["id": "n3", "role": "customer", "channel": "email", "stage": "en_route", "status": "missing_contact", "scheduledFor": soon, "currentCycle": true,
+                 "createdAt": ISO8601DateFormatter().string(from: Date())],
+            ] as [[String: Any]]]
+        }
+        // An estimate's or invoice's audit trail.
+        if path.hasPrefix("/v1/activity/") {
+            return ["items": [
+                ["id": "a3", "action": "invoice.issued", "description": "Ramon Marlowe issued the invoice", "actorType": "user",
+                 "occurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3_600))],
+                ["id": "a2", "action": "invoice.lines_replaced", "description": "Ramon Marlowe changed 2 line items", "actorType": "user",
+                 "occurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-7_200)),
+                 "clientOccurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-9_000))],
+                ["id": "a1", "action": "invoice.created", "description": "Invoice created from the job", "actorType": "system",
+                 "occurredAt": ISO8601DateFormatter().string(from: Date().addingTimeInterval(-90_000))],
+            ] as [[String: Any]]]
+        }
+        // The company agreements book: one active maintenance plan and one cancelled membership.
+        if path == "/v1/memberships" {
+            let c = PaperPreview.customerID
+            return ["items": [
+                ["id": "00000000-0000-4000-8000-000000009101", "customerId": c, "name": "Comfort Club", "kind": "maintenance",
+                 "cadence": "Twice a year", "startsOn": "2025-03-01", "renewsOn": "2027-03-01", "status": "active",
+                 "discountPercent": 15, "customerName": "Danielle Marlowe", "planName": "Comfort Club"],
+                ["id": "00000000-0000-4000-8000-000000009102", "customerId": "00000000-0000-4000-8000-000000000413",
+                 "name": "Priority membership", "kind": "membership", "status": "cancelled", "discountPercent": 10,
+                 "customerName": "David Chen", "planName": "Priority membership"],
+            ] as [[String: Any]]]
+        }
+        // The company equipment book: Danielle's home units, as the office and her page read them.
+        if path == "/v1/equipment" {
+            let c = PaperPreview.customerID, loc = PaperPreview.homeLocationID
+            return ["items": [
+                ["id": "00000000-0000-4000-8000-000000006101", "customerId": c, "locationId": loc, "name": "3-ton condenser",
+                 "brand": "Carrier", "model": "24ACC636", "serialNumber": "2419E04117", "installedOn": "2019-06-12",
+                 "warrantyExpiresOn": "2029-06-12", "customerName": "Danielle Marlowe", "locationLabel": "Home"],
+                ["id": "00000000-0000-4000-8000-000000006102", "customerId": c, "locationId": loc, "name": "50-gal gas water heater",
+                 "brand": "Rheem", "model": "XG50T06EC36U1", "installedOn": "2016-02-03", "warrantyExpiresOn": "2022-02-03",
+                 "customerName": "Danielle Marlowe", "locationLabel": "Home"],
+            ] as [[String: Any]]]
+        }
+        // Company payments (payments.all): a card payment today, cash yesterday, one refunded.
+        if path == "/v1/query", queryItems.contains(where: { $0.name == "resourceId" && $0.value == "payments" }) {
+            let day: (Double) -> String = { ISO8601DateFormatter().string(from: Date().addingTimeInterval(-$0 * 86_400)) }
+            return ["resourceId": "payments", "items": [
+                ["id": "p1", "resourceId": "payments", "fields": ["payments.invoice_id": PaperPreview.invoice.id, "payments.amount": "34000",
+                 "payments.method": "card", "payments.status": "succeeded", "payments.refunded_amount": "0", "payments.recorded_at": day(0)]],
+                ["id": "p2", "resourceId": "payments", "fields": ["payments.invoice_id": PaperPreview.invoice.id, "payments.amount": 12000,
+                 "payments.method": "cash", "payments.status": "succeeded", "payments.refunded_amount": 0, "payments.recorded_at": day(1)]],
+                ["id": "p3", "resourceId": "payments", "fields": ["payments.invoice_id": PaperPreview.invoice.id, "payments.amount": "9500",
+                 "payments.method": "card", "payments.status": "refunded", "payments.refunded_amount": "9500", "payments.recorded_at": day(6)]],
+            ] as [[String: Any]]]
+        }
+        // A week on the scorecard: most of the way to goal, with a short leaderboard.
+        if path == "/v1/reports/scorecard" {
+            let now = ISO8601DateFormatter().string(from: Date())
+            let me: [String: Any] = ["userId": "preview-user", "sold": 824_000, "collected": 611_500, "invoices": 9,
+                                     "averageTicket": 67_900, "jobsDone": 11, "estimatesPresented": 7,
+                                     "estimatesApproved": 4, "closeRateBps": 5714, "goal": 1_000_000]
+            return ["generatedAt": now, "reportVersion": 1, "from": now, "to": now, "currency": "USD",
+                    "me": me, "people": [me], "truncated": false,
+                    "leaderboard": [
+                        ["rank": 1, "userId": "u2", "displayName": "Dana Ruiz", "percentOfGoalBps": 9600, "me": false],
+                        ["rank": 2, "userId": "preview-user", "displayName": "You", "percentOfGoalBps": 8240, "me": true],
+                        ["rank": 3, "userId": "u3", "displayName": "Marcus Lee", "percentOfGoalBps": 5100, "me": false],
+                    ] as [[String: Any]]]
+        }
+        // The notice delivery log: a booking email that went out, one held because email is off.
+        if path == "/v1/notice-deliveries" {
+            let now = ISO8601DateFormatter().string(from: Date())
+            return ["items": [
+                ["id": "d1", "role": "customer", "channel": "email", "status": "sent", "subject": "Your AC repair is booked for Thursday", "updatedAt": now],
+                ["id": "d2", "role": "technician", "channel": "in_app", "status": "sent", "subject": "New job: AC not cooling", "updatedAt": now],
+                ["id": "d3", "role": "owner", "channel": "email", "status": "canceled", "reason": "preference_off", "subject": "Job booked: AC not cooling", "updatedAt": now],
+            ] as [[String: Any]]]
+        }
+        if path.hasPrefix("/v1/notice-preferences/customer/") { return ["items": [[String: Any]]()] }
         if path == "/v1/notice-preferences" {
             return ["items": [["subjectKind": "role", "subjectKey": "technician", "channel": "email", "enabled": false]]]
+        }
+        // The Inbox's call log: a missed call, a caller who rang twice (one answered call with a
+        // summary and a recording, one shorter), and a voicemail. The server does not mark
+        // voicemail yet (it records from answer); the sample shows how one reads once it does.
+        if PaperPreview.screen == "inbox", path == "/v1/calls" || path.hasPrefix("/v1/calls/") {
+            let calls = PaperPreview.inboxCalls()
+            if path == "/v1/calls" { return ["items": calls, "nextCursor": NSNull()] as [String: Any] }
+            let id = path.split(separator: "/").dropFirst(2).first.map(String.init) ?? ""
+            if var call = calls.first(where: { $0["id"] as? String == id }) {
+                call["transcript"] = id.hasSuffix("9702") ? [
+                    ["sequence": 1, "speaker": "business", "text": "Acme HVAC, this is Maria."],
+                    ["sequence": 2, "speaker": "caller", "text": "Hi, my water heater is leaking at the bottom. There's a puddle in the garage."],
+                    ["sequence": 3, "speaker": "business", "text": "We can be out tomorrow morning. Any gate code or pets?"],
+                    ["sequence": 4, "speaker": "caller", "text": "Side gate is 4471. The dog is friendly. Please call half an hour before."],
+                ] : [Any]()
+                return call
+            }
         }
         if path == "/v1/staff/notices", PaperPreview.screen == "inbox" || PaperPreview.role != nil {
             var notices: [[String: Any]] = [
@@ -1184,12 +1379,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
+            if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.completionViewRevoked }) { capabilities.removeAll { $0 == "invoice.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
-            if PaperPreview.isPaymentCollectionPreview { capabilities.append("invoice.payment.create") }
+            if PaperPreview.isPaymentCollectionPreview, !scenario.lock.withLock({ scenario.paymentPermissionRevoked }) {
+                capabilities.append("invoice.payment.create")
+            }
             if PaperPreview.isPaymentRefundPreview { capabilities.append("invoice.refund") }
             if PaperPreview.screen == "team" { capabilities.append("organization.members.manage") }
             if PaperPreview.screen == "job-onsite" { capabilities += ["job.complete", "invoice.create"] }
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "owner-home" { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
@@ -1209,6 +1408,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
+            if PaperPreview.screen == "inbox", !ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-no-calls") { enabledFeatures.append("call_recording") }
             if PaperPreview.role != nil { enabledFeatures.append("job_booking_notices") }
             if ["office", "owner"].contains(PaperPreview.role) { enabledFeatures.append("payments") }
             let features = Dictionary(enabledFeatures.map { ($0, decision) }, uniquingKeysWith: { first, _ in first })
@@ -1590,7 +1790,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                        "label": "Home", "kind": "service", "address": address, "createdAt": now, "updatedAt": now]]]
                 }
                 return ["items": [["id": "00000000-0000-4000-8000-000000007001", "organizationId": org, "customerId": id,
-                                    "label": "Home", "kind": "service", "address": address,
+                                    "label": ProcessInfo.processInfo.arguments.contains("--paper-preview-long-location-label")
+                                        ? "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
+                                        : "Home", "kind": "service", "address": address,
                                     "notes": "Sample location for design preview",
                                     "coordinates": previewCoordinates(customerID: id),
                                     "gateCode": "4821#", "alarmCode": "7350",

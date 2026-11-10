@@ -78,7 +78,7 @@ struct CustomerRecordsView: View {
                 }
                 .accessibilityIdentifier("customer-photo-partial")
             } else if compilation.photos.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             ForEach(compilation.photos, id: \.jobID) { group in
                 jobHeading(group.title, jobID: group.jobID, count: group.count, incomplete: compilation.mediaIncompleteJobIDs.contains(group.jobID) || compilation.identityIncomplete)
@@ -162,7 +162,7 @@ struct CustomerRecordsView: View {
             if incomplete {
                 ErrorBanner(message: "Some records could not be verified. Please try again.") { await retryMedia() }
             } else if groups.isEmpty && extra.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             if !groups.isEmpty || !extra.isEmpty {
                 panel {
@@ -191,7 +191,7 @@ struct CustomerRecordsView: View {
                     await retryMedia()
                 }
             } else if groups.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             if !groups.isEmpty {
                 panel {
@@ -218,7 +218,7 @@ struct CustomerRecordsView: View {
             if compilation.activityIncomplete {
                 ErrorBanner(message: "Some activity could not be loaded. Please try again.") { await retryMedia() }
             } else if compilation.activity.isEmpty && compilation.accountActivity.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             if !compilation.activity.isEmpty || !compilation.accountActivity.isEmpty {
                 panel {
@@ -258,6 +258,12 @@ struct CustomerRecordsView: View {
         }
     }
 
+    /// An empty section's line, under its label's words rather than 4 points left of them.
+    private var noneYet: some View {
+        Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, RecordRoom.labelInset)
+    }
+
     /// One white panel per section; rows pad to the panel's inset.
     private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         PaperCard {
@@ -268,12 +274,17 @@ struct CustomerRecordsView: View {
 
     private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false) -> some View {
         NavigationLink(value: PaperRoute.job(jobID)) {
-            HStack(spacing: 6) {
-                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
-                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(12)).foregroundStyle(Theme.muted)
+            // A quiet link to the job that groups the records under it, so it never reads as one of them.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 Spacer(minLength: 0)
             }.frame(minHeight: 44)
         }.buttonStyle(RowPressStyle())
+        .accessibilityLabel("Job: \(title), \(incomplete ? "partial" : "\(count)")")
+        .accessibilityHint("Opens the job")
     }
 
     private func moneyLink(_ row: CustomerMoneyRow) -> some View {

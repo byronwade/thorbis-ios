@@ -371,9 +371,17 @@ struct JobMediaView: View {
                     }
                     .accessibilityIdentifier("photo-filter-menu")
                 } else {
-                    ThorbisSegmented(options: MediaFilter.selector.map { ($0, $0.rawValue) },
-                                     selection: Binding(get: { filter == .untagged ? .all : filter },
-                                                        set: { filter = $0; if $0 == .documents { endSelecting() } }))
+                    // Text tabs, as every list and the job's own sections use; wrapping keeps each word whole.
+                    PaperTabs(options: MediaFilter.selector.map(\.rawValue),
+                              selection: Binding(get: { (filter == .untagged ? .all : filter).rawValue },
+                                                 set: { raw in
+                                                     guard let next = MediaFilter(rawValue: raw) else { return }
+                                                     filter = next
+                                                     if next == .documents { endSelecting() }
+                                                 }),
+                              wrapOverflow: true, textTabs: true)
+                        .padding(.horizontal, -(Theme.gutter - 8))
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityIdentifier("job-media-selector")
                     ThorbisMenu(items: filterMenuItems, title: "Photos", accessibilityLabel: "More photo options") {
                         PaperCircleLabel(symbol: "line.3.horizontal.decrease", size: 44,

@@ -67,18 +67,7 @@ struct CustomerEquipmentSection: View {
         } }
     }
 
-    private func row(_ unit: EquipmentRecord) -> some View {
-        let warranty = unit.warrantyEnd.map { end -> (String, Bool) in
-            let expired = end < Calendar.current.startOfDay(for: .now)
-            return ("\(expired ? "Warranty ended" : "Warranty until") \(end.formatted(date: .abbreviated, time: .omitted))", expired)
-        }
-        return PaperListRow(title: unit.name, subtitle: unit.detail.isEmpty ? nil : unit.detail,
-                            meta: warranty?.0, subtitleLines: 2) {
-            if let warranty {
-                StatusWord(text: warranty.1 ? "Out of warranty" : "In warranty", tint: warranty.1 ? nil : Theme.success)
-            }
-        }
-    }
+    private func row(_ unit: EquipmentRecord) -> some View { EquipmentUnitRow(unit: unit) }
 
     private func load() async {
         if let jobID, let context = try? await JobServiceContextLoader.load(jobID, api: api) {
@@ -126,21 +115,31 @@ struct EquipmentEditor: View {
     private static let nameMissing = "Say what it is, like \u{201C}50-gal gas water heater.\u{201D}"
 
     var body: some View {
-        NavigationStack {
-            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit
-            // above the keyboard (it was the toolbar's Save), Cancel stays in the toolbar.
-            ScrollView {
+        // The shared modal (Add discount, Invite to team): the title row with Cancel, one column of
+        // field wells, and one ink commit that is never pre-disabled.
+        ThorbisModalSheet(title: existing == nil ? "Add equipment" : "Equipment", closeLabel: "Cancel",
+                          onClose: busy ? nil : { dismiss() }, detents: [.large],
+                          commitTitle: existing == nil ? "Add equipment" : "Save equipment", busy: busy,
+                          commitIdentifier: "equipment-commit", commit: {
+                              // Pressed without a name, it says so under the field.
+                              if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                  nameProblem = Self.nameMissing
+                                  nameFocused = true
+                              } else {
+                                  Task { await save() }
+                              }
+                          }) {
                 VStack(alignment: .leading, spacing: 18) {
                     PaperFormField("What it is", error: nameProblem) {
-                        TextField("e.g. 50-gal gas water heater", text: $input.name, prompt: .placeholder("e.g. 50-gal gas water heater")).font(Theme.font(16)).fieldWell()
+                        TextField("What it is", text: $input.name, prompt: .placeholder("50-gal gas water heater")).font(Theme.font(16)).fieldWell()
                             .focused($nameFocused)
                             .onChange(of: input.name) { _, _ in nameProblem = nil }
                     }
                     PaperFormField("Type", note: "Optional") { TextField("Water heater", text: binding(\.kind), prompt: .placeholder("Water heater")).font(Theme.font(16)).fieldWell() }
-                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand), prompt: .placeholder("Brand")).font(Theme.font(16)).fieldWell() }
-                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model), prompt: .placeholder("Model")).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Brand", note: "Optional") { TextField("Brand", text: binding(\.brand), prompt: .placeholder("Rheem")).font(Theme.font(16)).fieldWell() }
+                    PaperFormField("Model", note: "Optional") { TextField("Model", text: binding(\.model), prompt: .placeholder("XG50T06EC36U1")).font(Theme.font(16)).fieldWell() }
                     PaperFormField("Serial number", note: "Optional") {
-                        TextField("Serial number", text: binding(\.serialNumber), prompt: .placeholder("Serial number")).textInputAutocapitalization(.characters)
+                        TextField("Serial number", text: binding(\.serialNumber), prompt: .placeholder("Q1924A12345")).textInputAutocapitalization(.characters)
                             .font(Theme.font(16)).fieldWell()
                     }
                     if !locations.isEmpty {
@@ -173,26 +172,6 @@ struct EquipmentEditor: View {
                         .disabled(busy)
                     }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .background(Theme.canvas)
-            .navigationTitle(existing == nil ? "Add equipment" : "Equipment")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
-            }
-            .safeAreaInset(edge: .bottom) {
-                // Never pre-disabled: pressed without a name, it says so under the field.
-                PaperActionBar(title: existing == nil ? "Add equipment" : "Save equipment", busy: busy,
-                               identifier: "equipment-commit") {
-                    if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        nameProblem = Self.nameMissing
-                        nameFocused = true
-                    } else {
-                        Task { await save() }
-                    }
-                }
             }
             .thorbisConfirm("Remove this equipment?", isPresented: $confirmRemove,
                             actions: [ThorbisConfirmAction("Remove", role: .destructive) { Task { await remove() } }])
@@ -205,7 +184,6 @@ struct EquipmentEditor: View {
                 nameProblem = Self.nameMissing
             }
             #endif
-        }
     }
 
     private func binding(_ key: WritableKeyPath<EquipmentInput, String?>) -> Binding<String> {
@@ -336,13 +314,7 @@ struct CustomerMembershipSection: View {
         })
     }
 
-    private func membershipDetail(_ membership: MembershipRecord) -> String {
-        var parts: [String] = []
-        if membership.discountPercent > 0 { parts.append("\(membership.discountPercent)% off") }
-        if let cadence = membership.cadence, !cadence.isEmpty { parts.append(cadence) }
-        if let renews = membership.renewsOn.flatMap(EquipmentRecord.day) { parts.append("Renews \(renews.formatted(date: .abbreviated, time: .omitted))") }
-        return parts.isEmpty ? membership.kind.capitalized : parts.joined(separator: " · ")
-    }
+    private func membershipDetail(_ membership: MembershipRecord) -> String { membership.detail }
 
     private var planPicker: some View {
         NavigationStack {
@@ -458,5 +430,168 @@ struct MemberChip: View {
             }
         }
         .task(id: customerID) { pricing = try? await api.memberPricing(customerID) }
+    }
+}
+
+
+/// One unit: its name, brand · model, then the serial and the warranty date each on their own line
+/// (so neither breaks mid-number), and the warranty as a word.
+struct EquipmentUnitRow: View {
+    let unit: EquipmentRecord
+
+    var body: some View {
+        let warranty = unit.warrantyEnd.map { end -> (String, Bool) in
+            let expired = end < Calendar.current.startOfDay(for: .now)
+            // The date stays whole ("Feb 3, 2022"), never "Feb" / "3, 2022".
+            let day = end.formatted(date: .abbreviated, time: .omitted).replacingOccurrences(of: " ", with: "\u{00A0}")
+            return ("\(expired ? "Warranty ended" : "Warranty until") \(day)", expired)
+        }
+        let made = [unit.brand, unit.model].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        let serial = unit.serialNumber.flatMap { $0.isEmpty ? nil : "SN \($0)" }
+        let meta = [serial, warranty?.0].compactMap { $0 }.joined(separator: "\n")
+        PaperListRow(title: unit.name, subtitle: made.isEmpty ? nil : made,
+                     meta: meta.isEmpty ? nil : meta, subtitleLines: 2) {
+            if let warranty {
+                StatusWord(text: warranty.1 ? "Out of warranty" : "In warranty", tint: warranty.1 ? nil : Theme.success)
+            }
+        }
+    }
+}
+
+/// Web parity (apps/web equipment.tsx): the company's equipment book from the server, the same rows
+/// the office and the customer page read, grouped under the site each unit lives at. A unit opens
+/// its customer, where it is edited. Hidden when the read is refused or the server is older.
+struct CompanyEquipmentBook: View {
+    var onLoaded: (Bool) -> Void = { _ in }
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var store: Store
+    @State private var items: [EquipmentRecord]?
+    @State private var openCustomer: Customer?
+
+    private var sites: [(id: String, label: String, units: [EquipmentRecord])] {
+        let grouped = Dictionary(grouping: items ?? []) { "\($0.customerId):\($0.locationId ?? "")" }
+        return grouped.map { key, units in
+            let first = units[0]
+            let customer = first.customerName ?? store.customerName(first.customerId)
+            let place = first.locationLabel ?? first.locationAddress
+            let label = [customer, place].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+            return (key, label, units.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
+        }
+        .sorted { $0.label.localizedStandardCompare($1.label) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Color.clear.frame(width: 0, height: 0)
+            if let items, !items.isEmpty {
+                ForEach(sites, id: \.id) { site in
+                    PaperSection(site.label, count: site.units.count) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(site.units) { unit in
+                                Button { openCustomer = store.customers.first { $0.id == unit.customerId } } label: {
+                                    EquipmentUnitRow(unit: unit)
+                                }
+                                .buttonStyle(RowPressStyle())
+                                .accessibilityHint("Opens the customer")
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
+                    }
+                }
+            }
+        }
+        .task(id: session.generation) { await load() }
+        .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+    }
+
+    private func load() async {
+        guard session.can("customer.view", feature: "core_crm") else { onLoaded(false); return }
+        do {
+            let loaded = try await api.allEquipment()
+            items = loaded
+            onLoaded(!loaded.isEmpty)
+        } catch is CancellationError {
+        } catch {
+            items = nil
+            onLoaded(false)
+        }
+    }
+}
+
+
+extension MembershipRecord {
+    /// "15% off · Twice a year · Renews Mar 1, 2027", or the kind when nothing else is known.
+    var detail: String {
+        var parts: [String] = []
+        if discountPercent > 0 { parts.append("\(discountPercent)% off") }
+        if let cadence, !cadence.isEmpty { parts.append(cadence) }
+        if let renews = renewsOn.flatMap(EquipmentRecord.day) { parts.append("Renews \(renews.formatted(date: .abbreviated, time: .omitted))") }
+        return parts.isEmpty ? kind.capitalized : parts.joined(separator: " \u{00B7} ")
+    }
+}
+
+/// Web parity (apps/web agreements.tsx): the company's agreements from the server, grouped by kind
+/// as on the web (Maintenance, Membership), cancelled ones last. A row opens its customer, where
+/// agreements are sold and cancelled. Hidden when the read is refused or the server is older.
+struct CompanyAgreementsBook: View {
+    var onLoaded: (Bool) -> Void = { _ in }
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var store: Store
+    @State private var items: [MembershipRecord]?
+    @State private var openCustomer: Customer?
+
+    private var groups: [(title: String, rows: [MembershipRecord])] {
+        let all = items ?? []
+        let live = all.filter { $0.status != "cancelled" }
+        let byName: (MembershipRecord, MembershipRecord) -> Bool = {
+            customer($0).localizedStandardCompare(customer($1)) == .orderedAscending
+        }
+        return [("Maintenance", live.filter { $0.kind == "maintenance" }.sorted(by: byName)),
+                ("Membership", live.filter { $0.kind != "maintenance" }.sorted(by: byName)),
+                ("Cancelled", all.filter { $0.status == "cancelled" }.sorted(by: byName))]
+            .filter { !$0.rows.isEmpty }
+    }
+
+    private func customer(_ row: MembershipRecord) -> String { row.customerName ?? store.customerName(row.customerId) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Color.clear.frame(width: 0, height: 0)
+            ForEach(groups, id: \.title) { group in
+                PaperSection(group.title, count: group.rows.count) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(group.rows) { row in
+                            Button { openCustomer = store.customers.first { $0.id == row.customerId } } label: {
+                                PaperListRow(title: customer(row), subtitle: "\(row.planName ?? row.name) \u{00B7} \(row.detail)",
+                                             subtitleLines: 2, dimmed: row.status == "cancelled") {
+                                    StatusWord(text: row.status == "cancelled" ? "Cancelled" : "Active",
+                                               tint: row.status == "cancelled" ? nil : Theme.success)
+                                }
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityHint("Opens the customer")
+                        }
+                    }
+                    .padding(.vertical, PaperCardMetrics.edge)
+                }
+            }
+        }
+        .task(id: session.generation) { await load() }
+        .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+    }
+
+    private func load() async {
+        guard session.can("customer.view", feature: "core_crm") else { onLoaded(false); return }
+        do {
+            let loaded = try await api.allMemberships()
+            items = loaded
+            onLoaded(!loaded.isEmpty)
+        } catch is CancellationError {
+        } catch {
+            items = nil
+            onLoaded(false)
+        }
     }
 }

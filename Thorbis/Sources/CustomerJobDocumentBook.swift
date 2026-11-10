@@ -19,7 +19,6 @@ struct CustomerJobDocumentBook: View {
     @State private var selection: CustomerJobDocumentSelection
     @EnvironmentObject private var api: APIClient
     #if DEBUG
-    @EnvironmentObject private var previewSession: SessionController
     @State private var previewDocumentChanged = false
     #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -79,11 +78,15 @@ struct CustomerJobDocumentBook: View {
         .navigationTitle(selection.selected?.reference ?? "Documents")
         .onChange(of: ids) { _, value in selection.reconcile(value) }
         #if DEBUG
-        .task { await PaperPreview.expireDocumentSessionForTesting(previewSession) }
         .task {
             let args = ProcessInfo.processInfo.arguments
             guard PaperPreview.isJobDocumentsPreview,
                   args.contains("--paper-preview-description-stale") || args.contains("--paper-preview-description-replaced") else { return }
+            // Count from the open Description, so the UI test's taps to reach it can't use up the delay.
+            while !PaperPreview.descriptionOpened {
+                try? await Task.sleep(for: .milliseconds(100))
+                if Task.isCancelled { return }
+            }
             try? await Task.sleep(for: .seconds(10))
             if !Task.isCancelled { previewDocumentChanged = true }
         }
@@ -278,9 +281,10 @@ private struct CustomerEstimateBookPage: View {
     }
 
     @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, descriptionContext: String) -> some View {
-        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency) {
+        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
+           let projected = customerEstimateProjection(lines, currency: currency) {
             CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: lines, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess, descriptionContext: descriptionContext)
+                    CustomerIncludedLines(lines: projected, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false), readingAccess: readingAccess, descriptionContext: descriptionContext)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                 .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
@@ -313,6 +317,7 @@ private struct CustomerInvoiceBookPage: View {
     @StateObject private var model: InvoicePaymentCollectionModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var showPayments = false
+    @State private var choseInitialPaymentVisibility = false
 
     init(invoice: InvoiceRecord, scope: JobDocumentScope, sourceGeneration: UUID?, api: APIClient, fresh: Bool,
          canSign: Bool, canPay: Bool, active: Bool, refresh: @escaping () async -> Void,
@@ -364,12 +369,22 @@ private struct CustomerInvoiceBookPage: View {
                             .accessibilityLabel("Loading your payments")
                     } else if !model.historyComplete {
                         CustomerProblemBanner(message: "Payments couldn't be loaded. The invoice's paid amount is shown above.",
-                                              actionTitle: "Try again") { await model.load() }
+                                              actionTitle: "Try again") {
+                            #if DEBUG
+                            if PaperPreview.isJobDocumentsPreview { PaperPreviewProtocol.restoreDocumentHistory() }
+                            #endif
+                            await model.load()
+                        }
                     } else {
                         paymentHistory
                         if model.paymentTotalCents != invoice.amountPaid {
                             CustomerProblemBanner(message: "Payments are still updating. Refresh to confirm the balance.",
-                                                  symbol: "arrow.clockwise", actionTitle: "Refresh payments") { await model.load() }
+                                                  symbol: "arrow.clockwise", actionTitle: "Refresh payments") {
+                                #if DEBUG
+                                if PaperPreview.isJobDocumentsPreview { PaperPreviewProtocol.restoreDocumentHistory() }
+                                #endif
+                                await model.load()
+                            }
                         }
                     }
                 }
@@ -388,6 +403,12 @@ private struct CustomerInvoiceBookPage: View {
             }
         }
         .task(id: original) { await model.load() }
+        .onChange(of: model.historyComplete) { _, complete in
+            guard complete, !choseInitialPaymentVisibility else { return }
+            // Show a short history immediately; keep large histories easy to scan.
+            showPayments = model.payments.count <= 2
+            choseInitialPaymentVisibility = true
+        }
     }
 
     private var paymentHistory: some View {

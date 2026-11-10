@@ -46,6 +46,7 @@ struct PaperHeader: View {
     @Environment(\.paperMenuButton) private var menuButtonSetting
     /// Set by the phone shell on a place's root only, so pushed screens never offer the drawer.
     @Environment(\.paperDrawer) private var drawer
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var showsMenuButton: Bool { menuButtonSetting || drawer != nil }
 
@@ -77,10 +78,17 @@ struct PaperHeader: View {
                     createButton
                 }
             }
-            Text(subtitle)
-                .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .lineLimit(2)
-                .frame(minHeight: 20, alignment: .leading)
+            // At accessibility sizes the whole subtitle shows; two lines would cut it mid-sentence,
+            // and a " · " list breaks between its parts so no line ends on a dot.
+            Group {
+                if typeSize.isAccessibilitySize && subtitle.contains(" \u{00B7} ") {
+                    DotLine(subtitle)
+                } else {
+                    Text(subtitle).lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                }
+            }
+            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            .frame(minHeight: 20, alignment: .leading)
         }
         .foregroundStyle(Theme.foreground)
         .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 12)
@@ -89,7 +97,10 @@ struct PaperHeader: View {
     /// The tab root's +. Several creates open the create menu; a long press lists them directly.
     @ViewBuilder private var createButton: some View {
         if showsCreate, let create {
-            PaperCircleButton(symbol: "plus", label: create.label, size: 40, fill: Theme.fill, action: create.run)
+            // One create button app-wide: the cream sheet's ink circle (Today, Board, Map and every list).
+            Button(action: create.run) { CreamCircleLabel(symbol: "plus", ink: true) }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel(create.label)
                 .contextMenu {
                     ForEach(create.choices) { choice in
                         Button(action: choice.run) { Label(choice.title, systemImage: choice.symbol) }
@@ -206,6 +217,14 @@ struct PaperTabs: View {
                 // Accessibility sizes: the job screen's chooser. Three words at XXXL never fit one
                 // row, and a row of fixed-width words would widen the whole screen past its edges.
                 accessibleChooser
+            } else if textTabs && wrapOverflow {
+                // Text tabs that don't fit one row flow onto a second, each word whole and spaced
+                // (a plain row squeezed them into one run: "OverviewRevenueOperations").
+                FlowRow(spacing: 4, lineSpacing: 0) {
+                    ForEach(options, id: \.self) { option in tab(option, padding: 12) }
+                }
+                .padding(.horizontal, Theme.gutter - 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else if textTabs {
                 HStack(spacing: 4) {
                     ForEach(options, id: \.self) { option in tab(option, padding: 12) }
@@ -378,13 +397,16 @@ struct PaperGroupHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
     @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 8) {
-            // "Later today · 3": one label, the count in the same voice.
-            Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
-                .font(Theme.font(13, weight: .medium)).monospacedDigit()
-            Spacer(minLength: 0)
+        // At accessibility sizes the trailing figure drops under the title instead of squeezing it.
+        let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        row {
+            // "Later today  3": the word, then the count beside it, as every list room reads.
+            PaperSection<EmptyView, EmptyView>.label(title, count: count)
+                .frame(maxWidth: .infinity, alignment: .leading)
             trailing
         }
         .foregroundStyle(Theme.muted)
@@ -766,7 +788,10 @@ struct PaperQuickActions: View {
     var phone: String?
     var email: String?
     var directions: URL?
+    /// Who the number belongs to, for the Inbox conversation Text opens.
+    var name: String? = nil
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var dialable: String? {
@@ -794,7 +819,7 @@ struct PaperQuickActions: View {
         return layout {
             if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
                 action("Call", symbol: "phone", label: "Call", stacked: stacked) { openURL(call) }
-                action("Text", symbol: "message", label: "Text", stacked: stacked) { openURL(text) }
+                action("Text", symbol: "message", label: "Text", stacked: stacked) { inboxText(text, name: name, openURL: openURL) }
             }
             if let mail { action("Email", symbol: "envelope", label: "Email", stacked: stacked) { openURL(mail) } }
             if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps", stacked: stacked) { openURL(directions) } }
@@ -1374,6 +1399,10 @@ struct PaperListRow<Trailing: View>: View {
     /// A quieter third line (tech · photos · paid).
     var meta: String? = nil
     var subtitleLines = 1
+    /// Rows that give width to a trailing button (Schedule) let the title take a third line.
+    var titleLines = 2
+    /// Compact previews can stay bounded when the complete text opens separately.
+    var limitsSubtitleAtAccessibility = false
     /// A note-like supporting line (a past job's notes): folds at `subtitleLines` with "More"
     /// instead of cutting the rest off.
     var expandsSubtitle = false
@@ -1398,14 +1427,28 @@ struct PaperListRow<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 2) {
                 PaperHighlight.text(title, words: highlight).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
-                    .lineLimit(stacked ? nil : 2)
+                    .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty {
                     if expandsSubtitle {
                         ExpandableNoteText(text: subtitle, lines: subtitleLines, size: 14)
+                    } else if highlight.isEmpty, subtitleLines > 1, !stacked, subtitle.contains(" \u{00B7} ") {
+                        // "AC not cooling · Danielle Marlowe" on one line when it fits; otherwise each part
+                        // on its own line, so a "·" never ends a line (as MoneyListRow and JobRoomRow do).
+                        let parts = subtitle.components(separatedBy: " \u{00B7} ")
+                        ViewThatFits(in: .horizontal) {
+                            Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(1)
+                                .fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(parts.enumerated()), id: \.offset) { part in
+                                    Text(part.element).font(Theme.font(14)).foregroundStyle(Theme.subtle).lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
                     } else {
                         PaperHighlight.text(subtitle, words: highlight).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                            .lineLimit(stacked ? nil : subtitleLines)
+                            .lineLimit(stacked && !limitsSubtitleAtAccessibility ? nil : subtitleLines)
                     }
                 }
                 if let meta, !meta.isEmpty {
@@ -1500,6 +1543,13 @@ extension PaperListRow where Trailing == Text {
 
 /// One section: a 13/500 label (with " · count") above one white panel of rows.
 struct PaperSection<Content: View, Accessory: View>: View {
+    /// "By month  6": the label in 13 Medium and its count in 13 Regular, as one text that wraps whole.
+    static func label(_ title: String, count: Int?) -> Text {
+        let word = Text(title).font(Theme.font(13, weight: .medium))
+        guard let count, count > 0 else { return word }
+        return word + Text("  \(count)").font(Theme.font(13)).monospacedDigit()
+    }
+
     let title: String?
     var count: Int? = nil
     @ViewBuilder var content: Content
@@ -1512,12 +1562,13 @@ struct PaperSection<Content: View, Accessory: View>: View {
             if let title, wells {
                 SectionHeader(title: title, count: count) { accessory }.padding(.bottom, 2)
             } else if let title {
-                HStack(spacing: 8) {
-                    Text(count.map { "\(title) · \($0)" } ?? title)
-                        .font(Theme.font(13, weight: .medium)).monospacedDigit()
+                // The list grammar's count ("By month  6"): the number beside the word, not after a dot.
+                // One text, so at large sizes the count wraps with the words instead of floating mid-label.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Self.label(title, count: count)
                         .foregroundStyle(Theme.muted)
                         .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 0)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     accessory
                 }
                 .frame(minHeight: 28)
@@ -1705,5 +1756,32 @@ struct ExpandableNoteText: View {
                 .accessibilityIdentifier("note-more")
             }
         }
+    }
+}
+
+/// A " · " line that never strands a dot at the start of a line: the whole line when it fits,
+/// then the first two parts over the rest, else one part per line. VoiceOver reads it as one phrase.
+struct DotLine: View {
+    let parts: [String]
+    init(_ parts: [String]) { self.parts = parts.filter { !$0.isEmpty } }
+    init(_ text: String) { self.init(text.components(separatedBy: " \u{00B7} ")) }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            Text(parts.joined(separator: " \u{00B7} ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+            if parts.count > 2 {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(parts.prefix(2).joined(separator: " \u{00B7} ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Text(parts.dropFirst(2).joined(separator: " \u{00B7} ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { part in
+                    Text(part.element).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(parts.joined(separator: ", "))
     }
 }

@@ -97,6 +97,7 @@ struct NewJobSheet: View {
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var draft: FieldJobDraft
     @State private var busy = false
     @State private var error: String?
@@ -400,19 +401,33 @@ struct NewJobSheet: View {
     }
 
     private func chosenCustomer(_ person: CallerMatch) -> some View {
-        PaperCard(padding: 0) {
-            HStack(alignment: .center, spacing: 12) {
+        // At accessibility sizes Change sits under the caller so the name and street keep the width.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return PaperCard(padding: 0) {
+            layout {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(person.name).font(Theme.font(16, weight: .medium)).lineLimit(2)
-                    let detail = [person.phone, person.address].compactMap({ $0 }).filter({ !$0.isEmpty }).joined(separator: " · ")
-                    if !detail.isEmpty {
-                        Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted).lineLimit(2)
+                    Text(person.name).font(Theme.font(16, weight: .medium)).lineLimit(stacked ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // Phone · street on one line when both fit; otherwise each on its own, so a street
+                    // never breaks between its number and its name.
+                    let parts = [person.phone, person.address].compactMap({ $0 }).filter({ !$0.isEmpty })
+                    if !parts.isEmpty {
+                        ViewThatFits(in: .horizontal) {
+                            Text(parts.joined(separator: " · ")).fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(parts, id: \.self) { Text($0).lineLimit(stacked ? nil : 2).fixedSize(horizontal: false, vertical: true) }
+                            }
+                        }
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
                     }
                     if let last = lastJobLine(person.id) {
-                        Text(last).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                        Text(last).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(stacked ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Spacer(minLength: 8)
+                if !stacked { Spacer(minLength: 8) }
                 if savedJob == nil {
                     Button {
                         draft.customerID = ""

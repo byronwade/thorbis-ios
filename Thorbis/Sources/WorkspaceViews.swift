@@ -456,7 +456,6 @@ struct WorkspacePriceBookView: View {
                             },
                             filterActive: category != "All")
                     .environment(\.paperMenuButton, false)
-                PaperSearchField(text: $search, prompt: "Search price book")
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() } }
@@ -591,6 +590,8 @@ struct WorkspacePriceBookView: View {
         }
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
+        // Search at the bottom, as Estimates, Invoices and every list room.
+        .searchable(text: $search, prompt: "Search price book")
     }
 
     private func row(_ item: PriceBookListItem, showFullDescription: Bool = false) -> some View {
@@ -609,7 +610,12 @@ struct WorkspacePriceBookView: View {
                 }
                 .padding(.horizontal, ListRoom.gutter).padding(.vertical, 12)
             } else {
-                PaperListRow(title: PriceBookPresentation.title(item.description), subtitle: unit) {
+                let details = PriceBookPresentation.supportingDetails(item.description)
+                PaperListRow(title: PriceBookPresentation.title(item.description),
+                             subtitle: details ?? unit,
+                             meta: details == nil ? nil : unit,
+                             subtitleLines: 2,
+                             limitsSubtitleAtAccessibility: true) {
                     itemPrice(item).fixedSize(horizontal: true, vertical: false)
                 }
             }

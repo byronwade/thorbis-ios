@@ -131,6 +131,20 @@ source evidence; verify platform/API/version claims before relying on them.
    is full width with its own close circle. VoiceOver: the circle reads "Menu",
    the open drawer is a modal group that the escape gesture closes, and focus
    moves to the drawer and back. iPad at regular width keeps its sidebar.
+   **2026-11-05 navigation update:** The owner asked for the sidebar to follow
+   Thorbis web's organization. Show native personal destinations first, then
+   Work, Customers, Money, Reports and Operations, with other native tools in
+   Other. Keep device-only records under On this phone, and retain role access,
+   pins, hidden items, custom order and the person's chosen startup screen. A
+   customized global order is shown under Your places instead of being silently
+   rearranged into groups. Label message drafts as stored on this phone.
+   Do not imply that device-only records are synced or add destinations that
+   have no native implementation.
+   **Web hierarchy correction:** Workspace names are actionable rows, not static
+   headings. Multi-page workspaces reveal indented destinations when active;
+   a workspace with one available destination shows that destination directly.
+   Favorites and Recent can be collapsed independently. Preserve saved global
+   order in the Your places disclosure and distinguish device-only records.
 7. **Match the surface to the task.** Durable job/customer/site/equipment/document
    records belong in navigation destinations. Assignment, payment and completion
    are focused transactions. Small local choices use native menus/pickers;

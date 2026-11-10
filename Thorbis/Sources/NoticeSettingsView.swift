@@ -15,6 +15,14 @@ extension APIClient {
         return page.items
     }
 
+    /// One customer's job-email switch (web customer record); no row means on.
+    func customerJobEmailsEnabled(_ customerID: String) async throws -> Bool {
+        struct Page: Decodable { let items: [NoticePreference] }
+        let key = customerID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? customerID
+        let page: Page = try await send("GET", "/v1/notice-preferences/customer/\(key)")
+        return page.items.first?.enabled ?? true
+    }
+
     func setNoticePreference(_ preference: NoticePreference) async throws -> NoticePreference {
         try await send("POST", "/v1/notice-preferences", body: preference)
     }
@@ -28,6 +36,7 @@ struct NoticeSettingsView: View {
     @State private var loaded = false
     @State private var saving: String?
     @State private var error: String?
+    @State private var openLog = false
     @State private var morningDigest = PushNotifications.morningDigest
 
     private var managesRoles: Bool { session.can("organization.settings.edit", feature: "job_booking_notices") }
@@ -45,8 +54,8 @@ struct NoticeSettingsView: View {
                 .padding(.bottom, 12)
                 if PushNotifications.receivesMorningDigest(session) {
                     // TG-11: one push at 6:30, the off switch lives here. Per phone, saved offline.
-                    PaperGroupHeader(title: "This phone").padding(.top, 6)
-                    Toggle(isOn: Binding(get: { morningDigest }, set: { next in
+                    PaperGroupHeader(title: "This phone").padding(.top, 14)
+                    PaperCard { Toggle(isOn: Binding(get: { morningDigest }, set: { next in
                         morningDigest = next
                         PushNotifications.shared.setMorningDigest(next)
                     })) {
@@ -57,34 +66,45 @@ struct NoticeSettingsView: View {
                         }
                     }
                     .tint(Theme.brand)
-                    .frame(minHeight: 52)
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                    .frame(minHeight: 52) }
                 }
                 if managesRoles {
                     if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -Theme.gutter) }
                     if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
                     if loaded {
+                        // One panel per role, as in Settings; the header names the role, so the rows don't.
                         ForEach(roles, id: \.0) { role, label in
-                            PaperGroupHeader(title: label).padding(.top, 6)
-                            ForEach(channels, id: \.0) { channel, channelName in
+                            PaperGroupHeader(title: label).padding(.top, 14)
+                            PaperCard {
+                            ForEach(Array(channels.enumerated()), id: \.element.0) { index, pair in
+                                let (channel, channelName) = pair
                                 let key = "\(role):\(channel)"
+                                if index > 0 { WellDivider(leading: PaperCardMetrics.inset) }
                                 Toggle(isOn: Binding(get: { isOn(role, channel) }, set: { next in Task { await save(role, channel, next) } })) {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(channelName).font(Theme.font(15, weight: .medium))
-                                        Text(channel == "email" ? "\(label) email for booked, changed and canceled jobs" : "\(label) in-app feed for the same updates")
+                                        Text(channel == "email" ? "When a job is booked, changed or canceled" : "The same updates, in the app")
                                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
                                     }
                                 }
                                 .tint(Theme.brand)
                                 .disabled(saving == key)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
                                 .frame(minHeight: 52)
+                                .accessibilityLabel("\(label) \(channelName.lowercased())")
+                            }
                             }
                         }
                     }
-                    PaperGroupHeader(title: "History").padding(.top, 6)
-                    NavigationLink { NoticeDeliveryLogView() } label: {
-                        PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
+                    PaperGroupHeader(title: "History").padding(.top, 14)
+                    PaperCard {
+                        Button { openLog = true } label: {
+                            PaperMenuRow("Delivery log", symbol: "clock.arrow.circlepath", subtitle: "Recent notices and whether each was sent")
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+                        }
+                        .buttonStyle(RowPressStyle())
                     }
-                    .buttonStyle(RowPressStyle())
                 }
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
@@ -92,7 +112,12 @@ struct NoticeSettingsView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
+        .thorbisDestination(isPresented: $openLog) { NoticeDeliveryLogView() }
         .refreshable { if managesRoles { await load() } }
+        #if DEBUG
+        // `--paper-preview-screen notice-log`: Notification rules, then straight into the log.
+        .task { if PaperPreview.enabled, PaperPreview.screen == "notice-log" { openLog = true } }
+        #endif
         .task { if managesRoles { await load() } }
     }
 

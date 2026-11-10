@@ -24,6 +24,7 @@ struct RootView: View {
     @State private var customPaths: [String: NavigationPath] = [:]
     /// Set once the launch place is settled, so a later capability refresh never moves the person.
     @State private var settledLaunchPlace = false
+    @State private var phoneShellVisible = false
     /// The side drawer (2026-10-31, after the Claude and ChatGPT apps): open, and a drag in progress.
     @State private var drawerOpen = false
     @State private var drawerDrag: CGFloat = 0
@@ -116,23 +117,49 @@ struct RootView: View {
         #endif
         guard session.phase == .ready else { return }
         layout.applyRoleDefaults(WorkRole(session), permitted: { $0.permitted(session) })
-        openHomeAtLaunch()
+        if phoneShellVisible { openHomeAtLaunch() }
     }
 
     /// Owners whose pinned places lead with Home open there; everyone else still opens on Today. Only
     /// at launch, only from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
-        guard !settledLaunchPlace else { return }
+        guard !settledLaunchPlace, session.phase == .ready else { return }
         settledLaunchPlace = true
-        guard layout.visibleTabs(session).first == .home, selectedTab == PrimaryTab.initial.rawValue,
-              schedulePath.isEmpty, !store.openedForRecord else { return }
-        selectedTab = MenuItem.home.rawValue
+        guard store.consumeStartupSelection(session: session.generation) else { return }
+        guard selectedTab == PrimaryTab.initial.rawValue, schedulePath.isEmpty,
+              !store.hasStartupIntent(session: session.generation) else { return }
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let preference = StartupDestinationPreferences().get(for: scope)
+            if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
+                selectedTab = target.rawValue
+                return
+            }
+        }
+        if layout.visibleTabs(session).first == .home { selectedTab = MenuItem.home.rawValue }
     }
 
     /// iPad at regular width gets the sidebar and split columns; compact width (Slide Over, a
     /// narrow Split View) and every iPhone get the phone layout.
     @ViewBuilder private func navigation(wide: Bool) -> some View {
-        if wide { TabletRoot() } else { phoneShell() }
+        if wide { TabletRoot() } else {
+            phoneShell()
+                .onAppear {
+                    phoneShellVisible = true
+                    if store.requestedJobID == nil, store.requestedRecord == nil,
+                       let saved = store.rememberedRoot(session: session.generation),
+                       let destination = StartupDestination(rawValue: saved), destination.permitted(session) {
+                        selectedTab = saved
+                    }
+                    applyRoleDefaults()
+                }
+                .onChange(of: selectedTab) { _, value in
+                    if phoneShellVisible {
+                        store.rememberRoot(value, session: session.generation)
+                        _ = store.consumeStartupSelection(session: session.generation)
+                    }
+                }
+                .onDisappear { phoneShellVisible = false }
+        }
     }
 
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -279,6 +306,13 @@ struct RootView: View {
             openRecent: { item in
                 closeDrawer(thenRun: nil)
                 openRecent(item)
+            },
+            openFavorite: { item in
+                closeDrawer(thenRun: nil)
+                switch item.entry.kind {
+                case .job: store.requestedJobID = item.entry.id
+                case .customer: store.requestedRecord = .customer(item.entry.id)
+                }
             },
             openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }
         )
@@ -636,7 +670,8 @@ struct RootView: View {
         .background(Theme.canvas)
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob(phone: true) }
         .onChange(of: store.jobs) { openRequestedJob(phone: true) }
-        .onChange(of: store.requestedSchedule) {
+        .onChange(of: store.requestedSchedule, initial: true) {
+            guard store.consumeScheduleRequest(session: session.generation) else { return }
             if drawerOpen { closeDrawer() }
             schedulePath = NavigationPath()
             primaryTab = .schedule
@@ -790,6 +825,7 @@ struct RootView: View {
         case "local-agreements": openLocal(.agreements)
         case "team": previewPlace(.team)
         case "customize-menu": schedulePath.append(PaperRoute.customizeMenu)
+        case "properties", "property-detail": schedulePath.append(PaperRoute.properties)
         case "signature": previewSignature = true
         case "job-schedule", "equipment-editor", "equipment-sections": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
         case "new-job", "book-job", "book-job-filled": createJob = true
@@ -815,7 +851,7 @@ struct RootView: View {
         case "reports": previewPlace(.reports)
         case "scorecard": previewPlace(.scorecard)
         case "billing": previewPlace(.billing)
-        case "notices": previewPlace(.notices)
+        case "notices", "notice-log": previewPlace(.notices)
         case "payments": schedulePath.append(PaperRoute.payments)
         case "billing-detail": previewPlace(.billing, then: .billingSchedule("00000000-0000-4000-8000-000000009501"))
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
@@ -952,6 +988,8 @@ struct RootView: View {
         if phone {
             if drawerOpen { closeDrawer() }
             let tabs = layout.visibleTabs(session)
+            store.noteHandledNavigation(session: session.generation,
+                root: tabs.contains(.schedule) || !tabs.contains(.jobs) ? "schedule" : "jobs")
             if tabs.contains(.schedule) || !tabs.contains(.jobs) {
                 primaryTab = .schedule
                 schedulePath = NavigationPath()
@@ -967,6 +1005,11 @@ struct RootView: View {
     /// Opens search with the words a Siri or Shortcuts search asked for.
     private func openRequestedSearch(phone: Bool) {
         guard let query = store.requestedSearch else { return }
+        let saved = store.rememberedRoot(session: session.generation)
+        let permitted = saved.flatMap(StartupDestination.init(rawValue:))?.permitted(session) ?? false
+        selectedTab = StartupDestination.searchRoot(current: selectedTab, remembered: saved,
+                                                    phoneVisible: phoneShellVisible, rememberedAllowed: permitted)
+        store.noteHandledNavigation(session: session.generation, root: selectedTab)
         store.requestedSearch = nil
         if phone {
             if drawerOpen { closeDrawer() }
@@ -992,6 +1035,8 @@ struct RootView: View {
         case .invoice(let id): target.append(PaperRoute.invoice(id)); home = .invoices
         }
         guard phone else { return }
+        let root = home.permitted(session) ? home.rawValue : selectedTab
+        store.noteHandledNavigation(session: session.generation, root: root)
         if drawerOpen { closeDrawer() }
         if home == .customers, MenuItem.customers.permitted(session) {
             primaryTab = .customers
@@ -1178,8 +1223,8 @@ struct PaperRouteView: View {
     var body: some View {
         switch route {
         case .inbox:
-            WorkspaceNoticesView(api: api, available: session.can("job.view", feature: "job_booking_notices"),
-                                 calls: CallLogRules.available(session)).id(session.generation)
+            CommsInboxView(access: CommsInboxAccess(session), actorID: session.user?.id,
+                           organizationID: session.activeOrganization?.id).id(session.generation)
         case .estimates: EstimatesView()
         case .invoices: InvoicesView()
         case .priceBook:

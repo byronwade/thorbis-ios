@@ -93,7 +93,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .home: "Today at a glance, money and what needs you"
         case .properties: "Every service address, across customers"
         case .attention: "Unpaid invoices, waiting estimates, jobs without a time"
-        case .inbox: "Booked, changed and assigned jobs"
+        case .inbox: "Messages, calls and job notices"
         case .billing: "Progress billing, deposits, retainage"
         case .money: "Revenue, overdue and reports"
         case .reports: "Estimate conversion and schedule"
@@ -164,7 +164,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .home: session.can("job.view", feature: "jobs") && WorkRole(session) == .owner
         case .customers, .properties: session.can("customer.view", feature: "core_crm")
         case .attention: session.can("invoice.view", feature: "invoicing") || session.can("estimate.view", feature: "estimates")
-        case .inbox: session.can("job.view", feature: "job_booking_notices")
+        case .inbox: CommsInboxAccess(session).visible
         case .estimates: session.can("estimate.view", feature: "estimates")
         case .invoices: session.can("invoice.view", feature: "invoicing")
         case .billing: session.can("invoice.view", feature: "progress_billing")

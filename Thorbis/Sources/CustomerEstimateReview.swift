@@ -23,6 +23,11 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
         else { throw customerReviewUnavailable() }
     }
 
+    /// Retained reader content must still match the record now backing its destination.
+    func matchesDetails(for record: EstimateRecord) -> Bool {
+        (try? validate(for: record)) != nil
+    }
+
     fileprivate func validate(action: PublicEstimateAction, paperHash: String) throws {
         guard action.kind == "estimate", action.signingOffered,
               action.contentHash == paperHash, paperHash.count >= 15,
@@ -45,8 +50,10 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
         else { throw customerReviewUnavailable() }
 
         if reviewed.isEmpty {
-            guard let scope = action.scopeLines, scope.count == lines.count,
-                  zip(scope, lines).allSatisfy({ actual, expected in
+            guard let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == totalAmount,
+                  let projected = customerEstimateProjection(lines, currency: currency),
+                  let scope = action.scopeLines, scope.count == projected.count,
+                  zip(scope, projected).allSatisfy({ actual, expected in
                       actual.id == expected.id && actual.description == expected.description
                           && Int(exactly: actual.quantity) == expected.quantity
                           && Int(exactly: actual.unitPrice) == expected.unitPrice.amount

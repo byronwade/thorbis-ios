@@ -44,14 +44,20 @@ struct PaperInvoiceBalance: Equatable {
 
 struct PaperInvoiceCollectionFooter: View {
     @ObservedObject var model: InvoicePaymentCollectionModel
+    var invoiceReference: String? = nil
     let onCollectPayment: () -> Void
 
     var body: some View {
         if model.canOfferCollection {
             VStack(alignment: .leading, spacing: 8) {
+                if let invoiceReference {
+                    Text("For \(invoiceReference)")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("job-collect-selected-invoice")
+                }
                 PrimaryButton(title: "Collect payment", busy: model.isRecording, action: onCollectPayment)
                     .disabled(!model.canRecordPayment)
-                    .accessibilityHint(model.collectBlockedReason ?? "")
+                    .accessibilityHint([invoiceReference.map { "For \($0)" }, model.collectBlockedReason].compactMap { $0 }.joined(separator: ". "))
                 // A disabled commit says why (design.thorbis.com Controls).
                 if let reason = model.collectBlockedReason {
                     Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)

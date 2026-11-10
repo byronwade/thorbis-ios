@@ -262,9 +262,8 @@ struct JobCircleLabel: View {
     }
 }
 
-/// The three job sections as Linear text tabs (the style Today uses, `PaperTabs(textTabs:)`): plain
-/// words on the ground, the chosen one on a light well pill, left-aligned. Values stay "Overview",
-/// "Money", "Activity"; only the words change. A label with its own words and spoken form keeps
+/// Job sections as Linear text tabs (the style Today uses, `PaperTabs(textTabs:)`): plain
+/// words on the ground, the chosen one on a light well pill, left-aligned. A label with its own words and spoken form keeps
 /// `PaperTabs` out (it binds the label to the value and has no per-tab identifiers).
 struct JobSectionControl: View {
     let options: [(value: String, label: String, spoken: String)]
@@ -273,7 +272,9 @@ struct JobSectionControl: View {
     @Namespace private var pill
 
     var body: some View {
-        JobSectionRowLayout(spacing: 4, fills: false) {
+        // Each tab keeps its whole word; when four don't fit one row they flow onto a second, as
+        // Money's tabs do, instead of every tab shrinking to "Overvi…" and "Pho…".
+        FlowRow(spacing: 4, lineSpacing: 0) {
             ForEach(options, id: \.value) { option in
                 let isOn = option.value == selection
                 Button { withMotion(.snappy) { selection = option.value } } label: {
@@ -470,6 +471,7 @@ func jobShortMoney(_ cents: Int, currency: String) -> String {
 struct JobInvoiceLineRows: View {
     let lines: [FieldLine]
     let currency: String
+    var invoiceID: String? = nil
     @Environment(\.dynamicTypeSize) private var typeSize
 
     static func amount(_ line: FieldLine) -> Int? {
@@ -499,6 +501,7 @@ struct JobInvoiceLineRows: View {
             .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(line.description), quantity \(line.quantity)\(amount.map { ", \($0)" } ?? "")")
+            .accessibilityIdentifier(invoiceID.map { "job-invoice-line-\($0)-\(line.id)" } ?? "")
         }
     }
 }

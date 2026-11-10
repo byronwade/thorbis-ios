@@ -13,6 +13,320 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-05-ipad-schedule-list",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "ipad", title: "iPad Schedule matches Jobs",
+                      detail: "On iPad, Schedule's list uses the same tabs and plain rows as the Jobs list beside it."),
+            ],
+            fixes: 27
+        ),
+        ReleaseNote(
+            id: "2026-11-05-section-counts",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "number", title: "Section counts read the same",
+                      detail: "Every list and report shows a section's count the same way, the number beside the label."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-new-estimate-header",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "doc.badge.plus", title: "New estimate like other forms",
+                      detail: "A new estimate opens with the same title and close button as the other forms."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-11-05-job-notices-and-tabs",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "bell", title: "See if booking notices went out",
+                      detail: "A job lists who was emailed or told in the app about the booking, and whether it was sent."),
+                .init(symbol: "rectangle.split.3x1", title: "Job tabs show whole words",
+                      detail: "Job sections never cut off as “Overvi…”; at larger text they wrap onto a second line."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-11-05-new-customer-sheet",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "person.badge.plus", title: "New customer like other forms",
+                      detail: "Adding a customer opens the same sheet as the other forms: a title, the close button and one Save."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-equipment-sheet",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "wrench.and.screwdriver", title: "Add equipment like other forms",
+                      detail: "Adding equipment opens the same sheet as the other forms: a title, the close button and one Save."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-forms-read-the-same",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "list.bullet.rectangle", title: "Forms read the same",
+                      detail: "Optional fields are marked the same way in every form, and equipment fields show real examples."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-money-overview-tab",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "chart.bar", title: "Money opens on the overview",
+                      detail: "Money's first tab shows what's owed, aging and who to chase; Revenue and the reports follow."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-11-05-one-create-button",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "plus.circle", title: "One New button everywhere",
+                      detail: "Jobs, Customers, Estimates and Home use the same dark + as Today, Board and Map."),
+            ],
+            fixes: 1
+        ),
+        ReleaseNote(
+            id: "2026-11-05-money-overview",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "chart.bar", title: "Money at a glance",
+                      detail: "See what's owed, collected and billed, how old unpaid invoices are and who to chase first."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-payments-list",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "creditcard", title: "See every payment",
+                      detail: "Home's Money section opens every payment collected, by card, cash or refunded, as on the web."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-property-page",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "house", title: "A page for each property",
+                      detail: "Properties open their own page: the codes at the door, jobs at that address and the equipment there."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-record-activity",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "clock.arrow.circlepath", title: "See an invoice's history",
+                      detail: "Estimates and invoices list who changed, sent or paid them and when, as on the web."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-agreements-server-book",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "doc.text", title: "Agreements shared with your team",
+                      detail: "Agreements now lists every maintenance plan and membership on file, the same list the office sees."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-equipment-server-book",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "wrench.and.screwdriver", title: "Equipment shared with your team",
+                      detail: "Equipment now lists every unit on file, by customer and address, the same list the office sees."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-customer-job-emails",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "envelope", title: "Turn off job emails for a customer",
+                      detail: "On a customer's details, stop booking, schedule and cancel emails for them, as on the web."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-invoice-discount",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "tag", title: "Discount a draft invoice",
+                      detail: "Add a discount and a reason the customer sees from the invoice's menu, as on the web."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-calmer-lists-and-screens",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "list.bullet", title: "Calmer job lists",
+                      detail: "Rows drop words they repeat, and titles, times and streets no longer break mid-line."),
+                .init(symbol: "tray", title: "Notices line up in the Inbox",
+                      detail: "Job notices sit beside calls and texts, with the same age and unread dot."),
+                .init(symbol: "bell", title: "Notification rules, grouped",
+                      detail: "Each role's email and in-app switches sit together in one panel."),
+                .init(symbol: "checkmark.circle", title: "One tap to confirm",
+                      detail: "Wrap up shows a single Confirm button on each item you can check off."),
+                .init(symbol: "dollarsign.circle", title: "Billing reads like Invoices",
+                      detail: "Billing schedules show as plain rows, with the amount over the status."),
+            ],
+            fixes: 13
+        ),
+        ReleaseNote(
+            id: "2026-11-05-text-opens-inbox",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "message", title: "Text opens the Inbox",
+                      detail: "Text on a job or customer opens their conversation in the Inbox, where it saves as a draft."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-inbox-calls-texts-email",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "phone", title: "Calls in the Inbox",
+                      detail: "See calls to your business by caller, play the recording and link a call to its job."),
+                .init(symbol: "bubble.left", title: "Texts and email in the Inbox (beta)",
+                      detail: "Texts save as drafts and emails wait in Sent on this phone; nothing goes out yet."),
+                .init(symbol: "tray", title: "Sort your Inbox",
+                      detail: "Switch between calls, texts, email and job notices, and archive or star conversations."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-web-sidebar-workspaces",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Find your workspaces",
+                      detail: "The menu now follows the web: open a workspace to see its pages."),
+                .init(symbol: "line.3.horizontal", title: "Keep your menu order",
+                      detail: "Your saved order is in Your places, which you can collapse when you don't need it."),
+                .init(symbol: "plus", title: "Create from the menu",
+                      detail: "Choose a new item at the top of the menu; the New job shortcut is still at the bottom."),
+                .init(symbol: "star", title: "Favorite jobs and customers",
+                      detail: "Save records on this device and find them in Favorites when you have access."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-job-invoice-draft-review",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "doc.text", title: "Open a new invoice right away",
+                      detail: "Create an invoice on a job and review its draft in one step."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-job-invoice-collect",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "creditcard", title: "Collect from the invoice list",
+                      detail: "On a job, collect payment directly from the invoice you choose."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-05-web-aligned-menu",
+            date: "2026-11-05",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Find work more easily",
+                      detail: "Jobs, estimates and invoices are together in the menu, like on the web."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-04-job-photos-section",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "photo.on.rectangle", title: "Open job photos directly",
+                      detail: "Go straight to a job's photos from its section bar."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-04-job-payment-selection",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "creditcard", title: "Keep the selected invoice",
+                      detail: "Collect payment stays with the invoice you chose on the job."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-04-customer-payment-history",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "creditcard", title: "See payments at a glance",
+                      detail: "Customers can see short payment histories and refunds without an extra tap."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-04-payment-history-workspace",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "arrow.triangle.2.circlepath", title: "Keep payment history together",
+                      detail: "Payment history refresh stops if the saved workspace changes."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-04-estimate-details-before-selection",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "doc.text", title: "Read estimates before choosing",
+                      detail: "Customers can read sent estimate details before selecting work."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-04-estimate-material-privacy",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "doc.text", title: "Respect estimate display choices",
+                      detail: "Customer estimates group hidden material details while keeping the total visible."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-04-job-money-jumps",
+            date: "2026-11-04",
+            highlights: [
+                .init(symbol: "arrow.up.arrow.down", title: "Find job invoices faster",
+                      detail: "Jump to estimates or invoices from a job's Money page."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-03-navigation-routing",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "arrow.turn.up.right", title: "Keep your place",
+                      detail: "Links and search open more reliably when your layout changes."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-03-startup-destination",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "rectangle.on.rectangle", title: "Choose your start screen",
+                      detail: "Choose where Thorbis opens on this device from Settings."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-03-public-estimate-amounts",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "dollarsign.circle", title: "Clearer estimate amounts",
+                      detail: "Customer estimate totals, options and discounts now show the correct dollar amounts."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-03-closeout-payment-evidence",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "checklist", title: "Clearer payment closeout",
+                      detail: "Closeout checks known invoices and explains when saved payments need review."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-03-contact-quick-actions",
+            date: "2026-11-03",
+            highlights: [
+                .init(symbol: "person.crop.circle", title: "Reach contacts faster",
+                      detail: "Call or text a customer contact directly from their profile."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-03-customer-records-loading",
             date: "2026-11-03",
             highlights: [

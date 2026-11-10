@@ -1121,12 +1121,12 @@ struct EstimateBuilderSection<Header: View>: View {
                     .disabled(disabled)
                 }
             }
-            .padding(.horizontal, 4)
+            // Flush with the card and the fields above it, so every left edge on the sheet lines up.
             .frame(minHeight: 32)
             if let caption {
                 Text(caption).font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4).padding(.bottom, 2)
+                    .padding(.bottom, 2)
             }
             PaperCard {
                 VStack(alignment: .leading, spacing: 0) {

@@ -9,7 +9,7 @@ struct PublicEstimateAction: Decodable, Equatable {
     let contentHash: String
     let allowedActions: [String]
     let nonce: String?
-    let totalAmount: Double
+    @PublicEstimateAmount var totalAmount: Double
     let currency: String
     let html: String?
     let approvalWithoutSignatureAllowed: Bool?
@@ -29,15 +29,15 @@ struct PublicEstimateAction: Decodable, Equatable {
     struct ScopeLine: Decodable, Equatable, Identifiable {
         let id: String
         let description: String
-        let quantity: Double
-        let unitPrice: Double
+        @PublicEstimateQuantity var quantity: Double
+        @PublicEstimateSignedAmount var unitPrice: Double
     }
 
     struct Option: Decodable, Equatable, Identifiable {
         let id: String
         let title: String
         let description: String
-        let totalAmount: Double
+        @PublicEstimateAmount var totalAmount: Double
         let currency: String
     }
 
@@ -46,10 +46,17 @@ struct PublicEstimateAction: Decodable, Equatable {
         let optionId: String?
         let signerName: String
         let acceptedAt: String
-        let totalAmount: Double
+        @PublicEstimateAmount var totalAmount: Double
     }
 
-    var canApprovePlainly: Bool {
+    /// Validate customer-facing amounts before approving this issued action.
+    var amountsAvailableForApproval: Bool {
+        guard currency == "USD", totalAmount >= 0, PublicEstimateMoney.format(totalAmount, currency: currency) != nil else { return false }
+        guard (options ?? []).allSatisfy({ $0.currency == "USD" && $0.totalAmount >= 0 && PublicEstimateMoney.format($0.totalAmount, currency: $0.currency) != nil }) else { return false }
+        return (scopeLines ?? []).allSatisfy { PublicEstimateMoney.lineTotal(quantity: $0.quantity, unitPrice: $0.unitPrice) != nil }
+    }
+
+    var plainApprovalOffered: Bool {
         status == .sent
             && nonce != nil
             && allowedActions.contains("approve")
@@ -57,6 +64,8 @@ struct PublicEstimateAction: Decodable, Equatable {
             && options?.isEmpty != false
             && scopeLines?.isEmpty == false
     }
+
+    var canApprovePlainly: Bool { plainApprovalOffered && amountsAvailableForApproval }
 
     var signingOffered: Bool {
         status == .sent
@@ -69,7 +78,7 @@ struct PublicEstimateAction: Decodable, Equatable {
 
     func canApprove(signerName: String, consent: Bool, selectedOptionID: String?) -> Bool {
         let normalizedName = signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard signingOffered, contentHash.count >= 15,
+        guard amountsAvailableForApproval, signingOffered, contentHash.count >= 15,
               consent, !normalizedName.isEmpty, normalizedName.count <= 120 else { return false }
         if let options, !options.isEmpty {
             return options.contains { $0.id == selectedOptionID }
@@ -111,7 +120,7 @@ struct PublicEstimateActionPatch: Decodable {
     let contentHash: String?
     let allowedActions: [String]?
     let nonce: String?
-    let totalAmount: Double?
+    @OptionalPublicEstimateAmount var totalAmount: Double?
     let currency: String?
     let html: String?
     let approvalWithoutSignatureAllowed: Bool?
@@ -190,6 +199,16 @@ final class PublicEstimateActionModel: ObservableObject {
 
     func submit(_ decision: PublicEstimateActionDecision, api: APIClient, token: String) async {
         guard !isSubmitting, currentToken == token, let current = action else { return }
+        switch decision {
+        case .approve, .approvePlainly:
+            guard current.amountsAvailableForApproval else {
+                actionFailure = nil
+                actionError = "We can’t verify the estimate amount. Ask the company for an updated estimate."
+                return
+            }
+        case .decline, .requestChanges:
+            break
+        }
         guard Self.matchesCurrentRevision(decision, action: current), Self.isAllowed(decision, by: current) else {
             actionFailure = nil
             actionError = "This estimate no longer allows that action. Reload the link and review the current estimate."

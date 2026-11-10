@@ -1037,7 +1037,9 @@ extension APIClient {
         let query = includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : []
         return try await allFieldPages("/v1/customers", queryItems: query)
     }
-    func fieldCustomer(_ id: String) async throws -> CustomerRecord { try await send("GET", fieldPath("/v1/customers", id: id)) }
+    func fieldCustomer(_ id: String, requireFresh: Bool = false) async throws -> CustomerRecord {
+        try await send("GET", fieldPath("/v1/customers", id: id), requireFresh: requireFresh)
+    }
     func fieldCustomerHistory(_ id: String, cursor: String? = nil) async throws -> CustomerHistoryPage {
         try await send("GET", fieldPath("/v1/customers", id: id, suffix: "/history"),
                        queryItems: [URLQueryItem(name: "limit", value: "50")], cursor: cursor)
@@ -1137,6 +1139,9 @@ extension APIClient {
         return try await allFieldPages("/v1/invoices", queryItems: [URLQueryItem(name: "customerId", value: customerID)], isCurrent: isCurrent)
     }
     func fieldInvoice(_ id: String) async throws -> InvoiceRecord { try await send("GET", fieldPath("/v1/invoices", id: id)) }
+    func fieldInvoiceWithProvenance(_ id: String) async throws -> APIRead<InvoiceRecord> {
+        try await sendWithProvenance(fieldPath("/v1/invoices", id: id))
+    }
     /// A job's invoices, drafts included (`GET /v1/jobs/{id}/invoices`). Unlike the invoice list this
     /// answers for a technician through the assigned job, so a fresh device still sees the job's paper.
     func fieldJobInvoices(_ jobID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [InvoiceRecord] {

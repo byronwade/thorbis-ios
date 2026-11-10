@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct EstimateRevisionEditorView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let estimate: EstimateRecord
     let onSaved: (EstimateRecord) -> Void
 
@@ -253,7 +254,10 @@ struct EstimateRevisionEditorView: View {
                 .font(Theme.font(24, weight: .medium)).tracking(-0.36)
                 .accessibilityLabel("Estimate title")
                 .disabled(busy || !canEdit)
-            HStack(spacing: 10) {
+            // At accessibility sizes the customer drops under the status instead of wrapping beside it.
+            let statusLayout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
+            statusLayout {
                 HStack(spacing: 6) {
                     Circle().fill(Theme.warning).frame(width: 7, height: 7)
                     Text(editor.estimate.status.statusLabel).font(Theme.font(14, weight: .medium))

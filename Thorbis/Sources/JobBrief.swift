@@ -211,6 +211,7 @@ private struct JobContactRow: View {
     var hidesName = false
     var route: PaperRoute? = nil
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
 
     var body: some View {
         let reach = person.reach
@@ -233,7 +234,7 @@ private struct JobContactRow: View {
                 Spacer(minLength: 8)
             }
             if let call = reach.call { glyph("phone", label: "Call \(person.name)") { openURL(call) } }
-            if let text = reach.text { glyph("message", label: "Text \(person.name)") { openURL(text) } }
+            if let text = reach.text { glyph("message", label: "Text \(person.name)") { inboxText(text, name: person.name, openURL: openURL) } }
             if let email = reach.email { glyph("envelope", label: "Email \(person.name)") { openURL(email) } }
         }
         .padding(.vertical, 6)
