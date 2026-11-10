@@ -55,8 +55,11 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(label.isHittable)
         XCTAssertGreaterThan(label.frame.height, 220, "The entire long location name must wrap rather than truncate.")
         let options = app.buttons["Options for \(name)"]
+        // The preview's centring scroll can land after the label is found, leaving Options below
+        // the screen rather than above it, so look up first and then down.
         for _ in 0..<12 where !options.isHittable { app.swipeDown() }
-        XCTAssertTrue(options.isHittable)
+        for _ in 0..<12 where !options.isHittable { app.swipeUp() }
+        XCTAssertTrue(options.isHittable, app.debugDescription)
         capture("Customer long location, largest text")
         options.tap()
         XCTAssertTrue(app.buttons["Edit location"].waitForExistence(timeout: 5))

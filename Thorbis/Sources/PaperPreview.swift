@@ -100,6 +100,8 @@ enum PaperPreview {
     static func replacedDescriptionEstimate(_ estimate: EstimateRecord) -> EstimateRecord {
         changed(estimate, ["currentRevisionNumber": (estimate.currentRevisionNumber ?? 0) + 1])
     }
+    /// Set once a document's Description sheet has opened; the preview's document changes wait for it.
+    @MainActor static var descriptionOpened = false
     @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
         let args = ProcessInfo.processInfo.arguments
         guard isJobDocumentsPreview, args.contains("--paper-preview-description-expire-session") || args.contains("--paper-preview-description-revoke-permission") || args.contains("--paper-preview-description-replace-session") else { return }

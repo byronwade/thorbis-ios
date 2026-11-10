@@ -39,6 +39,9 @@ jobs:
       - name: Generate project
         run: xcodegen generate
       - name: Build and test on an iPhone simulator
+        # Signed to run locally (ad hoc, no team or profile): an unsigned test host has no keychain
+        # access in the simulator (errSecMissingEntitlement, -34018), and the price book's denial
+        # marker lives in the keychain.
         run: |
           simulator_id=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(v["udid"] for key,values in sorted(d["devices"].items(), reverse=True) if "iOS" in key for v in values if v["name"].startswith("iPhone")))')
           xcodebuild -project Thorbis.xcodeproj -scheme Thorbis \
@@ -46,7 +49,8 @@ jobs:
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
             -resultBundlePath "${{ runner.temp }}/ThorbisTests.xcresult" \
             -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO test
+            CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
+            DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= test
       - name: Save test evidence
         if: always()
         uses: actions/upload-artifact@v4

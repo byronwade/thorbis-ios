@@ -58,9 +58,9 @@ final class CustomerJobCompilationTests: XCTestCase {
     private func waitForSavedHistory(_ client: APIClient) async throws {
         let scope = try XCTUnwrap(client.savedCopyScope)
         let key = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/customers/\(customer)/history", query: [URLQueryItem(name: "limit", value: "50")])
-        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        // The live read queued its write before returning; wait for that write rather than a
+        // fixed second, which a busy CI simulator can outrun.
+        SavedCopyStore.shared.waitForQueuedWrites()
         XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key), "The first live response must be saved before testing offline fallback")
     }
 

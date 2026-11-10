@@ -19,7 +19,6 @@ struct CustomerJobDocumentBook: View {
     @State private var selection: CustomerJobDocumentSelection
     @EnvironmentObject private var api: APIClient
     #if DEBUG
-    @EnvironmentObject private var previewSession: SessionController
     @State private var previewDocumentChanged = false
     #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -79,11 +78,15 @@ struct CustomerJobDocumentBook: View {
         .navigationTitle(selection.selected?.reference ?? "Documents")
         .onChange(of: ids) { _, value in selection.reconcile(value) }
         #if DEBUG
-        .task { await PaperPreview.expireDocumentSessionForTesting(previewSession) }
         .task {
             let args = ProcessInfo.processInfo.arguments
             guard PaperPreview.isJobDocumentsPreview,
                   args.contains("--paper-preview-description-stale") || args.contains("--paper-preview-description-replaced") else { return }
+            // Count from the open Description, so the UI test's taps to reach it can't use up the delay.
+            while !PaperPreview.descriptionOpened {
+                try? await Task.sleep(for: .milliseconds(100))
+                if Task.isCancelled { return }
+            }
             try? await Task.sleep(for: .seconds(10))
             if !Task.isCancelled { previewDocumentChanged = true }
         }
