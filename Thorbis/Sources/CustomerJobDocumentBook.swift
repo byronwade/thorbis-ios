@@ -82,6 +82,11 @@ struct CustomerJobDocumentBook: View {
             let args = ProcessInfo.processInfo.arguments
             guard PaperPreview.isJobDocumentsPreview,
                   args.contains("--paper-preview-description-stale") || args.contains("--paper-preview-description-replaced") else { return }
+            // Count from the open Description, so the UI test's taps to reach it can't use up the delay.
+            while !PaperPreview.descriptionOpened {
+                try? await Task.sleep(for: .milliseconds(100))
+                if Task.isCancelled { return }
+            }
             try? await Task.sleep(for: .seconds(10))
             if !Task.isCancelled { previewDocumentChanged = true }
         }

@@ -97,7 +97,10 @@ struct ReadOnlyDocumentDescription: View {
                 #if DEBUG
                 // The preview's authority change counts from the open Description, so the UI test's
                 // taps to reach it can't use up the delay on a slow simulator.
-                .task { await PaperPreview.expireDocumentSessionForTesting(session) }
+                .task {
+                    PaperPreview.descriptionOpened = true
+                    await PaperPreview.expireDocumentSessionForTesting(session)
+                }
                 #endif
             }
         } }
