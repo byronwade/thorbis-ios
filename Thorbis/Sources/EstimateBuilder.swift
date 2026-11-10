@@ -104,7 +104,7 @@ extension Array where Element == EstimateRevisionLineDraft {
     @discardableResult
     mutating func addCustomLine(_ description: String = "", to group: EstimateLineGroup) -> UUID? {
         guard count < Self.maximumLines else { return nil }
-        let trimmed = String(description.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+        let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         let line = EstimateRevisionLineDraft(description: trimmed, quantity: "1", unitPrice: "", source: .manual, group: group)
         insertFollowingSwitch(line, at: insertionIndex(for: group))
         return line.id
@@ -195,7 +195,23 @@ extension Array where Element == EstimateRevisionLineDraft {
     }
 }
 
+enum EstimateDescriptionProblem {
+    case empty, tooLong, priceBookOriginalTooLong
+}
+
 extension EstimateRevisionLineDraft {
+    /// Price Book sources are snapshotted by the server, so changing the displayed line
+    /// cannot repair an overlong original revision.
+    var estimateDescriptionProblem: EstimateDescriptionProblem? {
+        if case .priceBookSelection = source,
+           let original = priceBookOriginal?.description.trimmingCharacters(in: .whitespacesAndNewlines),
+           original.utf16.count > 200 { return .priceBookOriginalTooLong }
+        let value = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { return .empty }
+        if value.utf16.count > 200 { return .tooLong }
+        return nil
+    }
+
     var isEditedPriceBookLine: Bool {
         guard let original = priceBookOriginal, case .priceBookSelection = source else { return false }
         return description.trimmingCharacters(in: .whitespacesAndNewlines) != original.description ||
@@ -218,7 +234,7 @@ extension Array where Element == EstimateRevisionLineDraft {
     @discardableResult
     mutating func addCreditLine(_ description: String, cents: Int) -> UUID? {
         guard count < Self.maximumLines, cents > 0 else { return nil }
-        let line = EstimateRevisionLineDraft(description: String(description.prefix(200)), quantity: "1",
+        let line = EstimateRevisionLineDraft(description: description, quantity: "1",
                                              unitPrice: EstimateRevisionEditorState.priceText(-cents),
                                              source: .manual, group: last?.group ?? .work)
         append(line)
@@ -292,6 +308,7 @@ extension View {
 /// favourites and recent items when nothing is typed, then the ranked catalog in pages.
 struct PriceBookResultsList: View {
     @ObservedObject var catalog: PriceBookCatalog
+    @EnvironmentObject private var api: APIClient
     let context: PriceBookCatalogContext
     let query: String
     let kind: PriceBookKindFilter
@@ -304,13 +321,14 @@ struct PriceBookResultsList: View {
     var showFavorites = true
 
     @State private var pageOffset = 0
+    @State private var partialPageAnchorID: String?
     @State private var usageSnapshot: [String: PriceBookUsage] = [:]
     @State private var rankingTime = Date()
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
-        let current = catalog.context == context
+        let current = catalog.isCurrent(context, api: api)
         let browsing = canUsePriceBook && current && trimmedQuery.isEmpty
         let favorites = browsing && showFavorites ? catalog.index.favorites(kind: kind, ids: catalog.favorites) : []
         let favoriteIDs = Set(favorites.map(\.id))
@@ -329,9 +347,16 @@ struct PriceBookResultsList: View {
                     Button { addCustomLine(trimmedQuery) } label: {
                         HStack(spacing: 12) {
                             PaperCircleLabel(symbol: "plus", size: 32)
-                            Text(trimmedQuery.isEmpty ? "Add a custom item" : "Add \u{201C}\(trimmedQuery)\u{201D} as a custom item")
-                                .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .multilineTextAlignment(.leading)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Add a custom item")
+                                    .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                if !trimmedQuery.isEmpty {
+                                    Text(trimmedQuery)
+                                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 10).frame(minHeight: 56).contentShape(Rectangle())
@@ -340,17 +365,40 @@ struct PriceBookResultsList: View {
                     .accessibilityIdentifier("price-book-add-custom")
                 }
             }
-            if canUsePriceBook, !current || catalog.items.isEmpty {
+            if canUsePriceBook, catalog.context == context, catalog.denialPersistenceFailure, !catalog.accessDenied {
+                ErrorBanner(message: "The saved price book could not be secured. Connect and finish refreshing it.") { retry() }
+            }
+            if canUsePriceBook, catalog.context == context, catalog.accessDenied {
+                ErrorBanner(message: catalog.denialPersistenceFailure
+                    ? "Price book access could not be verified, and its saved copy could not be secured. Connect and try again."
+                    : "Price book access could not be verified. \(catalog.error ?? "Try again when you have access.")") { retry() }
+            } else if canUsePriceBook, context.authority == nil {
+                Text("Connect once to verify your price book access on this device.")
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            } else if canUsePriceBook, !current || catalog.items.isEmpty {
                 if !current || catalog.loading {
                     PaperCard { ForEach(0..<6, id: \.self) { _ in skeletonRow } }
-                } else if let error = catalog.error {
+                } else if let error = catalog.error, !catalog.isPartial {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("The price book didn't load. \(error)").font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        Text(catalog.needsScopedRefresh
+                             ? "The saved price book needs one online refresh after this update. \(error)"
+                             : "The price book didn't load. \(error)")
+                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
                         Button("Try again", action: retry).font(Theme.font(15, weight: .medium)).frame(minHeight: 44)
                     }
                 }
             }
-            if canUsePriceBook, current, !catalog.items.isEmpty, let error = catalog.error {
+            if canUsePriceBook, current, catalog.isPartial {
+                if let error = catalog.error {
+                    ErrorBanner(message: "Only some price book items loaded. Search covers loaded items only. \(error)") { retry() }
+                } else if catalog.loading {
+                    Text("Loading more price book items. Search covers loaded items only.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("price-book-partial")
+                } else {
+                    ErrorBanner(message: "Only some price book items loaded. Search covers loaded items only. Refresh to load more.") { retry() }
+                }
+            } else if canUsePriceBook, current, !catalog.items.isEmpty, let error = catalog.error {
                 ErrorBanner(message: "Couldn't refresh the price book. Showing saved items. \(error)") { retry() }
             }
             if !favorites.isEmpty {
@@ -362,21 +410,21 @@ struct PriceBookResultsList: View {
             if !page.results.isEmpty {
                 section(trimmedQuery.isEmpty ? (favorites.isEmpty && recent.isEmpty ? nil : "Price book") : "Matches",
                         trailing: page.total > PriceBookSearchIndex.resultLimit
-                            ? "\(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)" : nil) {
+                            ? "\(page.offset + 1)–\(page.offset + page.results.count) of \(page.total)\(catalog.isPartial ? " loaded" : "")" : nil) {
                     if page.offset > 0 {
                         pageButton("Previous items", detail: nil, identifier: "price-book-previous") {
-                            pageOffset = max(0, page.offset - PriceBookSearchIndex.resultLimit)
+                            goToPage(max(0, page.offset - PriceBookSearchIndex.resultLimit), excluding: favoriteIDs.union(recent.map(\.id)))
                         }
                     }
                     ForEach(page.results, content: row)
                     if remaining > 0 {
-                        pageButton("Next items", detail: "\(remaining) remaining", identifier: "price-book-show-more") {
-                            pageOffset = page.offset + PriceBookSearchIndex.resultLimit
+                        pageButton("Next items", detail: "\(remaining)\(catalog.isPartial ? " loaded" : " remaining")", identifier: "price-book-show-more") {
+                            goToPage(page.offset + PriceBookSearchIndex.resultLimit, excluding: favoriteIDs.union(recent.map(\.id)))
                         }
                     }
                 }
             }
-            if canUsePriceBook, current, !catalog.loading, catalog.error == nil,
+            if canUsePriceBook, current, !catalog.loading, !catalog.isPartial, catalog.error == nil,
                page.results.isEmpty, recent.isEmpty, favorites.isEmpty {
                 if addCustomLine == nil {
                     ContentUnavailableView(
@@ -399,9 +447,30 @@ struct PriceBookResultsList: View {
         .onAppear { resetPage() }
         .onChange(of: query) { _, _ in resetPage() }
         .onChange(of: kind) { _, _ in resetPage() }
-        .onChange(of: context) { _, _ in resetPage() }
-        .onChange(of: catalog.context) { _, newContext in
-            if newContext == context { resetPage() }
+        .onChange(of: context) { previous, current in
+            if !previous.hasSameVerifiedScope(as: current) ||
+                !(catalog.isCurrent(previous, api: api) || catalog.isCurrent(current, api: api)) || catalog.isPartial || catalog.loading {
+                resetPage()
+            }
+        }
+        .onChange(of: api.requestGeneration) { _, _ in resetPage() }
+        .onChange(of: catalog.context) { previous, current in
+            guard let current, current == context else { return }
+            if previous?.hasSameVerifiedScope(as: current) != true || !catalog.isCurrent(current, api: api) || catalog.isPartial || catalog.loading {
+                resetPage()
+            }
+        }
+        .onChange(of: catalog.isPartial) { wasPartial, isPartial in
+            if isPartial {
+                partialPageAnchorID = page.results.first?.id
+            } else if wasPartial, let anchor = partialPageAnchorID {
+                // Keep the item at the start of the prior page visible after the full
+                // ranked catalog arrives; never alter the query or draft selection.
+                pageOffset = catalog.index.pageOffset(containing: anchor, query: query, kind: kind,
+                    usage: usageSnapshot, now: rankingTime,
+                    excludingIDs: favoriteIDs.union(recent.map(\.id))) ?? pageOffset
+                partialPageAnchorID = nil
+            }
         }
     }
 
@@ -409,6 +478,25 @@ struct PriceBookResultsList: View {
         pageOffset = 0
         usageSnapshot = catalog.usage
         rankingTime = Date()
+        partialPageAnchorID = nil
+        if catalog.isPartial, catalog.isCurrent(context, api: api) {
+            let browsing = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let favorites = browsing && showFavorites ? catalog.index.favorites(kind: kind, ids: catalog.favorites) : []
+            let favoriteIDs = Set(favorites.map(\.id))
+            let recent = browsing ? catalog.index.recent(kind: kind, usage: usageSnapshot, now: rankingTime)
+                .filter { !favoriteIDs.contains($0.id) } : []
+            partialPageAnchorID = catalog.index.page(query, kind: kind, usage: usageSnapshot, now: rankingTime,
+                excludingIDs: favoriteIDs.union(recent.map(\.id)), limit: PriceBookSearchIndex.resultLimit).results.first?.id
+        }
+    }
+
+    private func goToPage(_ offset: Int, excluding: Set<String>) {
+        pageOffset = offset
+        if catalog.isPartial {
+            partialPageAnchorID = catalog.index.page(query, kind: kind, usage: usageSnapshot,
+                now: rankingTime, excludingIDs: excluding, limit: PriceBookSearchIndex.resultLimit,
+                offset: offset).results.first?.id
+        }
     }
 
     private func section<Content: View>(_ title: String?, trailing: String? = nil, @ViewBuilder content: () -> Content) -> some View {
@@ -484,9 +572,76 @@ private struct PriceBookCatalogResultRow: View {
     let addItem: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    var body: some View {
+    @ViewBuilder var body: some View {
+        if typeSize.isAccessibilitySize {
+            accessibilityRow
+        } else {
+            standardRow
+        }
+    }
+
+    /// Keep the add action reachable even when the item's full description grows
+    /// taller than the space between the keyboard and the Done bar.
+    @ViewBuilder private var accessibilityRow: some View {
         let item = result.item
-        let stacked = typeSize.isAccessibilitySize
+        HStack(alignment: .top, spacing: 4) {
+            if let toggleFavorite {
+                Button(action: toggleFavorite) {
+                    Image(systemName: favorite ? "star.fill" : "star")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(favorite ? Theme.foreground : Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(favorite ? "Remove \(item.description) from favourites" : "Add \(item.description) to favourites")
+            }
+            Button(action: addItem) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(PriceBookResultsList.highlighted(item.description, result.highlights))
+                        .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit)")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
+                        .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    if let secondary = secondaryPrice {
+                        Text(secondary).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, toggleFavorite == nil ? 14 : 0)
+                .padding(.vertical, 8).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            // The compact add button below exposes the same complete information to VoiceOver.
+            .accessibilityHidden(true)
+            Button(action: addItem) {
+                ZStack(alignment: .topTrailing) {
+                    PaperCircleLabel(symbol: "plus", size: 36, fill: quantity == nil ? Theme.fill : Theme.brandSurface)
+                    if let quantity {
+                        Text("\(quantity)")
+                            .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.onInk)
+                            .padding(.horizontal, 5).frame(minWidth: 20, minHeight: 20)
+                            .background(Theme.ink, in: Capsule()).offset(x: 2, y: -2)
+                    }
+                }
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add \(item.description), \(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized), \(item.unit), \(money(item.sellPrice.amount, currency: item.sellPrice.currency))\(secondaryPrice.map { ", \($0)" } ?? "")")
+            .accessibilityIdentifier("price-book-item-\(item.id)")
+            .accessibilityValue(quantity.map { "\($0) in draft" } ?? "Not added")
+            .accessibilityHint("Adds one to the current draft")
+            .padding(.trailing, 6).padding(.top, 8)
+        }
+        .sensoryFeedback(.impact(weight: .light), trigger: quantity ?? 0)
+        .animation(.spring(response: 0.25, dampingFraction: 0.8), value: quantity)
+    }
+
+    @ViewBuilder private var standardRow: some View {
+        let item = result.item
+        let stacked = false
         HStack(alignment: .center, spacing: 4) {
             if let toggleFavorite {
                 Button(action: toggleFavorite) {
@@ -585,9 +740,30 @@ struct BuilderLineRow: View {
     var descriptionIdentifier: String? = nil
     var quantityIdentifier: String? = nil
     var priceIdentifier: String? = nil
+    /// Keep both row actions clear of the keyboard's trailing Done control.
+    var lineActionsLeading = false
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var removeLineButton: some View {
+        Button(role: .destructive, action: remove) {
+            Text("Remove").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var closeLineButton: some View {
+        Button(action: toggle) {
+            Text("Done").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                .padding(.horizontal, 16).frame(minHeight: 44)
+                .background(Theme.fill, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Close line")
+    }
 
     private var quantityValue: Int { Int(quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 }
     private var stacked: Bool { typeSize.isAccessibilitySize }
@@ -722,21 +898,20 @@ struct BuilderLineRow: View {
                     }
                 }
             }
-            HStack {
-                Button(role: .destructive, action: remove) {
-                    Text("Remove").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
-                        .frame(minHeight: 44).contentShape(Rectangle())
+            if lineActionsLeading {
+                let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                                     : AnyLayout(HStackLayout(spacing: 24))
+                layout {
+                    closeLineButton
+                    removeLineButton
                 }
-                .buttonStyle(.plain)
-                Spacer()
-                Button(action: toggle) {
-                    Text("Done").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.fill, in: Capsule())
-                        .contentShape(Capsule())
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack {
+                    removeLineButton
+                    Spacer()
+                    closeLineButton
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Close line")
             }
         }
         .padding(.vertical, 12)
@@ -946,12 +1121,12 @@ struct EstimateBuilderSection<Header: View>: View {
                     .disabled(disabled)
                 }
             }
-            .padding(.horizontal, 4)
+            // Flush with the card and the fields above it, so every left edge on the sheet lines up.
             .frame(minHeight: 32)
             if let caption {
                 Text(caption).font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4).padding(.bottom, 2)
+                    .padding(.bottom, 2)
             }
             PaperCard {
                 VStack(alignment: .leading, spacing: 0) {

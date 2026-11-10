@@ -4,6 +4,158 @@ import XCTest
 /// screen), and the closed drawer staying out of the accessibility tree.
 @MainActor
 final class DrawerGearMenuUITests: XCTestCase {
+    func testCurrentJobCanBeAddedAndRemovedFromFavorites() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002214"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-role", "office"]
+        app.launch()
+        let star = app.buttons["record-favorite-job-\(id)"]
+        XCTAssertTrue(star.waitForExistence(timeout: 30))
+        if star.label == "Remove from favorites" { star.tap() }
+        XCTAssertEqual(star.label, "Add to favorites")
+        XCTAssertGreaterThanOrEqual(star.frame.height, 43.99)
+        star.tap()
+        XCTAssertEqual(star.label, "Remove from favorites")
+        star.tap()
+        XCTAssertEqual(star.label, "Add to favorites")
+    }
+
+    func testCurrentCustomerCanBeAddedAndRemovedFromFavorites() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000000412"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-role", "office"]
+        app.launch()
+        let star = app.buttons["record-favorite-customer-\(id)"]
+        XCTAssertTrue(star.waitForExistence(timeout: 30))
+        if star.label == "Remove from favorites" { star.tap() }
+        XCTAssertEqual(star.label, "Add to favorites")
+        XCTAssertGreaterThanOrEqual(star.frame.height, 43.99)
+        star.tap(); XCTAssertEqual(star.label, "Remove from favorites")
+        star.tap(); XCTAssertEqual(star.label, "Add to favorites")
+    }
+
+    func testTabletFavoriteJobCanBeOpenedAndRemoved() throws {
+        guard XCUIApplication().usesTabletLayout else { throw XCTSkip("iPad sidebar only") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002214"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-role", "office"]
+        app.launch()
+        let star = app.buttons["record-favorite-job-\(id)"]
+        XCTAssertTrue(star.waitForExistence(timeout: 30))
+        if star.label == "Add to favorites" { star.tap() }
+        app.showSidebar()
+        let favorite = app.buttons["sidebar-favorite-record-\(id)"]
+        XCTAssertTrue(favorite.waitForExistence(timeout: 15)); favorite.tap()
+        XCTAssertTrue(app.buttons["job-section-money"].waitForExistence(timeout: 15))
+        app.showSidebar()
+        XCTAssertTrue(favorite.waitForExistence(timeout: 15)); favorite.press(forDuration: 1)
+        let remove = app.buttons["Remove from favorites"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5)); remove.tap()
+        XCTAssertTrue(favorite.waitForNonExistence(timeout: 10))
+    }
+
+    func testRecentJobCanBeAddedOpenedAndRemovedFromFavorites() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone Recent surface") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        let id = "00000000-0000-4000-8000-000000002214"
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office", "--paper-preview-drawer-open"]
+        app.launch()
+        XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 30))
+        let recent = app.buttons["drawer-recent-\(id)"]
+        for _ in 0..<8 where !recent.isHittable { app.scrollViews["drawer-rows"].swipeUp() }
+        XCTAssertTrue(recent.waitForExistence(timeout: 10)); recent.press(forDuration: 1)
+        let existing = app.buttons["Remove from favorites"]
+        if existing.waitForExistence(timeout: 1) { existing.tap(); recent.press(forDuration: 1) }
+        let add = app.buttons["Add to favorites"]
+        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        let favorite = app.buttons["drawer-favorite-record-\(id)"]
+        for _ in 0..<8 where !favorite.isHittable { app.scrollViews["drawer-rows"].swipeDown() }
+        XCTAssertTrue(favorite.waitForExistence(timeout: 15))
+        favorite.tap()
+        XCTAssertTrue(app.buttons["job-section-money"].waitForExistence(timeout: 15))
+        // The existing pushed-screen drawer gap is covered separately; return to the root for cleanup.
+        app.buttons["Back"].firstMatch.tap()
+        app.openDrawer()
+        XCTAssertTrue(favorite.waitForExistence(timeout: 15)); favorite.press(forDuration: 1)
+        let remove = app.buttons["Remove from favorites"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5)); remove.tap()
+        XCTAssertTrue(favorite.waitForNonExistence(timeout: 10))
+    }
+
+    func testTopNewMenuOpensPermittedCustomerCreate() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office"]
+        app.launch(); app.openDrawer()
+        let new = app.buttons["drawer-new-menu"]
+        XCTAssertGreaterThanOrEqual(new.frame.height, 44)
+        new.tap()
+        let customer = app.buttons.matching(NSPredicate(format: "label == %@", "New customer")).firstMatch
+        XCTAssertTrue(customer.waitForExistence(timeout: 5)); customer.tap()
+        XCTAssertTrue(app.staticTexts["New customer"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.scrollViews["drawer-rows"].exists, "The drawer closes before the sheet opens")
+    }
+
+    func testTopWorkspaceMenuOpensSettings() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch(); app.openDrawer()
+        let workspace = app.buttons["drawer-workspace-menu"]
+        XCTAssertGreaterThanOrEqual(workspace.frame.height, 44)
+        workspace.tap()
+        let settings = app.buttons.matching(NSPredicate(format: "label == %@", "Settings")).firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 5)); settings.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.scrollViews["drawer-rows"].exists)
+    }
+
+    func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office"]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        if !app.usesTabletLayout {
+            XCTAssertTrue(app.buttons["drawer-workspace-menu"].exists)
+            XCTAssertTrue(app.buttons["drawer-new-menu"].exists)
+            XCTAssertTrue(app.buttons["drawer-new"].exists, "The direct New job shortcut remains available")
+            XCTAssertTrue(app.buttons["drawer-settings"].exists)
+        }
+        let jobs = app.buttons["\(prefix)-jobs"]
+        let estimates = app.buttons["\(prefix)-estimates"]
+        let invoices = app.buttons["\(prefix)-invoices"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 15))
+        XCTAssertTrue(estimates.exists)
+        XCTAssertTrue(invoices.exists)
+        XCTAssertLessThan(jobs.frame.minY, estimates.frame.minY)
+        XCTAssertLessThan(estimates.frame.minY, invoices.frame.minY)
+        let work = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(work.exists)
+        XCTAssertEqual(work.value as? String, "Expanded")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Web-aligned sidebar"
+        shot.lifetime = .keepAlways
+        add(shot)
+        let other = app.buttons["\(prefix)-workspace-other"]
+        if other.exists {
+            if !app.usesTabletLayout { app.revealDrawerRow("workspace-other") }
+            other.tap()
+            if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        }
+        let drafts = app.buttons["\(prefix)-drafts"]
+        XCTAssertTrue(drafts.exists)
+        XCTAssertTrue(drafts.label.contains(app.usesTabletLayout ? "On this iPad" : "On this phone"), drafts.label)
+    }
+
     /// The seeded saved work belongs to this test: reset it so its banner never reaches later tests.
     private var cleanupArguments: [String]?
 

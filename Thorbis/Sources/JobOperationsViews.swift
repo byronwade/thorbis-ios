@@ -162,6 +162,7 @@ enum WrapUpList {
 }
 
 struct JobCloseoutView: View {
+    @Environment(\.dynamicTypeSize) private var closeoutTypeSize
     let jobID: String
     /// The job's street when the opener already knows it (street first, the ID after it).
     var place: String? = nil
@@ -179,6 +180,7 @@ struct JobCloseoutView: View {
     @State private var confirmCancel = false
     @State private var invoiceID: String?
     @State private var openInvoiceID: String?
+    @State private var savedWorkScope: SavedWorkScope?
     @State private var openBilling = false
     @State private var unpaidReasonCode = "customer_will_pay_later"
     @State private var unpaidReason = ""
@@ -221,31 +223,59 @@ struct JobCloseoutView: View {
     }
     /// Photos of this job still on this phone (`PendingMediaStore`).
     private var waitingPhotos: Int { pendingMedia.items.filter { $0.jobID == jobID && $0.kind == "photo" }.count }
+    private var unassociatedPendingPayments: [OutboxEntry.PaymentPayload] {
+        outbox.pending.compactMap { entry in
+            guard case .payment(let payment) = entry.action, payment.jobId == nil else { return nil }
+            return payment
+        }
+    }
+    private var canRefreshRecordedPayments: Bool {
+        session.can("invoice.view", feature: "invoicing") && session.can("invoice.view", feature: "payments")
+    }
+    private var unassociatedRecordedPayments: [OutboxEntry.PaymentPayload] {
+        outbox.recordedPayments.filter { $0.jobId == nil }
+    }
+    private var recordedInvoiceIDsToRefresh: [String] {
+        Array(Set(outbox.recordedPayments.filter { $0.jobId == nil || $0.jobId == jobID }.map(\.invoiceId))).sorted()
+    }
+
     /// Cash and check waiting on this phone cover every unpaid balance on the job's invoices as
     /// last seen. A partial payment leaves the requirement (and the unpaid disposition) showing.
     private var waitingPaymentsCoverBalance: Bool {
-        // The job's invoice list, plus any invoice this phone took cash on for the job; the single
-        // invoice copy is newer when a payment was recorded on the invoice screen.
-        let listed = JobDetailCache.invoices(jobID) ?? []
+        // Include the job's invoice list and invoices with payments on this phone. Independent
+        // cached copies have no proven ordering, so disagreements leave coverage unknown.
+        guard let job, let organizationID = session.activeOrganization?.id, let actorID = session.user?.id,
+              job.id == jobID, job.organizationId == organizationID else { return false }
+        let unassociated = outbox.pending.compactMap { entry -> OutboxEntry.PaymentPayload? in
+            if case .payment(let payload) = entry.action { return payload }
+            return nil
+        } + outbox.recordedPayments
+        let listed = JobDetailCache.invoices(jobID)
+        guard !CloseoutInvoiceEvidence.hasUnassociatedPayments(unassociated.map(\.jobId)) else { return false }
         let paidHere = (outbox.pending.compactMap { entry -> String? in
             if case .payment(let payment) = entry.action, payment.jobId == jobID { payment.invoiceId } else { nil }
         } + outbox.recordedPayments.filter { $0.jobId == jobID }.map(\.invoiceId))
-            .filter { id in !listed.contains { $0.id == id } }
-        let invoices = listed.map { JobDetailCache.invoice($0.id) ?? $0 }
-            + Set(paidHere).compactMap { JobDetailCache.invoice($0) }
-        let owing = invoices.filter { $0.status == "issued" }.compactMap { invoice -> (String, Int)? in
-            let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-            let due = total - invoice.amountPaid
-            return due > 0 ? (invoice.id, due) : nil
+        guard let invoices = CloseoutInvoiceEvidence.resolve(
+            listed: listed, paidHere: paidHere, id: { $0.id }, cached: JobDetailCache.invoice,
+            equivalent: { $0 == $1 }, valid: { $0.jobId == jobID && $0.organizationId == organizationID && $0.customerId == job.customerId }
+        ) else { return false }
+        var owing: [(String, Int)] = []
+        for invoice in invoices where invoice.status == "issued" {
+            guard invoice.currency == "USD",
+                  let amounts = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency,
+                                                        amountPaid: invoice.amountPaid) else { return false }
+            if amounts.due > 0 { owing.append((invoice.id, amounts.due)) }
         }
         return !owing.isEmpty && owing.allSatisfy { id, due in
-            let queued = outbox.waitingPayments(invoiceID: id, replayableOnly: true).reduce(0) { $0 + $1.amountCents }
-            // Recorded from the queue but newer than this phone's saved copy of the invoice.
-            let saved = Set((JobDetailCache.payments(id) ?? []).map(\.idempotencyKey))
-            let recorded = outbox.recordedPayments
-                .filter { $0.invoiceId == id && !saved.contains($0.idempotencyKey) }
-                .reduce(0) { $0 + $1.amountCents }
-            return queued + recorded >= due
+            let payments = outbox.pending.compactMap { entry -> CloseoutInvoiceEvidence.PendingPayment? in
+                guard case .payment(let payload) = entry.action, payload.invoiceId == id else { return nil }
+                return .init(actorID: entry.actorId, organizationID: entry.organizationId, jobID: payload.jobId,
+                             invoiceID: payload.invoiceId, method: payload.method, amount: payload.amountCents)
+            }
+            guard let pending = CloseoutInvoiceEvidence.pendingAmounts(payments, actorID: actorID,
+                organizationID: organizationID, jobID: jobID, invoiceID: id) else { return false }
+            return CloseoutInvoiceEvidence.covers(due: due, pending: pending,
+                recorded: outbox.recordedPayments.filter { $0.invoiceId == id }.map(\.amountCents))
         }
     }
     private var canComplete: Bool {
@@ -287,14 +317,14 @@ struct JobCloseoutView: View {
                     ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
                         let step = CloseoutNextStep(requirement)
                         let waiting = waitingSatisfies(requirement)
-                        HStack(spacing: 12) {
+                        let canRecover = !waiting && !session.isOffline && step?.buttonTitle != nil
+                            && (step?.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) ?? false)
+                        checklistLayout {
+                            // The action stands in for "To do": one control at the edge, not a word and a button.
                             checklistRow(done: requirement.outcome != "blocked" || waiting, title: requirement.detail,
-                                         detail: waiting ? "Waiting to sync" : step?.detail)
-                            if !waiting, !session.isOffline, let step, let title = step.buttonTitle,
-                               step.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) {
-                                Button { Task { await recover(step) } } label: { Text(title) }
-                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .frame(minHeight: 44).contentShape(Rectangle())
+                                         detail: waiting ? "Waiting to sync" : step?.detail, showsStatus: !canRecover)
+                            if canRecover, let step, let title = step.buttonTitle {
+                                Button { Task { await recover(step) } } label: { actionPill(title) }
                                     .buttonStyle(PressStyle())
                                     .disabled(busy)
                             }
@@ -304,12 +334,12 @@ struct JobCloseoutView: View {
                     ForEach(checks, id: \.key) { check in
                         let waiting = waitingChecks.contains(check.key)
                         let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key) || waiting
-                        HStack(spacing: 12) {
-                            checklistRow(done: acknowledged, title: check.label, detail: waiting ? "Waiting to sync" : nil)
-                            if !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs") {
-                                Button { Task { await acknowledge(check.key) } } label: { Text("Confirm") }
-                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .frame(minHeight: 44).contentShape(Rectangle())
+                        let canConfirm = !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs")
+                        checklistLayout {
+                            checklistRow(done: acknowledged, title: check.label, detail: waiting ? "Waiting to sync" : nil,
+                                         showsStatus: !canConfirm)
+                            if canConfirm {
+                                Button { Task { await acknowledge(check.key) } } label: { actionPill("Confirm") }
                                     .buttonStyle(PressStyle())
                                     .disabled(busy)
                                     .accessibilityHint(check.label)
@@ -321,6 +351,41 @@ struct JobCloseoutView: View {
                     }
                     if closeout.requirements.isEmpty && checks.isEmpty {
                         Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                    }
+                    if closeout.unmet.contains(where: { $0.kind == "payment_or_unpaid_disposition" && $0.outcome == "blocked" }),
+                       !unassociatedPendingPayments.isEmpty || !recordedInvoiceIDsToRefresh.isEmpty {
+                        PaperGroupHeader(title: "Payments to check").padding(.top, 18)
+                        if !unassociatedPendingPayments.isEmpty || !unassociatedRecordedPayments.isEmpty {
+                            Text("Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet.")
+                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if !unassociatedPendingPayments.isEmpty {
+                            Text(session.can("job.edit", feature: "jobs") && session.can("invoice.payment.create", feature: "payments")
+                                 ? "Connect and sync saved work to send waiting payments."
+                                 : "Ask your office to restore your access to sync payments on this phone.")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            if SavedWorkScope.capture(session: session, api: api, media: pendingMedia, outbox: outbox) != nil {
+                                Button("Review saved work") {
+                                    savedWorkScope = SavedWorkScope.capture(session: session, api: api, media: pendingMedia, outbox: outbox)
+                                }.frame(minHeight: 44).buttonStyle(PressStyle())
+                            }
+                        }
+                        if !recordedInvoiceIDsToRefresh.isEmpty {
+                            if canRefreshRecordedPayments {
+                                Text("Sent payments may still be updating. Connect, then search these invoice IDs in Invoices on this phone to refresh them.")
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                                ForEach(recordedInvoiceIDsToRefresh, id: \.self) { id in
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text("Invoice \(id.suffix(4).uppercased())").font(Theme.font(15, weight: .medium))
+                                        Text(id).font(Theme.monoFont(12)).textSelection(.enabled)
+                                    }.frame(minHeight: 44, alignment: .leading)
+                                }
+                            } else {
+                                Text("Ask your office to enable your invoice and payment access, then refresh those invoices on this phone.")
+                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            }
+                        }
                     }
                     if mayRecordUnpaidDisposition && !isCompleted {
                         PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
@@ -398,15 +463,37 @@ struct JobCloseoutView: View {
         // Collecting from the checklist comes back here once it's paid, ready to complete.
         .thorbisDestination(item: $openInvoiceID) { InvoiceDetailView(id: $0, returnsWhenPaid: true).onDisappear { Task { await load() } } }
         .thorbisDestination(isPresented: $openBilling) { BillingSchedulesView() }
+        .sheet(item: $savedWorkScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
+        .onChange(of: savedWorkScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
+            if !valid { savedWorkScope = nil }
+        }
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
         .thorbisConfirm("Cancel this job?", isPresented: $confirmCancel,
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
-    private func checklistRow(done: Bool, title: String, detail: String?) -> some View {
+    /// Item and action side by side; at accessibility sizes the action goes under the words, whole.
+    private var checklistLayout: AnyLayout {
+        closeoutTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                              : AnyLayout(HStackLayout(spacing: 12))
+    }
+
+    /// A checklist item's own action, as a quiet pill (the Schedule pill's shape) with a 44pt target.
+    private func actionPill(_ title: String) -> some View {
+        Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+            .fixedSize()
+            .padding(.horizontal, 14).frame(minHeight: 34)
+            .background(Theme.fill, in: Capsule())
+            .frame(minHeight: 44).contentShape(Rectangle())
+    }
+
+    private func checklistRow(done: Bool, title: String, detail: String?, showsStatus: Bool = true) -> some View {
         // v2: the state is a word with its mark ("Done" / "To do"), not a tick's colour.
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        // At accessibility sizes the word sits under the item, so the item keeps the full width.
+        let row = closeoutTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return row {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
                     .foregroundStyle(done ? Theme.muted : Theme.foreground)
@@ -414,8 +501,10 @@ struct JobCloseoutView: View {
                 if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            StatusLabel(tone: done ? .done : .unscheduled, word: done ? "Done" : "To do", emphasis: done ? .quiet : .strong)
-                .fixedSize()
+            if showsStatus {
+                StatusLabel(tone: done ? .done : .unscheduled, word: done ? "Done" : "To do", emphasis: done ? .quiet : .strong)
+                    .fixedSize()
+            }
         }
         .padding(.vertical, 8)
         .frame(minHeight: 44)
@@ -853,6 +942,7 @@ struct JobScheduleView: View {
 }
 
 struct JobFollowUpsView: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     let jobID: String
     /// The job screen's Return visit tool opens the form already on "Schedule a return visit".
     init(jobID: String, initialKind: FieldFollowUpRequest.Kind = .notifyOffice) {
@@ -996,18 +1086,35 @@ struct JobFollowUpsView: View {
         let meta = [record.kind.statusLabel,
                     record.scheduling.map { $0.appointment != nil ? "Visit booked" : "Waiting for office review" }]
             .compactMap { $0 }.joined(separator: " · ")
-        return HStack(alignment: .top, spacing: 0) {
-            PaperListRow(title: record.reason, subtitle: "Next: \(record.nextAction)", meta: meta, subtitleLines: 3) {
+        // The status and the menu sit beside the reason only; the next step and the meta take the row's
+        // full width, so "Next:" isn't squeezed into a column beside an empty gutter.
+        let stacked = typeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: 2) {
+            // At accessibility sizes the status and menu go under the reason, so it keeps whole words.
+            (stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))) {
+                Text(record.reason).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 StatusWord(text: record.status.statusLabel, tint: record.status == "open" ? Theme.warning : Theme.success)
-            }
-            if !actions.isEmpty {
-                ThorbisMenu(items: actions, accessibilityLabel: "Follow-up actions") {
-                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                if !actions.isEmpty {
+                    ThorbisMenu(items: actions, accessibilityLabel: "Follow-up actions") {
+                        Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                            .frame(width: 44, height: 32).contentShape(Rectangle())
+                    }
+                    .padding(.trailing, -12)
                 }
-                .padding(.trailing, 4).padding(.top, 4)
+            }
+            Text("Next: \(record.nextAction)").font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+            if !meta.isEmpty {
+                Text(meta).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 1)
             }
         }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     private func load() async {

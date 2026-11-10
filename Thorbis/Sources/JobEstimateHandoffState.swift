@@ -211,8 +211,15 @@ final class JobEstimateHandoffModel: ObservableObject {
         self.customerName = customerName; self.documents = documents; self.api = api; self.session = session
         actorID = session.user?.id ?? ""; sessionGeneration = session.generation; apiGeneration = api.requestGeneration; origin = api.normalizedOrigin
     }
-    func revision(for id: String) -> CustomerIssuedEstimateRevision? { revisions[id] }
-    func options(for id: String) -> [FieldEstimateOption] { revisions[id]?.options ?? records.first(where: { $0.id == id })?.options ?? [] }
+    func revision(for id: String) -> CustomerIssuedEstimateRevision? {
+        guard let current = records.first(where: { $0.id == id }), let revision = revisions[id],
+              (try? revision.validate(for: current)) != nil else { return nil }
+        return revision
+    }
+    func options(for id: String) -> [FieldEstimateOption] {
+        if let currentRevision = revision(for: id) { return currentRevision.options ?? [] }
+        return records.first(where: { $0.id == id })?.options ?? []
+    }
     func context(for id: String) -> CustomerEstimateHandoffContext? {
         guard let revision = records.first(where: { $0.id == id })?.currentRevisionNumber else { return nil }
         return contexts["\(id):\(revision)"]
@@ -367,6 +374,39 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     private func sameJob(_ fresh: JobRecord) -> Bool {
         fresh.id == scope.jobID && fresh.organizationId == scope.organizationID && fresh.customerId == scope.customerID && fresh.locationId == jobLocationID && fresh.estimateId == scope.originEstimateID
+    }
+    /// Reading one estimate never selects it or prepares an approval.
+    func detailsCurrent(_ record: EstimateRecord, authority: UUID) -> Bool {
+        isCurrent && session.authorityRevision == authority && complete && freshIDs.contains(record.id)
+            && record.status == "sent" && records.contains(record)
+            && scope.contains(record, requestedID: record.id)
+    }
+
+    func issuedDetails(_ record: EstimateRecord, authority: UUID) async throws -> CustomerIssuedEstimateRevision {
+        func current() -> Bool { detailsCurrent(record, authority: authority) && !Task.isCancelled }
+        guard current() else { throw CancellationError() }
+        let fresh = try await api.liveFieldJob(scope.jobID)
+        guard current() else { throw CancellationError() }
+        guard sameJob(fresh) else {
+            throw Problem(title: "This job changed. Ask your technician to reopen it.", status: 409, detail: nil)
+        }
+        let links = try await api.liveFieldJobEstimateLinks(scope.jobID)
+        guard current() else { throw CancellationError() }
+        guard links.allSatisfy({ $0.jobId == scope.jobID }),
+              links.contains(where: { $0.estimateId == record.id }) || fresh.estimateId == record.id else {
+            throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
+        }
+        let revision = try await api.customerIssuedEstimateRevision(for: record, currentAuthority: current)
+        guard current() else { throw CancellationError() }
+        let verifiedJob = try await api.liveFieldJob(scope.jobID)
+        guard current() else { throw CancellationError() }
+        let verifiedLinks = try await api.liveFieldJobEstimateLinks(scope.jobID)
+        guard current() else { throw CancellationError() }
+        guard sameJob(verifiedJob), verifiedLinks.allSatisfy({ $0.jobId == scope.jobID }),
+              verifiedLinks.contains(where: { $0.estimateId == record.id }) || verifiedJob.estimateId == record.id else {
+            throw Problem(title: "This job's estimates changed. Ask your technician to reopen it.", status: 409, detail: nil)
+        }
+        return revision
     }
     func verifyMembership(_ item: JobEstimateReviewedItem) async throws {
         guard isCurrent, approvalAllowed(item) else { throw CancellationError() }

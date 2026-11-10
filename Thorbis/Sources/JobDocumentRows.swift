@@ -12,11 +12,15 @@ struct JobDocumentRow: View {
     var symbol = "doc.text"
     /// On a grouped well with other rows (the job's Money): no card of its own.
     var grouped = false
+    /// Job estimates use the compact, individually bordered Paper document card.
+    var jobEstimateCard = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Group {
-            if customerFacing { customerRow } else { technicianRow }
+            if customerFacing { customerRow }
+            else if jobEstimateCard { estimateCardRow }
+            else { technicianRow }
         }
         .foregroundStyle(Theme.foreground)
         .multilineTextAlignment(.leading)
@@ -24,7 +28,61 @@ struct JobDocumentRow: View {
         .padding(.vertical, customerFacing ? 16 : 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(grouped ? AnyShapeStyle(Color.clear) : AnyShapeStyle(ThorbisPanelStyle()), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .overlay {
+            if jobEstimateCard {
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).stroke(Theme.border)
+            }
+        }
         .contentShape(Rectangle())
+    }
+
+    func asJobEstimateCard() -> JobDocumentRow {
+        var row = self
+        row.jobEstimateCard = true
+        return row
+    }
+
+    /// Paper's job estimate card shows what the work is and what happens next.
+    /// Amounts and freshness still come from the validated document read.
+    private var estimateCardRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let titleLayout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            titleLayout {
+                Text(title).font(Theme.font(16, weight: .medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let amount { Text(amount).moneyStyle(.row).fixedSize() }
+            }
+            let detailLayout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+            detailLayout {
+                if fresh {
+                    StatusWord(documentStatus: status)
+                    if let message = estimateStatusMessage {
+                        Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                } else {
+                    Label("Needs refresh", systemImage: "arrow.clockwise")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+                Text([reference, detail].compactMap { $0 }.joined(separator: " · "))
+                    .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var estimateStatusMessage: String? {
+        switch status.lowercased() {
+        case "draft": "Not sent yet"
+        case "sent": "Awaiting approval"
+        default: nil
+        }
     }
 
     /// The row for a grouped well: the well draws the surface and the hairlines.
@@ -118,8 +176,8 @@ extension JobDocumentRow {
         self.symbol = "doc.text"
     }
 
-    init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false) {
-        reference = "INV-\(invoice.id.suffix(4).uppercased())"
+    init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false, invoiceReference: String? = nil) {
+        reference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
         title = invoice.origin == "estimate_deposit" ? "Deposit" : "Invoice"
         status = invoice.status
         amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }

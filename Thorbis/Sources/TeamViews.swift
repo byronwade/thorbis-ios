@@ -101,6 +101,7 @@ extension APIClient {
 struct TeamView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @Environment(\.openURL) private var openURL
     @State private var members: [RoleMember] = []
     @State private var loading = true
     @State private var error: String?
@@ -145,103 +146,79 @@ struct TeamView: View {
                     Text(teamSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
-                PaperSearchField(text: $search, prompt: "Search team members")
-                if roles.count > 2 { PaperTabs(options: roles, selection: $filter) }
+                // v2 List room, like Customers: the role filter is the view bar's text tabs; finding
+                // someone is the bar's Search below.
+                if roles.count > 2 { ListViewBar(options: roles, selection: $filter) }
                 if let error { ErrorBanner(message: error) { await load() } }
-                if loading && members.isEmpty { SkeletonRows(count: 6) }
+                if loading && members.isEmpty { ListRoomSkeleton(count: 6, threeLines: false) }
                 if visible.isEmpty && !members.isEmpty {
                     PaperEmptyState(symbol: "magnifyingglass", title: "No one on the team matches",
                                     actionTitle: "Clear search") { search = ""; filter = "All" }
                 }
-                VStack(alignment: .leading, spacing: 0) {
-                    if !visible.isEmpty { PaperGroupHeader(title: "Members", count: visible.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin) }
-                    PaperCardList(data: visible) { member in
-                        Button { if canManage && !member.member.isLegalOwner { opening = member } } label: {
-                        HStack(spacing: 12) {
-                            Avatar(name: member.member.displayName, size: IconTile.size)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(member.member.displayName).font(Theme.font(15, weight: .medium)).lineLimit(2)
-                                Text(member.member.email).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                // Rows on the canvas under a 13 Medium label; space between groups, no lines, no panel.
+                if !visible.isEmpty { ListGroupLabel(title: "Members", count: visible.count, first: true) }
+                ForEach(visible) { member in
+                    let opens = canManage && !member.member.isLegalOwner
+                    HStack(alignment: .center, spacing: 0) {
+                        Button { if opens { opening = member } } label: {
+                            // Role is a plain word at the trailing edge; owner reads by weight, not a tint.
+                            TeamRoomRow(title: member.member.displayName, detail: member.member.email) {
+                                Text(member.roleLabel)
+                                    .font(Theme.font(13, weight: member.member.isLegalOwner ? .medium : .regular))
+                                    .foregroundStyle(member.member.isLegalOwner ? Theme.foreground : Theme.muted)
                             }
-                            Spacer(minLength: 8)
-                            // Role is a word on a quiet capsule; owner reads by weight, not a brand tint.
-                            Text(member.roleLabel)
-                                .font(Theme.font(12, weight: .medium))
-                                .foregroundStyle(member.member.isLegalOwner ? Theme.foreground : Theme.muted)
-                                .padding(.horizontal, 10).frame(height: 24)
-                                .background(Theme.fill, in: Capsule())
-                            if canManage && !member.member.isLegalOwner {
-                                PaperDisclosure()
-                            }
-                        }
-                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
-                        .frame(minHeight: 60)
-                        .contentShape(Rectangle())
                         }
                         .buttonStyle(RowPressStyle())
                         .accessibilityElement(children: .combine)
-                        .accessibilityHint(canManage && !member.member.isLegalOwner ? "Change role" : "")
-                        // MA-12: long-press mirrors what the row already offers.
-                        .contextMenu {
-                            Button { UIPasteboard.general.string = member.member.email } label: { Label("Copy email", systemImage: "doc.on.doc") }
-                            if let mail = URL(string: "mailto:\(member.member.email)") {
-                                Link(destination: mail) { Label("Email", systemImage: "envelope") }
-                            }
-                            if canManage && !member.member.isLegalOwner {
-                                Button { opening = member } label: { Label("Change role", systemImage: "person.badge.key") }
-                            }
-                            if MemberRemovalRules.canRemove(member, session: session) {
-                                Button(role: .destructive) { removing = member } label: { Label("Remove from team", systemImage: "person.badge.minus") }
-                            }
+                        .accessibilityHint(opens ? "Change role" : "")
+                        // MA-12: the row's actions behind a Thorbis menu (the Invited rows' •••),
+                        // not the stock long-press menu.
+                        ThorbisMenu(items: memberActions(member), title: member.member.displayName,
+                                    accessibilityLabel: "Actions for \(member.member.displayName)") {
+                            // A fixed-size mark inside its 44pt target, so it stays on screen at the largest text.
+                            Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.muted)
+                                .frame(width: 44, height: 44).contentShape(Rectangle())
                         }
+                        .padding(.trailing, ListRoom.gutter - 14)
                     }
                 }
-                .paperCardMargin()
                 if canInvite && !invitations.isEmpty {
-                    VStack(alignment: .leading, spacing: 0) {
-                        PaperGroupHeader(title: "Invited", count: invitations.count).padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                        PaperCardList(data: invitations) { invitation in
-                            HStack(spacing: 12) {
-                                IconTile(symbol: "envelope", tint: Theme.markOlive)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(invitation.email).font(Theme.font(15, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                                    // "Invited" is the state: a word with its mark, then the role and expiry.
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        StatusLabel(tone: .scheduled, word: "Invited", emphasis: .quiet)
-                                        Text("\(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")")
-                                            .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(2)
-                                    }
-                                }
-                                Spacer(minLength: 8)
-                                ThorbisMenu(items: [
-                                    ThorbisMenuItem("Cancel invite", role: .destructive) { Task { await cancel(invitation) } }
-                                ], accessibilityLabel: "Invite actions") {
-                                    Image(systemName: "ellipsis").frame(width: 44, height: 44)
-                                }
+                    ListGroupLabel(title: "Invited", count: invitations.count)
+                    ForEach(invitations) { invitation in
+                        HStack(alignment: .center, spacing: 0) {
+                            // The email leads, then the role and expiry; "Invited" is the state word that trails.
+                            TeamRoomRow(title: invitation.email,
+                                        detail: "\(invitation.roleLabel)\(JobFiltering.date(invitation.expiresAt).map { " · expires \($0.formatted(.dateTime.month(.abbreviated).day()))" } ?? "")") {
+                                StatusLabel(tone: .scheduled, word: "Invited", emphasis: .quiet)
                             }
-                            .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 4).padding(.vertical, 8)
-                            .frame(minHeight: 60)
+                            .accessibilityElement(children: .combine)
+                            ThorbisMenu(items: [
+                                ThorbisMenuItem("Cancel invite", role: .destructive) { Task { await cancel(invitation) } }
+                            ], accessibilityLabel: "Invite actions") {
+                                Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.muted)
+                                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                            }
+                            .padding(.trailing, ListRoom.gutter - 14)
                         }
                     }
-                    .paperCardMargin().padding(.top, 16)
                 }
                 if canManage {
-                    VStack(alignment: .leading, spacing: 0) {
-                        PaperGroupHeader(title: "Roles", count: customRoles.count) {
-                            Button { newRoleName = ""; naming = true } label: {
-                                Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle())
-                            }
-                            .accessibilityLabel("New role")
+                    ListGroupLabel(title: "Roles", count: customRoles.count) {
+                        Button { newRoleName = ""; naming = true } label: {
+                            Image(systemName: "plus").frame(width: 44, height: 44).contentShape(Rectangle())
                         }
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                        PaperCardList(data: customRoles) { role in
-                            Button { editingRoleID = role.id } label: {
-                                PaperMenuRow(role.revision.name, symbol: "person.badge.key", subtitle: role.revision.description?.isEmpty == false ? role.revision.description : nil, tile: Theme.markOlive, filled: true)
-                            }
-                            .buttonStyle(RowPressStyle())
-                        }
+                        .accessibilityLabel("New role")
                     }
-                    .paperCardMargin().padding(.top, 16)
+                    ForEach(customRoles) { role in
+                        Button { editingRoleID = role.id } label: {
+                            TeamRoomRow(title: role.revision.name,
+                                        detail: role.revision.description?.isEmpty == false ? role.revision.description : nil,
+                                        trailingInset: ListRoom.gutter) { EmptyView() }
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityElement(children: .combine)
+                        .accessibilityHint("Edit what this role can do")
+                    }
                 }
                 // Only when there is truly no one; a search with no match has its own state above.
                 if !loading && members.isEmpty && error == nil {
@@ -259,6 +236,8 @@ struct TeamView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
+        // Like Invoices and Estimates: the system search field, at the bottom of the screen.
+        .searchable(text: $search, prompt: "Search team members")
         .toolbar {
             if canInvite {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -330,6 +309,21 @@ struct TeamView: View {
 }
 
 extension TeamView {
+    /// What a member's ••• offers: the same four actions the row's long-press used to, under the same checks.
+    fileprivate func memberActions(_ member: RoleMember) -> [ThorbisMenuItem] {
+        var items = [ThorbisMenuItem("Copy email", icon: "doc.on.doc") { UIPasteboard.general.string = member.member.email }]
+        if let mail = URL(string: "mailto:\(member.member.email)") {
+            items.append(ThorbisMenuItem("Email", icon: "envelope") { openURL(mail) })
+        }
+        if canManage && !member.member.isLegalOwner {
+            items.append(ThorbisMenuItem("Change role", icon: "person.badge.key") { opening = member })
+        }
+        if MemberRemovalRules.canRemove(member, session: session) {
+            items.append(ThorbisMenuItem("Remove from team", icon: "person.badge.minus", role: .destructive) { removing = member })
+        }
+        return items
+    }
+
     fileprivate func cancel(_ invitation: TeamInvitation) async {
         do {
             _ = try await api.cancelInvitation(invitation.id)
@@ -345,6 +339,52 @@ extension TeamView {
             await load()
             editingRoleID = created.role.id
         } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// A row in Team's list room, after `CustomerRoomRow`: the name (15 Medium), then a quieter line
+/// that keeps its end ("jorge@acmehvac.com" truncates at the tail, never the middle), and a word at
+/// the trailing edge. Stacks at accessibility sizes so nothing is cut.
+private struct TeamRoomRow<Trailing: View>: View {
+    let title: String
+    var detail: String? = nil
+    /// Tight where a ••• follows the row; the gutter where nothing does.
+    var trailingInset: CGFloat = 4
+    @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        layout {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(stacked && !Self.isAddress(title) ? nil : Self.isAddress(title) ? 1 : 2)
+                    .addressFit(Self.isAddress(title))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let detail, !detail.isEmpty {
+                    Text(detail).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                        .lineLimit(stacked && !Self.isAddress(detail) ? nil : 1).truncationMode(.tail)
+                        .addressFit(Self.isAddress(detail))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            trailing.fixedSize(horizontal: !stacked, vertical: true)
+        }
+        .padding(.leading, ListRoom.gutter).padding(.trailing, trailingInset).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    /// An email address breaks mid-word when it wraps, so it stays on one line and shrinks instead.
+    static func isAddress(_ text: String) -> Bool { text.contains("@") && !text.contains(" ") }
+}
+
+private extension View {
+    @ViewBuilder func addressFit(_ isAddress: Bool) -> some View {
+        if isAddress { self.minimumScaleFactor(0.6).truncationMode(.middle) } else { self }
     }
 }
 

@@ -9,6 +9,7 @@ struct CustomersView: View {
     @State private var showNew = false
     @State private var newJobFor: Customer?
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
     @State private var newName = ""
     @State private var selectedView = CustomerListScope.recent.rawValue
     @State private var stateFilter = "Any state"
@@ -113,7 +114,7 @@ struct CustomersView: View {
         .contextMenu {
             if let phone = customer.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 {
                 if let call = URL(string: "tel:\(phone)") { Button("Call", systemImage: "phone") { openURL(call) } }
-                if let text = URL(string: "sms:\(phone)") { Button("Text", systemImage: "message") { openURL(text) } }
+                if let text = URL(string: "sms:\(phone)") { Button("Text", systemImage: "message") { inboxText(text, name: customer.name, openURL: openURL) } }
             }
             if let address = customer.address, !address.isEmpty, let maps = Directions.url(address: address, coordinates: nil) {
                 Button("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") { openURL(maps) }
@@ -209,7 +210,7 @@ private enum CustomerContactSheetItem: Identifiable {
 }
 
 /// Identity and authority that authorized a compiled customer record.
-struct CustomerRecordsScope: Equatable {
+struct CustomerRecordsScope: Equatable, Sendable {
     let actorID: String
     let organizationID: String
     let customerID: String
@@ -269,6 +270,10 @@ struct CustomerDetailView: View {
     private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
+    /// Web parity: the customer's "Email job updates" switch. Nil until it loads (or on an older server).
+    @State private var jobEmails: Bool?
+    @State private var jobEmailsSaving = false
+    @State private var jobEmailsError: String?
     @State private var smsConsentKey = UUID().uuidString
     @State private var smsConsentChoice: Bool?
     @State private var smsConsentError: String?
@@ -286,6 +291,7 @@ struct CustomerDetailView: View {
     @State private var jobRecords: [JobRecord] = []
     @State private var showAllPast = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
 
     /// Overview | Jobs · N | Money: the page's one selector row.
     private var jobsLabel: String { session.can("job.view", feature: "jobs") ? "Jobs · \(jobs.count)" : "Jobs" }
@@ -344,6 +350,11 @@ struct CustomerDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
+            if let record, record.id == customer.id {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    FavoriteRecordButton(kind: .customer, id: record.id, organizationID: record.organizationId)
+                }
+            }
             let items = customerMenuItems
             if !items.isEmpty {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -355,6 +366,7 @@ struct CustomerDetailView: View {
         .deviceHandoffs($handoff)
         .task { await load() }
         .task { await loadSmsConsent() }
+        .task { await loadJobEmails() }
         .task(id: customer.id) { pricing = try? await api.memberPricing(customer.id) }
         .task { await loadActivity(reset: true) }
         .task(id: recordsScope) {
@@ -454,7 +466,7 @@ struct CustomerDetailView: View {
     @ViewBuilder private func actionCircleItems(dialable: String?, mail: MailDraft?) -> some View {
         if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
             PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
-            PaperLabeledCircle(symbol: "message", title: "Text") { openURL(text) }
+            PaperLabeledCircle(symbol: "message", title: "Text") { inboxText(text, name: customer.name, openURL: openURL) }
         }
         if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { handoff = .mail(mail) } }
         if let directionsURL {
@@ -545,6 +557,7 @@ struct CustomerDetailView: View {
                     if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
                     if let terms = record.billingTerms { detailLine("Billing terms") { Text(terms) } }
                     if smsConsentLoaded { smsConsentRow.padding(.horizontal, PaperCardMetrics.inset) }
+                    if jobEmails != nil { jobEmailsRow.padding(.horizontal, PaperCardMetrics.inset) }
                 }
                 .padding(.vertical, PaperCardMetrics.edge)
             }
@@ -608,9 +621,9 @@ struct CustomerDetailView: View {
 
     private func contactMenuItems(_ contact: CustomerContactRecord) -> [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
-        if let phone = contact.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 {
+        if let phone = contactDialable(contact) {
             if let call = URL(string: "tel:\(phone)") { items.append(ThorbisMenuItem("Call", icon: "phone") { openURL(call) }) }
-            if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { openURL(text) }) }
+            if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { inboxText(text, name: contact.name, openURL: openURL) }) }
         }
         if let mail = MailDraft(recipient: contact.email) {
             items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
@@ -631,6 +644,11 @@ struct CustomerDetailView: View {
         return items
     }
 
+    private func contactDialable(_ contact: CustomerContactRecord) -> String? {
+        guard let phone = contact.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 else { return nil }
+        return phone
+    }
+
     private func locationMenuItems(_ location: ServiceLocationRecord) -> [ThorbisMenuItem] {
         [ThorbisMenuItem("Edit location", icon: "pencil") { locationSheet = .edit(location) },
          ThorbisMenuItem("Remove location", icon: "trash", role: .destructive) { locationToRemove = location }]
@@ -641,11 +659,14 @@ struct CustomerDetailView: View {
         // Captured so dismissing the confirm (which clears smsConsentChoice) can't blank the choice
         // before the action reads it.
         let pendingGrant = smsConsentChoice
-        return HStack {
+        // At accessibility sizes the choice sits under its label instead of squeezing beside it.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout())
+        return layout {
             Text("Job texts").foregroundStyle(Theme.muted)
                 // The menu below says "Job texts" itself, so VoiceOver doesn't stop on the label alone.
                 .accessibilityHidden(canEdit)
-            Spacer()
+            if !stacked { Spacer() }
             let granted = smsConsent?.decision == "grant"
             if canEdit {
                 ThorbisMenu(items: [
@@ -659,7 +680,7 @@ struct CustomerDetailView: View {
                     .foregroundStyle(Theme.foreground)
                     // A real 44pt target: the frame alone left VoiceOver and the hit test on the
                     // ~18pt words, so the shape covers the whole box for both, with room either side.
-                    .padding(.leading, 12)
+                    .padding(.leading, stacked ? 0 : 12)
                     .frame(minHeight: 44)
                     .contentShape([.interaction, .accessibility], Rectangle())
                 }
@@ -682,6 +703,46 @@ struct CustomerDetailView: View {
         }])
         .overlay(alignment: .bottomTrailing) {
             if let smsConsentError { Text(smsConsentError).font(Theme.font(12)).foregroundStyle(Theme.destructive).offset(y: 14) }
+        }
+    }
+
+    /// Job emails: booking, schedule and cancel emails to this customer. Texts and calls are separate.
+    private var jobEmailsRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Toggle(isOn: Binding(get: { jobEmails ?? true }, set: { next in Task { await saveJobEmails(next) } })) {
+                Text("Job emails").foregroundStyle(Theme.muted)
+            }
+            .tint(Theme.brand)
+            .disabled(!canEdit || jobEmailsSaving || session.isOffline)
+            .accessibilityHint("Booking, schedule and cancel emails to this customer")
+            if let jobEmailsError {
+                Text(jobEmailsError).font(Theme.font(12)).foregroundStyle(Theme.destructive)
+            }
+        }
+        .font(Theme.font(15))
+        .frame(minHeight: 44)
+    }
+
+    private func loadJobEmails() async {
+        guard session.can("customer.view", feature: "core_crm") else { return }
+        // An older server or no access: leave the row out rather than show a guess.
+        jobEmails = try? await api.customerJobEmailsEnabled(customer.id)
+    }
+
+    private func saveJobEmails(_ enabled: Bool) async {
+        let previous = jobEmails
+        jobEmails = enabled
+        jobEmailsSaving = true
+        defer { jobEmailsSaving = false }
+        do {
+            _ = try await api.setNoticePreference(NoticePreference(subjectKind: "customer", subjectKey: customer.id,
+                                                                   channel: "email", enabled: enabled))
+            jobEmailsError = nil
+        } catch is CancellationError {
+            jobEmails = previous
+        } catch {
+            jobEmails = previous
+            jobEmailsError = error.isConnectivityFailure ? "Needs a connection" : "Couldn\u{2019}t save. Pull to refresh and try again."
         }
     }
 
@@ -731,8 +792,7 @@ struct CustomerDetailView: View {
             .accessibilityIdentifier(id)
     }
 
-    /// Contacts on one panel: name, role and number, "Primary" as a word; Call, Text, Email and
-    /// the edits are in the row's ••• menu.
+    /// Contacts show the person first, with direct phone actions and the complete actions menu.
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             PaperSection(title: "Contacts", count: contacts.isEmpty ? nil : contacts.count) {
@@ -742,22 +802,7 @@ struct CustomerDetailView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(contacts.enumerated()), id: \.element.id) { index, contact in
                             if index > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? PaperCardMetrics.inset : PaperCardMetrics.inset + 28 + 12) }
-                            HStack(spacing: 0) {
-                                PaperListRow(title: contact.name,
-                                             subtitle: [contact.role, contact.phone ?? contact.email].compactMap { $0 }.joined(separator: " · ")) {
-                                    if contact.primary { StatusWord(text: "Primary") }
-                                }
-                                .environment(\.paperRowInset, PaperCardMetrics.inset)
-                                // Name, "Primary", role and number as one VoiceOver stop; ••• stays its own.
-                                .accessibilityElement(children: .combine)
-                                ThorbisMenu(items: contactMenuItems(contact),
-                                            accessibilityLabel: "Contact actions for \(contact.name)") {
-                                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                                }
-                                .disabled(isMutatingContact)
-                                .padding(.trailing, 4)
-                            }
+                            contactRow(contact)
                         }
                     }
                     .padding(.vertical, PaperCardMetrics.edge)
@@ -767,6 +812,43 @@ struct CustomerDetailView: View {
             }
             if let contactMutationError { mutationError(contactMutationError, id: "contact-mutation-error") }
         }
+    }
+
+    private func contactRow(_ contact: CustomerContactRecord) -> some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: 4))
+        return layout {
+            HStack(alignment: .top, spacing: 10) {
+                InitialsAvatar(name: contact.name, size: 32).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(contact.name).font(Theme.font(16, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    let subtitle = [contact.role, contact.primary ? "Primary" : nil, contact.phone ?? contact.email]
+                        .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                    if !subtitle.isEmpty {
+                        Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 0) {
+                if let phone = contactDialable(contact), let call = URL(string: "tel:\(phone)"), let text = URL(string: "sms:\(phone)") {
+                    PaperCircleButton(symbol: "phone", label: "Call \(contact.name)", size: 32) { openURL(call) }
+                    PaperCircleButton(symbol: "message", label: "Text \(contact.name)", size: 32) { inboxText(text, name: contact.name, openURL: openURL) }
+                }
+                ThorbisMenu(items: contactMenuItems(contact), accessibilityLabel: "Contact actions for \(contact.name)") {
+                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+            }
+            .disabled(isMutatingContact)
+        }
+        .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 4)
+        .padding(.vertical, 8)
     }
 
     /// Service and billing places: label, address (opens Maps), then the site notes.
@@ -787,11 +869,14 @@ struct CustomerDetailView: View {
                                         .padding(.top, 2)
                                 }
                                 VStack(alignment: .leading, spacing: 2) {
-                                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    let headingLayout = typeSize.isAccessibilitySize
+                                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 3))
+                                        : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                                    headingLayout {
                                         Text(location.label).font(Theme.font(16, weight: .medium))
-                                            .lineLimit(typeSize.isAccessibilitySize ? 3 : 2)
-                                        Spacer(minLength: 4)
-                                        StatusWord(text: location.kind.statusLabel)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        StatusWord(text: location.kind.statusLabel).fixedSize()
                                     }
                                     .accessibilityElement(children: .combine)
                                     AddressLink(address: location.address, coordinates: location.coordinates)
@@ -1005,7 +1090,6 @@ struct CustomerDetailView: View {
                     SkeletonRows(count: 3, inset: 0)
                 } else if let visible {
                     CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() }, parts: parts)
-                        .accessibilityIdentifier("customer-records")
                 }
             }
         }
@@ -1028,8 +1112,10 @@ struct CustomerDetailView: View {
         recordsError = nil
         defer { if recordsLoadGeneration == request { recordsLoading = false } }
         do {
+            let recordsSession = session
             let compiled = try await CustomerJobCompilationLoader.load(customerID: scope.customerID,
-                organizationID: scope.organizationID, api: api, access: scope.access)
+                organizationID: scope.organizationID, api: api, access: scope.access,
+                isCurrent: { scope.isCurrent(session: recordsSession) })
             guard !Task.isCancelled, recordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
             records = compiled
             recordsPublishedScope = scope

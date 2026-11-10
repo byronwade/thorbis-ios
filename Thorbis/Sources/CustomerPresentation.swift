@@ -164,6 +164,11 @@ struct CustomerEstimatePresentation: View {
     private var reviewReady: Bool {
         !openingReview && flow.issuedRevision != nil && reviewGeneration == api.requestGeneration
     }
+    private var verifiedCustomerLines: [FieldLine]? {
+        guard let amounts = CustomerDocumentAmounts(lines: flow.lines, currency: flow.currency),
+              amounts.total == flow.total else { return nil }
+        return customerEstimateProjection(flow.lines, currency: flow.currency)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -332,9 +337,14 @@ struct CustomerEstimatePresentation: View {
             let index = flow.options.firstIndex { $0.id == flow.selectedOptionID }
             header(eyebrow: flow.hasOptions ? "Option \((index ?? 0) + 1) of \(flow.options.count)" : "Your estimate",
                    title: flow.choiceName, summary: flow.hasOptions ? flow.selectedOption?.description : nil)
-            CustomerIncludedLines(lines: customerEstimateLines(flow.lines), type: type,
-                                  rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
-                                      + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
+            if let projected = verifiedCustomerLines {
+                CustomerIncludedLines(lines: projected, type: type,
+                                      rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
+                                          + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
+            } else {
+                Text("These amounts couldn't be verified. Hand the device back to your technician.")
+                    .font(Theme.customerFont(type.body))
+            }
             if let total = flow.total, let example = offer.example(for: total) {
                 CustomerFinancingLine(example: example, type: type)
                 seeTerms
@@ -457,7 +467,7 @@ struct CustomerEstimatePresentation: View {
                     }
                 }
             case .review:
-                CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: true, busy: actionBusy, type: type) { Task { await startSigning() } }
+                CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: verifiedCustomerLines != nil, busy: actionBusy, type: type) { Task { await startSigning() } }
                     .accessibilityIdentifier("customer-estimate-approve")
                 if let error { hint(error, danger: true) }
                 // PresentDetail.dc.html: "See other options" is the quiet action right under the commit.
@@ -599,7 +609,8 @@ struct CustomerEstimatePresentation: View {
 
     private func startSigning() async {
         error = nil
-        guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady, let revision = flow.issuedRevision else {
+        guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady,
+              verifiedCustomerLines != nil, let revision = flow.issuedRevision else {
             openingError = "Ask your technician to reopen the current estimate."
             reviewGeneration = nil
             return
@@ -1242,7 +1253,7 @@ struct CustomerLinesCard: View {
     private func lineDetails(_ line: FieldLine) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let readingAccess {
-                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+                ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess, customerFacing: true)
             } else {
                 Text(line.description).font(Theme.customerFont(type.body))
                     .fixedSize(horizontal: false, vertical: true)
@@ -1378,18 +1389,19 @@ struct CustomerIncludedLines: View {
     let rows: [CustomerAmountRow]
     /// Consent screens read each description through the protected reader.
     var readingAccess: DocumentDescriptionAccess? = nil
+    var descriptionContext: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(lines) { line in
+            ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
                 VStack(alignment: .leading, spacing: 6) {
                     if dynamicTypeSize.isAccessibilitySize {
-                        description(line)
+                        description(line, index: index)
                         amount(line).frame(maxWidth: .infinity, alignment: .trailing)
                     } else {
                         HStack(alignment: .firstTextBaseline, spacing: 14) {
-                            description(line)
+                            description(line, index: index)
                             amount(line).fixedSize()
                         }
                     }
@@ -1429,9 +1441,11 @@ struct CustomerIncludedLines: View {
         .documentPanel()
     }
 
-    @ViewBuilder private func description(_ line: FieldLine) -> some View {
+    @ViewBuilder private func description(_ line: FieldLine, index: Int) -> some View {
         if let readingAccess {
-            ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess)
+            ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess,
+                                        customerFacing: true,
+                                        accessibilityContext: descriptionContext.map { "\($0), item \(index + 1)" })
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(LineText(line.description).name).font(Theme.customerFont(type.body, weight: .medium))

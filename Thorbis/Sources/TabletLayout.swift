@@ -314,24 +314,50 @@ struct TabletRoot: View {
         .onChange(of: scheduleRange) { path = NavigationPath() }
         .onChange(of: store.requestedJobID, initial: true) { openRequestedJob() }
         .onChange(of: store.jobs) { openRequestedJob() }
-        .onChange(of: store.requestedSchedule) { show(.schedule); scheduleRange = "Today" }
+        .onChange(of: store.requestedSchedule, initial: true) {
+            guard store.consumeScheduleRequest(session: session.generation) else { return }
+            show(.schedule); scheduleRange = "Today"
+        }
         .onChange(of: store.requestedRecord, initial: true) { openRequestedRecord() }
         .onChange(of: store.requestedSearch, initial: true) {
             guard let query = store.requestedSearch else { return }
+            store.noteHandledNavigation(session: session.generation)
             store.requestedSearch = nil
             searchSeed = query
             search = true
         }
         .task(id: "addr|\(store.jobs.map { "\($0.id):\($0.locationId ?? "")" }.joined(separator: ","))|\(session.generation)") {
             guard session.can("customer.view", feature: "core_crm") else { return }
-            await addresses.load(Array(store.jobs.prefix(60)), api: api, organizationID: session.activeOrganization?.id,
+            // The job you're on first: the sidebar's "On now" card leads with its street on every
+            // place, however long the day's list is.
+            await addresses.load([currentJob].compactMap { $0 } + store.jobs.prefix(60), api: api, organizationID: session.activeOrganization?.id,
                                  identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
         }
         .onAppear {
-            if session.can("job.view", feature: "jobs") { tab = .schedule }
+            if store.requestedJobID == nil, store.requestedRecord == nil, store.requestedSearch == nil,
+               let saved = store.rememberedRoot(session: session.generation),
+               let destination = StartupDestination(rawValue: saved), destination.permitted(session) {
+                if let item = destination.menuItem { tab = section(for: item) }
+                else if let local = destination.localSection { tab = .local(local) }
+            } else if session.can("job.view", feature: "jobs") { tab = .schedule }
             else if session.can("customer.view", feature: "core_crm") { tab = .customers }
             else if let first = menuPlaces.first { tab = section(for: first) }
             openHomeAtLaunch()
+        }
+        .onChange(of: tab) { _, value in
+            let id: String?
+            switch value {
+            case .schedule: id = "schedule"
+            case .jobs: id = "jobs"
+            case .customers: id = "customers"
+            case .place(let item): id = item.rawValue
+            case .local(let local): id = "local-" + local.rawValue
+            case .more: id = nil
+            }
+            if let id {
+                store.rememberRoot(id, session: session.generation)
+                _ = store.consumeStartupSelection(session: session.generation)
+            }
         }
         // Owners whose places lead with Home open there, as on the phone (the role's places can
         // arrive just after launch).
@@ -492,8 +518,9 @@ struct TabletRoot: View {
     }
 
     private var createButton: some View {
+        // The same create control as every phone list and Today: the cream sheet's ink circle.
         Button { createMenuOpen = true } label: {
-            PaperCircleLabel(symbol: "plus", size: 40, fill: Theme.card, bordered: true)
+            CreamCircleLabel(symbol: "plus", ink: true)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Create")
@@ -525,6 +552,13 @@ struct TabletRoot: View {
                 withAnimation(motion) { sidebarOpen = false }
                 store.requestedJobID = job.id
             },
+            openFavorite: { item in
+                withAnimation(motion) { sidebarOpen = false }
+                switch item.entry.kind {
+                case .job: store.requestedJobID = item.entry.id
+                case .customer: store.requestedRecord = .customer(item.entry.id)
+                }
+            },
             search: { search = true },
             create: { createMenuOpen = true },
             workspace: { workspace = true },
@@ -540,13 +574,27 @@ struct TabletRoot: View {
 
     /// Once, from the untouched first place, and never over a record a link asked for.
     private func openHomeAtLaunch() {
-        guard !settledLaunchPlace, layout.visibleTabs(session).first == .home else { return }
-        settledLaunchPlace = true
-        guard tab == .schedule, path.isEmpty, !store.openedForRecord, store.requestedJobID == nil,
-              store.requestedRecord == nil else { return }
+        guard !settledLaunchPlace, session.phase == .ready else { return }
+        guard path.isEmpty, !store.hasStartupIntent(session: session.generation) else {
+            settledLaunchPlace = true
+            _ = store.consumeStartupSelection(session: session.generation)
+            return
+        }
         #if DEBUG
         if PaperPreview.enabled, PaperPreview.screen != "schedule" { return }
         #endif
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let preference = StartupDestinationPreferences().get(for: scope)
+            if let target = preference.launchTarget(isPermitted: preference.permitted(session), openedForReason: false) {
+                settledLaunchPlace = true
+                guard store.consumeStartupSelection(session: session.generation) else { return }
+                if let item = target.menuItem { show(section(for: item)); return }
+                if let local = target.localSection { show(.local(local)); return }
+            }
+        }
+        guard layout.visibleTabs(session).first == .home, tab == .schedule else { return }
+        settledLaunchPlace = true
+        guard store.consumeStartupSelection(session: session.generation) else { return }
         show(.place(.home))
     }
 
@@ -654,7 +702,9 @@ struct TabletRoot: View {
               let job = id == JobActivityLink.nextJob ? PaperWorkGroups.next(store.jobs) : store.jobs.first(where: { $0.id == id })
         else { return }
         store.requestedJobID = nil
-        if JobFiltering.schedule(store.jobs, range: .today).contains(where: { $0.id == job.id }) {
+        let isToday = JobFiltering.schedule(store.jobs, range: .today).contains(where: { $0.id == job.id })
+        store.noteHandledNavigation(session: session.generation, root: isToday ? "schedule" : "jobs")
+        if isToday {
             show(.schedule)
             scheduleRange = "Today"
             scheduleSelection = job.id
@@ -670,6 +720,13 @@ struct TabletRoot: View {
         store.requestedRecord = nil
         let access = record.access
         guard session.can(access.capability, feature: access.feature) else { return }
+        let root: String
+        switch record {
+        case .customer: root = "customers"
+        case .estimate: root = "estimates"
+        case .invoice: root = "invoices"
+        }
+        store.noteHandledNavigation(session: session.generation, root: root)
         switch record {
         case .customer(let id):
             let customer = store.customers.first { $0.id == id } ?? Customer(id: id, name: "Customer", archived: nil, createdAt: nil)
@@ -763,6 +820,7 @@ struct TabletSidebar: View {
     var savedWork: AppBottomBar.Sync? = nil
     let select: (TabletSection) -> Void
     let openJob: (Job) -> Void
+    let openFavorite: (ScopedRecordFavorites.Visible) -> Void
     let search: () -> Void
     let create: () -> Void
     let workspace: () -> Void
@@ -799,13 +857,11 @@ struct TabletSidebar: View {
                                isCurrentLocal: { current == .local($0) }, count: count, idPrefix: "sidebar",
                                phoneHeading: "On this iPad", savedWork: savedWork, savedWorkTitle: "Saved on this iPad",
                                openPlace: { select(section($0)) }, openLocal: { select(.local($0)) },
-                               openSavedWork: reviewSavedWork)
-                    Button(action: settings) {
-                        rowLabel("Settings", icon: "gearshape", selected: false, count: nil)
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityIdentifier("sidebar-settings")
-                    .padding(.top, 14)
+                               openSavedWork: reviewSavedWork, openFavorite: openFavorite)
+                    // The places' own row, so the gear and its word sit in the places' columns.
+                    PlaceRow(title: "Settings", symbol: "gearshape", tint: Theme.markGrey, here: false,
+                             count: nil, id: "sidebar-settings", action: settings)
+                        .padding(.top, 14)
                 }
                 .padding(.bottom, 24)
             }
@@ -845,27 +901,6 @@ struct TabletSidebar: View {
         .buttonStyle(RowPressStyle())
         .accessibilityLabel("Business, \(session.activeOrganization?.name ?? "Workspace")")
         .accessibilityHint("Switch or manage businesses")
-    }
-
-    /// Selected place: the drawer's grammar (ink word, filled glyph) on a quiet well, no rim.
-    private func rowLabel(_ title: String, icon: String, selected: Bool, count: Int?) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon).font(.system(size: 16)).frame(width: 22)
-                .symbolVariant(selected ? .fill : .none)
-                .foregroundStyle(selected ? Theme.foreground : Theme.muted)
-            Text(title).font(Theme.font(15, weight: selected ? .medium : .regular)).lineLimit(1)
-            Spacer(minLength: 0)
-            if let count, count > 0 {
-                Text("\(count)").font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
-            }
-        }
-        .padding(.horizontal, 10).frame(minHeight: 44)
-        .background {
-            if selected {
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.fill)
-            }
-        }
-        .contentShape(Rectangle())
     }
 
     /// The job you're on, always one tap away — in the sidebar's foot, never floating over rows.
@@ -961,7 +996,7 @@ struct TabletWeekBoard: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 12)
-            PaperTabs(options: PaperTabletSchedule.ranges, selection: $range)
+            PaperTabs(options: PaperTabletSchedule.ranges, selection: $range, textTabs: true)
                 .frame(maxWidth: 420, alignment: .leading)
                 .padding(.bottom, 8)
             GeometryReader { geometry in

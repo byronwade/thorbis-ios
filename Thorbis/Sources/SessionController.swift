@@ -80,11 +80,25 @@ final class SessionController: ObservableObject {
     @Published private(set) var isOffline = false
     /// Policy version of the verified authority; offline command envelopes carry it.
     private(set) var policyVersion: Int?
+    private(set) var authorityGeneration: String?
+    private var authorityOrigin: String?
+
+    var priceBookAuthority: PriceBookAuthority? {
+        guard can("pricebook.view", feature: "price_book"), let actor = user?.id,
+              let policyVersion, policyVersion > 0, let authorityGeneration, !authorityGeneration.isEmpty,
+              let authorityOrigin, authorityOrigin == api.normalizedOrigin else { return nil }
+        return PriceBookAuthority(actorID: actor, policyVersion: policyVersion,
+                                  generation: authorityGeneration, revision: authorityRevision)
+    }
 
     /// Changes before publishing new authority, even when the server policy version is unchanged.
     /// Visible media must reauthorize when this value changes.
-    @Published private(set) var authorityRevision = UUID()
-    private(set) var generation = UUID()
+    @Published private(set) var authorityRevision = UUID() {
+        didSet { ScopedRecordFavorites.shared.retireSession(generation: generation, authority: oldValue) }
+    }
+    private(set) var generation = UUID() {
+        didSet { ScopedRecordFavorites.shared.retireSession(generation: oldValue, authority: authorityRevision) }
+    }
     var onInvalidate: (() -> Void)?
     /// Called after verified policy publication when job access has been revoked.
     var onJobAuthorityRevoked: (() -> Void)?
@@ -185,6 +199,8 @@ final class SessionController: ObservableObject {
             sessionDeadline = sessionExpiry
             authorityDeadline = authorityExpiry
             policyVersion = binding.policyVersion
+            authorityGeneration = binding.generation
+            authorityOrigin = api.normalizedOrigin
             if !can("job.view", feature: "jobs") { onJobAuthorityRevoked?() }
             isOffline = false
             expiryTask?.cancel()
@@ -202,7 +218,8 @@ final class SessionController: ObservableObject {
         guard phase == .ready, let user, let activeOrganization, let sessionDeadline, let policyVersion else { return }
         snapshots.save(SessionSnapshot(user: user, organization: activeOrganization, organizations: organizations,
                                        capabilities: capabilities.sorted(), features: features, policyVersion: policyVersion,
-                                       sessionDeadline: sessionDeadline, authorityDeadline: authorityDeadline))
+                                       sessionDeadline: sessionDeadline, authorityDeadline: authorityDeadline,
+                                       authorityGeneration: authorityGeneration, authorityOrigin: authorityOrigin))
     }
 
     /// Cold launch with no signal: adopt the last verified authority if it has not expired.
@@ -219,6 +236,8 @@ final class SessionController: ObservableObject {
         sessionDeadline = snapshot.sessionDeadline
         authorityDeadline = snapshot.authorityDeadline
         policyVersion = snapshot.policyVersion
+        authorityGeneration = snapshot.authorityOrigin == api.normalizedOrigin ? snapshot.authorityGeneration : nil
+        authorityOrigin = authorityGeneration == nil ? nil : snapshot.authorityOrigin
         api.auth = .session
         api.displayName = snapshot.user.name ?? snapshot.user.email ?? ""
         error = nil
@@ -360,6 +379,8 @@ final class SessionController: ObservableObject {
         revalidation = nil
         isOffline = false
         policyVersion = nil
+        authorityGeneration = nil
+        authorityOrigin = nil
         api.invalidateRequests()
         expiryTask?.cancel()
         expiryTask = nil
@@ -493,6 +514,8 @@ final class SessionController: ObservableObject {
             self.api.auth = .session
             self.api.displayName = actor.name ?? actor.email ?? ""
             self.policyVersion = binding.policyVersion
+            self.authorityGeneration = binding.generation
+            self.authorityOrigin = api.normalizedOrigin
             self.error = nil
             self.phase = .ready
             if !can("job.view", feature: "jobs") { onJobAuthorityRevoked?() }

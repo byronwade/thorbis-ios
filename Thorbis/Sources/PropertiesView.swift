@@ -44,6 +44,7 @@ struct PropertiesView: View {
     @State private var failedCustomers = 0
     @State private var error: String?
     @State private var query = ""
+    @State private var opened: PropertyRow?
 
     var body: some View {
         let shown = rows.filter { $0.matches(query) }
@@ -66,27 +67,22 @@ struct PropertiesView: View {
                                     actionTitle: "Clear search") { query = "" }
                 }
                 ForEach(shown) { row in
-                    NavigationLink(value: row.customer) {
-                        HStack(alignment: .top, spacing: 14) {
-                            Image(systemName: row.location.kind == "billing" ? "envelope" : "house")
-                                .font(.system(size: 17)).foregroundStyle(Theme.markOlive)
-                                .frame(width: 22).padding(.top, 2)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(row.location.address).font(Theme.font(15, weight: .medium)).lineLimit(2)
-                                Text([row.customer.name, row.location.label, row.kindLabel]
-                                    .filter { !$0.isEmpty }.joined(separator: " · "))
-                                    .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
-                            }
-                            Spacer(minLength: 8)
-                            PaperDisclosure()
+                    // Web parity: a property opens its own page (property-detail.tsx), not the customer.
+                    Button { opened = row } label: {
+                        // A plain list-room row, as Customers and Jobs: the address, then whose and what kind.
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.location.address).font(Theme.font(15, weight: .medium)).lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            DotLine([row.customer.name, row.location.label, row.kindLabel])
+                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
                         }
-                        .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                        .frame(minHeight: 56)
+                        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityElement(children: .combine)
-                    Divider().padding(.leading, Theme.gutter + 36)
+                    .accessibilityHint("Opens the property")
                 }
                 if loaded && (capped || failedCustomers > 0) {
                     Text(footnote)
@@ -96,6 +92,7 @@ struct PropertiesView: View {
             }
             .padding(.bottom, 24)
         }
+        .thorbisDestination(item: $opened) { PropertyDetailView(row: $0) }
         .searchable(text: $query, prompt: "Address, place or customer")
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
@@ -140,9 +137,94 @@ struct PropertiesView: View {
             if index % 8 == 7, !loaded { rows = PropertiesUnion.rows(pairs) }
         }
         rows = PropertiesUnion.rows(pairs)
+        #if DEBUG
+        // `--paper-preview-screen property-detail`: open the first property once the list has loaded.
+        if PaperPreview.enabled, PaperPreview.screen == "property-detail", opened == nil { opened = rows.first }
+        #endif
         capped = isCapped
         failedCustomers = failures
         loaded = true
         error = (pairs.isEmpty && failures > 0) ? lastError?.localizedDescription : nil
+    }
+}
+
+
+/// Web parity (property-detail.tsx): one address on its own. What kind of place it is and whose,
+/// the facts a tech needs at the door, the jobs booked there and the equipment on site. Read-only:
+/// the address is edited on its customer, where the rules live.
+struct PropertyDetailView: View {
+    let row: PropertyRow
+    @EnvironmentObject private var store: Store
+    @State private var openCustomer: Customer?
+
+    private var location: ServiceLocationRecord { row.location }
+    private var jobs: [Job] {
+        store.jobs.filter { $0.locationId == location.id }
+            .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantPast) > (JobFiltering.date($1.scheduledFor) ?? .distantPast) }
+    }
+    private var facts: [(String, String)] {
+        [("Gate code", location.gateCode), ("Alarm", location.alarmCode), ("Dog", location.dogOnSite),
+         ("Parking", location.parking), ("Notes", location.notes)]
+            .compactMap { label, value in value.flatMap { $0.isEmpty ? nil : (label, $0) } }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 6) {
+                    PaperEyebrow(text: [row.kindLabel, location.label].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+                    Text(location.address).font(Theme.font(24, weight: .medium)).tracking(-0.36)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Button { openCustomer = row.customer } label: {
+                        HStack(spacing: 4) {
+                            Text(row.customer.name)
+                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
+                        }
+                        .font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Customer, \(row.customer.name)")
+                    .accessibilityHint("Opens the customer")
+                }
+                if !facts.isEmpty {
+                    PaperSection("At the door") {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(facts, id: \.0) { label, value in
+                                PaperDetailRow(label: label) { Text(value) }
+                                    .padding(.horizontal, PaperCardMetrics.inset)
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
+                    }
+                }
+                PaperSection("Jobs here", count: jobs.isEmpty ? nil : jobs.count) {
+                    if jobs.isEmpty {
+                        Text("No jobs at this address yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(jobs) { job in
+                                NavigationLink(value: PaperRoute.job(job.id)) {
+                                    JobRoomRow(job: job, when: JobFiltering.date(job.scheduledFor).map {
+                                        $0.formatted(.dateTime.month(.abbreviated).day().year())
+                                    }, inset: PaperCardMetrics.inset)
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
+                        }
+                        .padding(.vertical, PaperCardMetrics.edge)
+                    }
+                }
+                CustomerEquipmentSection(customerID: row.customer.id, locations: [location],
+                                         onlyLocationID: location.id, editable: false)
+            }
+            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.canvas)
+        .navigationBarTitleDisplayMode(.inline)
+        .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
     }
 }

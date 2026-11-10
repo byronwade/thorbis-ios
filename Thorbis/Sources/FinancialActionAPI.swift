@@ -213,6 +213,11 @@ private struct FinancialItems<T: Decodable>: Decodable {
     let nextCursor: String?
 }
 
+struct FieldPaymentHistoryRead {
+    let payments: [FieldPaymentRecord]
+    let pages: [APIReadProvenance]
+}
+
 @MainActor
 extension APIClient {
     func financialPath(_ base: String, id: String, suffix: String) throws -> String {
@@ -263,23 +268,46 @@ extension APIClient {
                               body: Body(expectedLinesRevision: expectedLinesRevision))
     }
 
+    /// Web parity (invoice-detail): a draft takes a discount as one negative "Discount — reason" line.
+    /// The server refuses a sent invoice, a discount above the total, or one past the role's limit.
+    func discountFieldInvoice(_ id: String, amountCents: Int, reason: String) async throws -> InvoiceRecord {
+        struct Body: Encodable { let description: String; let amount: FieldMoney }
+        return try await send("POST", financialPath("/v1/invoices", id: id, suffix: "/discount"),
+                              body: Body(description: reason, amount: FieldMoney(amount: amountCents, currency: "USD")))
+    }
+
     func fieldPayments(_ invoiceID: String) async throws -> [FieldPaymentRecord] {
+        try await fieldPaymentsWithProvenance(invoiceID).payments
+    }
+
+    func fieldPaymentsWithProvenance(_ invoiceID: String) async throws -> FieldPaymentHistoryRead {
         let path = try financialPath("/v1/invoices", id: invoiceID, suffix: "/payments")
         let generation = requestGeneration
+        let scope = savedCopyScope
+        let scopeRevision = savedCopyScopeRevision
+        let origin = normalizedOrigin
         var payments: [FieldPaymentRecord] = []
+        var pages: [APIReadProvenance] = []
         var cursor: String?
         var seen = Set<String>()
         repeat {
             try Task.checkCancellation()
-            guard generation == requestGeneration else { throw CancellationError() }
-            let page: FinancialItems<FieldPaymentRecord> = try await send("GET", path, cursor: cursor)
-            payments.append(contentsOf: page.items)
-            cursor = page.nextCursor
+            guard generation == requestGeneration, scope == savedCopyScope, scopeRevision == savedCopyScopeRevision,
+                  origin == normalizedOrigin else { throw CancellationError() }
+            let page: APIRead<FinancialItems<FieldPaymentRecord>> = try await sendWithProvenance(path, cursor: cursor)
+            try Task.checkCancellation()
+            guard generation == requestGeneration, scope == savedCopyScope, scopeRevision == savedCopyScopeRevision, origin == normalizedOrigin,
+                  page.provenance.generation == generation, page.provenance.savedCopyScope == scope,
+                  page.provenance.savedCopyScopeRevision == scopeRevision,
+                  Self.normalizedOrigin(page.provenance.origin) == origin else { throw CancellationError() }
+            payments.append(contentsOf: page.value.items)
+            pages.append(page.provenance)
+            cursor = page.value.nextCursor
             if let cursor, cursor.isEmpty || !seen.insert(cursor).inserted {
                 throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")
             }
         } while cursor != nil
-        return payments
+        return FieldPaymentHistoryRead(payments: payments, pages: pages)
     }
 
     func openFieldPayLink(_ invoiceID: String) async throws -> FieldInvoicePayLink {

@@ -2,6 +2,26 @@ import XCTest
 @testable import Thorbis
 
 final class CustomerDocumentAmountsTests: XCTestCase {
+    func testCustomerEstimateProjectionHidesMaterialsAndFailsClosedOnInvalidValues() throws {
+        let work = FieldLine(id: "work", description: "Service", quantity: 1, unitPrice: .init(amount: 14000, currency: "USD"), source: nil)
+        var material = FieldLine(id: "material", description: "Private material detail", quantity: 1, unitPrice: .init(amount: 5000, currency: "USD"), source: nil)
+        material.showToCustomer = false
+        let result = try XCTUnwrap(customerEstimateProjection([work, material], currency: "USD"))
+        XCTAssertEqual(result.map(\.description), ["Service", "Materials"])
+        XCTAssertEqual(result.last?.unitPrice.amount, 5000)
+        XCTAssertEqual(CustomerDocumentAmounts(lines: result, currency: "USD")?.total, 19000)
+        let charge = FieldLine(id: "hidden-charge", description: "Hidden charge", quantity: 1, unitPrice: .init(amount: 7000, currency: "USD"), source: nil, showToCustomer: false)
+        let credit = FieldLine(id: "hidden-credit", description: "Hidden credit", quantity: 1, unitPrice: .init(amount: -2000, currency: "USD"), source: nil, showToCustomer: false)
+        let net = try XCTUnwrap(customerEstimateProjection([work, charge, credit], currency: "USD"))
+        XCTAssertEqual(net.map(\.description), ["Service", "Materials"])
+        XCTAssertEqual(net.last?.unitPrice.amount, 5000)
+        XCTAssertEqual(CustomerDocumentAmounts(lines: [work, charge, credit], currency: "USD")?.credits, -2000)
+        XCTAssertEqual(CustomerDocumentAmounts(lines: net, currency: "USD")?.total, 19000)
+        material = FieldLine(id: "bad", description: "Secret", quantity: 2, unitPrice: .init(amount: .max, currency: "USD"), source: nil, showToCustomer: false)
+        XCTAssertNil(customerEstimateProjection([work, material], currency: "USD"))
+        material = FieldLine(id: "bad", description: "Secret", quantity: 1, unitPrice: .init(amount: 1, currency: "EUR"), source: nil, showToCustomer: false)
+        XCTAssertNil(customerEstimateProjection([work, material], currency: "USD"))
+    }
     private func line(_ id: String, quantity: Int = 1, amount: Int, currency: String = "USD") -> FieldLine {
         FieldLine(id: id, description: id, quantity: quantity, unitPrice: .init(amount: amount, currency: currency), source: nil)
     }

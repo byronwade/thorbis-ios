@@ -38,22 +38,20 @@ struct PaperTabletSchedule: View {
                 Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 12)
-            // design 2026-10-30: the one segmented selector.
-            PaperTabs(options: Self.ranges, selection: $range)
+            // Text tabs, as the Jobs column beside it and every phone list use.
+            PaperTabs(options: Self.ranges, selection: $range, textTabs: true)
                 .padding(.bottom, 8)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if let error = store.error { ErrorBanner(message: error) }
                     if let problem = swipes.problem { ErrorBanner(message: problem) }
                     if !jobs.isEmpty {
+                        // Plain rows on the canvas, as in the Jobs column: no card around the day.
                         VStack(spacing: 0) {
                             ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
                                 scheduleRow(job, showsPeriod: TimeColumn.showsPeriod(jobs, at: index))
                             }
                         }
-                            .padding(4)
-                            .panelBackground(cornerRadius: Theme.cardRadius)
-                            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.border.opacity(0.6)))
                     }
                     if jobs.isEmpty && !store.loading {
                         PaperEmptyState(symbol: "calendar", title: "Nothing booked today",
@@ -61,7 +59,7 @@ struct PaperTabletSchedule: View {
                     }
                     if store.loading && jobs.isEmpty { SkeletonRows(count: 5, leading: false) }
                 }
-                .padding(.horizontal, 12).padding(.bottom, 16)
+                .padding(.horizontal, Theme.gutter - 12).padding(.bottom, 16)
             }
             .refreshable { await store.refresh(api) }
             .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
@@ -89,16 +87,22 @@ struct PaperTabletSchedule: View {
         let date = JobFiltering.date(job.scheduledFor)
         let time = date?.tradeTime ?? "No time"
         // The column reads 10:30, 12:15, 1:00: the period under the time only where it changes.
-        let leading: PaperRowLeading = date.map { .clock($0.columnTime, period: showsPeriod ? $0.periodMark : nil, accessibility: $0.tradeTime) }
-            ?? .text(time)
         return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
             Button { selectedID = job.id } label: {
-                PaperListRow(leading: leading, title: street ?? job.title,
-                             subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
-                             subtitleLines: 2, dimmed: job.status == "completed") {
-                    StatusWord(jobStatus: job.status)
+                // The phone's Today row: the time column, then the list room's job row, whose problem
+                // and customer share a line only when both fit (no "·" left at a line end).
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(date?.columnTime ?? time).font(Theme.font(13, weight: .medium)).monospacedDigit()
+                        if showsPeriod, let period = date?.periodMark {
+                            Text(period).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    .frame(width: 44, alignment: .leading)
+                    JobRoomRow(job: job, street: street, customer: customer, inset: 0)
                 }
-                .environment(\.paperRowInset, 12)
+                .padding(.horizontal, 12)
+                .opacity(job.status == "completed" ? 0.7 : 1)
                 .background {
                     if selected { RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface) }
                 }

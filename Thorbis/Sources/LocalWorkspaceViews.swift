@@ -215,6 +215,13 @@ struct LocalWorkspaceView: View {
     @State private var editor: LocalWorkspaceDraft?
     @State private var editorOwner: String?
     @State private var actionError: String?
+    /// Equipment: whether the company's server book has units, so the phone's own notes read as a second list.
+    @State private var hasServerEquipment = false
+    @State private var hasServerAgreements = false
+    /// Equipment and Agreements: the company's server book is showing, so this phone's notes are second.
+    private var sharedEquipment: Bool {
+        (section == .equipment && hasServerEquipment) || (section == .agreements && hasServerAgreements)
+    }
 
     private var identityKey: String { "\(actorID.lowercased())|\(organizationID.lowercased())" }
 
@@ -232,20 +239,32 @@ struct LocalWorkspaceView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(section.title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
                         .accessibilityAddTraits(.isHeader)
-                    Text("On this device · Not synced").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text(sharedEquipment ? "Shared with your team" : "On this device · Not synced")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 if let error = actionError ?? model.error {
                     Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                         .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 }
+                if section == .equipment {
+                    CompanyEquipmentBook { hasServerEquipment = $0 }
+                }
+                if section == .agreements {
+                    CompanyAgreementsBook { hasServerAgreements = $0 }
+                }
                 if bound {
                     let rows = model.rows(section)
-                    PaperSection(section.title, count: rows.isEmpty ? nil : rows.count) {
-                        if rows.isEmpty {
-                            Text("No records on this device").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
-                        } else {
+                    // Empty: the shared empty state, not a label repeating the title over a one-line card.
+                    if rows.isEmpty && sharedEquipment {
+                        EmptyView()
+                    } else if rows.isEmpty {
+                        ListRoomEmpty(title: "Nothing here yet.",
+                                      message: "Add to \(section.title.lowercased()) with the button below.")
+                            .padding(.horizontal, -PaperCardMetrics.margin)
+                    } else {
+                    PaperSection(sharedEquipment ? "Notes on this phone" : section.title, count: rows.count) {
+                        Group {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(rows) { row in
                                     HStack(spacing: 0) {
@@ -271,10 +290,14 @@ struct LocalWorkspaceView: View {
                         }
                     }
                     .id(model.revision)
+                    }
                 } else if model.error == nil {
                     SkeletonRows(count: 3, leading: false, inset: 0)
                 }
-                Text("These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
+                // With the shared book showing, units are added where they belong: on the customer.
+                Text(sharedEquipment ? (section == .equipment ? "Add or edit a unit on its customer\u{2019}s page; it shows here for the whole team."
+                                                              : "Add or cancel an agreement on its customer\u{2019}s page; it shows here for the whole team.")
+                                     : "These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
             }
@@ -283,8 +306,10 @@ struct LocalWorkspaceView: View {
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
-            PaperActionBar(title: "Add to \(section.title.lowercased())", symbol: "plus", disabled: !bound) {
-                present(LocalWorkspaceDraft())
+            if !sharedEquipment {
+                PaperActionBar(title: "Add to \(section.title.lowercased())", symbol: "plus", disabled: !bound) {
+                    present(LocalWorkspaceDraft())
+                }
             }
         }
         .task(id: identityKey) {

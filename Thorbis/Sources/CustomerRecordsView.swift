@@ -44,16 +44,16 @@ struct CustomerRecordsView: View {
             }
             if !parts.contains(.estimates) {
             } else if compilation.estimatesAccessible {
-                linkedSection("Estimates", total: compilation.estimateCount, groups: compilation.estimates, symbol: "doc.text", incomplete: compilation.estimatesIncomplete || compilation.identityIncomplete, extra: compilation.estimatesOffJob.map { ($0.title, PaperRoute.estimate($0.id)) }) { estimate in
-                    (estimate.title, PaperRoute.estimate(estimate.id))
+                linkedSection("Estimates", total: compilation.estimateCount, groups: compilation.estimates, symbol: "doc.text", incomplete: compilation.estimatesIncomplete || compilation.identityIncomplete, extra: compilation.estimatesOffJob.map { CustomerMoneyRow.estimate($0) }) { estimate in
+                    CustomerMoneyRow.estimate(estimate)
                 }
             } else {
                 unavailable("Estimates")
             }
             if !parts.contains(.invoices) {
             } else if compilation.invoicesAccessible {
-                linkedSection("Invoices", total: compilation.invoiceCount, groups: compilation.invoices, symbol: "doc.plaintext", incomplete: compilation.invoicesIncomplete || compilation.identityIncomplete, extra: compilation.invoicesOffJob.map { (CustomerRecordLabel.invoice($0), PaperRoute.invoice($0.id)) }) { invoice in
-                    (CustomerRecordLabel.invoice(invoice), PaperRoute.invoice(invoice.id))
+                linkedSection("Invoices", total: compilation.invoiceCount, groups: compilation.invoices, symbol: "doc.plaintext", incomplete: compilation.invoicesIncomplete || compilation.identityIncomplete, extra: compilation.invoicesOffJob.map { CustomerMoneyRow.invoice($0) }) { invoice in
+                    CustomerMoneyRow.invoice(invoice)
                 }
             } else {
                 unavailable("Invoices")
@@ -78,7 +78,7 @@ struct CustomerRecordsView: View {
                 }
                 .accessibilityIdentifier("customer-photo-partial")
             } else if compilation.photos.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             ForEach(compilation.photos, id: \.jobID) { group in
                 jobHeading(group.title, jobID: group.jobID, count: group.count, incomplete: compilation.mediaIncompleteJobIDs.contains(group.jobID) || compilation.identityIncomplete)
@@ -156,27 +156,26 @@ struct CustomerRecordsView: View {
         }
     }
 
-    private func linkedSection<Item: Identifiable>(_ title: String, total: Int, groups: [CustomerJobGroup<Item>], symbol: String, incomplete: Bool = false, extra: [(String, PaperRoute)], row: @escaping (Item) -> (String, PaperRoute)) -> some View where Item: Equatable {
+    private func linkedSection<Item: Identifiable>(_ title: String, total: Int, groups: [CustomerJobGroup<Item>], symbol: String, incomplete: Bool = false, extra: [CustomerMoneyRow], row: @escaping (Item) -> CustomerMoneyRow) -> some View where Item: Equatable {
         VStack(alignment: .leading, spacing: 8) {
             heading(title, count: total, symbol: symbol, incomplete: incomplete)
             if incomplete {
                 ErrorBanner(message: "Some records could not be verified. Please try again.") { await retryMedia() }
             } else if groups.isEmpty && extra.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             if !groups.isEmpty || !extra.isEmpty {
                 panel {
                     ForEach(groups, id: \.jobID) { group in
                         jobHeading(group.title, jobID: group.jobID, count: group.count)
                         ForEach(group.items) { item in
-                            let pair = row(item)
-                            NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
+                            moneyLink(row(item))
                         }
                     }
                     if !extra.isEmpty {
                         Text("Not on a job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 4)
-                        ForEach(Array(extra.enumerated()), id: \.offset) { _, pair in
-                            NavigationLink(value: pair.1) { rowLabel(pair.0) }.buttonStyle(RowPressStyle())
+                        ForEach(extra) { item in
+                            moneyLink(item)
                         }
                     }
                 }
@@ -192,7 +191,7 @@ struct CustomerRecordsView: View {
                     await retryMedia()
                 }
             } else if groups.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             if !groups.isEmpty {
                 panel {
@@ -219,7 +218,7 @@ struct CustomerRecordsView: View {
             if compilation.activityIncomplete {
                 ErrorBanner(message: "Some activity could not be loaded. Please try again.") { await retryMedia() }
             } else if compilation.activity.isEmpty && compilation.accountActivity.isEmpty {
-                Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                noneYet
             }
             if !compilation.activity.isEmpty || !compilation.accountActivity.isEmpty {
                 panel {
@@ -259,6 +258,12 @@ struct CustomerRecordsView: View {
         }
     }
 
+    /// An empty section's line, under its label's words rather than 4 points left of them.
+    private var noneYet: some View {
+        Text("None yet").font(Theme.font(15)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, RecordRoom.labelInset)
+    }
+
     /// One white panel per section; rows pad to the panel's inset.
     private func panel<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         PaperCard {
@@ -269,19 +274,77 @@ struct CustomerRecordsView: View {
 
     private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false) -> some View {
         NavigationLink(value: PaperRoute.job(jobID)) {
-            HStack(spacing: 6) {
-                Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(1)
-                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(12)).foregroundStyle(Theme.muted)
+            // A quiet link to the job that groups the records under it, so it never reads as one of them.
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 Spacer(minLength: 0)
             }.frame(minHeight: 44)
         }.buttonStyle(RowPressStyle())
+        .accessibilityLabel("Job: \(title), \(incomplete ? "partial" : "\(count)")")
+        .accessibilityHint("Opens the job")
     }
 
-    private func rowLabel(_ title: String) -> some View {
-        HStack {
-            Text(title).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(2)
-            Spacer(minLength: 0)
-        }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+    private func moneyLink(_ row: CustomerMoneyRow) -> some View {
+        NavigationLink(value: row.route) {
+            DocumentListRowContent(status: row.status, title: row.title, subtitle: row.reference,
+                                   meta: row.meta, amount: row.amount, amountNote: row.amountNote)
+                .environment(\.paperRowInset, 0)
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityIdentifier("customer-\(row.kind)-\(row.id)")
+    }
+}
+
+/// Display-only facts from one document. The invoice total is not its balance, and alternative
+/// estimate options are never added together into a made-up package price.
+struct CustomerMoneyRow: Identifiable {
+    let id: String
+    let kind: String
+    let route: PaperRoute
+    let title: String
+    let reference: String
+    let status: DocumentStatus
+    let meta: String?
+    let amount: String?
+    let amountNote: String?
+
+    static func estimate(_ estimate: EstimateRecord) -> Self {
+        let options = estimate.options?.count ?? 0
+        let amounts = CustomerDocumentAmounts(lines: estimate.lines, currency: "USD")
+        let total = options == 0 && !estimate.lines.isEmpty ? amounts?.total : nil
+        return Self(id: estimate.id, kind: "estimate", route: .estimate(estimate.id),
+                    title: estimate.title.isEmpty ? "Estimate" : estimate.title,
+                    reference: "EST-\(estimate.id.suffix(4).uppercased())",
+                    status: DocumentStatus(estimateStatus: estimate.status),
+                    meta: options > 0 ? "\(options) option\(options == 1 ? "" : "s")" : nil,
+                    amount: total.map { money($0, currency: "USD") },
+                    amountNote: total != nil ? "Last known total" : nil)
+    }
+
+    static func invoice(_ invoice: InvoiceRecord) -> Self {
+        let isVoid = invoice.status == "void" || invoice.status == "voided"
+        let amounts = invoice.currency == "USD"
+            ? CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) : nil
+        let isOpen = ["issued", "sent", "open"].contains(invoice.status)
+        let baseStatus: DocumentStatus
+        if isOpen && (amounts == nil || amounts?.due == 0) {
+            // Do not infer a settled invoice from line arithmetic without payment reconciliation.
+            baseStatus = DocumentStatus(tone: .scheduled, word: invoice.status.statusLabel)
+        } else {
+            baseStatus = DocumentStatus(invoiceStatus: invoice.status, amountPaid: invoice.amountPaid,
+                                        balance: amounts?.due)
+        }
+        let status = DocumentStatus(tone: baseStatus.tone, word: "Last known: \(baseStatus.word)")
+        let total = isVoid ? nil : amounts?.total
+        let paid = !isVoid && invoice.status != "draft" && amounts != nil && invoice.amountPaid > 0
+            ? "Last known paid \(money(invoice.amountPaid, currency: invoice.currency))" : nil
+        return Self(id: invoice.id, kind: "invoice", route: .invoice(invoice.id), title: "Invoice",
+                    reference: "INV-\(invoice.id.suffix(4).uppercased())", status: status, meta: paid,
+                    amount: total.map { money($0, currency: invoice.currency) },
+                    amountNote: total != nil ? "Last known total" : nil)
     }
 }
 

@@ -764,59 +764,78 @@ private struct ScheduleHero<Commit: View>: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
-            NavigationLink(value: job) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(headline).font(Theme.font(20, weight: .medium)).tracking(-0.2)
-                        .foregroundStyle(Theme.foreground)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(supporting).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                                                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-                    layout {
-                        // v2: the status is a word; its small mark sits beside it in the hue.
-                        TimelineView(.everyMinute) { context in
-                            StatusLabel(tone: tone, word: statusWord(now: context.date), pending: pendingStatus != nil)
-                        }
-                        Text(when).font(Theme.font(13, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(Theme.muted)
+            // C-Today: the stop leads with its map strip; the drive time stays in the meta line.
+            if nextStop { map }
+            VStack(alignment: .leading, spacing: 0) {
+                NavigationLink(value: job) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(headline).font(Theme.font(20, weight: .medium)).tracking(-0.2)
+                            .foregroundStyle(Theme.foreground)
+                            .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier(etaMinutes != nil ? "next-stop-eta" : "next-stop-time")
+                        Text(supporting).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                        layout {
+                            // v2: the status is a word; its small mark sits beside it in the hue.
+                            TimelineView(.everyMinute) { context in
+                                StatusLabel(tone: tone, word: statusWord(now: context.date), pending: pendingStatus != nil)
+                            }
+                            Text(when).font(Theme.font(13, weight: .medium)).monospacedDigit()
+                                .foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier(etaMinutes != nil ? "next-stop-eta" : "next-stop-time")
+                        }
+                        .padding(.top, 6)
                     }
-                    .padding(.top, 6)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .jobContextMenu(job, customer: customer)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(accessibilitySummary)
-            .accessibilityHint("Opens the job")
-            .accessibilityIdentifier(nextStop ? "next-stop-card" : "schedule-hero")
-            // Outside the link, so Open Settings and dismiss never open the job.
-            if nextStop, let locationNotice {
-                NextStopLocationNotice(dismiss: locationNotice).padding(.top, 12)
-            }
-            // One row: the commit, then the quiet circles. At accessibility sizes the circles go
-            // under the commit so its words never squeeze.
-            let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                                       : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-            actions {
-                commit()
-                if hasCircles {
-                    HStack(spacing: 8) { circles }
+                .buttonStyle(.plain)
+                .jobContextMenu(job, customer: customer)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(accessibilitySummary)
+                .accessibilityHint("Opens the job")
+                .accessibilityIdentifier(nextStop ? "next-stop-card" : "schedule-hero")
+                // Outside the link, so Open Settings and dismiss never open the job.
+                if nextStop, let locationNotice {
+                    NextStopLocationNotice(dismiss: locationNotice).padding(.top, 12)
                 }
+                // One row: the commit, then the quiet circles. At accessibility sizes the circles go
+                // under the commit so its words never squeeze.
+                let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                                           : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+                actions {
+                    commit()
+                    if hasCircles {
+                        HStack(spacing: 8) { circles }
+                    }
+                }
+                .padding(.top, 16)
             }
-            .padding(.top, 16)
+            .padding(16)
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         // v2: no coloured side rail; "you are here" is the status word and its mark (D-018).
         .background(ThorbisPanelStyle(), in: shape)
+        .clipShape(shape)
+    }
+
+    /// The map strip; with an address on file it opens driving directions in Maps.
+    @ViewBuilder private var map: some View {
+        let strip = MapStrip(aspect: 3, hasPlace: place?.directions != nil)
+        if let directions = place?.directions {
+            Button { openURL(directions) } label: { strip }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Directions to \(headline)")
+                .accessibilityHint("Opens driving directions in Maps")
+                .accessibilityIdentifier("next-stop-map")
+        } else {
+            strip
+        }
     }
 
     private var hasCircles: Bool { nextStop && (place?.directions != nil || place?.call != nil) }
@@ -941,8 +960,9 @@ struct TodayRow: View {
             }
             .frame(width: stacked ? nil : column, alignment: .leading)
             .padding(.top, stacked ? 10 : 0)
+            // Beside the Schedule button the row is narrow, so the title may take a third line.
             JobRoomRow(job: job, street: street, customer: customer, who: assignee, pendingStatus: pendingStatus,
-                       showsStatus: schedule == nil, inset: 0)
+                       showsStatus: schedule == nil, titleLines: schedule == nil ? 2 : 3, inset: 0)
         }
         .padding(.horizontal, ListRoom.gutter)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1001,9 +1021,9 @@ struct ScheduleCompactRow: View {
         // The Schedule button sits beside the row's link, not inside it, so each is its own target.
         HStack(alignment: .center, spacing: 0) {
             NavigationLink(value: job) {
-                PaperListRow(leading: leading, title: street ?? job.title,
-                             subtitle: street != nil ? "\(job.title) · \(customer)" : customer,
-                             subtitleLines: 2, dimmed: job.status == "completed") {
+                PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
+                             subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
+                             subtitleLines: 2, titleLines: schedule == nil ? 2 : 3, dimmed: job.status == "completed") {
                     if schedule == nil {
                         StatusWord(jobStatus: pendingStatus ?? job.status, pending: pendingStatus != nil)
                     }
@@ -1256,18 +1276,22 @@ struct JobsView: View {
     @ViewBuilder private func group(_ title: String, jobs: [Job], first: Bool) -> some View {
         if !jobs.isEmpty {
             ListGroupLabel(title: title, count: jobs.count, first: first)
-            ForEach(jobs) { job in jobRow(job) }
+            ForEach(jobs) { job in jobRow(job, group: title) }
         }
     }
 
-    private func jobRow(_ job: Job) -> some View {
+    private func jobRow(_ job: Job, group: String? = nil) -> some View {
         let customer = store.customerName(job.customerId)
         let needsTime = canSchedule && job.scheduledFor == nil && !["completed", "canceled"].contains(job.status)
             && !ScheduleLead.activeStatuses.contains(job.status)
         let mine = job.assignedToUserId != nil && job.assignedToUserId == session.user?.id
         let assignee = job.assignedToUserId.flatMap { roster[$0] }
         // The tech by name from the roster; "You" only where the roster can't name you, on a shared board.
-        let who = assignee ?? (tab != "Assigned" && mine ? "You" : nil)
+        // Assigned is your own list, so naming you on every row is noise.
+        let who = tab == "Assigned" && mine ? nil : assignee ?? (mine ? "You" : nil)
+        // Under "In progress" a row needn't say "In progress" again; it still says Late or a pending move.
+        let saysGroup = group.map { job.status.statusLabel.caseInsensitiveCompare($0) == .orderedSame } ?? false
+        let showsStatus = !needsTime && (isLate(job) || outbox.pendingStatus(for: job.id) != nil || !saysGroup)
         // Swipe right: Call, Directions. Swipe left: the next move the server allows.
         return JobSwipeRow(job: job, customer: customer, book: swipes, places: addresses) { actions in
             HStack(spacing: 0) {
@@ -1276,7 +1300,7 @@ struct JobsView: View {
                     JobRoomRow(job: job, street: addresses.street(job), customer: customer, when: when(job),
                                who: needsTime ? nil : who,
                                pendingStatus: outbox.pendingStatus(for: job.id),
-                               late: isLate(job), showsStatus: !needsTime)
+                               late: isLate(job), showsStatus: showsStatus)
                 }
                 .buttonStyle(RowPressStyle())
                 .jobContextMenu(job, customer: customer)

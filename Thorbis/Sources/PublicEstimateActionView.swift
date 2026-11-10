@@ -18,7 +18,7 @@ struct PublicEstimateActionView: View {
     }
 
     private var approvalEnabled: Bool {
-        guard let action = model.action else { return false }
+        guard let action = model.action, action.amountsAvailableForApproval else { return false }
         if action.signingOffered {
             return action.canApprove(signerName: model.signerName, consent: model.consent, selectedOptionID: model.selectedOptionID)
         }
@@ -115,7 +115,8 @@ struct PublicEstimateActionView: View {
 
     @ViewBuilder
     private var approvalFooter: some View {
-        if let action = model.action, action.signingOffered || action.canApprovePlainly {
+        if let action = model.action,
+           action.signingOffered || action.plainApprovalOffered {
             VStack(spacing: 5) {
                 Button(action: approve) {
                     HStack(spacing: 8) {
@@ -128,7 +129,11 @@ struct PublicEstimateActionView: View {
                 }
                 .disabled(!approvalEnabled || model.isSubmitting)
                 .accessibilityIdentifier("public-estimate-approve")
-                .accessibilityHint(approvalEnabled ? "Records approval of this issued estimate." : "Choose an option, enter your name, and provide consent to continue.")
+                .accessibilityHint(approvalEnabled ? "Records approval of this issued estimate." : (action.amountsAvailableForApproval ? "Choose an option, enter your name, and provide consent to continue." : "The amount cannot be verified. Ask the company for an updated estimate."))
+                if !action.amountsAvailableForApproval {
+                    Text("We can’t verify the estimate amount. Ask the company for an updated estimate.")
+                        .font(Theme.customerFont(12)).foregroundStyle(Theme.muted)
+                }
                 if model.isSubmitting {
                     Text("Saving your decision. Wait for confirmation.")
                         .font(Theme.customerFont(12))
@@ -155,8 +160,9 @@ struct PublicEstimateActionView: View {
             // MF-01/CP-02: the price is the biggest thing on the estimate, labelled.
             VStack(alignment: .leading, spacing: 2) {
                 Text("Total").font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
-                Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: action.currency))
+                Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: selectedOption?.currency ?? action.currency))
                     .moneyStyle(.hero).foregroundStyle(Theme.foreground)
+                    .accessibilityIdentifier("public-estimate-total")
             }
             .padding(.top, 6)
             .accessibilityElement(children: .combine)
@@ -188,7 +194,7 @@ struct PublicEstimateActionView: View {
                                     .font(Theme.customerFont(15)).monospacedDigit().foregroundStyle(Theme.muted)
                             }
                             Spacer(minLength: 8)
-                            Text(money(line.quantity * line.unitPrice, currency: action.currency))
+                            Text(action.currency == "USD" ? (PublicEstimateMoney.lineTotal(quantity: line.quantity, unitPrice: line.unitPrice).map { PublicEstimateMoney.format(cents: $0) } ?? "Amount unavailable") : "Amount unavailable")
                                 .moneyStyle(.row).foregroundStyle(Theme.foreground)
                         }
                         .padding(.vertical, 12)
@@ -398,8 +404,10 @@ struct PublicEstimateActionView: View {
     private func loadFailureState(_ message: String) -> some View {
         CustomerStateMessage(symbol: (model.loadFailure.map { ProblemKind($0) } ?? .other).symbol,
                              title: "We couldn’t open this estimate",
-                             message: model.loadFailure?.customerSentence(.openEstimate, handBack: false)
-                                ?? "Opening your estimate didn’t work. Try again in a moment.",
+                             message: model.loadFailure is DecodingError || (model.loadFailure as? Problem)?.title == "Invalid API response"
+                                ? "We couldn’t verify this estimate. Ask the company for an updated estimate."
+                                : (model.loadFailure?.customerSentence(.openEstimate, handBack: false)
+                                    ?? "Opening your estimate didn’t work. Try again in a moment."),
                              actionTitle: "Try again") { Task { await model.load(api: api, token: token) } }
             .disabled(model.isLoading)
     }
@@ -410,6 +418,7 @@ struct PublicEstimateActionView: View {
 
     private func approvalTitle(_ action: PublicEstimateAction) -> String {
         if model.isSubmitting { return "Saving approval…" }
+        if !action.amountsAvailableForApproval { return "Amount unavailable" }
         if action.signingOffered, let options = action.options, !options.isEmpty, selectedOption == nil {
             return "Choose an option to approve"
         }
@@ -418,7 +427,7 @@ struct PublicEstimateActionView: View {
     }
 
     private func approve() {
-        guard let action = model.action, let nonce = action.nonce else { return }
+        guard approvalEnabled, let action = model.action, let nonce = action.nonce else { return }
         focusedField = nil
         let decision: PublicEstimateActionDecision
         if action.signingOffered, let consentVersion = action.consentVersion {
@@ -506,11 +515,7 @@ private struct IssuedEstimatePreview: UIViewRepresentable {
 }
 
 private func money(_ amount: Double, currency: String) -> String {
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.currencyCode = currency
-    formatter.maximumFractionDigits = 2
-    return formatter.string(from: NSNumber(value: amount)) ?? "\(currency) \(amount)"
+    PublicEstimateMoney.format(amount, currency: currency) ?? "Amount unavailable"
 }
 
 private func quantity(_ amount: Double) -> String {

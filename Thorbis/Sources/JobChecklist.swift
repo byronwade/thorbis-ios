@@ -235,7 +235,9 @@ struct JobChecklistSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let reading = item.reading {
                     HStack(spacing: 6) {
-                        TextField(reading.prompt, text: readingBinding(item), prompt: .placeholder(reading.prompt))
+                        // An empty reading shows a dash: the label above names it, and a sample number
+                        // could pass for a reading that was taken.
+                        TextField(reading.prompt, text: readingBinding(item), prompt: .placeholder("\u{2014}"))
                             .font(Theme.font(15, weight: .medium)).monospacedDigit()
                             .keyboardType(.numbersAndPunctuation)
                             .focused($focused, equals: item.id)

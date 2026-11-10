@@ -55,8 +55,13 @@ struct JobDetailView: View {
     @State private var selectedInvoiceID: String?
     @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
     @State private var loadedInvoiceModelID: String?
-    @State private var showCollectPayment = false
+    @State private var invoicePaymentLoads = JobInvoicePaymentLoads()
+    @State private var paymentRoute: JobInvoicePaymentRoute?
     @State private var activityFilter = "All"
+    @State private var activityFilterBeforePhotos = "All"
+    #if DEBUG
+    @State private var previewPaymentRevalidated = false
+    #endif
     @State private var showSchedule = false
     private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
@@ -127,12 +132,28 @@ struct JobDetailView: View {
     /// Set once the stop card's Customer view has opened, so coming back never opens it again.
     @State private var openedCustomerViewOnArrival = false
     @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    /// Overview for the visit, Money for its estimates and invoices, Activity for notes, status and photos.
-    private let tabs = ["Overview", "Money", "Activity"]
+    /// Photos reuse Activity's job-scoped media view, but have their own direct section.
+    private let tabs = ["Overview", "Money", "Activity", "Photos"]
     private let activityFilters = ["All", "Notes", "Status", "Estimates", "Photos"]
     private var showsPhotos: Bool { selectedTab == "Activity" && activityFilter == "Photos" }
+
+    /// Retire a mounted sheet on material authority or job changes. A routine
+    /// authority revision alone does not discard a technician's entered amount.
+    /// This token does not establish fresh per-invoice authorization.
+    private var paymentAuthorityToken: [String] {
+        [session.generation.uuidString,
+         session.user?.id ?? "", session.activeOrganization?.id ?? "", String(session.policyVersion ?? 0),
+         session.authorityGeneration ?? "",
+         api.requestGeneration.uuidString, api.savedCopyScopeRevision.uuidString,
+         api.savedCopyScope ?? "", api.normalizedOrigin ?? "", job?.id ?? "",
+         job?.organizationId ?? "", job?.customerId ?? "",
+         String(session.can("job.view", feature: "jobs")),
+         String(session.can("invoice.view", feature: "invoicing")),
+         String(session.can("invoice.payment.create", feature: "payments"))]
+    }
 
     private var liveActivityKey: String {
         guard let job else { return "" }
@@ -188,7 +209,7 @@ struct JobDetailView: View {
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
-                            case "Money": moneyContent(job)
+                            case "Money": moneyContent(job, proxy: proxy)
                             case "Activity": activityContent(job)
                             default: overviewContent(job)
                             }
@@ -198,13 +219,19 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card) }
+                        // Inset 1pt so the pinned tabs never cut the sheet's rim.
+                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card.padding(.horizontal, 1)) }
                     }
                     }
                     }
+                    // Each section gets a scroll view of its own, starting at the top. Kept at the old
+                    // offset, a section shorter than where the page was scrolled to (Money opened from
+                    // Due on site far down Overview) had the lazy stack measure its content short, then
+                    // long, then short again every frame, never settling (the app hung). A scrollTo
+                    // from there did not help: the offset never moved.
+                    .id(selectedTab)
                     // A section opened while the tabs are pinned (the pinned tabs, or Due on site, Open
-                    // and See all far down the page) starts at its top. Left at the old offset, the
-                    // shorter section had the scroll view re-adjusting its offset every frame (a hang).
+                    // and See all far down the page) starts at its top, with the tabs still pinned.
                     .onChange(of: selectedTab) {
                         guard tabsPinned else { return }
                         proxy.scrollTo("job-sections", anchor: .top)
@@ -251,6 +278,12 @@ struct JobDetailView: View {
                 .accessibilityLabel("Loading job")
                 Spacer(minLength: 0)
             }
+            // The Money action is a sibling of the scroll view, so document
+            // controls cannot draw or receive taps underneath the payment bar.
+            if job != nil, selectedTab == "Money", !typeSize.isAccessibilitySize {
+                primaryAction.environment(\.thorbisSheetCanvas, true)
+                    .padding(.horizontal, 1)
+            }
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
@@ -281,11 +314,11 @@ struct JobDetailView: View {
             }
         } }
         .thorbisDestination(item: $documentInvoiceID) { id in
-            InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) })
+            InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $reviewInvoiceID) { id in
-            InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) })
+            InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
         }
         .thorbisDestination(item: $openEstimate) { opened in
@@ -332,7 +365,7 @@ struct JobDetailView: View {
             if let id = createdEstimateID { createdEstimateID = nil; openEstimate = OpenedEstimate(id: id, present: false) }
         }) { SheetSurface {
             if let job {
-                NewEstimateView(customerID: job.customerId, jobID: job.id, title: job.title) { estimate in
+                NewEstimateView(customerID: job.customerId, jobID: job.id, locationID: job.locationId, title: job.title) { estimate in
                     createdEstimateID = estimate.id
                     Task { await loadJobEstimates(job) }
                 }
@@ -364,6 +397,7 @@ struct JobDetailView: View {
                 selectedInvoiceID = nil
                 invoicePaymentModel = nil
                 loadedInvoiceModelID = nil
+                paymentRoute = nil
             }
             await load()
             // The next step needs the job's paper, so it loads with the job, not only on its tab.
@@ -421,6 +455,7 @@ struct JobDetailView: View {
             contactsLoaded = false
             contactsFailed = false
         }
+        .onChange(of: paymentAuthorityToken) { _, _ in paymentRoute = nil }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
@@ -434,7 +469,8 @@ struct JobDetailView: View {
                 Task { await loadMediaCount(); await loadCloseout() }
             }
         }
-        .onChange(of: activityFilter) { previous, _ in
+        .onChange(of: activityFilter) { previous, current in
+            if current == "Photos", previous != "Photos" { activityFilterBeforePhotos = previous }
             if previous == "Photos" { Task { await loadMediaCount() } }
         }
         .onChange(of: selectedInvoiceID) { _, selectedID in
@@ -442,6 +478,7 @@ struct JobDetailView: View {
             Task { await loadInvoicePayments(for: invoice) }
         }
         .safeAreaInset(edge: .bottom) {
+            Group {
             if job != nil, selectedTab == "Activity", !showsPhotos, session.can("job.note", feature: "jobs") {
                 // JobActivity.dc.html: the composer stays at the bottom, quick notes above it.
                 // Its ground runs past the home indicator to the screen's edge, so no timeline
@@ -450,7 +487,11 @@ struct JobDetailView: View {
                     .background(alignment: .top) {
                         Theme.card.padding(.bottom, -120).ignoresSafeArea()
                     }
-            } else if !typeSize.isAccessibilitySize { primaryAction.environment(\.thorbisSheetCanvas, true) }
+            } else if !typeSize.isAccessibilitySize, selectedTab != "Money" { primaryAction.environment(\.thorbisSheetCanvas, true) }
+            }
+            // 1pt in from each side, so every bar (Overview, Money, Activity's composer) sits inside
+            // the job's sheet and the sheet's rim runs on to the bottom edge.
+            .padding(.horizontal, 1)
         }
         .sheet(isPresented: $showPause) { SheetSurface {
             // v2 modal: two sunk fields, one ink commit in the sheet's pad. The commit is never
@@ -478,13 +519,46 @@ struct JobDetailView: View {
             }
         } }
         // A payment changes the balance the next step reads, wherever it was collected from.
-        .sheet(isPresented: $showCollectPayment, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) {
-            if let invoice = selectedInvoice, let model = invoicePaymentModel {
-                InvoicePaymentCollectionSheet(model: model, invoice: model.invoice ?? invoice)
-                    .thorbisSheetSurface()
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
+        .sheet(item: $paymentRoute, onDismiss: { Task { await loadInvoices(); await loadCloseout() } }) { route in
+            paymentSheet(route)
+        }
+    }
+
+    @ViewBuilder private func paymentSheet(_ route: JobInvoicePaymentRoute) -> some View {
+        if route.authorityToken == paymentAuthorityToken,
+           let job, let scope = scope(for: job), route.belongs(to: scope),
+           session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
+           session.can("invoice.payment.create", feature: "payments") {
+            InvoicePaymentCollectionSheet(model: route.model, invoice: route.invoice, invoiceReference: route.reference)
+                .thorbisSheetSurface().presentationDetents([.large]).presentationDragIndicator(.visible)
+                #if DEBUG
+                .overlay(alignment: .topLeading) {
+                    if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revalidate") {
+                        Button(previewPaymentRevalidated ? "Preview revalidated" : "Preview revalidate") {
+                            Task {
+                                let previous = session.authorityRevision
+                                if ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-revoke") {
+                                    PaperPreviewProtocol.revokePaymentPermission()
+                                }
+                                await session.revalidate()
+                                previewPaymentRevalidated = session.authorityRevision != previous
+                            }
+                        }
+                        .accessibilityIdentifier(previewPaymentRevalidated ? "preview-payment-revalidated" : "preview-payment-revalidate")
+                    }
+                }
+                #endif
+                #if DEBUG
+                .task {
+                    guard PaperPreview.enabled,
+                          ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-scope-aba") else { return }
+                    try? await Task.sleep(for: .seconds(2))
+                    guard !Task.isCancelled else { return }
+                    let original = api.savedCopyScope
+                    api.savedCopyScope = (original ?? "preview") + "-other"
+                    api.savedCopyScope = original
+                }
+                #endif
         }
     }
 
@@ -502,6 +576,9 @@ struct JobDetailView: View {
             }
         }
         if let job {
+            ThorbisToolbarItem(placement: .topBarTrailing) {
+                FavoriteRecordButton(kind: .job, id: job.id, organizationID: job.organizationId)
+            }
             ThorbisToolbarItem(placement: .topBarTrailing) {
                 // One quiet circle (Job.dc.html): Share job sits in the menu with the rest, so it is always there.
                 ThorbisMenu(items: menuGroups(job).flatMap { $0 }.map { menuActionItem($0, job: job) } + [
@@ -653,17 +730,18 @@ struct JobDetailView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("job-title")
             if let subtitle = headerSubtitle(job) {
-                Text(subtitle)
+                Text(headerLines(subtitle))
                     .font(Theme.font(15))
                     .foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
             }
-            Text(metaLine(job))
+            metaLines(metaParts(job))
                 .font(Theme.font(13)).monospacedDigit()
                 .foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(metaParts(job).joined(separator: ", "))
                 .accessibilityIdentifier("job-number")
                 // A long press copies the full ID (also in •••).
                 .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
@@ -694,7 +772,7 @@ struct JobDetailView: View {
     }
 
     /// "10:30 a.m. · Ramon M. · JOB-2214 · Member 15% off": when, who, the job number, membership.
-    private func metaLine(_ job: JobRecord) -> String {
+    private func metaParts(_ job: JobRecord) -> [String] {
         let arrived = isOnSite && outbox.pendingStatus(for: job.id) == nil ? JobFiltering.date(job.arrivedAt) : nil
         var parts: [String] = []
         if let arrived {
@@ -713,7 +791,31 @@ struct JobDetailView: View {
         if let memberPricing, memberPricing.isMember {
             parts.append(memberPricing.discountPercent > 0 ? "Member \(memberPricing.discountPercent)% off" : "Member")
         }
-        return parts.joined(separator: " · ")
+        return parts
+    }
+
+    /// One line when it fits; else when · who over number · membership; else a part per line,
+    /// so a "·" never ends a wrapped line.
+    @ViewBuilder private func metaLines(_ parts: [String]) -> some View {
+        let all = parts.joined(separator: " · ")
+        let one = Text(all).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+        let each = VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(parts.enumerated()), id: \.offset) { Text($0.element).fixedSize(horizontal: false, vertical: true) }
+        }
+        if typeSize.isAccessibilitySize {
+            each
+        } else if parts.count > 2 {
+            ViewThatFits(in: .horizontal) {
+                one
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(parts.prefix(2).joined(separator: " · ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Text(parts.dropFirst(2).joined(separator: " · ")).lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
+                each
+            }
+        } else {
+            ViewThatFits(in: .horizontal) { one; each }
+        }
     }
 
     /// Where this job sits, for the bar: "Today · Stop 3 of 6" on the person's day, else when it is.
@@ -725,6 +827,11 @@ struct JobDetailView: View {
         let stops = TodayStopOrder.ordered(visits) { outbox.pendingStatus(for: $0.id) ?? $0.status }
         guard let at = stops.firstIndex(where: { $0.id == job.id }) else { return "Today" }
         return "Today · Stop \(at + 1) of \(stops.count)"
+    }
+
+    /// At accessibility sizes each " · " part gets its own line, so a "·" never ends a wrapped line.
+    private func headerLines(_ text: String) -> String {
+        typeSize.isAccessibilitySize ? text.replacingOccurrences(of: " \u{00B7} ", with: "\n") : text
     }
 
     /// The problem and who it is for, under the street.
@@ -789,7 +896,7 @@ struct JobDetailView: View {
             .disabled(reach.call == nil)
             .accessibilityLabel("Call \(store.customerName(job.customerId))")
             .accessibilityIdentifier("job-call")
-            Button { if let text = reach.text { openURL(text) } } label: {
+            Button { if let text = reach.text { inboxText(text, name: store.customerName(job.customerId), openURL: openURL) } } label: {
                 RimmedButtonLabel(title: "Text", symbol: "message", enabled: reach.text != nil)
             }
             .buttonStyle(PressStyle())
@@ -941,6 +1048,7 @@ struct JobDetailView: View {
         case "Money":
             guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
             return "Money · \(jobShortMoney(balance, currency: "USD"))"
+        case "Photos": return "Photos"
         default:
             let count = activityCount(job)
             return count > 0 ? "Activity · \(count)" : "Activity"
@@ -959,15 +1067,27 @@ struct JobDetailView: View {
         }
     }
 
-    /// The job's three sections as Linear text tabs; a menu at accessibility sizes.
+    private var shownJobSection: String { showsPhotos ? "Photos" : selectedTab }
+
+    private func selectJobSection(_ section: String) {
+        if section == "Photos" {
+            if activityFilter != "Photos" { activityFilterBeforePhotos = activityFilter }
+            openPhotos()
+        } else {
+            if section == "Activity", activityFilter == "Photos" { activityFilter = activityFilterBeforePhotos }
+            withMotion(.snappy) { selectedTab = section }
+        }
+    }
+
+    /// Job sections as Linear text tabs; a menu at accessibility sizes.
     private func tabBar(_ job: JobRecord) -> some View {
         Group {
             if typeSize.isAccessibilitySize {
                 ThorbisMenu(items: tabs.map { tab in
-                    ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == selectedTab) { selectedTab = tab }
-                }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(selectedTab, job: job))") {
+                    ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == shownJobSection) { selectJobSection(tab) }
+                }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(shownJobSection, job: job))") {
                     HStack(spacing: 12) {
-                        Text(sectionLabel(selectedTab, job: job)).font(Theme.font(15, weight: .medium))
+                        Text(sectionLabel(shownJobSection, job: job)).font(Theme.font(15, weight: .medium))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.up.chevron.down")
@@ -983,7 +1103,7 @@ struct JobDetailView: View {
                 .accessibilityIdentifier("job-section-chooser")
             } else {
                 JobSectionControl(options: tabs.map { ($0, sectionLabel($0, job: job), spokenSectionLabel($0, job: job)) },
-                                  selection: $selectedTab)
+                                  selection: Binding(get: { shownJobSection }, set: { selectJobSection($0) }))
                     .padding(.horizontal, Theme.gutter - 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -1156,7 +1276,10 @@ struct JobDetailView: View {
         if let invoice = selectedInvoice, invoice.status == "draft", session.can("invoice.view", feature: "invoicing") {
             PaperActionBar(title: "Review and send invoice", symbol: "paperplane") { reviewInvoiceID = invoice.id }
         } else if moneyBarCollects, let model = invoicePaymentModel {
-            PaperInvoiceCollectionFooter(model: model) { showCollectPayment = true }
+            PaperInvoiceCollectionFooter(model: model,
+                invoiceReference: invoices.count > 1 ? selectedInvoice.map { jobInvoiceReference($0.id) } : nil) {
+                    if let id = selectedInvoice?.id { presentPayment(for: id) }
+                }
         } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
             PaperActionBar(title: "Show customer", symbol: "iphone") { openCustomerView(.estimates) }
                 .accessibilityIdentifier("job-customer-view-bar")
@@ -1208,6 +1331,8 @@ struct JobDetailView: View {
                                           visits: visits, visitsLoaded: visitsLoaded)
             }
             followUpsPanel
+            // Web parity: whether the booking and on-the-way notices reached the customer.
+            JobNoticesSection(jobID: job.id)
             // JS-05: only when the platform recorded the call that booked this job.
             if let bookingCall { JobBookingCallSection(call: bookingCall) }
             if session.can("customer.view", feature: "core_crm") {
@@ -1431,7 +1556,7 @@ struct JobDetailView: View {
                     let due = TechJobFlow.due(invoice)
                     let (word, tint) = invoiceWord(invoice, due: due)
                     let amount = invoice.status == "issued" ? due : paperLinesTotal(invoice.lines)
-                    moneyLine("Invoice INV-\(invoice.id.suffix(4).uppercased())",
+                    moneyLine("Invoice \(jobInvoiceReference(invoice.id))",
                               amount: amount.map { jobShortMoney($0, currency: invoice.currency) }, word: word, tint: tint)
                 }
                 if estimates.isEmpty && bills.isEmpty {
@@ -1441,11 +1566,24 @@ struct JobDetailView: View {
                 if let balance = invoiceBalanceCents, balance > 0 {
                     // What is owed now, in the type colour; it opens Money.
                     Button { withMotion(.snappy) { selectedTab = "Money" } } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                            Spacer(minLength: 8)
-                            Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
-                                .foregroundStyle(Theme.foreground)
+                        let amount = Text(jobShortMoney(balance, currency: "USD")).font(Theme.monoFont(15, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Group {
+                            if typeSize.isAccessibilitySize {
+                                // The amount reads under the label, as in `moneyLine`: side by side it
+                                // broke mid-number ("$340.0" over "0").
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    amount
+                                }
+                            } else {
+                                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                                    Text("Due on site").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    Spacer(minLength: 8)
+                                    amount
+                                }
+                            }
                         }
                         .padding(.horizontal, 16).padding(.vertical, 11)
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -1482,21 +1620,18 @@ struct JobDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// The estimate's word and mark as its own page and the lists show them (`DocumentStatus`).
     private func estimateWord(_ status: String) -> (String, StatusTone) {
-        switch status {
-        case "approved": ("Approved", .done)
-        case "sent": ("Sent", .dispatched)
-        case "declined": ("Declined", .attention)
-        default: (status.statusLabel, .unscheduled)
-        }
+        let document = DocumentStatus(estimateStatus: status)
+        return (document.word, document.tone)
     }
 
+    /// The invoice's word and mark as its own page and the lists show them; an issued invoice with
+    /// nothing left to collect still reads "Issued".
     private func invoiceWord(_ invoice: InvoiceRecord, due: Int?) -> (String, StatusTone) {
-        switch invoice.status {
-        case "issued": (due ?? 0) > 0 ? ("Unpaid", .inProgress) : ("Issued", .unscheduled)
-        case "paid": ("Paid", .done)
-        default: (invoice.status.statusLabel, .unscheduled)
-        }
+        if invoice.status == "issued", invoice.amountPaid == 0, (due ?? 0) <= 0 { return ("Issued", .unscheduled) }
+        let document = DocumentStatus(invoice: invoice)
+        return (document.word, document.tone)
     }
 
     /// Open follow-ups, waiting on the office; Open goes to the follow-ups screen.
@@ -1698,7 +1833,7 @@ struct JobDetailView: View {
         JobPanel(dividers: false) {
         VStack(alignment: .leading, spacing: 0) {
             // The visit's time and the job number are said once, in the header (chip and eyebrow).
-            DisclosureGroup("More job details") {
+            DisclosureGroup {
                 if let created = JobFiltering.date(job.createdAt) {
                     PaperDetailRow("Booked", value: created.formatted(.dateTime.month(.abbreviated).day().year()))
                 }
@@ -1710,10 +1845,14 @@ struct JobDetailView: View {
                         }
                     }
                 }
+            } label: {
+                // The whole row toggles, 44pt tall; the bare title was a 25pt target.
+                Text("More job details")
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .font(Theme.font(15, weight: .medium))
             .tint(Theme.foreground)
-            .frame(minHeight: 44)
         }
         .padding(.horizontal, 16).padding(.vertical, 4)
         }
@@ -1721,11 +1860,37 @@ struct JobDetailView: View {
 
     /// Money: the job's estimates, then its invoices. Each paper shows its own amount once; what's
     /// owed across them is on Overview and in the bar, never repeated in a header.
-    private func moneyContent(_ job: JobRecord) -> some View {
+    private func moneyContent(_ job: JobRecord, proxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            estimatesContent(job)
-            invoiceContent(job)
+            if session.can("estimate.view", feature: "estimates") && session.can("invoice.view", feature: "invoicing") {
+                FlowRow(spacing: 8, lineSpacing: 8) {
+                    moneyJump("Estimates", id: "job-money-estimates", proxy: proxy)
+                    moneyJump("Invoices", id: "job-money-invoices", proxy: proxy)
+                }
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear.frame(height: 1).id("job-money-estimates")
+                estimatesContent(job)
+            }
+            VStack(alignment: .leading, spacing: 0) {
+                Color.clear.frame(height: 1).id("job-money-invoices")
+                invoiceContent(job)
+            }
         }
+    }
+
+    private func moneyJump(_ title: String, id: String, proxy: ScrollViewProxy) -> some View {
+        Button { proxy.scrollTo(id, anchor: .center) } label: {
+            Text(title).font(Theme.font(15, weight: .medium))
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .background(Theme.fill, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityHint("Jump to \(title.lowercased()) on this job")
+        .accessibilityIdentifier("job-money-jump-\(title.lowercased())")
     }
 
     /// Every estimate has its own paper and price; the footer builds another on this job.
@@ -1746,10 +1911,10 @@ struct JobDetailView: View {
                                     message: "Build one from the price book.")
                 }
                 if !jobEstimates.isEmpty || !unavailable.isEmpty {
-                    JobPanel {
+                    VStack(alignment: .leading, spacing: 10) {
                         ForEach(jobEstimates) { estimate in
                             NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId).thorbisBackButton() } label: {
-                                JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true).onWell()
+                                JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true).asJobEstimateCard()
                             }
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("job-estimate-\(estimate.id)")
@@ -1757,7 +1922,7 @@ struct JobDetailView: View {
                         }
                         ForEach(unavailable, id: \.self) { id in
                             JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
-                                           status: "unavailable", amount: nil, fresh: false).onWell()
+                                           status: "unavailable", amount: nil, fresh: false).asJobEstimateCard()
                                 // A container keeps the id on the card itself; without one it lands on each text.
                                 .accessibilityElement(children: .contain)
                                 .accessibilityIdentifier("job-estimate-unavailable-\(id)")
@@ -1840,6 +2005,14 @@ struct JobDetailView: View {
 
     private func invoiceContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 15) {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") {
+                Text("Create requests: \(PaperPreviewProtocol.sampleCompletionCreates)")
+                    .accessibilityIdentifier("preview-create-invoice-count")
+                Text(creatingInvoice ? "Pending" : "Finished")
+                    .accessibilityIdentifier("preview-create-invoice-state")
+            }
+            #endif
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
             } else if !invoicesLoaded {
@@ -1850,12 +2023,13 @@ struct JobDetailView: View {
                     if session.can("invoice.create", feature: "invoicing") || (job.estimateId != nil && session.can("invoice.create", feature: "progress_billing")) {
                         JobPanel {
                             if session.can("invoice.create", feature: "invoicing") {
-                                Button { Task { await createInvoice() } } label: {
+                                Button { run(.createInvoice) } label: {
                                     PaperMenuRow(creatingInvoice ? "Creating…" : "Create invoice", symbol: "doc.plaintext",
                                                  subtitle: "Lines come from the approved estimate; edit them before sending")
                                         .padding(.horizontal, 16)
                                 }
                                 .buttonStyle(RowPressStyle())
+                                .accessibilityIdentifier("job-create-invoice")
                                 .disabled(creatingInvoice)
                             }
                             if job.estimateId != nil, session.can("invoice.create", feature: "progress_billing") {
@@ -1880,22 +2054,40 @@ struct JobDetailView: View {
                                 selectedInvoiceID = invoice.id
                                 documentInvoiceID = invoice.id
                             } label: {
-                                JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true).onWell()
+                                JobDocumentRow(invoice: invoice, fresh: invoiceRead?.freshIDs.contains(invoice.id) == true,
+                                               invoiceReference: jobInvoiceReference(invoice.id)).onWell()
                             }
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("job-invoice-\(invoice.id)")
                             .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
-                            // What the invoice is for: each line, its quantity and amount, two
-                            // decimals, tabular (design.thorbis.com "Money is two decimals").
+                            if let scope = scope(for: job),
+                               let step = JobInvoiceDirectPayment.step(invoice: invoice, scope: scope,
+                                   freshIDs: invoiceRead?.freshIDs ?? [],
+                                   canCollect: session.can("invoice.payment.create", feature: "payments")) {
+                                Button { run(step) } label: {
+                                    Label("Collect payment", systemImage: "creditcard")
+                                        .font(Theme.font(15, weight: .medium))
+                                        .frame(minHeight: 44)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 16)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(RowPressStyle())
+                                .accessibilityLabel("Collect payment for invoice \(jobInvoiceReference(invoice.id))")
+                                .accessibilityIdentifier("job-invoice-collect-\(invoice.id)")
+                            }
                             if !invoice.lines.isEmpty, invoiceRead?.freshIDs.contains(invoice.id) == true {
-                                JobInvoiceLineRows(lines: invoice.lines, currency: invoice.currency)
-                                    .padding(.bottom, 6)
+                                JobInvoiceItemsDisclosure(invoice: invoice, reference: jobInvoiceReference(invoice.id))
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    private func jobInvoiceReference(_ id: String) -> String {
+        JobInvoiceReferences.reference(for: id, among: invoices.map(\.id))
     }
 
     private var selectedInvoice: InvoiceRecord? {
@@ -2059,17 +2251,27 @@ struct JobDetailView: View {
     /// JobActivity.dc.html: quick notes, then the field with the mic and a camera circle. Send
     /// takes the camera's place once there is something to save.
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        // At accessibility sizes the bar stays a strip under the timeline (it took a third of the
+        // phone): the chips stop growing at the first accessibility size and still scroll in one
+        // row, the field at the second, starting at one line and growing to three, with less air.
+        let roomy = !typeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: roomy ? 8 : 4) {
             QuickNotesRow { phrase in note = NoteDraftText.joined(note, phrase) }
                 .disabled(dictation.isListening)
                 .padding(.horizontal, Theme.gutter)
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             HStack(alignment: .bottom, spacing: 8) {
                 TextField(dictation.isListening ? "Listening…" : "Add a note", text: $note, prompt: .placeholder(dictation.isListening ? "Listening…" : "Add a note"), axis: .vertical)
                     .font(Theme.font(16))
-                    .lineLimit(1...6)
+                    .lineLimit(roomy ? 1...6 : 1...3)
                     .focused($noteFocused)
-                    .padding(.horizontal, 16).padding(.vertical, 12)
-                    .panelBackground(cornerRadius: 23)
+                    .padding(.horizontal, 16).padding(.vertical, roomy ? 12 : 6)
+                    .frame(minHeight: 44)
+                    // The sunk field and its 1px rim: the panel ground matched the bar's, so the
+                    // field had no edge in light or dark.
+                    .background(Theme.field, in: RoundedRectangle(cornerRadius: 23, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous).strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false))
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("job-note-field")
                 DictateNoteButton(isListening: dictation.isListening) {
                     if dictation.isListening { dictation.stop(); return }
@@ -2112,7 +2314,7 @@ struct JobDetailView: View {
                 .padding(.horizontal, Theme.gutter)
             }
         }
-        .padding(.top, 10).padding(.bottom, 8)
+        .padding(.top, roomy ? 10 : 4).padding(.bottom, roomy ? 8 : 4)
     }
 
     private var canSaveNote: Bool {
@@ -2313,11 +2515,13 @@ struct JobDetailView: View {
         let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
         let originalScope = model.scope, actorID = session.user?.id
-        let generation = session.generation, apiGeneration = api.requestGeneration, origin = api.normalizedOrigin
+        let generation = session.generation, apiGeneration = api.requestGeneration,
+            copyRevision = api.savedCopyScopeRevision, origin = api.normalizedOrigin
         let current: @MainActor () -> Bool = { [weak api, weak session] in
             guard let api, let session else { return false }
             return session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
-                session.generation == generation && api.requestGeneration == apiGeneration && api.normalizedOrigin == origin &&
+                session.generation == generation && api.requestGeneration == apiGeneration &&
+                api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
                 session.can("job.view", feature: "jobs")
         }
         estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
@@ -2325,6 +2529,7 @@ struct JobDetailView: View {
             guard current() else { return }
             // The customer may have changed a phone, an email or a contact in their own hands.
             await loadContacts(job)
+            guard current() else { return }
             if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
             await finishCustomerDocuments()
         }
@@ -2344,15 +2549,29 @@ struct JobDetailView: View {
         case .createInvoice:
             Task {
                 // TF-08: one tap makes the invoice from the approved work and opens it for review.
-                if let invoice = await createInvoice() { reviewInvoiceID = invoice.id }
+                if let invoice = await createInvoice(), session.can("invoice.view", feature: "invoicing"),
+                   let job, let scope = scope(for: job), scope.contains(invoice) {
+                    reviewInvoiceID = invoice.id
+                }
             }
         case .reviewInvoice(let id): reviewInvoiceID = id
         case .collect(let invoiceID, _, _):
             Task {
+                let generation = session.generation
+                let authority = session.authorityRevision
+                let apiGeneration = api.requestGeneration
+                let copyRevision = api.savedCopyScopeRevision
+                let origin = api.normalizedOrigin
+                guard let job, let expectedScope = scope(for: job) else { return }
                 selectedInvoiceID = invoiceID
-                if let invoice = invoices.first(where: { $0.id == invoiceID }) { await loadInvoicePayments(for: invoice) }
-                if invoicePaymentModel?.canRecordPayment == true { showCollectPayment = true }
-                else { withMotion(.snappy) { selectedTab = "Money" } }
+                if let invoice = invoices.first(where: { $0.id == invoiceID && expectedScope.contains($0) }) {
+                    await loadInvoicePayments(for: invoice)
+                }
+                guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
+                      api.requestGeneration == apiGeneration, api.normalizedOrigin == origin,
+                      api.savedCopyScopeRevision == copyRevision,
+                      let currentJob = self.job, scope(for: currentJob) == expectedScope else { return }
+                if !presentPayment(for: invoiceID) { withMotion(.snappy) { selectedTab = "Money" } }
             }
         case .wrapUp: showWrapUp = true
         }
@@ -2431,24 +2650,71 @@ struct JobDetailView: View {
         creatingInvoice = true
         defer { creatingInvoice = false }
         let generation = session.generation
+        let authority = session.authorityRevision
+        let actorID = session.user?.id
+        let apiGeneration = api.requestGeneration
+        let copyRevision = api.savedCopyScopeRevision
+        let origin = api.normalizedOrigin
+        let current: @MainActor () -> Bool = {
+            !Task.isCancelled && session.user?.id == actorID && session.generation == generation &&
+                session.authorityRevision == authority && api.requestGeneration == apiGeneration &&
+                api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
+                session.activeOrganization?.id == scope.organizationID &&
+                session.can("job.view", feature: "jobs") && session.can("invoice.create", feature: "invoicing") &&
+                self.job.map { self.scope(for: $0) == scope } == true
+        }
+        let reportUncertain: @MainActor () -> Void = {
+            guard !Task.isCancelled, let actorID, session.user?.id == actorID,
+                  session.activeOrganization?.id == scope.organizationID,
+                  JobInvoiceRecoveryContext.matches(origin: origin, savedCopyRevision: copyRevision,
+                      currentOrigin: api.normalizedOrigin, currentSavedCopyRevision: api.savedCopyScopeRevision),
+                  session.can("job.view", feature: "jobs"),
+                  self.job.map({ self.scope(for: $0) == scope }) == true else { return }
+            self.error = "Invoice may have been created. Refresh this job to check."
+        }
         do {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invalidate-post") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(300))
+                    api.invalidateRequests()
+                }
+            }
+            #endif
             let invoice = try await api.ensureFieldCompletionInvoice(jobId)
-            guard session.generation == generation, session.activeOrganization?.id == scope.organizationID else { return nil }
+            guard current() else { reportUncertain(); return nil }
             guard scope.contains(invoice) else {
                 throw Problem(title: "Invoice could not be verified for this job", status: nil, detail: nil)
             }
             JobInvoiceMemory.remember(invoice.id, jobID: jobId)
             selectedInvoiceID = invoice.id
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invalidate-refresh") {
+                api.invalidateRequests()
+            }
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-revoke-view") {
+                PaperPreviewProtocol.revokeInvoiceViewForCreate()
+                await session.revalidate()
+            }
+            #endif
             await loadInvoices()
+            guard current() else { reportUncertain(); return nil }
             committed += 1
             return invoice
-        } catch is CancellationError { return nil } catch { self.error = error.localizedDescription; return nil }
+        } catch is CancellationError { reportUncertain(); return nil } catch {
+            if current() { self.error = error.localizedDescription } else { reportUncertain() }
+            return nil
+        }
     }
 
     private func finishCustomerDocuments() async {
         let requestedID = customerPaymentInvoiceID
         customerPaymentInvoiceID = nil
         let generation = session.generation
+        let authority = session.authorityRevision
+        let apiGeneration = api.requestGeneration
+        let copyRevision = api.savedCopyScopeRevision
+        let origin = api.normalizedOrigin
         if let job { await loadJobEstimates(job) }
         await loadInvoices()
         guard session.generation == generation, let requestedID,
@@ -2457,11 +2723,27 @@ struct JobDetailView: View {
               let invoice = invoices.first(where: { $0.id == requestedID }) else { return }
         selectedInvoiceID = requestedID
         await loadInvoicePayments(for: invoice)
-        guard session.generation == generation, loadedInvoiceModelID == requestedID,
-              let actual = invoicePaymentModel?.invoice, actual.id == requestedID,
-              let job, scope(for: job)?.contains(actual) == true,
-              invoicePaymentModel?.canRecordPayment == true else { return }
-        showCollectPayment = true
+        guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
+              api.requestGeneration == apiGeneration, api.savedCopyScopeRevision == copyRevision,
+              api.normalizedOrigin == origin else { return }
+        presentPayment(for: requestedID)
+    }
+
+    /// Revalidates the current selection at the transition, then fixes the
+    /// invoice and model together for the lifetime of the payment sheet.
+    @discardableResult private func presentPayment(for requestedID: String) -> Bool {
+        guard session.can("job.view", feature: "jobs"),
+              session.can("invoice.view", feature: "invoicing"),
+              session.can("invoice.payment.create", feature: "payments"),
+              let job, let scope = scope(for: job), invoiceRead?.scope == scope,
+              invoiceRead?.freshIDs.contains(requestedID) == true,
+              let route = JobInvoicePaymentRoute.make(requestedID: requestedID, selectedID: selectedInvoiceID,
+                                                       selected: selectedInvoice, loadedID: loadedInvoiceModelID,
+                                                       model: invoicePaymentModel, scope: scope,
+                                                       authorityToken: paymentAuthorityToken,
+                                                       reference: jobInvoiceReference(requestedID)) else { return false }
+        paymentRoute = route
+        return true
     }
 
     private func loadInvoicePayments(for invoice: InvoiceRecord) async {
@@ -2473,7 +2755,7 @@ struct JobDetailView: View {
             invoicePaymentModel?.outbox = outbox
             invoicePaymentModel?.policyVersion = session.policyVersion ?? 0
         }
-        await invoicePaymentModel?.load()
+        if let model = invoicePaymentModel { await invoicePaymentLoads.load(model) }
     }
     private func load() async {
         let generation = session.generation
@@ -2743,6 +3025,43 @@ struct JobDetailView: View {
                 note = ""
             } else {
                 self.error = error.localizedDescription
+            }
+        }
+    }
+}
+
+/// Keep each invoice scannable while leaving its line quantities and amounts a tap away.
+private struct JobInvoiceItemsDisclosure: View {
+    let invoice: InvoiceRecord
+    let reference: String
+    @State private var expanded = false
+
+    private var itemCount: String {
+        "\(invoice.lines.count) \(invoice.lines.count == 1 ? "item" : "items")"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 8) {
+                    Text("\(expanded ? "Hide" : "Show") \(itemCount)")
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .medium))
+                    Spacer(minLength: 0)
+                }
+                .font(Theme.font(14, weight: .medium))
+                .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityLabel("\(expanded ? "Hide" : "Show") \(itemCount) for invoice \(reference)")
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+            .accessibilityIdentifier("job-invoice-items-\(invoice.id)")
+            if expanded {
+                JobInvoiceLineRows(lines: invoice.lines, currency: invoice.currency, invoiceID: invoice.id)
+                    .padding(.bottom, 6)
             }
         }
     }

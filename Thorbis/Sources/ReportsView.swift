@@ -71,7 +71,7 @@ extension APIClient {
 struct ReportsView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
-    /// Money: Revenue leads the tabs and the header reads Money.
+    /// Money: Overview (web money.tsx) and Revenue lead the tabs and the header reads Money.
     var includesRevenue = false
     @State private var tab: String
     @State private var refreshes = 0
@@ -84,7 +84,7 @@ struct ReportsView: View {
 
     init(includesRevenue: Bool = false, initialTab: String? = nil) {
         self.includesRevenue = includesRevenue
-        var start = initialTab ?? (includesRevenue ? "Revenue" : "Operations")
+        var start = initialTab ?? (includesRevenue ? "Overview" : "Operations")
         #if DEBUG
         // Screenshot-only: `--paper-preview-money-tab Payments` opens Money on that tab.
         let args = ProcessInfo.processInfo.arguments
@@ -97,6 +97,7 @@ struct ReportsView: View {
 
     private var tabs: [String] {
         var result: [String] = []
+        if includesRevenue && session.can("invoice.view", feature: "invoicing") { result.append("Overview") }
         if includesRevenue && MenuItem.money.permitted(session) { result.append("Revenue") }
         if session.can("estimate.view", feature: "estimates") { result.append("Operations") }
         if session.can("job.view", feature: "jobs") { result.append("Schedule") }
@@ -113,11 +114,14 @@ struct ReportsView: View {
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true) }
+                // Text tabs, as on Customers, Team and the Inbox; wrapping keeps every report reachable.
+                if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true, textTabs: true) }
                 if let error { ErrorBanner(message: error) }
                 Group {
                     if tabs.isEmpty {
                         PaperEmptyState(symbol: "chart.bar", title: "You can't see reports", message: "Your role doesn't include estimates, jobs or invoices. Ask an owner for access.")
+                    } else if (tabs.contains(tab) ? tab : tabs[0]) == "Overview" {
+                        MoneyOverviewView(embedded: true).id(refreshes)
                     } else if (tabs.contains(tab) ? tab : tabs[0]) == "Revenue" {
                         // Rebuilt on pull to refresh, so its figures reload with the rest.
                         WorkspaceRevenueView(api: api, available: true, embedded: true).id(refreshes)

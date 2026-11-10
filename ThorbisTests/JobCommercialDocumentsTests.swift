@@ -8,6 +8,197 @@ final class JobCommercialDocumentsTests: XCTestCase {
         .init(jobID: id(job), organizationID: id(1), customerID: id(2), originEstimateID: origin.map(id))
     }
 
+    func testJobInvoiceReferencesExtendOnlyWhenSuffixesCollide() {
+        let first = "00000000-0000-4000-8000-000000001234"
+        let second = "00000000-0000-4000-8000-000000011234"
+        let third = "00000000-0000-4000-8000-000000005678"
+        let ids = [first, second, third]
+        XCTAssertEqual(JobInvoiceReferences.reference(for: first, among: ids), "INV-01234")
+        XCTAssertEqual(JobInvoiceReferences.reference(for: second, among: ids), "INV-11234")
+        XCTAssertEqual(JobInvoiceReferences.reference(for: third, among: ids), "INV-5678")
+    }
+
+    func testInvoiceRecoveryNoticeStaysInOriginalAPIAndSavedCopyScope() {
+        let revision = UUID()
+        XCTAssertTrue(JobInvoiceRecoveryContext.matches(origin: "https://one.example", savedCopyRevision: revision,
+            currentOrigin: "https://one.example", currentSavedCopyRevision: revision))
+        XCTAssertFalse(JobInvoiceRecoveryContext.matches(origin: "https://one.example", savedCopyRevision: revision,
+            currentOrigin: "https://two.example", currentSavedCopyRevision: revision))
+        XCTAssertFalse(JobInvoiceRecoveryContext.matches(origin: "https://one.example", savedCopyRevision: revision,
+            currentOrigin: "https://one.example", currentSavedCopyRevision: UUID()))
+    }
+
+    func testDirectPaymentActionOnlyOffersFreshPayableInvoiceForThisJob() throws {
+        let decoder = JSONDecoder()
+        let first = try decoder.decode(InvoiceRecord.self, from: Data(invoice(50).utf8))
+        let second = try decoder.decode(InvoiceRecord.self, from: Data(invoice(51).utf8))
+        let draft = try decoder.decode(InvoiceRecord.self, from: Data(invoice(52, status: "draft").utf8))
+        let paid = try decoder.decode(InvoiceRecord.self, from: Data(invoice(53, paid: 10000).utf8))
+        let foreign = try decoder.decode(InvoiceRecord.self, from: Data(invoice(54, job: 101).utf8))
+        let eligible = JobInvoiceDirectPayment.step(invoice: first, scope: scope(), freshIDs: [first.id, second.id], canCollect: true)
+        XCTAssertEqual(eligible, .collect(invoiceID: first.id, due: 10000, currency: "USD"))
+        XCTAssertEqual(JobInvoiceDirectPayment.step(invoice: second, scope: scope(), freshIDs: [first.id, second.id], canCollect: true), .collect(invoiceID: second.id, due: 10000, currency: "USD"))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: first, scope: scope(), freshIDs: [], canCollect: true))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: first, scope: scope(), freshIDs: [first.id], canCollect: false))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: draft, scope: scope(), freshIDs: [draft.id], canCollect: true))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: paid, scope: scope(), freshIDs: [paid.id], canCollect: true))
+        XCTAssertNil(JobInvoiceDirectPayment.step(invoice: foreign, scope: scope(), freshIDs: [foreign.id], canCollect: true))
+    }
+
+    func testPaymentRouteNeverUsesAFormerOrMissingInvoice() async throws {
+        let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#)])
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        await model.load()
+        XCTAssertTrue(model.canRecordPayment)
+        let current = try XCTUnwrap(model.invoice)
+        XCTAssertNotNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                     selected: current, loadedID: id(50), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(51), selectedID: id(51),
+                                                  selected: nil, loadedID: id(50), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(51),
+                                                  selected: current, loadedID: id(50), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                  selected: current, loadedID: id(51), model: model, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                  selected: current, loadedID: id(50), model: model, scope: scope(job: 101)))
+    }
+
+    func testPaymentRouteKeepsItsModelWhenAnotherInvoiceBecomesSelected() async throws {
+        let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#),
+                          .init(200, invoice(51)), .init(200, #"{"items":[]}"#)])
+        let first = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        await first.load()
+        let route = try XCTUnwrap(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                              selected: first.invoice, loadedID: id(50), model: first, scope: scope(), authorityToken: ["session-A"]))
+        let second = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        await second.load()
+        XCTAssertTrue(second.canRecordPayment)
+        XCTAssertEqual(route.invoice.id, id(50))
+        XCTAssertEqual(route.authorityToken, ["session-A"])
+        XCTAssertTrue(route.model === first, "The presented sheet must not switch to a newly selected model")
+        XCTAssertTrue(route.belongs(to: scope()))
+        XCTAssertTrue(route.belongs(to: scope(origin: 55)), "A changed estimate does not change the invoice's job or customer")
+        XCTAssertFalse(route.belongs(to: scope(job: 101)), "A changed job must retire the payment sheet")
+        XCTAssertFalse(route.belongs(to: .init(jobID: id(100), organizationID: id(1), customerID: id(4))),
+                       "A changed customer must retire the payment sheet")
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(51),
+                                                  selected: second.invoice, loadedID: id(51), model: second, scope: scope()))
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(50),
+                                                  selected: first.invoice, loadedID: id(50), model: second, scope: scope()),
+                     "A stale ID marker cannot disguise a model for another invoice")
+    }
+
+    func testOverlappingLoadsForSameInvoiceWaitForTheExistingRead() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, #"{"items":[]}"#)])
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let loads = JobInvoicePaymentLoads()
+        let first = Task { await loads.load(model) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        var secondFinished = false
+        let second = Task { await loads.load(model); secondFinished = true }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(secondFinished, "The collect action must await the existing load")
+        gate.release(); await first.value; await second.value
+        XCTAssertTrue(secondFinished)
+        XCTAssertTrue(model.canRecordPayment)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "Coalesced loads request one invoice and its history")
+    }
+
+    func testInvoiceLoadCoordinatorWaitsForFirstModelAfterAnotherModelStarts() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, invoice(51)),
+                          .init(200, #"{"items":[]}"#), .init(200, #"{"items":[]}"#)])
+        let firstModel = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let secondModel = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        let loads = JobInvoicePaymentLoads()
+        let first = Task { await loads.load(firstModel) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        await loads.load(secondModel)
+        XCTAssertTrue(secondModel.canRecordPayment)
+        var repeatedFinished = false
+        let repeated = Task { await loads.load(firstModel); repeatedFinished = true }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(repeatedFinished, "Returning to an in-flight model must await that model's original read")
+        gate.release(); await first.value; await repeated.value
+        XCTAssertTrue(firstModel.canRecordPayment)
+        XCTAssertTrue(repeatedFinished)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 4)
+    }
+
+    func testJobLoadWaitsForSheetOwnedReadOfTheSameModel() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, #"{"items":[]}"#)])
+        let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let sheetRead = Task { await model.load() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        let loads = JobInvoicePaymentLoads()
+        var jobReadFinished = false
+        let jobRead = Task { await loads.load(model); jobReadFinished = true }
+        var cancelledWouldOpen = false
+        let cancelled = Task { await loads.load(model); if !Task.isCancelled { cancelledWouldOpen = true } }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(jobReadFinished, "A job refresh must wait for the sheet's in-flight read")
+        cancelled.cancel()
+        gate.release(); await sheetRead.value; await jobRead.value; await cancelled.value
+        XCTAssertTrue(model.canRecordPayment)
+        XCTAssertFalse(cancelledWouldOpen, "A cancelled route must not present after the shared read completes")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+    }
+
+    func testOfflineCashAndCheckRemainAvailableThroughTheScopedPaymentRoute() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let suite = "job-payment-route-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var cachedInvoiceIDs: [String] = []
+        defer {
+            let cache = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("JobDetailCache", isDirectory: true)
+            for id in cachedInvoiceIDs { try? FileManager.default.removeItem(at: cache.appendingPathComponent("\(id).invoice.json")) }
+        }
+        let outbox = FieldOutbox(directory: directory, defaults: defaults)
+        outbox.bind(actorID: id(3), organizationID: id(1))
+        for method in [FieldPaymentMethod.cash, .check] {
+            let value = Int.random(in: 100_000_000...999_999_999)
+            let record = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(value).utf8))
+            cachedInvoiceIDs.append(record.id)
+            JobDetailCache.save(invoice: record)
+            let model = InvoicePaymentCollectionModel(api: api([URLProtocolFixture.offline]), invoiceID: record.id,
+                intentStore: InvoicePaymentIntentStore(defaults: defaults), makeIdempotencyKey: { "offline-\(UUID().uuidString)" },
+                expectedJobScope: scope())
+            model.outbox = outbox
+            model.policyVersion = 1
+            await model.load()
+            XCTAssertTrue(model.offlineCopy)
+            let route = try XCTUnwrap(JobInvoicePaymentRoute.make(requestedID: record.id, selectedID: record.id,
+                selected: record, loadedID: record.id, model: model, scope: scope()))
+            let queued = await route.model.record(amountCents: 1000, method: method)
+            XCTAssertTrue(queued)
+            XCTAssertEqual(outbox.waitingPayments(invoiceID: record.id).first?.method, method.rawValue)
+        }
+    }
+
+    func testDelayedInvoiceReadCannotOpenTheNewSelectionForTheOldRequest() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = api([.init(200, invoice(50), gate: gate), .init(200, invoice(51)),
+                          .init(200, #"{"items":[]}"#), .init(200, #"{"items":[]}"#)])
+        let first = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())
+        let second = InvoicePaymentCollectionModel(api: client, invoiceID: id(51), expectedJobScope: scope())
+        let delayed = Task { await first.load() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        await second.load()
+        XCTAssertTrue(second.canRecordPayment)
+        gate.release(); await delayed.value
+        XCTAssertTrue(first.canRecordPayment)
+        XCTAssertNil(JobInvoicePaymentRoute.make(requestedID: id(50), selectedID: id(51),
+                                                  selected: second.invoice, loadedID: id(51), model: second, scope: scope()))
+    }
+
     func testApprovedEstimateWithUnknownOptionsDoesNotAssertBaseAmount() throws {
         var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
         payload["status"] = "approved"

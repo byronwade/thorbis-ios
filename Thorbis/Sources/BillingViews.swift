@@ -87,34 +87,34 @@ struct BillingSchedulesView: View {
 
     var body: some View {
         ScrollView {
+            // v2 List room, as on Invoices and Estimates: the header, a 13 Medium label per status,
+            // then plain rows on the canvas with the amount over the status word.
             LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Billing").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text("Progress billing and deposits by job").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                .padding(.bottom, 12)
-                if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
-                if loading && schedules.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
-                ForEach(paperDocumentGroups(schedules, status: \.status, order: ["open", "closed"]), id: \.0) { status, group in
-                    PaperGroupHeader(title: status == "open" ? "Open" : "Closed", count: group.count).padding(.top, 10)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                    PaperCardList(data: group) { schedule in
+                PaperHeader(title: "Billing", subtitle: "Progress billing and deposits by job")
+                    .environment(\.paperMenuButton, false)
+                if let error { ErrorBanner(message: error) { await load() } }
+                if loading && schedules.isEmpty { ListRoomSkeleton(count: 4, threeLines: false) }
+                let groups = paperDocumentGroups(schedules, status: \.status, order: ["open", "closed"])
+                ForEach(Array(groups.enumerated()), id: \.element.0) { index, pair in
+                    ListGroupLabel(title: pair.0 == "open" ? "Open" : "Closed", count: pair.1.count, first: index == 0)
+                    ForEach(pair.1) { schedule in
                         NavigationLink(value: PaperRoute.billingSchedule(schedule.id)) {
-                            PaperDocumentRow(kind: .billingSchedule, reference: "SOV-\(schedule.id.suffix(4).uppercased())",
-                                             title: store.customerName(schedule.customerId),
-                                             subtitle: "\(schedule.lines.count) line\(schedule.lines.count == 1 ? "" : "s")\(schedule.retainageRateBps > 0 ? " · \(schedule.retainageRateBps / 100)% retainage" : "")",
-                                             status: schedule.status, amount: money(schedule.total, currency: "USD"))
+                            MoneyListRow(title: store.customerName(schedule.customerId),
+                                         subtitle: "SOV-\(schedule.id.suffix(4).uppercased())\(schedule.retainageRateBps > 0 ? " · \(schedule.retainageRateBps / 100)% retainage" : "")",
+                                         status: schedule.status == "open" ? DocumentStatus(tone: .scheduled, word: "Open")
+                                                                           : DocumentStatus(tone: .done, word: "Closed"),
+                                         amount: money(schedule.total, currency: "USD"))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(RowPressStyle())
                     }
                 }
                 if !loading && schedules.isEmpty && error == nil {
-                    PaperEmptyState(symbol: "list.bullet.rectangle", title: "No billing schedules yet",
-                                    message: "A schedule starts when a job is billed in stages or takes a deposit.")
+                    ListRoomEmpty(title: "No billing schedules.",
+                                  message: "A schedule starts when a job is billed in stages or takes a deposit.")
                 }
             }
-            .paperCardMargin().padding(.bottom, 24)
+            .environment(\.paperRowInset, ListRoom.gutter)
+            .padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)

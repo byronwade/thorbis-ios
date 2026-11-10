@@ -26,70 +26,21 @@ struct ThorbisBackButton: View {
     }
 }
 
-/// A compact back chevron for the phone's pushed screens, where the menu circle leads the bar:
-/// the chevron alone (no circle) so the pair reads as one control group, 44pt to the finger.
-struct ThorbisCompactBackButton: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        Button { dismiss() } label: {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(Theme.foreground)
-                // A full 44pt target (golden rule 13), even beside the menu circle.
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel("Back")
-    }
-}
-
 private struct ThorbisBackButtonModifier: ViewModifier {
     let isEnabled: Bool
-    /// The phone drawer, offered on every screen of a place (nil on iPad and in sheets' own stacks).
-    @Environment(\.paperDrawerReach) private var drawer
-    /// Inside a sheet or full-screen cover the bar keeps Back alone.
-    @State private var presented = false
 
+    /// Pushed screens keep Back alone (C-Job.dc.html): the drawer lives on the place's root, one
+    /// Back or edge swipe away, so the bar never stacks two circles at its leading edge.
     func body(content: Content) -> some View {
         if isEnabled {
             content
                 .navigationBarBackButtonHidden(true)
                 .toolbar {
-                    ThorbisToolbarItem(placement: .topBarLeading) { leading }
+                    ThorbisToolbarItem(placement: .topBarLeading) { ThorbisBackButton() }
                 }
-                .background { if drawer != nil { PresentationProbe(presented: $presented).frame(width: 0, height: 0).accessibilityHidden(true) } }
         } else {
             content
         }
-    }
-
-    /// Phone place screens: the menu circle where it sits on every root, Back beside it. Elsewhere
-    /// the round back circle alone.
-    @ViewBuilder private var leading: some View {
-        if let drawer, !presented {
-            HStack(spacing: 2) {
-                if Self.backFirst {
-                    ThorbisCompactBackButton()
-                    DrawerMenuCircle(control: drawer, size: 36)
-                } else {
-                    DrawerMenuCircle(control: drawer, size: 36)
-                    ThorbisCompactBackButton()
-                }
-            }
-        } else {
-            ThorbisBackButton()
-        }
-    }
-
-    /// Screenshot-only: the other arrangement, Back first, kept for the comparison shot.
-    private static var backFirst: Bool {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("--paper-preview-back-first")
-        #else
-        false
-        #endif
     }
 }
 

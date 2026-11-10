@@ -28,10 +28,14 @@ struct EvidenceHeader: View {
     /// The title's identifier (the room hides the navigation bar title, so tests find it here).
     var titleIdentifier = "document-title"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        // At accessibility sizes the status goes under the title, so "Estimate 2218" never splits around it.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            layout {
                 Text(title).font(Theme.font(20, weight: .medium)).tracking(-0.2)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
@@ -134,11 +138,10 @@ struct EvidenceLineRow: View {
             if stacked {
                 Text(text.name).font(Theme.font(15, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(line.quantity) × \(unit)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
-                    Spacer(minLength: 8)
-                    if let amount { Text(amount).font(Theme.rowAmountFont(15)) }
-                }
+                // One figure per line, each whole: side by side they broke mid-number ("$120.0" over "0").
+                Text("\(line.quantity) × \(unit)").font(Theme.monoFont(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let amount { Text(amount).font(Theme.rowAmountFont(15)).lineLimit(1).fixedSize() }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text(text.name).font(Theme.font(15, weight: .medium))
@@ -147,7 +150,13 @@ struct EvidenceLineRow: View {
                     Text("\(line.quantity)").font(Theme.monoFont(15)).foregroundStyle(Theme.muted)
                         .frame(width: quantityWidth, alignment: .trailing)
                     if let amount {
-                        Text(amount).font(Theme.rowAmountFont(15)).lineLimit(1).fixedSize()
+                        // At least as wide as "$9,999.00", so the quantity column stays put
+                        // whatever each line costs (sized by a hidden template, not a frame).
+                        ZStack(alignment: .trailing) {
+                            Text(verbatim: "$9,999.00").hidden().accessibilityHidden(true)
+                            Text(amount)
+                        }
+                        .font(Theme.rowAmountFont(15)).lineLimit(1).fixedSize()
                     }
                 }
                 if line.quantity != 1 {
@@ -214,11 +223,7 @@ struct MoneyListRow: View {
                     .foregroundStyle(status.tone == .cancelled ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if let subtitle, !subtitle.isEmpty { subtitleLines(subtitle, stacked: stacked) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: stacked ? .leading : .trailing, spacing: 3) {
@@ -236,6 +241,32 @@ struct MoneyListRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, subtitle, word, amount].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
     }
+
+    /// "INV-2209 · balance due" on one line when it fits; otherwise each part on its own line, so a
+    /// "·" never ends a line (as JobRoomRow does for problem · customer).
+    @ViewBuilder private func subtitleLines(_ subtitle: String, stacked: Bool) -> some View {
+        let parts = subtitle.components(separatedBy: " \u{00B7} ")
+        if parts.count > 1 && !stacked {
+            ViewThatFits(in: .horizontal) {
+                subtitleText(subtitle, lines: 1).fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(parts.enumerated()), id: \.offset) { subtitleText($0.element, lines: 2) }
+                }
+            }
+        } else if parts.count > 1 {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { subtitleText($0.element, lines: nil) }
+            }
+        } else {
+            subtitleText(subtitle, lines: stacked ? nil : 2)
+        }
+    }
+
+    private func subtitleText(_ text: String, lines: Int?) -> some View {
+        Text(text).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            .lineLimit(lines)
+            .fixedSize(horizontal: false, vertical: true)
+    }
 }
 
 /// A form's field (design.thorbis.com Forms): the label stays above, an optional "Optional" note
@@ -252,7 +283,8 @@ struct FormField<Content: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                if optional { Text("Optional").font(Theme.font(13)).foregroundStyle(Theme.muted) }
+                // Same marker as PaperFormField ("Notes for the tech · Optional"), one form grammar.
+                if optional { Text("\u{00B7} Optional").font(Theme.font(13)).foregroundStyle(Theme.muted.opacity(0.8)) }
             }
             .accessibilityHidden(true)
             content

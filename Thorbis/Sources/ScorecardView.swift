@@ -5,6 +5,7 @@ import SwiftUI
 struct ScorecardView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var period = ScorecardPeriod.week.rawValue
     @State private var card: Scorecard?
     /// The period `card` was loaded for, so a card is never shown under another period's tab.
@@ -23,7 +24,7 @@ struct ScorecardView: View {
                     Text("Your own work, credited by who the job was assigned to").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-                PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period)
+                PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period, wrapOverflow: true, textTabs: true)
                 if let error, card == nil { ErrorBanner(message: error) { await load() } }
                 Group {
                     if let card, loadedPeriod == selected { content(card) } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
@@ -157,16 +158,31 @@ struct ScorecardView: View {
     }
 
     @ViewBuilder private func row(_ label: String, _ value: String, detail: String? = nil, route: PaperRoute?) -> some View {
-        let line = HStack(alignment: .firstTextBaseline) {
-            Text(label).font(Theme.font(15, weight: .medium))
-            Spacer()
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(value).moneyStyle(.row)
-                if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted) }
-            }
-            if route != nil {
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
+        let figure = VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
+            Text(value).moneyStyle(.row)
+            if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted) }
+        }
+        let chevron = Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+            .accessibilityHidden(true)
+        // At accessibility sizes the label sits over its figure so neither breaks mid-word.
+        let line = Group {
+            if typeSize.isAccessibilitySize {
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(label).font(Theme.font(15, weight: .medium))
+                        figure
+                    }
+                    Spacer(minLength: 8)
+                    if route != nil { chevron }
+                }
+                .padding(.vertical, 6)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(label).font(Theme.font(15, weight: .medium))
+                    Spacer()
+                    figure
+                    if route != nil { chevron }
+                }
             }
         }
         .frame(minHeight: 48)

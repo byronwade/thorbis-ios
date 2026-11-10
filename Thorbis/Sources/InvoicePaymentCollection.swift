@@ -59,6 +59,7 @@ final class InvoicePaymentCollectionModel: ObservableObject {
     private let makeIdempotencyKey: () -> String
     private var acceptedPaymentID: String?
     private var verifiedHistoryGeneration: UUID?
+    private var loadWaiters: [CheckedContinuation<Void, Never>] = []
 
     init(api: APIClient, invoiceID: String,
          intentStore: InvoicePaymentIntentStore = .shared,
@@ -164,7 +165,12 @@ final class InvoicePaymentCollectionModel: ObservableObject {
         historyComplete = false
         verifiedHistoryGeneration = nil
         payments = []
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            let waiters = loadWaiters
+            loadWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
         do {
             try Task.checkCancellation()
             let loadedInvoice = try await api.fieldInvoice(invoiceID)
@@ -219,6 +225,14 @@ final class InvoicePaymentCollectionModel: ObservableObject {
             }
             loadError = error.localizedDescription
         }
+    }
+
+    /// Wait for a read started by another owner without changing the model's
+    /// own refresh semantics (payment reconciliation may need a new read).
+    func waitForCurrentLoad() async -> Bool {
+        guard isLoading else { return false }
+        await withCheckedContinuation { loadWaiters.append($0) }
+        return true
     }
 
     /// Shows the copy saved on this phone so cash and check can go to the outbox (OF-08). A payment
@@ -933,6 +947,7 @@ private struct InvoicePaymentRefundStatusPanel: View {
 struct InvoicePaymentCollectionSheet: View {
     @ObservedObject var model: InvoicePaymentCollectionModel
     let invoice: InvoiceRecord
+    let invoiceReference: String
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var store: Store
@@ -954,9 +969,10 @@ struct InvoicePaymentCollectionSheet: View {
     @StateObject private var tapToPayController: TapToPayController
     private var tapToPay: TapToPayController? { tapToPayController }
 
-    init(model: InvoicePaymentCollectionModel, invoice: InvoiceRecord) {
+    init(model: InvoicePaymentCollectionModel, invoice: InvoiceRecord, invoiceReference: String? = nil) {
         self.model = model
         self.invoice = invoice
+        self.invoiceReference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
         let cents = model.pendingRequest?.amount.amount ?? min(model.collectableCents ?? 0, 1_000_000_000_000)
         _amountText = State(initialValue: paymentAmountText(cents))
         // MF-09: open on the way this phone last collected (cash, check or link); otherwise on
@@ -980,6 +996,7 @@ struct InvoicePaymentCollectionSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                ScrollViewReader { proxy in
                 ScrollView {
                     // v2 modal: the amount large, the method as quiet chips with the rest in a popover,
                     // the custom amount in a sunk well with its $ inside, then the one ink commit.
@@ -996,7 +1013,7 @@ struct InvoicePaymentCollectionSheet: View {
                             }
                         }
                         paymentOptions
-                        if option.takesCustomAmount && !hasLockedIntent && !model.waitingForProjection { amountField }
+                        if option.takesCustomAmount && !hasLockedIntent && !model.waitingForProjection { amountField.id("payment-amount") }
                         receiptRow
                         if let payLinkError { ErrorBanner(message: payLinkError) }
                         if let paymentError = model.paymentError, !hasLockedIntent, !model.waitingForProjection {
@@ -1008,9 +1025,22 @@ struct InvoicePaymentCollectionSheet: View {
                     .padding(.bottom, 24)
                 }
                 .scrollDismissesKeyboard(.interactively)
+                // The Done bar's clearance lands after the keyboard scrolled the field into view,
+                // leaving it half under the footer; bring the field and its help back once it has.
+                .onChange(of: amountFocused) { _, focused in
+                    guard focused else { return }
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(350))
+                        withAnimation { proxy.scrollTo("payment-amount", anchor: .bottom) }
+                    }
+                }
+                }
 
                 footer
             }
+            // The number pad's Done, with the footer lifted clear of it: the bare Done bar floated
+            // over the commit's trailing end.
+            .keyboardDoneButton()
             .background(Theme.surface.ignoresSafeArea())
             .foregroundStyle(Theme.foreground)
             .navigationTitle("Collect payment")
@@ -1020,7 +1050,6 @@ struct InvoicePaymentCollectionSheet: View {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     PaperCircleButton(symbol: "xmark", label: "Close", size: 30, fill: Theme.fill) { dismiss() }
                 }
-                ThorbisKeyboardDoneBar { amountFocused = false }
             }
             .thorbisDestination(isPresented: $showPayLinkShare) {
                 InvoicePaymentLinkView(
@@ -1065,7 +1094,7 @@ struct InvoicePaymentCollectionSheet: View {
     /// The amount being collected: who and which invoice, then the figure at 30pt, then what's due.
     private var amountHero: some View {
         VStack(spacing: 4) {
-            PaperEyebrow(reference: "INV-\(invoice.id.suffix(4).uppercased())", text: customerName)
+            PaperEyebrow(reference: invoiceReference, text: customerName)
                 .accessibilityIdentifier("collect-payment-invoice")
             // MF-01: the amount being collected is the screen.
             Text(money(amountCents ?? model.pendingRequest?.amount.amount ?? model.collectableCents ?? 0, currency: invoice.currency))
@@ -1074,8 +1103,10 @@ struct InvoicePaymentCollectionSheet: View {
                 .contentTransition(.numericText())
                 .padding(.top, 4)
                 .accessibilityLabel("Collecting \(money(amountCents ?? model.collectableCents ?? 0, currency: invoice.currency))")
+            // Centred like the figure above, so at large text "Balance due" sits squarely over the amount.
             Text("Balance due \(money(model.outstandingCents ?? 0, currency: invoice.currency))")
                 .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.center)
             if model.waitingCents > 0 {
                 // OF-08: what's waiting to record isn't paid yet, but it can't be collected twice.
                 WaitingToSyncLabel(text: "\(money(model.waitingCents, currency: invoice.currency)) waiting to record")

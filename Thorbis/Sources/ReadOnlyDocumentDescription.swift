@@ -48,16 +48,21 @@ struct ReadOnlyDocumentDescription: View {
     let text: String
     let fontSize: CGFloat
     let access: DocumentDescriptionAccess
+    var customerFacing = false
+    var accessibilityContext: String? = nil
     @State private var opening: DescriptionOpening?
     @EnvironmentObject private var session: SessionController
 
     private var needsDetails: Bool { text.count > 80 || text.contains("\n") }
+    private func readerFont(weight: Font.Weight = .regular) -> Font {
+        customerFacing ? Theme.customerFont(fontSize, weight: weight) : Theme.font(fontSize, weight: weight)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if access.authorized(session) {
                 Text(text)
-                    .font(Theme.font(fontSize))
+                    .font(readerFont())
                     .lineLimit(needsDetails && access.permits(session) ? 2 : nil)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -66,10 +71,11 @@ struct ReadOnlyDocumentDescription: View {
                     guard access.permits(session), let identity = DescriptionSessionIdentity(session) else { return }
                     opening = DescriptionOpening(access: access, session: identity)
                 }
-                .font(Theme.font(fontSize, weight: .medium))
+                .font(readerFont(weight: .medium))
                 .foregroundStyle(Theme.brandText)
                 .frame(minHeight: 56)
                 .contentShape(Rectangle())
+                .accessibilityLabel(accessibilityContext.map { "Show more, \($0)" } ?? "Show more")
             }
         }
         .sheet(item: $opening) { snapshot in SheetSurface {
@@ -77,7 +83,7 @@ struct ReadOnlyDocumentDescription: View {
                 NavigationStack {
                     ScrollView {
                         Text(text)
-                            .font(Theme.font(fontSize))
+                            .font(readerFont())
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(Theme.gutter)
@@ -88,6 +94,14 @@ struct ReadOnlyDocumentDescription: View {
                     .background(Theme.canvas)
                 }
                 .presentationDetents([.large])
+                #if DEBUG
+                // The preview's authority change counts from the open Description, so the UI test's
+                // taps to reach it can't use up the delay on a slow simulator.
+                .task {
+                    PaperPreview.descriptionOpened = true
+                    await PaperPreview.expireDocumentSessionForTesting(session)
+                }
+                #endif
             }
         } }
         .onChange(of: text) { _, _ in opening = nil }
