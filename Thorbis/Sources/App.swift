@@ -60,6 +60,7 @@ struct ThorbisApp: App {
             outbox?.clearAll()
             pendingMedia?.clearAll()
             JobDetailCache.clearAll()
+            try? JobOfficeOfflineStore.shared.clearAll()
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
             JobChecklistStore.clearAll()
