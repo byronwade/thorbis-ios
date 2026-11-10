@@ -100,6 +100,8 @@ struct ThorbisModalSheet<Content: View>: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollBounceBehavior(.basedOnSize)
+            // A drag down the form puts the keyboard away, as the forms did before the shared modal.
+            .scrollDismissesKeyboard(.interactively)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if let commitTitle {

@@ -29,9 +29,7 @@ final class InvoicePaymentCollectionTests: XCTestCase {
         _ = try await client.fieldInvoice(invoiceID)
         let scope = try XCTUnwrap(client.savedCopyScope)
         let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
-        for _ in 0..<100 where !SavedCopyStore.shared.exists(scope: scope, key: key) {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        SavedCopyStore.shared.waitForQueuedWrites()
         XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key))
         client.invalidateRequests()
         let live = Task { try await client.fieldInvoiceWithProvenance(invoiceID) }

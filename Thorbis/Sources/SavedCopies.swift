@@ -92,6 +92,11 @@ final class SavedCopyStore: @unchecked Sendable {
         }
     }
 
+    /// Returns once every write queued so far is on disk (tests wait on this instead of polling).
+    func waitForQueuedWrites() {
+        queue.sync {}
+    }
+
     /// Sign-out. Runs after every queued write, and synchronously, so nothing survives it.
     func clearAll() {
         queue.sync { try? FileManager.default.removeItem(at: directory) }
