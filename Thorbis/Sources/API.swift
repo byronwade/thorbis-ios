@@ -469,7 +469,7 @@ final class APIClient: ObservableObject {
         let requestQueryItems = queryItems + (cursor.map { [URLQueryItem(name: "cursor", value: $0)] } ?? [])
         origin.queryItems = requestQueryItems.isEmpty ? nil : requestQueryItems
         guard let url = origin.url else { throw Problem(title: "Bad API URL", status: nil, detail: baseURL) }
-        let freshRead = requireFresh || (SavedCopies.liveOnly && method.uppercased() == "GET")
+        let freshRead = requireFresh || ((SavedCopies.liveOnly || SavedCopies.customerNamespace != nil) && method.uppercased() == "GET")
         var req = URLRequest(url: url, cachePolicy: freshRead ? .reloadIgnoringLocalCacheData : .useProtocolCachePolicy)
         if freshRead { req.setValue("no-cache", forHTTPHeaderField: "Cache-Control") }
         req.httpMethod = method
@@ -481,7 +481,8 @@ final class APIClient: ObservableObject {
         }
         let pageQuery = requestQueryItems.filter { $0.name != "cursor" }
         let isJSONRead = isGET && authed && body == nil && accept == "application/json" && !requireFresh
-        let readKey = isJSONRead ? SavedCopies.key(origin: requestOrigin, path: path, query: requestQueryItems) : nil
+        let readKey = isJSONRead ? SavedCopies.key(origin: requestOrigin, path: path, query: requestQueryItems,
+                                                   namespace: SavedCopies.customerNamespace) : nil
         let epoch = mutationEpoch
         let copyScope = savedCopyScope
         let copyScopeRevision = savedCopyScopeRevision
@@ -504,6 +505,7 @@ final class APIClient: ObservableObject {
         func savedCopy() -> DataResponse? {
             guard !SavedCopies.liveOnly, let copyScope, let keptKey, generation == requestGeneration, savedCopyScope == copyScope,
                   let copy = SavedCopyStore.shared.read(scope: copyScope, key: keptKey) else { return nil }
+            if SavedCopies.customerNamespace != nil && !SavedCopies.guardedCopyIsFresh(savedAt: copy.savedAt) { return nil }
             if savedCopyPaths[path] != copy.savedAt { savedCopyPaths[path] = copy.savedAt }
             PerfProbe.request(method, path, note: "saved copy")
             return DataResponse(data: copy.data, status: 200, contentType: "application/json",
