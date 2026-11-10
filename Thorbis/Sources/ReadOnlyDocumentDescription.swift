@@ -94,6 +94,11 @@ struct ReadOnlyDocumentDescription: View {
                     .background(Theme.canvas)
                 }
                 .presentationDetents([.large])
+                #if DEBUG
+                // The preview's authority change counts from the open Description, so the UI test's
+                // taps to reach it can't use up the delay on a slow simulator.
+                .task { await PaperPreview.expireDocumentSessionForTesting(session) }
+                #endif
             }
         } }
         .onChange(of: text) { _, _ in opening = nil }

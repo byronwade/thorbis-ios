@@ -19,7 +19,6 @@ struct CustomerJobDocumentBook: View {
     @State private var selection: CustomerJobDocumentSelection
     @EnvironmentObject private var api: APIClient
     #if DEBUG
-    @EnvironmentObject private var previewSession: SessionController
     @State private var previewDocumentChanged = false
     #endif
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -79,7 +78,6 @@ struct CustomerJobDocumentBook: View {
         .navigationTitle(selection.selected?.reference ?? "Documents")
         .onChange(of: ids) { _, value in selection.reconcile(value) }
         #if DEBUG
-        .task { await PaperPreview.expireDocumentSessionForTesting(previewSession) }
         .task {
             let args = ProcessInfo.processInfo.arguments
             guard PaperPreview.isJobDocumentsPreview,

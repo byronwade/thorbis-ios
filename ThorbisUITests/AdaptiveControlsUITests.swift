@@ -14,7 +14,12 @@ final class AdaptiveControlsUITests: XCTestCase {
         let form = app.scrollViews.containing(.button, identifier: "Residential").firstMatch
         XCTAssertTrue(form.waitForExistence(timeout: 10))
         let dismissStart = form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.29))
-        let dismissEnd = form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.46))
+        // The form now ends above the pinned Save bar, so the drag must carry on into the keyboard
+        // for the interactive dismissal to take it (a person's thumb does the same).
+        let keyboard = app.keyboards.firstMatch
+        let dismissEnd = keyboard.exists && !app.usesTabletLayout
+            ? keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.95))
+            : form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.46))
         dismissStart.press(forDuration: 0.1, thenDragTo: dismissEnd)
         // iPad: the form is a centered sheet the keyboard does not cover, so a drag in it does not
         // reach the keyboard; the iPad keyboard's own key puts it away.
