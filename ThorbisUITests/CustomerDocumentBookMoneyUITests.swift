@@ -2,6 +2,14 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testPayExplainsWhenFreshPaymentHistoryCannotBeVerified() {
+        let app = openPrimary(extra: ["--paper-preview-job-documents-money", "--paper-preview-job-invoice-signed", "--paper-preview-payment-recheck-fails"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        let message = app.staticTexts["Payment isn't ready. Ask your technician to check this invoice."]
+        XCTAssertTrue(message.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+    }
     func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch

@@ -93,7 +93,14 @@ struct JobCustomerDocumentsView: View {
                     initial: initial, actionError: error, refresh: refresh,
                     reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
                     signInvoice: { id in Task { await openInvoice(id, decision: true, sign: true) } },
-                    payInvoice: { id in Task { await openInvoice(id, payment: true) } },
+                    payInvoice: { id in
+                        #if DEBUG
+                        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-recheck-fails") {
+                            PaperPreviewProtocol.failDocumentPaymentRecheck()
+                        }
+                        #endif
+                        Task { await openInvoice(id, payment: true) }
+                    },
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
                     canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
                     .disabled(unlocking || openingID != nil)
