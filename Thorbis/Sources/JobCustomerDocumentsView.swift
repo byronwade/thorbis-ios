@@ -37,6 +37,7 @@ struct JobCustomerDocumentsView: View {
     @State private var openingID: String?
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var error: String?
+    @State private var documentSelectionRevision = UUID()
     @State private var unlocking = false
     @State private var approving = false
     @State private var editingDetails = false
@@ -102,7 +103,8 @@ struct JobCustomerDocumentsView: View {
                         Task { await openInvoice(id, payment: true) }
                     },
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
-                    canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
+                    canPayInvoice: session.can("invoice.payment.create", feature: "payments"),
+                    onSelectionChanged: { documentSelectionRevision = UUID(); error = nil })
                     .disabled(unlocking || openingID != nil)
                     .thorbisDestination(item: Binding(get: { paper }, set: { next in
                         if paper != next { paperGeneration = UUID() }
@@ -431,20 +433,36 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func pay(_ invoiceID: String) async {
-        let generation = session.generation
         guard !unlocking, currentWorkspace else { return }
         guard paymentModel?.invoice?.id == invoiceID, paymentModel?.canRecordPayment == true,
-              session.can("invoice.payment.create", feature: "payments") else {
+              canViewInvoices, handoff?.isCurrentJob == true,
+              session.can("invoice.payment.create", feature: "payments"),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
             error = "Payment isn't ready. Ask your technician to check this invoice."
             return
         }
         error = nil
+        let selectionRevision = documentSelectionRevision
+        let presentationRevision = paperGeneration
+        let originalPaper = paper
+        let originalBook = book
         unlocking = true
         defer { unlocking = false }
         let unlocked = await authenticateOwner("Unlock to take payment")
-        if unlocked, session.generation == generation, currentWorkspace {
+        #if DEBUG
+        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-retire-on-unlock") {
+            api.invalidateRequests()
+        }
+        #endif
+        let current = currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices &&
+            session.can("invoice.payment.create", feature: "payments") && authority.isCurrent(api: api, session: session) &&
+            documentSelectionRevision == selectionRevision && paperGeneration == presentationRevision &&
+            paper == originalPaper && book == originalBook && paymentModel?.invoice?.id == invoiceID &&
+            paymentModel?.canRecordPayment == true
+        guard current else { return }
+        if unlocked {
             requestPayment(invoiceID)
-        } else if session.generation == generation, currentWorkspace {
+        } else {
             error = "Your technician needs to unlock before taking payment."
         }
     }

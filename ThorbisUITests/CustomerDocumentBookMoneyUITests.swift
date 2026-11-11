@@ -9,6 +9,18 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let message = app.staticTexts["Payment isn't ready. Ask your technician to check this invoice."]
         XCTAssertTrue(message.waitForExistence(timeout: 20))
         XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        XCTAssertFalse(message.exists, "A payment warning must not follow the customer to another invoice")
+    }
+
+    func testPayCannotLeaveCustomerViewAfterAuthorityIsRetiredDuringUnlock() {
+        let app = openPrimary(extra: ["--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved", "--paper-preview-payment-retire-on-unlock"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        XCTAssertTrue(app.staticTexts["Please hand the device back to your technician."].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
     }
     func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])

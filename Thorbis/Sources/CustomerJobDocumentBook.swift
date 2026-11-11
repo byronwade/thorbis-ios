@@ -16,6 +16,7 @@ struct CustomerJobDocumentBook: View {
     let payInvoice: (String) -> Void
     let canSignInvoice: Bool
     let canPayInvoice: Bool
+    let onSelectionChanged: () -> Void
     @State private var selection: CustomerJobDocumentSelection
     @EnvironmentObject private var api: APIClient
     #if DEBUG
@@ -28,7 +29,8 @@ struct CustomerJobDocumentBook: View {
          freshEstimates: Set<String>, freshInvoices: Set<String>, unavailableEstimates: [String],
          initial: CustomerJobDocumentID, actionError: String?, refresh: @escaping () async -> Void,
          reviewEstimate: @escaping (String) -> Void, signInvoice: @escaping (String) -> Void,
-         payInvoice: @escaping (String) -> Void, canSignInvoice: Bool, canPayInvoice: Bool) {
+         payInvoice: @escaping (String) -> Void, canSignInvoice: Bool, canPayInvoice: Bool,
+         onSelectionChanged: @escaping () -> Void = {}) {
         self.scope = scope
         self.sourceGeneration = sourceGeneration
         self.estimates = estimates
@@ -43,6 +45,7 @@ struct CustomerJobDocumentBook: View {
         self.payInvoice = payInvoice
         self.canSignInvoice = canSignInvoice
         self.canPayInvoice = canPayInvoice
+        self.onSelectionChanged = onSelectionChanged
         _selection = State(initialValue: .init(ids: estimates.map { .estimate($0.id) }
             + unavailableEstimates.map { .estimate($0) }
             + invoices.filter(scope.contains).map { .invoice($0.id) }, selected: initial))
@@ -77,6 +80,7 @@ struct CustomerJobDocumentBook: View {
         }
         .navigationTitle(selection.selected?.reference ?? "Documents")
         .onChange(of: ids) { _, value in selection.reconcile(value) }
+        .onChange(of: selection.selected) { _, _ in onSelectionChanged() }
         #if DEBUG
         .task {
             let args = ProcessInfo.processInfo.arguments
