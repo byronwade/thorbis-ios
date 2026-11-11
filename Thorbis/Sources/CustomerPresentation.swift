@@ -107,6 +107,7 @@ struct CustomerEstimatePresentation: View {
     let customerName: String
     let onApproved: (EstimateRecord?) -> Void
     let onDone: () -> Void
+    let currentAuthority: () -> Bool
     let returnToDocuments: (() -> Void)?
     /// True when the company offers financing; the lender decides per amount (CP-13, CP-14).
     let financing: Bool
@@ -137,12 +138,14 @@ struct CustomerEstimatePresentation: View {
     init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil,
          financing: Bool = false,
          handoff: CustomerEstimateHandoffContext? = nil, returnToDocuments: (() -> Void)? = nil,
+         currentAuthority: @escaping () -> Bool = { true },
          onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
         self.jobID = jobID
         self.financing = financing
         self.customerName = customerName
         self.onApproved = onApproved
         self.onDone = onDone
+        self.currentAuthority = currentAuthority
         self.returnToDocuments = returnToDocuments
         _handoffObservation = StateObject(wrappedValue: CustomerEstimateHandoffObservation(handoff))
         var flow = CustomerEstimateFlow(estimate: estimate)
@@ -561,13 +564,13 @@ struct CustomerEstimatePresentation: View {
 
     /// One request for every total on screen; any failure simply shows no financing.
     private func loadOffer() async {
-        guard financing else { return }
+        guard financing, currentAuthority() else { return }
         let amounts = flow.hasOptions ? flow.options.map(\.totalAmount) : (flow.total.map { [$0] } ?? [])
         offer = await api.financingOffer(amounts: amounts)
     }
 
     private func openReview() async {
-        guard flow.estimate.status != "approved" else { return }
+        guard currentAuthority(), flow.estimate.status != "approved" else { return }
         if let handoff {
             guard handoff.current() else { return }
             if handoff.signature != nil || handoff.outcome != nil || handoff.running {
@@ -590,14 +593,14 @@ struct CustomerEstimatePresentation: View {
         defer { if reviewRequestID == requestID { openingReview = false } }
         do {
             if let handoff { try await handoff.validate() }
-            let revision = try await api.customerIssuedEstimateRevision(for: flow.estimate, currentAuthority: { handoff?.current() != false })
+            let revision = try await api.customerIssuedEstimateRevision(for: flow.estimate, currentAuthority: { currentAuthority() && handoff?.current() != false })
             try Task.checkCancellation()
             if let handoff {
                 guard handoff.current(), handoff.canApprove(), revision == handoff.reviewed.revision else {
                     throw Problem(title: "This estimate changed. Review its current terms again.", status: 409, detail: nil)
                 }
             }
-            guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
+            guard currentAuthority(), reviewRequestID == requestID, generation == api.requestGeneration else { return }
             try flow.useIssuedRevision(revision)
             reviewGeneration = generation
         } catch is CancellationError {
@@ -609,7 +612,7 @@ struct CustomerEstimatePresentation: View {
 
     private func startSigning() async {
         error = nil
-        guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady,
+        guard currentAuthority(), handoff?.current() != false, handoff?.canApprove() != false, reviewReady,
               verifiedCustomerLines != nil, let revision = flow.issuedRevision else {
             openingError = "Ask your technician to reopen the current estimate."
             reviewGeneration = nil
@@ -622,9 +625,9 @@ struct CustomerEstimatePresentation: View {
         do {
             let opened: (token: String, action: PublicEstimateAction)
             if let retained = handoff?.link { opened = retained }
-            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) }
+            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { currentAuthority() && handoff?.current() != false && handoff?.canApprove() != false }) }
             try Task.checkCancellation()
-            guard generation == api.requestGeneration else { return }
+            guard currentAuthority(), generation == api.requestGeneration else { return }
             guard handoff?.current() != false, handoff?.canApprove() != false else { return }
             link = opened
             consentText = opened.action.consentText
@@ -636,7 +639,7 @@ struct CustomerEstimatePresentation: View {
     }
 
     private func approve() async {
-        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
+        guard currentAuthority(), reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
         let signer = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) || handoff?.signature != nil else { return }
         guard handoff?.current() != false, handoff?.canApprove() != false else { return }
@@ -652,12 +655,12 @@ struct CustomerEstimatePresentation: View {
             if drawnApproval, let jobID {
                 let mediaID = try await uploadSignature(jobID: jobID)
                 try Task.checkCancellation()
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 guard handoff?.current() != false, handoff?.canApprove() != false else { return }
                 let input = FieldSignatureInput(signerName: signer, signedAt: handoff?.signature?.signedAt ?? ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
                 handoff?.submissionStarted = true; handoff?.retryVerified = false
                 let approved = try await api.approveFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber, signature: input)
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 if let handoff {
                     guard handoff.current() else { return }
                     guard handoff.canApprove() else { handoff.report(.unknown); return }
@@ -673,7 +676,7 @@ struct CustomerEstimatePresentation: View {
                 // The drawing is kept with the job; the server records the typed name and option.
                 if let jobID { _ = try? await uploadSignature(jobID: jobID) }
                 try Task.checkCancellation()
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 guard handoff?.current() != false, handoff?.canApprove() != false else { return }
                 let decision = handoff?.publicDecision ?? PublicEstimateActionDecision.approve(
                     revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
@@ -681,7 +684,7 @@ struct CustomerEstimatePresentation: View {
                 handoff?.publicDecision = decision
                 handoff?.submissionStarted = true; handoff?.retryVerified = false
                 let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 if let handoff {
                     guard handoff.current() else { return }
                     guard handoff.canApprove() else { handoff.report(.unknown); return }
@@ -708,6 +711,7 @@ struct CustomerEstimatePresentation: View {
     @State private var uploadedSignature: (strokes: [[CGPoint]], mediaID: String)?
 
     private func uploadSignature(jobID: String) async throws -> String {
+        guard currentAuthority() else { throw CancellationError() }
         if let handoff {
             guard handoff.current(), handoff.canApprove(), let intent = handoff.signature else { throw CancellationError() }
             if let id = handoff.uploadedMediaID { return id }
@@ -732,18 +736,20 @@ struct CustomerEstimatePresentation: View {
         transfer = MediaTransfer(api: api)
         #endif
         let asset = try await transfer.upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
-                                                             originalFilename: "signature.png", data: data, tags: ["signature"])
+            originalFilename: "signature.png", data: data, tags: ["signature"],
+            expectedOrganizationID: flow.estimate.organizationId, currentAuthority: { currentAuthority() })
+        guard currentAuthority() else { throw CancellationError() }
         uploadedSignature = (strokes, asset.id)
         return asset.id
     }
 
     private func decline() async {
-        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
+        guard currentAuthority(), reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
         busy = true
         defer { busy = false }
         do {
             let declined = try await api.declineFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber)
-            guard generation == api.requestGeneration else { return }
+            guard currentAuthority(), generation == api.requestGeneration else { return }
             onApproved(declined)
             onDone()
         } catch is CancellationError {
@@ -768,6 +774,7 @@ struct CustomerInvoicePresentation: View {
     let financing: Bool
     let onSigned: (InvoiceRecord) -> Void
     let onDone: () -> Void
+    let currentAuthority: () -> Bool
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -794,7 +801,7 @@ struct CustomerInvoicePresentation: View {
     private let opensPayChoice: Bool
 
     init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?, financing: Bool = false,
-         initiallySigning: Bool = false, opensPayChoice: Bool = false,
+         initiallySigning: Bool = false, opensPayChoice: Bool = false, currentAuthority: @escaping () -> Bool = { true },
          onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
         openedInvoice = invoice
         self.opensPayChoice = opensPayChoice
@@ -804,6 +811,7 @@ struct CustomerInvoicePresentation: View {
         self.financing = financing
         self.onSigned = onSigned
         self.onDone = onDone
+        self.currentAuthority = currentAuthority
         _name = State(initialValue: customerName)
         _signing = State(initialValue: initiallySigning)
     }
@@ -1080,23 +1088,27 @@ struct CustomerInvoicePresentation: View {
 
     /// With financing on the table the customer chooses first; otherwise straight to payment.
     private func pay() {
+        guard currentAuthority() else { return }
         guard dueExample != nil else { onPay?(); return }
         payChoice = CustomerPayChoice(dueText: dueText, canPayInFull: onPay != nil, canFinance: true,
                                       selected: onPay == nil ? .overTime : nil)
     }
 
     private func loadFinancing() async {
-        guard financing else { return }
+        guard financing, currentAuthority() else { return }
         if due > 0 {
             offer = await api.financingOffer(amounts: [due])
+            guard currentAuthority() else { return }
             if offer.available, opensPayChoice { pay() }
         }
         // A paid invoice still says "Paid by Wisetack", so the history loads whatever is due.
         let latest = (try? await api.refreshFinancingApplications(invoiceID: invoice.id)) ?? []
+        guard currentAuthority() else { return }
         applications = latest
         // A loan funded since the invoice was opened is a payment: show the balance it leaves.
         if latest.contains(where: { $0.status == "funded" }), invoice.amountPaid < (paperLinesTotal(invoice.lines) ?? 0),
            let updated = try? await api.fieldInvoice(invoice.id) {
+            guard currentAuthority() else { return }
             reloadedInvoice = updated
             onSigned(updated)
             // The offer answered for the old balance; ask again for what the loan left.
@@ -1105,11 +1117,13 @@ struct CustomerInvoicePresentation: View {
     }
 
     private func apply(phone: String?) async {
+        guard currentAuthority() else { return }
         busy = true
         defer { busy = false }
         error = nil
         do {
             let application = try await api.sendFinancingApplication(invoiceID: invoice.id, idempotencyKey: applicationKey, phone: phone)
+            guard currentAuthority() else { return }
             applications.insert(application, at: 0)
             sent = application
         } catch is CancellationError {
@@ -1125,7 +1139,7 @@ struct CustomerInvoicePresentation: View {
 
     private func sign() async {
         let signer = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let jobID = invoice.jobId, !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) else { return }
+        guard currentAuthority(), let jobID = invoice.jobId, !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) else { return }
         busy = true
         defer { busy = false }
         error = nil
@@ -1135,9 +1149,12 @@ struct CustomerInvoicePresentation: View {
                 return
             }
             let asset = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
-                                                                 originalFilename: "signature.png", data: data, tags: ["signature"])
+                originalFilename: "signature.png", data: data, tags: ["signature"],
+                expectedOrganizationID: invoice.organizationId, currentAuthority: { currentAuthority() })
+            guard currentAuthority() else { return }
             let input = FieldSignatureInput(signerName: signer, signedAt: ISO8601DateFormatter().string(from: Date()), imageMediaId: asset.id)
             let updated = try await api.authorizeFieldInvoice(invoice.id, expectedLinesRevision: invoice.linesRevision, signature: input)
+            guard currentAuthority() else { return }
             onSigned(updated)
             signedBy = signer
             signing = false
