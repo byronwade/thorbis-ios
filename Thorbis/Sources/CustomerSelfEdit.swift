@@ -495,17 +495,20 @@ final class CustomerSelfEditModel: ObservableObject {
 
     var hasChanges: Bool { draft?.hasChanges == true }
 
-    func load(api: APIClient) async {
-        guard draft == nil else { return }
+    func load(api: APIClient, currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), draft == nil else { return }
         // A retry starts clean, so "Try again" shows the skeleton instead of the old failure.
         loadError = nil
         do {
             let record = try await api.fieldCustomer(customerID)
+            guard currentAuthority() else { return }
             let contacts = try await api.fieldContacts(customerID)
+            guard currentAuthority() else { return }
             let locations = try await api.fieldLocations(customerID)
+            guard currentAuthority() else { return }
             let consent: CustomerSmsConsent?
             do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
-            guard draft == nil else { return }
+            guard currentAuthority(), draft == nil else { return }
             draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent)
         } catch is CancellationError {
         } catch {
@@ -515,47 +518,60 @@ final class CustomerSelfEditModel: ObservableObject {
 
     /// Customer record first, then contacts, addresses and the text decision. Each step is its own
     /// audited write; the draft is rebased after each one so a retry doesn't repeat finished work.
-    func save(api: APIClient) async {
-        guard var current = draft else { return }
+    func save(api: APIClient, currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), var current = draft else { return }
         saving = true
         defer { saving = false }
         saveError = nil
         do {
             let update = current.customerUpdate
             if !update.isEmpty {
+                guard currentAuthority() else { return }
                 let record = try await api.updateFieldCustomer(customerID, request: update)
+                guard currentAuthority() else { return }
                 current = current.rebased(record: record)
                 draft = current
             }
             for change in current.contactUpdates {
+                guard currentAuthority() else { return }
                 let saved = try await api.updateFieldContact(customerID, change.id, request: change.request)
+                guard currentAuthority() else { return }
                 current = current.rebased(contact: saved)
                 draft = current
             }
             if let create = current.newContact {
+                guard currentAuthority() else { return }
                 _ = try await api.createFieldContact(customerID, request: create)
+                guard currentAuthority() else { return }
                 current.newContactName = ""; current.newContactPhone = ""; current.newContactEmail = ""
                 draft = current
             }
             if !current.locationChanges.isEmpty {
+                guard currentAuthority() else { return }
                 let records = try await api.fieldLocations(customerID)
+                guard currentAuthority() else { return }
                 for change in current.locationChanges {
+                    guard currentAuthority() else { return }
                     guard let existing = records.first(where: { $0.id == change.id }) else { continue }
                     let saved = try await api.updateFieldLocation(customerID, change.id, request: FieldLocationUpdate(
                         label: existing.label, kind: existing.kind, address: change.address, notes: existing.notes,
                         // The map pin belonged to the old address.
                         coordinates: nil, gateCode: existing.gateCode, alarmCode: existing.alarmCode,
                         dogOnSite: existing.dogOnSite, parking: existing.parking))
+                    guard currentAuthority() else { return }
                     current = current.rebased(location: saved)
                     draft = current
                 }
             }
             if let texts = current.textsChange {
+                guard currentAuthority() else { return }
                 let consent: CustomerSmsConsent?
                 do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
+                guard currentAuthority() else { return }
                 _ = try await api.recordCustomerSmsConsent(
                     customerID, grant: texts, expectedVersion: consent?.version, idempotencyKey: consentKey,
                     evidenceRef: "Customer chose this themselves in customer mode on staff's Thorbis iPhone app")
+                guard currentAuthority() else { return }
             }
             savedAll = true
         } catch is CancellationError {
@@ -569,6 +585,7 @@ final class CustomerSelfEditModel: ObservableObject {
 struct CustomerSelfEditForm: View {
     @ObservedObject var model: CustomerSelfEditModel
     var doneTitle = "Done"
+    var currentAuthority: @MainActor () -> Bool = { true }
     let done: () -> Void
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
@@ -665,7 +682,7 @@ struct CustomerSelfEditForm: View {
         } else if let loadError = model.loadError {
             ScrollView {
                 CustomerStateMessage(symbol: "person.crop.circle.badge.exclamationmark", title: "We couldn’t open your details",
-                                     message: loadError, actionTitle: "Try again") { Task { await model.load(api: api) } }
+                                     message: loadError, actionTitle: "Try again") { Task { await model.load(api: api, currentAuthority: currentAuthority) } }
                     .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
                     .padding(.horizontal, Theme.gutter)
                     .frame(maxWidth: .infinity)
@@ -679,7 +696,7 @@ struct CustomerSelfEditForm: View {
             }
         }
         }
-        .task { await model.load(api: api) }
+        .task { await model.load(api: api, currentAuthority: currentAuthority) }
     }
 
     // MARK: Pieces
@@ -732,6 +749,7 @@ struct CustomerSelfEditForm: View {
 /// The technician's side, after unlocking: review the customer's changes, then save under staff's name.
 struct CustomerSelfEditReview: View {
     @ObservedObject var model: CustomerSelfEditModel
+    var currentAuthority: @MainActor () -> Bool = { true }
     let onFinished: () -> Void
     @EnvironmentObject private var api: APIClient
 
@@ -774,7 +792,7 @@ struct CustomerSelfEditReview: View {
         }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
-                PrimaryButton(title: "Save changes", busy: model.saving) { Task { await model.save(api: api) } }
+                PrimaryButton(title: "Save changes", busy: model.saving) { Task { await model.save(api: api, currentAuthority: currentAuthority) } }
                 Button("Discard changes", role: .destructive) { onFinished() }
                     .font(Theme.customerFont(15, weight: .medium)).frame(minHeight: 44).disabled(model.saving)
             }
@@ -802,23 +820,26 @@ struct CustomerSelfEditReview: View {
 struct CustomerSelfEditView: View {
     let customerID: String
     let onFinished: () -> Void
+    let currentAuthority: @MainActor () -> Bool
     @StateObject private var model: CustomerSelfEditModel
     @State private var staffReview = false
 
-    init(customerID: String, onFinished: @escaping () -> Void) {
+    init(customerID: String, currentAuthority: @escaping @MainActor () -> Bool = { true }, onFinished: @escaping () -> Void) {
         self.customerID = customerID
         self.onFinished = onFinished
+        self.currentAuthority = currentAuthority
         _model = StateObject(wrappedValue: CustomerSelfEditModel(customerID: customerID))
     }
 
     var body: some View {
         if staffReview {
-            CustomerSelfEditReview(model: model, onFinished: onFinished)
+            CustomerSelfEditReview(model: model, currentAuthority: currentAuthority, onFinished: onFinished)
         } else {
             CustomerModeContainer(onUnlocked: {
+                guard currentAuthority() else { return }
                 if model.hasChanges { staffReview = true } else { onFinished() }
-            }) { handBack in
-                CustomerSelfEditForm(model: model, done: handBack)
+            }, authenticateOwner: customerHandoffAuthenticate) { handBack in
+                CustomerSelfEditForm(model: model, currentAuthority: currentAuthority, done: handBack)
             }
         }
     }

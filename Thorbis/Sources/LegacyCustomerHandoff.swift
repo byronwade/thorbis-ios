@@ -1,6 +1,14 @@
 import SwiftUI
 import UIKit
 
+@MainActor
+func customerHandoffAuthenticate() async -> Bool {
+    #if DEBUG
+    if let authenticate = PaperPreview.ownerAuthentication { return await authenticate("Unlock to leave customer mode") }
+    #endif
+    return await StaffUnlock.unlock()
+}
+
 /// A legacy single-document presentation stays above session/navigation replacement until
 /// authenticated hand-back. The body is hidden immediately if its original authority changes.
 @MainActor

@@ -93,6 +93,29 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertTrue(draft.changeSummary.contains("Asked to stop job texts"))
     }
 
+    @MainActor
+    func testAuthorityChangeDuringCustomerSaveStopsFollowingContactWrite() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let body = String(decoding: try JSONEncoder().encode(record(name: "Updated Customer")), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, body, gate: gate), .init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: record().id)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
+        draft.name = "Updated Customer"
+        draft.newContactName = "New contact"
+        draft.newContactPhone = "555-0102"
+        model.draft = draft
+        var permitted = true
+        let task = Task { await model.save(api: api, currentAuthority: { permitted }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        permitted = false
+        gate.release()
+        await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "No contact write should follow a retired customer save")
+        XCTAssertFalse(model.savedAll)
+    }
+
     func testRebasingAfterTheCustomerSaveLeavesNothingToRepeat() {
         var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
         draft.name = "Dana Q. Customer"

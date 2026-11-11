@@ -139,7 +139,9 @@ struct JobCustomerDocumentsView: View {
         }
         .thorbisDestination(isPresented: $editingDetails) {
             if currentWorkspace, canEditDetails, let details {
-                CustomerSelfEditForm(model: details) { editingDetails = false }
+                CustomerSelfEditForm(model: details, currentAuthority: {
+                    currentWorkspace && handoff?.isCurrentJob == true && session.can("customer.edit", feature: "core_crm")
+                }) { editingDetails = false }
                     .navigationTitle("Your details")
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             } else {
