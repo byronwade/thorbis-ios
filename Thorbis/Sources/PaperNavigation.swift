@@ -859,6 +859,12 @@ struct RootView: View {
         case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
              "job-history", "job-history-empty", "job-onsite",
              "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
+            // Another preview refresh may supersede the one awaited above. Wait for its real
+            // job rather than silently leaving the test on Today when that read is still in flight.
+            for _ in 0..<100 where !store.jobs.contains(where: { $0.id == PaperPreview.jobID }) {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard !Task.isCancelled else { return }
+            }
             if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                 primaryTab = .jobs
                 jobsPath.append(job)
