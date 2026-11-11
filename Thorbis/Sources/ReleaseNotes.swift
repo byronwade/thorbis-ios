@@ -20,6 +20,8 @@ enum ReleaseNotes {
                       detail: "Review saved customer changes together before trying an interrupted update again."),
                 .init(symbol: "creditcard", title: "Return to the right invoice",
                       detail: "After customer review, return to the invoice you opened to collect its payment."),
+                .init(symbol: "arrow.clockwise", title: "Know when payment needs a check",
+                      detail: "If payment details need a refresh, the customer sees what to do next."),
             ]
         ),
         ReleaseNote(

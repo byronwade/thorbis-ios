@@ -108,7 +108,13 @@ struct JobCustomerDocumentsView: View {
                         if paper != next { paperGeneration = UUID() }
                         paper = next
                     })) { destination in
-                        destinationView(destination)
+                        VStack(spacing: 0) {
+                            if case .invoice = destination, let error {
+                                CustomerProblemBanner(message: error)
+                                    .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                            }
+                            destinationView(destination)
+                        }
                             .disabled(unlocking)
                             .navigationTitle(reference(destination))
                             .toolbar {
@@ -391,6 +397,7 @@ struct JobCustomerDocumentsView: View {
 
     private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
         guard openingID == nil, currentWorkspace, canViewInvoices else { return }
+        error = nil
         openingID = id
         defer { openingID = nil }
         let generation = session.generation
@@ -425,9 +432,13 @@ struct JobCustomerDocumentsView: View {
 
     private func pay(_ invoiceID: String) async {
         let generation = session.generation
-        guard !unlocking, currentWorkspace, paymentModel?.invoice?.id == invoiceID,
-              paymentModel?.canRecordPayment == true,
-              session.can("invoice.payment.create", feature: "payments") else { return }
+        guard !unlocking, currentWorkspace else { return }
+        guard paymentModel?.invoice?.id == invoiceID, paymentModel?.canRecordPayment == true,
+              session.can("invoice.payment.create", feature: "payments") else {
+            error = "Payment isn't ready. Ask your technician to check this invoice."
+            return
+        }
+        error = nil
         unlocking = true
         defer { unlocking = false }
         let unlocked = await authenticateOwner("Unlock to take payment")
