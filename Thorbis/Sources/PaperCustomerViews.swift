@@ -240,6 +240,9 @@ struct CustomerDetailView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
+    @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @Environment(\.dismiss) private var dismiss
     @State private var record: CustomerRecord?
     @State private var contactState = CustomerContactCollectionState()
@@ -277,7 +280,6 @@ struct CustomerDetailView: View {
     @State private var smsConsentKey = UUID().uuidString
     @State private var smsConsentChoice: Bool?
     @State private var smsConsentError: String?
-    @State private var showCustomerMode = false
     @State private var handoff: DeviceHandoff?
     private var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
@@ -345,6 +347,7 @@ struct CustomerDetailView: View {
         #endif
         }
         .foregroundStyle(Theme.foreground).background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -378,12 +381,14 @@ struct CustomerDetailView: View {
             if tab != "Overview" { await loadRecords() }
         }
         .onAppear {
+            customerWindowAnchor.visible = true
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
             #if DEBUG
             if PaperPreview.enabled && ["customer-records", "customer-jobs"].contains(PaperPreview.screen) { tab = "Jobs" }
             if PaperPreview.enabled && PaperPreview.screen == "customer-money" { tab = "Money" }
             #endif
         }
+        .onDisappear { customerWindowAnchor.visible = false }
         .onChange(of: tab, initial: true) { _, selectedTab in
             if selectedTab != "Overview" { Task { await loadRecords() } }
             if selectedTab == "Jobs" { Task { await loadJobRecords() } }
@@ -397,9 +402,6 @@ struct CustomerDetailView: View {
             }
         }
         .sheet(isPresented: $showNewJob) { SheetSurface { NewJobSheet(preselected: customer) } }
-        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
-            CustomerSelfEditView(customerID: customer.id) { showCustomerMode = false }
-        }
         .sheet(item: $contactSheet, onDismiss: { Task { await load() } }) { item in SheetSurface {
             CustomerContactSheet(customerID: customer.id, contact: item.contact) { contact in
                 contactState.save(contact)
@@ -613,10 +615,36 @@ struct CustomerDetailView: View {
         return items + [
             // Customer view: hands the phone to the customer to check and fix their details.
             ThorbisMenuItem("Customer view", icon: "person.crop.rectangle",
-                            subtitle: "Hand the phone over to check their details") { showCustomerMode = true },
+                            subtitle: "Hand the phone over to check their details") { presentCustomerDetails() },
             ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
             ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
         ]
+    }
+
+    private func presentCustomerDetails() {
+        guard canEdit, let record, record.id == customer.id,
+              record.organizationId == session.activeOrganization?.id,
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              let source = customerWindowAnchor.window, customerWindowAnchor.isAttached(to: source),
+              let lease = customerView.claimLegacy() else { return }
+        let content = AnyView(CustomerSelfEditView(customerID: customer.id, currentAuthority: {
+            legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true &&
+            session.can("customer.edit", feature: "core_crm")
+        }, onFinished: { legacyHandoff.authenticatedExit(for: lease) })
+            .environmentObject(api).environmentObject(session))
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
+            capability: "customer.edit", feature: "core_crm", sourceAttached: { customerWindowAnchor.isAttached(to: source) },
+            onDismiss: { _ in
+                Task {
+                    let current: @MainActor () -> Bool = { customerWindowAnchor.isAttached(to: source) && authority.isCurrent(api: api, session: session) }
+                    guard current() else { return }
+                    await load(currentAuthority: current)
+                    guard current() else { return }
+                    await loadSmsConsent(currentAuthority: current)
+                }
+            }), legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
+            lease.release(); error = "Customer view is unavailable. Please try again."; return
+        }
     }
 
     private func contactMenuItems(_ contact: CustomerContactRecord) -> [ThorbisMenuItem] {
@@ -752,10 +780,12 @@ struct CustomerDetailView: View {
         return (smsConsent.decision == "grant" ? "Allowed" : "Stopped") + date
     }
 
-    private func loadSmsConsent() async {
-        guard session.can("customer.view", feature: "core_crm") else { return }
+    private func loadSmsConsent(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), session.can("customer.view", feature: "core_crm") else { return }
         do {
-            smsConsent = try await api.customerSmsConsent(customer.id)
+            let loaded = try await api.customerSmsConsent(customer.id)
+            guard currentAuthority() else { return }
+            smsConsent = loaded
             smsConsentLoaded = true
         } catch {
             // An older server or no access: leave the row out rather than show a guess.
@@ -1261,20 +1291,21 @@ struct CustomerDetailView: View {
 
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
-    private func load() async {
+    private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority() else { return }
         loadGeneration += 1
         let requestGeneration = loadGeneration
         let locationRequestGeneration = locationState.beginLoad()
         let contactRequestGeneration = contactState.beginLoading()
         do {
             let loadedRecord = try await api.fieldCustomer(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), loadGeneration == requestGeneration else { return }
             record = loadedRecord
             let loadedContacts = try await api.fieldContacts(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), loadGeneration == requestGeneration else { return }
             contactState.receive(loadedContacts, generation: contactRequestGeneration)
             let loadedLocations = try await api.fieldLocations(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), loadGeneration == requestGeneration else { return }
             if locationState.receive(loadedLocations, generation: locationRequestGeneration) {
                 locationError = nil
             }
