@@ -2515,10 +2515,13 @@ struct JobDetailView: View {
     private func openCustomerView(_ start: CustomerViewStart) {
         guard let job, scope(for: job) != nil, canOpenCustomerView,
               let source = customerWindowAnchor.window, customerWindowAnchor.isAttached(to: source),
-              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            error = "Customer view isn't ready. Refresh this job and try again."
+            return
+        }
         let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
-        estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
+        let opened = estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
                                          invoiceUpdated: updateInvoice, sourceWindow: source) { exit in
             guard let exitRevision = estimateHandoffPresenter.idleRevision else { return }
             let current: @MainActor () -> Bool = {
@@ -2532,6 +2535,7 @@ struct JobDetailView: View {
             if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
             await finishCustomerDocuments(currentAuthority: current)
         }
+        if !opened { error = "Customer view couldn't open. Try again." }
     }
 
     private func buildEstimate() {
