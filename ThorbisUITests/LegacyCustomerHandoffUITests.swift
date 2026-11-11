@@ -2,6 +2,23 @@ import XCTest
 
 @MainActor
 final class LegacyCustomerHandoffUITests: XCTestCase {
+    func testJobLinkedInvoiceInSheetReturnsToExactInvoicePayment() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-working-job", "--paper-preview-legacy-handoff-test", "--paper-preview-job-linked-invoice", "--paper-preview-job-documents", "--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved"]
+        app.launch()
+        let menu = app.buttons["Customer view, edit or open the PDF"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 30)); menu.tap()
+        let show = app.buttons["Customer view"].firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
+        XCTAssertTrue(app.staticTexts["4 of 4 documents"].waitForExistence(timeout: 30))
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 30))
+        let invoice = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        XCTAssertTrue(invoice.label.contains("INV-2209"), invoice.label)
+    }
     func testInvoiceCustomerViewReturnsToItsSourceAfterAuthentication() {
         continueAfterFailure = false
         let app = XCUIApplication()
