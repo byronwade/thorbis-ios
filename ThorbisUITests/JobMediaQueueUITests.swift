@@ -318,8 +318,9 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(app.buttons["job-media-scan"].exists)
         XCTAssertTrue(app.buttons["Import a photo or PDF"].exists)
         thorbisSection(app, "Overview").tap()
-        // Photos live under Activity; the Photos filter is remembered.
-        thorbisSection(app, "Activity").tap()
+        // Photos is its own job section now (Activity reopens on "Showing all"), so leaving for
+        // Overview and coming back through Photos must still show this job's saved scan.
+        thorbisSection(app, "Photos").tap()
         XCTAssertTrue(scan.waitForExistence(timeout: 10))
         XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         app.terminate()

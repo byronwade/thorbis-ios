@@ -231,14 +231,24 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertLessThanOrEqual(item.frame.height, 64, "The add control must stay compact even when the item description is long")
         let scroll = app.scrollViews.containing(NSPredicate(format: "identifier == %@", itemID)).firstMatch
         XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        // Where the item starts depends on what else the search matches (restored Price Book pages
+        // can add results above it), so each drag heads toward the item and covers only the distance
+        // left. A slow, held drag leaves no momentum: a fling could carry the item past the viewport,
+        // and further drags the same way would only push it further off.
         for _ in 0..<8 {
             if item.isHittable && item.frame.minY >= search.frame.maxY && item.frame.maxY < done.frame.minY { break }
             let upper = search.frame.maxY + 12
             let lower = done.frame.minY - 12
             XCTAssertGreaterThan(lower - upper, 70, "The visible results viewport needs room to scroll above the Done bar")
+            let room = lower - upper
+            // Positive: the item is below the viewport, so content moves up; negative: it moves down.
+            let wanted = item.frame.maxY > lower ? item.frame.maxY - lower + 8 : -(upper - item.frame.minY + 8)
+            let distance = max(-room, min(room, wanted))
             let origin = app.coordinate(withNormalizedOffset: .zero)
-            origin.withOffset(CGVector(dx: scroll.frame.midX, dy: lower))
-                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: scroll.frame.midX, dy: upper)))
+            let start = distance > 0 ? lower : upper
+            origin.withOffset(CGVector(dx: scroll.frame.midX, dy: start))
+                .press(forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: scroll.frame.midX, dy: start - distance)),
+                       withVelocity: .slow, thenHoldForDuration: 0.4)
         }
         XCTAssertTrue(item.isHittable)
         XCTAssertGreaterThanOrEqual(item.frame.minY, search.frame.maxY)

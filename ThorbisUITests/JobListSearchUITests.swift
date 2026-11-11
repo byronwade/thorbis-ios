@@ -7,7 +7,10 @@ final class JobListSearchUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Kitchen sink backup — Petrov"].waitForExistence(timeout: 30))
+        // #354 keeps the dash with the word before it (a no-break space, "backup\u{00A0}— Petrov"), so the
+        // row's title is matched by its words rather than by an exact ASCII-spaced string.
+        let petrov = NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "Kitchen sink backup", "— Petrov")
+        XCTAssertTrue(app.staticTexts.matching(petrov).firstMatch.waitForExistence(timeout: 30))
         // The list keeps no search field of its own.
         XCTAssertFalse(app.textFields["Search title or job number"].exists)
         app.openSearch()

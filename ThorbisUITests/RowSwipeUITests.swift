@@ -61,11 +61,20 @@ final class RowSwipeUITests: XCTestCase {
         // The open row closes when the list scrolls, and the list still scrolls. On iPad the list is
         // a column beside the job, so the drag is made on the list itself; its few rows fit the
         // column's height, so it only bounces (which is still a scroll, and still closes the row).
+        // The phone's sample Assigned board fits on one screen too, and then it also only bounces back
+        // to rest. So the list must move when its rows run past it, and otherwise settle where it was.
         let before = row.frame.minY
         let list = app.scrollViews.containing(.button, identifier: "job-row-\(birchwood)").firstMatch
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "job-row-")).allElementsBoundByIndex
+        let overflows = (rows.map(\.frame.maxY).max() ?? 0) > list.frame.maxY + 0.5
         (app.usesTabletLayout ? list : app).swipeUp(velocity: .slow)
         XCTAssertTrue(move.waitForNonExistence(timeout: 3), "Scrolling closes the open row")
-        if !app.usesTabletLayout { XCTAssertLessThan(row.frame.minY, before, "Vertical scrolling still moves the list") }
+        if overflows {
+            XCTAssertLessThan(row.frame.minY, before - 0.5, "Vertical scrolling still moves the list")
+        } else {
+            XCTAssertEqual(row.frame.minY, before, accuracy: 1, "A list that fits bounces back to rest")
+        }
+        XCTAssertTrue(row.isHittable, "The list still shows the row after scrolling")
     }
 
     /// The design preview refuses every write: a full swipe must say the move wasn't saved and keep
