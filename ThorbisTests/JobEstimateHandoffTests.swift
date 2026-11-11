@@ -285,6 +285,17 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testCurrentHandoffReturnsRequestedInvoiceToStaff() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Current handoff returns the selected invoice")
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect("invoice-a") = exit { callback.fulfill() }
+        }
+        XCTAssertTrue(presenter.active === model)
+        presenter.authenticatedExit(.collect("invoice-a"))
+        await fulfillment(of: [callback], timeout: 1)
+    }
     func testRetiredHandoffCannotReturnCollectToStaff() async throws {
         let model = try await ready([])
         let presenter = JobEstimateHandoffPresenter()
