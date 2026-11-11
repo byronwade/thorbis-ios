@@ -23,7 +23,7 @@ final class LegacyCustomerHandoffUITests: XCTestCase {
         app.launch()
         let menu = app.buttons["Customer actions"]
         XCTAssertTrue(menu.waitForExistence(timeout: 30)); menu.tap()
-        let show = app.buttons["Customer view"].firstMatch
+        let show = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Customer view")).firstMatch
         XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
         XCTAssertTrue(app.buttons["lock"].waitForExistence(timeout: 20))
         let replace = app.buttons["preview-replace-session"]

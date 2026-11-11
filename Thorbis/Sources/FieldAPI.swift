@@ -1050,6 +1050,11 @@ extension APIClient {
         return page.items
     }
 
+    /// Recovery must inspect the complete collection before the technician confirms an uncertain contact.
+    func allContactsForRecovery(_ customerID: String, currentAuthority: @MainActor () -> Bool) async throws -> [CustomerContactRecord] {
+        try await allFieldPages(fieldPath("/v1/customers", id: customerID, suffix: "/contacts"), isCurrent: currentAuthority)
+    }
+
     func createFieldContact(_ customerID: String, request: FieldContactCreate) async throws -> CustomerContactRecord {
         try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/contacts"), body: request)
     }
@@ -1072,6 +1077,10 @@ extension APIClient {
     func fieldLocations(_ customerID: String) async throws -> [ServiceLocationRecord] {
         let page: FieldPage<ServiceLocationRecord> = try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/locations"))
         return page.items
+    }
+
+    func allLocationsForRecovery(_ customerID: String, currentAuthority: @MainActor () -> Bool) async throws -> [ServiceLocationRecord] {
+        try await allFieldPages(fieldPath("/v1/customers", id: customerID, suffix: "/locations"), isCurrent: currentAuthority)
     }
 
     func createFieldLocation(_ customerID: String, request: FieldLocationCreate) async throws -> ServiceLocationRecord {
