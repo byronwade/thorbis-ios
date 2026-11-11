@@ -489,6 +489,7 @@ final class CustomerSelfEditModel: ObservableObject {
     @Published private(set) var saving = false
     @Published private(set) var saveError: String?
     @Published private(set) var savedAll = false
+    @Published private(set) var saveNeedsReconciliation = false
     private let consentKey = UUID().uuidString
 
     init(customerID: String) { self.customerID = customerID }
@@ -520,29 +521,46 @@ final class CustomerSelfEditModel: ObservableObject {
     /// audited write; the draft is rebased after each one so a retry doesn't repeat finished work.
     func save(api: APIClient, currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
         guard currentAuthority(), var current = draft else { return }
+        guard !saveNeedsReconciliation else {
+            saveError = "Some changes may have saved. Check the customer record before trying again."
+            return
+        }
         saving = true
         defer { saving = false }
         saveError = nil
+        var writeInFlight = false
+        func confirmWrite() -> Bool {
+            guard currentAuthority() else {
+                saveNeedsReconciliation = true
+                saveError = "Some changes may have saved. Check the customer record before trying again."
+                return false
+            }
+            writeInFlight = false
+            return true
+        }
         do {
             let update = current.customerUpdate
             if !update.isEmpty {
                 guard currentAuthority() else { return }
+                writeInFlight = true
                 let record = try await api.updateFieldCustomer(customerID, request: update)
-                guard currentAuthority() else { return }
+                guard confirmWrite() else { return }
                 current = current.rebased(record: record)
                 draft = current
             }
             for change in current.contactUpdates {
                 guard currentAuthority() else { return }
+                writeInFlight = true
                 let saved = try await api.updateFieldContact(customerID, change.id, request: change.request)
-                guard currentAuthority() else { return }
+                guard confirmWrite() else { return }
                 current = current.rebased(contact: saved)
                 draft = current
             }
             if let create = current.newContact {
                 guard currentAuthority() else { return }
+                writeInFlight = true
                 _ = try await api.createFieldContact(customerID, request: create)
-                guard currentAuthority() else { return }
+                guard confirmWrite() else { return }
                 current.newContactName = ""; current.newContactPhone = ""; current.newContactEmail = ""
                 draft = current
             }
@@ -553,12 +571,13 @@ final class CustomerSelfEditModel: ObservableObject {
                 for change in current.locationChanges {
                     guard currentAuthority() else { return }
                     guard let existing = records.first(where: { $0.id == change.id }) else { continue }
+                    writeInFlight = true
                     let saved = try await api.updateFieldLocation(customerID, change.id, request: FieldLocationUpdate(
                         label: existing.label, kind: existing.kind, address: change.address, notes: existing.notes,
                         // The map pin belonged to the old address.
                         coordinates: nil, gateCode: existing.gateCode, alarmCode: existing.alarmCode,
                         dogOnSite: existing.dogOnSite, parking: existing.parking))
-                    guard currentAuthority() else { return }
+                    guard confirmWrite() else { return }
                     current = current.rebased(location: saved)
                     draft = current
                 }
@@ -568,15 +587,23 @@ final class CustomerSelfEditModel: ObservableObject {
                 let consent: CustomerSmsConsent?
                 do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
                 guard currentAuthority() else { return }
+                writeInFlight = true
                 _ = try await api.recordCustomerSmsConsent(
                     customerID, grant: texts, expectedVersion: consent?.version, idempotencyKey: consentKey,
                     evidenceRef: "Customer chose this themselves in customer mode on staff's Thorbis iPhone app")
-                guard currentAuthority() else { return }
+                guard confirmWrite() else { return }
             }
             savedAll = true
         } catch is CancellationError {
+            if writeInFlight { saveNeedsReconciliation = true; saveError = "Some changes may have saved. Check the customer record before trying again." }
         } catch {
-            saveError = error.isConnectivityFailure ? "Saving needs a connection. Try again when you have signal." : error.localizedDescription
+            let definiteRefusal = (error as? Problem).flatMap(\.status).map { (400..<500).contains($0) && $0 != 408 && $0 != 429 } ?? false
+            if writeInFlight && !definiteRefusal {
+                saveNeedsReconciliation = true
+                saveError = "Some changes may have saved. Check the customer record before trying again."
+            } else {
+                saveError = error.isConnectivityFailure ? "Saving needs a connection. Try again when you have signal." : error.localizedDescription
+            }
         }
     }}
 

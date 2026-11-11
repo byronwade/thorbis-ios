@@ -305,10 +305,11 @@ struct EstimateDetailView: View {
     }
 
     private func customerModeClosed(authority: CustomerHandoffExitAuthority, source: UIWindow) {
+        guard let exitRevision = customerView.idleRevision else { return }
         Task {
-            guard customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
+            guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
             await load()
-            guard customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
+            guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
             // TF-06: approved from the job's next step, the job (and its invoice step) comes back.
             if presentsOnOpen, record?.status == "approved" { dismiss() }
         }
@@ -367,9 +368,9 @@ struct EstimateDetailView: View {
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
                 customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session, sourceWindow: source,
                 sourceStillAttached: { customerWindowAnchor.isAttached(to: source) }) { _ in
-                guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                guard let exitRevision = customerView.idleRevision, customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
                 await load()
-                guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
                 if presentsOnOpen, self.record?.status == "approved" { dismiss() }
             }
             busy = false
@@ -796,10 +797,10 @@ struct InvoiceDetailView: View {
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
                 customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session, sourceWindow: source,
                 sourceStillAttached: { customerWindowAnchor.isAttached(to: source) }) { exit in
-                guard customerWindowAnchor.isAttached(to: source), let handoffAuthority,
+                guard let exitRevision = customerView.idleRevision, customerWindowAnchor.isAttached(to: source), let handoffAuthority,
                       handoffAuthority.isCurrent(api: api, session: session) else { return }
-                await load(currentAuthority: { customerWindowAnchor.isAttached(to: source) && handoffAuthority.isCurrent(api: api, session: session) })
-                guard customerWindowAnchor.isAttached(to: source), handoffAuthority.isCurrent(api: api, session: session) else { return }
+                await load(currentAuthority: { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && handoffAuthority.isCurrent(api: api, session: session) })
+                guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), handoffAuthority.isCurrent(api: api, session: session) else { return }
                 guard case .collect(let invoiceID) = exit, invoiceID == id, paymentModel?.canRecordPayment == true,
                       paymentModel?.invoice?.id == invoiceID,
                       paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true, paymentModel?.loadError == nil,
@@ -815,11 +816,12 @@ struct InvoiceDetailView: View {
         guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
             capability: "invoice.view", feature: "invoicing",
             sourceAttached: { customerWindowAnchor.isAttached(to: source) }, onDismiss: { exit in
+                guard let exitRevision = customerView.idleRevision else { return }
                 Task {
-                    guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                    guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
                     if case .collect = exit {
-                        await load(currentAuthority: { customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
-                        guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                        await load(currentAuthority: { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
+                        guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
                         guard paymentModel?.invoice?.id == record.id, paymentModel?.canRecordPayment == true,
                               paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true,
                               paymentModel?.loadError == nil, session.can("invoice.payment.create", feature: "payments") else {
@@ -828,8 +830,8 @@ struct InvoiceDetailView: View {
                         }
                         showCollectPayment = true
                     }
-                    guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
-                    await loadFinancing(currentAuthority: { customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
+                    guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                    await loadFinancing(currentAuthority: { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
                 }
             }), legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
             lease.release(); error = "Customer view is unavailable. Please try again."; return

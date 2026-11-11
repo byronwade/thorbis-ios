@@ -568,6 +568,8 @@ final class JobEstimateHandoffPresenter: ObservableObject {
         guard arbiter.claim(.legacy(id)) else { return nil }
         return LegacyCustomerHandoffLease(arbiter: arbiter, id: id)
     }
+    var idleRevision: UUID? { arbiter.owner == nil ? arbiter.revision : nil }
+    func isIdleRevision(_ revision: UUID) -> Bool { arbiter.owner == nil && arbiter.revision == revision }
     @Published private(set) var active: JobEstimateHandoffModel?
     private(set) var start: CustomerViewStart = .estimates
     /// The customer's own details, when this person may edit customers.
@@ -623,10 +625,11 @@ final class JobEstimateHandoffPresenter: ObservableObject {
         active?.retire(clearDocuments: false); active = nil; onAuthenticatedExit = nil
         exitAuthority = nil; sceneOwnerID = nil; usesSceneWindow = false
         arbiter.release(.documents)
+        let exitRevision = arbiter.revision
         details = nil; invoiceUpdated = { _ in }; start = .estimates
         if valid, let model, let authority {
             Task {
-                guard authority.isCurrent(api: model.api, session: model.session) else { return }
+                guard self.isIdleRevision(exitRevision), authority.isCurrent(api: model.api, session: model.session) else { return }
                 await refresh?(exit)
             }
         }

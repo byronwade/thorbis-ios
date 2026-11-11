@@ -114,6 +114,31 @@ final class CustomerSelfEditTests: XCTestCase {
         await task.value
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "No contact write should follow a retired customer save")
         XCTAssertFalse(model.savedAll)
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        permitted = true
+        await model.save(api: api, currentAuthority: { permitted })
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "An uncertain write must not be retried without checking the customer record")
+    }
+
+    @MainActor
+    func testUncertainContactCreationCannotBeRetriedAsADuplicate() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let body = String(decoding: try JSONEncoder().encode(contact()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, body, gate: gate), .init(200, body)]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: record().id)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
+        draft.newContactName = "Sam"; draft.newContactPhone = "555-0101"
+        model.draft = draft
+        var permitted = true
+        let task = Task { await model.save(api: api, currentAuthority: { permitted }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        permitted = false; gate.release(); await task.value
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        permitted = true
+        await model.save(api: api, currentAuthority: { permitted })
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
     }
 
     func testRebasingAfterTheCustomerSaveLeavesNothingToRepeat() {

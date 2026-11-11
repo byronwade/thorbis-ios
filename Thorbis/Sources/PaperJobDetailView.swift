@@ -29,6 +29,7 @@ struct JobDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var customerPaymentInvoiceID: String?
     @State private var documentInvoiceID: String?
     @State private var notes: [JobNoteRecord] = []
@@ -286,6 +287,7 @@ struct JobDetailView: View {
             }
         }
         .background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .foregroundStyle(Theme.foreground)
         // v2 Record room: sections are space and a 13 Medium label, no panels ("the page is one pour").
         .environment(\.paperRecordRoom, true)
@@ -443,7 +445,7 @@ struct JobDetailView: View {
             }
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
-        .onAppear { if job != nil { Task { await load() } } }
+        .onAppear { customerWindowAnchor.visible = true; if job != nil { Task { await load() } } }
         .onChange(of: session.can("customer.view", feature: "core_crm")) { _, _ in
             locations = []
             locationsContext = nil
@@ -459,7 +461,7 @@ struct JobDetailView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
-        .onDisappear { dictation.stop() }
+        .onDisappear { customerWindowAnchor.visible = false; dictation.stop() }
         .onChange(of: selectedTab) { previous, tab in
             if tab != "Activity" { dictation.stop(); noteFocused = false }
             if tab == "Money" { Task { await loadInvoices() } }
@@ -2511,27 +2513,24 @@ struct JobDetailView: View {
     /// Customer view: the job's one protected customer handoff (estimates, invoices, the customer's
     /// own details) with one staff hand-back. Every customer-facing door on the job opens it.
     private func openCustomerView(_ start: CustomerViewStart) {
-        guard let job, scope(for: job) != nil, canOpenCustomerView else { return }
+        guard let job, scope(for: job) != nil, canOpenCustomerView,
+              let source = customerWindowAnchor.window, customerWindowAnchor.isAttached(to: source),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
         let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
-        let originalScope = model.scope, actorID = session.user?.id
-        let generation = session.generation, apiGeneration = api.requestGeneration,
-            copyRevision = api.savedCopyScopeRevision, origin = api.normalizedOrigin
-        let current: @MainActor () -> Bool = { [weak api, weak session] in
-            guard let api, let session else { return false }
-            return session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
-                session.generation == generation && api.requestGeneration == apiGeneration &&
-                api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
-                session.can("job.view", feature: "jobs")
-        }
         estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
-                                         invoiceUpdated: updateInvoice) { exit in
+                                         invoiceUpdated: updateInvoice, sourceWindow: source) { exit in
+            guard let exitRevision = estimateHandoffPresenter.idleRevision else { return }
+            let current: @MainActor () -> Bool = {
+                estimateHandoffPresenter.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) &&
+                authority.isCurrent(api: api, session: session) && session.can("job.view", feature: "jobs") && self.job?.id == job.id
+            }
             guard current() else { return }
             // The customer may have changed a phone, an email or a contact in their own hands.
-            await loadContacts(job)
+            await loadContacts(job, currentAuthority: current)
             guard current() else { return }
             if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
-            await finishCustomerDocuments()
+            await finishCustomerDocuments(currentAuthority: current)
         }
     }
 
@@ -2707,7 +2706,8 @@ struct JobDetailView: View {
         }
     }
 
-    private func finishCustomerDocuments() async {
+    private func finishCustomerDocuments(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority() else { return }
         let requestedID = customerPaymentInvoiceID
         customerPaymentInvoiceID = nil
         let generation = session.generation
@@ -2716,14 +2716,15 @@ struct JobDetailView: View {
         let copyRevision = api.savedCopyScopeRevision
         let origin = api.normalizedOrigin
         if let job { await loadJobEstimates(job) }
+        guard currentAuthority() else { return }
         await loadInvoices()
-        guard session.generation == generation, let requestedID,
+        guard currentAuthority(), session.generation == generation, let requestedID,
               session.can("invoice.payment.create", feature: "payments"),
               invoiceRead?.freshIDs.contains(requestedID) == true,
               let invoice = invoices.first(where: { $0.id == requestedID }) else { return }
         selectedInvoiceID = requestedID
         await loadInvoicePayments(for: invoice)
-        guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
+        guard currentAuthority(), !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
               api.requestGeneration == apiGeneration, api.savedCopyScopeRevision == copyRevision,
               api.normalizedOrigin == origin else { return }
         presentPayment(for: requestedID)
@@ -2829,8 +2830,8 @@ struct JobDetailView: View {
     }
 
     /// JS-06: every contact and the account; the header's Call and Text reach the primary one.
-    private func loadContacts(_ job: JobRecord) async {
-        guard let context = customerContext(job) else { return }
+    private func loadContacts(_ job: JobRecord, currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), let context = customerContext(job) else { return }
         let generation = session.generation
         if contactsContext != context {
             contacts = []
@@ -2846,8 +2847,9 @@ struct JobDetailView: View {
         }
         do {
             let people = try await api.fieldContacts(job.customerId)
+            guard currentAuthority() else { return }
             let account = try? await api.fieldCustomer(job.customerId)
-            guard stillCurrent() else { return }
+            guard currentAuthority(), stillCurrent() else { return }
             let verified = people.filter { $0.organizationId == job.organizationId && $0.customerId == job.customerId }
             let verifiedAccount = account.flatMap { $0.organizationId == job.organizationId && $0.id == job.customerId ? $0 : nil }
             contacts = verified
