@@ -296,6 +296,18 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         presenter.authenticatedExit(.collect("invoice-a"))
         await fulfillment(of: [callback], timeout: 1)
     }
+    func testQueuedCollectDoesNotRunAfterAuthorityChanges() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Queued collection must not use retired authority")
+        callback.isInverted = true
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect = exit { callback.fulfill() }
+        }
+        presenter.authenticatedExit(.collect("invoice-a"))
+        model.api.invalidateRequests()
+        await fulfillment(of: [callback], timeout: 0.5)
+    }
     func testRetiredHandoffCannotReturnCollectToStaff() async throws {
         let model = try await ready([])
         let presenter = JobEstimateHandoffPresenter()
