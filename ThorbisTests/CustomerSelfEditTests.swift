@@ -143,6 +143,21 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertEqual(baselines.first?["address"] as? String, "1 Main St")
     }
 
+    func testOldFullRecordBaselinesReopenAsMinimalExactBaselines() throws {
+        let original = location()
+        let draft = CustomerSelfEditDraft(record: record(), contacts: [contact(phone: nil)], locations: [original], smsConsent: nil)
+        var body = try json(draft)
+        body["conditionalContactBaselines"] = [try json(contact(phone: nil))]
+        body["conditionalLocationBaselines"] = [try json(original)]
+        let restored = try JSONDecoder().decode(CustomerSelfEditDraft.self, from: JSONSerialization.data(withJSONObject: body))
+        let rewritten = try json(restored)
+        let locations = try XCTUnwrap(rewritten["conditionalLocationBaselines"] as? [[String: Any]])
+        XCTAssertNil(locations.first?["gateCode"])
+        XCTAssertEqual(locations.first?["address"] as? String, original.address)
+        let contactBaseline = try XCTUnwrap(restored.conditionalContactBaselines?.first)
+        XCTAssertNil(contactBaseline.phone)
+    }
+
     @MainActor
     func testMissingConditionalCapabilityKeepsDraftWithoutWriting() async throws {
         let body = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
@@ -568,6 +583,14 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertEqual(model.recoveryConflicts.map(\.label), ["Job texts"])
         model.resolveRecovery(contactAlreadySaved: false, keepConflictingEdits: nil, currentAuthority: { true })
         XCTAssertTrue(model.saveNeedsReconciliation)
+        store.rejectWrites = true
+        model.resolveRecovery(contactAlreadySaved: false, keepConflictingEdits: false, currentAuthority: { true })
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        XCTAssertEqual(try store.load(scope: recoveryScope)?.consentKey, "same-key")
+        let requestsBeforeRetry = URLProtocolFixture.recorded.count
+        await model.save(api: api)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, requestsBeforeRetry)
+        store.rejectWrites = false
         model.resolveRecovery(contactAlreadySaved: false, keepConflictingEdits: false, currentAuthority: { true })
         XCTAssertEqual(model.draft?.allowsTexts, false)
         XCTAssertNil(model.draft?.textsChange)
