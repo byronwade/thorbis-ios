@@ -61,6 +61,39 @@ struct ConditionalCustomerUpdate: Encodable {
     }
 }
 
+struct ConditionalContactUpdate: Encodable {
+    let update: FieldContactUpdate
+    let original: CustomerContactRecord
+    private enum Key: String, CodingKey { case expected, name, email, phone }
+    func encode(to encoder: Encoder) throws {
+        try update.encode(to: encoder)
+        var c = encoder.container(keyedBy: Key.self)
+        var expected = c.nestedContainer(keyedBy: Key.self, forKey: .expected)
+        if update.name != nil { try expected.encode(original.name, forKey: .name) }
+        func baseline(_ patch: FieldContactPatch<String>, _ value: String?, _ key: Key) throws {
+            if case .unchanged = patch { return }
+            if let value { try expected.encode(value, forKey: key) } else { try expected.encodeNil(forKey: key) }
+        }
+        try baseline(update.email, original.email, .email)
+        try baseline(update.phone, original.phone, .phone)
+    }
+}
+
+struct ConditionalLocationUpdate: Encodable {
+    let address: String
+    let original: ServiceLocationRecord
+    private enum Key: String, CodingKey { case address, coordinates, expected }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Key.self)
+        try c.encode(address, forKey: .address)
+        try c.encodeNil(forKey: .coordinates)
+        var expected = c.nestedContainer(keyedBy: Key.self, forKey: .expected)
+        try expected.encode(original.address, forKey: .address)
+        if let coordinates = original.coordinates { try expected.encode(coordinates, forKey: .coordinates) }
+        else { try expected.encodeNil(forKey: .coordinates) }
+    }
+}
+
 @MainActor
 extension APIClient {
     /// `POST /v1/customers/{id}` (customer.edit). The server records the change set in the audit log.
@@ -68,6 +101,10 @@ extension APIClient {
         guard UUID(uuidString: customerID) != nil else {
             throw Problem(title: "Invalid record ID", status: nil, detail: customerID)
         }
+        return try await send("POST", "/v1/customers/\(customerID)", body: request)
+    }
+    func updateFieldCustomerConditionally(_ customerID: String, request: ConditionalCustomerUpdate) async throws -> CustomerRecord {
+        guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await send("POST", "/v1/customers/\(customerID)", body: request)
     }
 }
@@ -110,6 +147,11 @@ struct CustomerSelfEditDraft: Codable, Equatable {
     private(set) var originalContacts: [Contact]
     private(set) var originalLocations: [Location]
     private(set) var originalTexts: Bool?
+    private(set) var originalConsentVersion: String?
+    private(set) var consentBaselineKnown: Bool?
+    // Nil means an older persisted draft without lossless baselines. It must be reconciled first.
+    private(set) var conditionalContactBaselines: [CustomerContactRecord]?
+    private(set) var conditionalLocationBaselines: [ServiceLocationRecord]?
 
     var name: String
     var phone: String
@@ -125,8 +167,12 @@ struct CustomerSelfEditDraft: Codable, Equatable {
     var newContactEmail = ""
 
     init(record: CustomerRecord, contacts: [CustomerContactRecord], locations: [ServiceLocationRecord],
-         smsConsent: CustomerSmsConsent?) {
+         smsConsent: CustomerSmsConsent?, consentKnown: Bool = true) {
         original = record
+        originalConsentVersion = smsConsent?.version
+        consentBaselineKnown = consentKnown
+        conditionalContactBaselines = contacts
+        conditionalLocationBaselines = locations
         name = record.name
         phone = record.phone ?? ""
         email = record.email ?? ""
@@ -701,9 +747,11 @@ final class CustomerSelfEditModel: ObservableObject {
             let locations = try await api.fieldLocations(customerID)
             guard currentAuthority() else { return }
             let consent: CustomerSmsConsent?
-            do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
+            let consentKnown: Bool
+            do { consent = try await api.customerSmsConsent(customerID); consentKnown = true }
+            catch { consent = nil; consentKnown = false }
             guard currentAuthority(), draft == nil else { return }
-            draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent)
+            draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent, consentKnown: consentKnown)
         } catch is CancellationError {
         } catch {
             loadError = error.customerSentence(.openDetails)
@@ -723,8 +771,16 @@ final class CustomerSelfEditModel: ObservableObject {
         defer { saving = false }
         saveError = nil
         var writeInFlight = false
+        let generation = api.requestGeneration
+        let scopeRevision = api.savedCopyScopeRevision
+        let copyScope = api.savedCopyScope
+        let boundScope = recoveryScope
+        func authority() -> Bool {
+            currentAuthority() && api.requestGeneration == generation && api.savedCopyScopeRevision == scopeRevision &&
+            api.savedCopyScope == copyScope && recoveryScope == boundScope && api.normalizedOrigin == boundScope?.origin
+        }
         func confirmWrite() -> Bool {
-            guard currentAuthority() else {
+            guard authority() else {
                 saveNeedsReconciliation = true
                 saveError = "Some changes may have saved. Check the customer record before trying again."
                 return false
@@ -734,12 +790,30 @@ final class CustomerSelfEditModel: ObservableObject {
         }
         do {
             try checkpoint(current, pending: nil)
+            let needsGuardedWrite = !current.customerUpdate.isEmpty || !current.contactUpdates.isEmpty || !current.locationChanges.isEmpty
+            if needsGuardedWrite {
+                guard authority(), let scope = boundScope else { return }
+                let capability = try await api.customerConditionalRead(customerID)
+                guard authority(), capability.provenance.origin == scope.origin,
+                      capability.value.id == customerID, capability.value.organizationId == scope.organizationID else { throw CancellationError() }
+                guard capability.supportsConditionalWrites else {
+                    saveError = "Customer changes can't be safely saved until the server supports protected updates. Your changes are kept on this device."
+                    return
+                }
+                guard current.contactUpdates.allSatisfy({ change in current.conditionalContactBaselines?.contains(where: { $0.id == change.id && $0.customerId == customerID && $0.organizationId == scope.organizationID }) == true }),
+                      current.locationChanges.allSatisfy({ change in current.conditionalLocationBaselines?.contains(where: { $0.id == change.id && $0.customerId == customerID && $0.organizationId == scope.organizationID }) == true }) else {
+                    try checkpoint(current, pending: .reviewDraft)
+                    saveNeedsReconciliation = true
+                    saveError = "Review the current customer record before saving these kept changes."
+                    return
+                }
+            }
             let update = current.customerUpdate
             if !update.isEmpty {
-                guard currentAuthority() else { return }
+                guard authority() else { return }
                 try checkpoint(current, pending: .customer)
                 writeInFlight = true
-                let record = try await api.updateFieldCustomer(customerID, request: update)
+                let record = try await api.updateFieldCustomerConditionally(customerID, request: current.conditionalCustomerUpdate())
                 guard record.id == customerID, record.organizationId == recoveryScope?.organizationID else {
                     saveNeedsReconciliation = true; saveError = "The customer update couldn't be verified. Check the record before continuing."; return
                 }
@@ -749,10 +823,11 @@ final class CustomerSelfEditModel: ObservableObject {
                 try checkpoint(current, pending: nil)
             }
             for change in current.contactUpdates {
-                guard currentAuthority() else { return }
+                guard authority() else { return }
                 try checkpoint(current, pending: .contact(change.id))
                 writeInFlight = true
-                let saved = try await api.updateFieldContact(customerID, change.id, request: change.request)
+                guard let baseline = current.conditionalContactBaselines?.first(where: { $0.id == change.id }) else { throw CancellationError() }
+                let saved = try await api.updateFieldContactConditionally(customerID, change.id, request: ConditionalContactUpdate(update: change.request, original: baseline))
                 guard saved.id == change.id, saved.customerId == customerID, saved.organizationId == recoveryScope?.organizationID else {
                     saveNeedsReconciliation = true; saveError = "The contact update couldn't be verified. Check the record before continuing."; return
                 }
@@ -762,7 +837,7 @@ final class CustomerSelfEditModel: ObservableObject {
                 try checkpoint(current, pending: nil)
             }
             if let create = current.newContact {
-                guard currentAuthority() else { return }
+                guard authority() else { return }
                 try checkpoint(current, pending: .createContact)
                 writeInFlight = true
                 let created = try await api.createFieldContact(customerID, request: create)
@@ -775,22 +850,19 @@ final class CustomerSelfEditModel: ObservableObject {
                 try checkpoint(current, pending: nil)
             }
             if !current.locationChanges.isEmpty {
-                guard currentAuthority() else { return }
-                let records = try await api.allLocationsForRecovery(customerID, currentAuthority: currentAuthority)
-                guard currentAuthority() else { return }
+                guard authority() else { return }
+                let records = try await api.allLocationsForRecovery(customerID, currentAuthority: authority)
+                guard authority() else { return }
                 for change in current.locationChanges {
-                    guard currentAuthority() else { return }
+                    guard authority() else { return }
                     guard let existing = records.first(where: { $0.id == change.id }),
                           existing.organizationId == recoveryScope?.organizationID, existing.customerId == customerID else {
                         throw Problem(title: "A service location changed or was removed. Review the customer record before saving.", status: 409, detail: nil)
                     }
                     try checkpoint(current, pending: .location(change.id))
                     writeInFlight = true
-                    let saved = try await api.updateFieldLocation(customerID, change.id, request: FieldLocationUpdate(
-                        label: existing.label, kind: existing.kind, address: change.address, notes: existing.notes,
-                        // The map pin belonged to the old address.
-                        coordinates: nil, gateCode: existing.gateCode, alarmCode: existing.alarmCode,
-                        dogOnSite: existing.dogOnSite, parking: existing.parking))
+                    guard let baseline = current.conditionalLocationBaselines?.first(where: { $0.id == change.id }) else { throw CancellationError() }
+                    let saved = try await api.updateFieldLocationConditionally(customerID, change.id, request: ConditionalLocationUpdate(address: change.address, original: baseline))
                     guard saved.id == change.id, saved.customerId == customerID, saved.organizationId == recoveryScope?.organizationID else {
                         saveNeedsReconciliation = true; saveError = "The location update couldn't be verified. Check the record before continuing."; return
                     }
@@ -801,14 +873,17 @@ final class CustomerSelfEditModel: ObservableObject {
                 }
             }
             if let texts = current.textsChange {
-                guard currentAuthority() else { return }
-                let consent: CustomerSmsConsent?
-                do { consent = try await api.customerSmsConsent(customerID) } catch { consent = nil }
-                guard currentAuthority() else { return }
+                guard authority() else { return }
+                guard current.consentBaselineKnown == true else {
+                    try checkpoint(current, pending: .reviewDraft)
+                    saveNeedsReconciliation = true
+                    saveError = "Check the current text preference before saving the kept changes."
+                    return
+                }
                 try checkpoint(current, pending: .consent)
                 writeInFlight = true
                 let savedConsent = try await api.recordCustomerSmsConsent(
-                    customerID, grant: texts, expectedVersion: consent?.version, idempotencyKey: consentKey,
+                    customerID, grant: texts, expectedVersion: current.originalConsentVersion, idempotencyKey: consentKey,
                     evidenceRef: "Customer chose this themselves in customer mode on staff's Thorbis iPhone app")
                 guard confirmWrite() else { return }
                 current = current.rebased(consent: savedConsent)
@@ -1223,12 +1298,15 @@ extension CustomerSelfEditDraft {
         guard !copy.originalContacts.contains(where: { $0.id == contact.id }) else { return copy }
         let value = Contact(id: contact.id, name: contact.name, phone: contact.phone ?? "", email: contact.email ?? "")
         copy.originalContacts.append(value); copy.contacts.append(value)
+        copy.conditionalContactBaselines?.append(contact)
         return copy
     }
     /// Keep explicit customer edits while adopting newer server values for fields they never touched.
     func mergingRecovery(record: CustomerRecord, contacts latestContacts: [CustomerContactRecord], locations latestLocations: [ServiceLocationRecord],
                          preferServerForConflicts: Bool = false) -> Self {
         var copy = self
+        copy.conditionalContactBaselines = latestContacts
+        copy.conditionalLocationBaselines = latestLocations
         func useLatest<T: Equatable>(_ old: T, _ edited: T, _ latest: T) -> Bool {
             edited == old || (preferServerForConflicts && latest != old && edited != latest)
         }
@@ -1280,6 +1358,9 @@ extension CustomerSelfEditDraft {
 
     func rebased(contact: CustomerContactRecord) -> Self {
         var copy = self
+        if let index = copy.conditionalContactBaselines?.firstIndex(where: { $0.id == contact.id }) {
+            copy.conditionalContactBaselines?[index] = contact
+        }
         if let index = copy.originalContacts.firstIndex(where: { $0.id == contact.id }) {
             copy.originalContacts[index] = Contact(id: contact.id, name: contact.name, phone: contact.phone ?? "", email: contact.email ?? "")
         }
@@ -1288,6 +1369,9 @@ extension CustomerSelfEditDraft {
 
     func rebased(location: ServiceLocationRecord) -> Self {
         var copy = self
+        if let index = copy.conditionalLocationBaselines?.firstIndex(where: { $0.id == location.id }) {
+            copy.conditionalLocationBaselines?[index] = location
+        }
         if let index = copy.originalLocations.firstIndex(where: { $0.id == location.id }) {
             copy.originalLocations[index] = Location(id: location.id, label: location.label, address: location.address)
         }
@@ -1297,6 +1381,8 @@ extension CustomerSelfEditDraft {
     func rebased(consent: CustomerSmsConsent?) -> Self {
         var copy = self
         copy.originalTexts = consent.map { $0.decision == "grant" }
+        copy.originalConsentVersion = consent?.version
+        copy.consentBaselineKnown = true
         return copy
     }
 }
