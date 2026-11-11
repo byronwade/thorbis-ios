@@ -331,8 +331,21 @@ final class JobEstimateHandoffModelTests: XCTestCase {
             if case .collect("invoice-a") = exit { callback.fulfill() }
         }
         XCTAssertTrue(presenter.active === model)
-        presenter.authenticatedExit(.collect("invoice-a"))
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
         await fulfillment(of: [callback], timeout: 1)
+    }
+    func testQueuedCollectDoesNotRunAfterAnotherCustomerHandoffStarts() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Earlier collection must not run behind a newer handoff")
+        callback.isInverted = true
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect = exit { callback.fulfill() }
+        }
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
+        let lease = try XCTUnwrap(presenter.claimLegacy())
+        await fulfillment(of: [callback], timeout: 0.5)
+        lease.release()
     }
     func testQueuedCollectDoesNotRunAfterAuthorityChanges() async throws {
         let model = try await ready([])
@@ -342,7 +355,7 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         presenter.present(model, start: .invoice("invoice-a")) { exit in
             if case .collect = exit { callback.fulfill() }
         }
-        presenter.authenticatedExit(.collect("invoice-a"))
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
         model.api.invalidateRequests()
         await fulfillment(of: [callback], timeout: 0.5)
     }
@@ -357,7 +370,7 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertTrue(presenter.active === model)
         model.api.invalidateRequests()
         XCTAssertFalse(model.isCurrentJob)
-        presenter.authenticatedExit(.collect("invoice-a"))
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
         await fulfillment(of: [callback], timeout: 0.5)
     }
     func testResultAttributionUsesCanonicalSignerInsteadOfRetainedInput() async throws {
