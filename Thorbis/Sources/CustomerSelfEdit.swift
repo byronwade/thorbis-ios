@@ -551,7 +551,8 @@ final class CustomerSelfEditModel: ObservableObject {
                 guard currentAuthority(), contacts.allSatisfy({ $0.customerId == customerID && $0.organizationId == scope.organizationID }) else { throw CancellationError() }
                 let locations = try await api.allLocationsForRecovery(customerID, currentAuthority: currentAuthority)
                 guard currentAuthority(), locations.allSatisfy({ $0.customerId == customerID && $0.organizationId == scope.organizationID }) else { throw CancellationError() }
-                let consent = pendingWrite == .consent ? try await api.customerSmsConsent(customerID) : nil
+                let needsConsent = pendingWrite == .consent || draft?.allowsTexts != draft?.originalTexts
+                let consent = needsConsent ? try await api.customerSmsConsent(customerID) : nil
                 guard currentAuthority() else { throw CancellationError() }
                 return RecoveryEvidence(record: record, contacts: contacts, locations: locations, consent: consent)
             }
@@ -574,7 +575,7 @@ final class CustomerSelfEditModel: ObservableObject {
         }
         current = current.mergingRecovery(record: evidence.record, contacts: evidence.contacts, locations: evidence.locations,
                                           preferServerForConflicts: keepConflictingEdits == false)
-        if pendingWrite == .consent {
+        if pendingWrite == .consent || current.allowsTexts != current.originalTexts {
             let latest = evidence.consent.map { $0.decision == "grant" }
             if keepConflictingEdits == false, current.allowsTexts != current.originalTexts,
                latest != current.originalTexts, current.allowsTexts != latest { current.allowsTexts = latest }
@@ -593,7 +594,7 @@ final class CustomerSelfEditModel: ObservableObject {
     var recoveryConflicts: [CustomerSelfEditConflict] {
         guard let draft, let evidence = recoveryEvidence else { return [] }
         var conflicts = draft.recoveryConflicts(record: evidence.record, contacts: evidence.contacts, locations: evidence.locations)
-        if pendingWrite == .consent {
+        if pendingWrite == .consent || draft.allowsTexts != draft.originalTexts {
             let latest = evidence.consent.map { $0.decision == "grant" }
             if draft.allowsTexts != draft.originalTexts, latest != draft.originalTexts, draft.allowsTexts != latest {
                 func words(_ value: Bool?) -> String { value.map { $0 ? "Allow job texts" : "Stop job texts" } ?? "Not set" }
@@ -625,19 +626,39 @@ final class CustomerSelfEditModel: ObservableObject {
             do {
                 let saved = try recoveryStore.load(scope: recoveryScope)
                 if let saved {
+                    if saved.completed {
+                        try? recoveryStore.remove(scope: recoveryScope)
+                        recoveryLoaded = true
+                    } else {
                     guard saved.draft.original.id == customerID, saved.draft.original.organizationId == recoveryScope.organizationID else {
                         loadError = "Saved customer changes couldn't be verified. Return to your technician."
                         return
                     }
-                    let current = try await SavedCopies.$liveOnly.withValue(true) { try await api.fieldCustomer(customerID, requireFresh: true) }
-                    guard currentAuthority(), current.id == customerID, current.organizationId == recoveryScope.organizationID else { return }
-                    recoveryLoaded = true
-                    draft = saved.draft; pendingWrite = saved.pending; consentKey = saved.consentKey
-                    if saved.pending != nil {
-                        saveNeedsReconciliation = true
-                        saveError = "A change may have saved. Check the customer record before continuing."
+                    let verified = try await SavedCopies.$liveOnly.withValue(true) {
+                        let current = try await api.fieldCustomer(customerID, requireFresh: true)
+                        guard currentAuthority(), current.id == customerID, current.organizationId == recoveryScope.organizationID else { throw CancellationError() }
+                        let contacts = try await api.allContactsForRecovery(customerID, currentAuthority: currentAuthority)
+                        guard currentAuthority(), contacts.allSatisfy({ $0.customerId == customerID && $0.organizationId == recoveryScope.organizationID }) else { throw CancellationError() }
+                        let locations = try await api.allLocationsForRecovery(customerID, currentAuthority: currentAuthority)
+                        guard currentAuthority(), locations.allSatisfy({ $0.customerId == customerID && $0.organizationId == recoveryScope.organizationID }) else { throw CancellationError() }
+                        if saved.draft.originalTexts != nil || saved.draft.allowsTexts != nil {
+                            _ = try await api.customerSmsConsent(customerID)
+                            guard currentAuthority() else { throw CancellationError() }
+                        }
+                        let contactIDs = Set(contacts.map(\.id)), locationIDs = Set(locations.map(\.id))
+                        return saved.draft.originalContacts.allSatisfy { contactIDs.contains($0.id) } &&
+                            saved.draft.originalLocations.allSatisfy { locationIDs.contains($0.id) }
                     }
+                    guard currentAuthority(), verified else {
+                        loadError = "Some saved customer changes can't be verified. Return to your technician."
+                        return
+                    }
+                    recoveryLoaded = true
+                    draft = saved.draft; pendingWrite = saved.pending ?? .reviewDraft; consentKey = saved.consentKey
+                    saveNeedsReconciliation = true
+                    saveError = saved.pending == nil ? "Check saved edits against the current customer record." : "A change may have saved. Check the customer record before continuing."
                     return
+                    }
                 }
                 recoveryLoaded = true
             } catch {
@@ -688,12 +709,16 @@ final class CustomerSelfEditModel: ObservableObject {
             return true
         }
         do {
+            try checkpoint(current, pending: nil)
             let update = current.customerUpdate
             if !update.isEmpty {
                 guard currentAuthority() else { return }
                 try checkpoint(current, pending: .customer)
                 writeInFlight = true
                 let record = try await api.updateFieldCustomer(customerID, request: update)
+                guard record.id == customerID, record.organizationId == recoveryScope?.organizationID else {
+                    saveNeedsReconciliation = true; saveError = "The customer update couldn't be verified. Check the record before continuing."; return
+                }
                 guard confirmWrite() else { return }
                 current = current.rebased(record: record)
                 draft = current
@@ -704,6 +729,9 @@ final class CustomerSelfEditModel: ObservableObject {
                 try checkpoint(current, pending: .contact(change.id))
                 writeInFlight = true
                 let saved = try await api.updateFieldContact(customerID, change.id, request: change.request)
+                guard saved.id == change.id, saved.customerId == customerID, saved.organizationId == recoveryScope?.organizationID else {
+                    saveNeedsReconciliation = true; saveError = "The contact update couldn't be verified. Check the record before continuing."; return
+                }
                 guard confirmWrite() else { return }
                 current = current.rebased(contact: saved)
                 draft = current
@@ -713,7 +741,10 @@ final class CustomerSelfEditModel: ObservableObject {
                 guard currentAuthority() else { return }
                 try checkpoint(current, pending: .createContact)
                 writeInFlight = true
-                _ = try await api.createFieldContact(customerID, request: create)
+                let created = try await api.createFieldContact(customerID, request: create)
+                guard created.customerId == customerID, created.organizationId == recoveryScope?.organizationID else {
+                    saveNeedsReconciliation = true; saveError = "The contact couldn't be verified. Check the record before continuing."; return
+                }
                 guard confirmWrite() else { return }
                 current.newContactName = ""; current.newContactPhone = ""; current.newContactEmail = ""
                 draft = current
@@ -721,11 +752,14 @@ final class CustomerSelfEditModel: ObservableObject {
             }
             if !current.locationChanges.isEmpty {
                 guard currentAuthority() else { return }
-                let records = try await api.fieldLocations(customerID)
+                let records = try await api.allLocationsForRecovery(customerID, currentAuthority: currentAuthority)
                 guard currentAuthority() else { return }
                 for change in current.locationChanges {
                     guard currentAuthority() else { return }
-                    guard let existing = records.first(where: { $0.id == change.id }) else { continue }
+                    guard let existing = records.first(where: { $0.id == change.id }),
+                          existing.organizationId == recoveryScope?.organizationID, existing.customerId == customerID else {
+                        throw Problem(title: "A service location changed or was removed. Review the customer record before saving.", status: 409, detail: nil)
+                    }
                     try checkpoint(current, pending: .location(change.id))
                     writeInFlight = true
                     let saved = try await api.updateFieldLocation(customerID, change.id, request: FieldLocationUpdate(
@@ -733,6 +767,9 @@ final class CustomerSelfEditModel: ObservableObject {
                         // The map pin belonged to the old address.
                         coordinates: nil, gateCode: existing.gateCode, alarmCode: existing.alarmCode,
                         dogOnSite: existing.dogOnSite, parking: existing.parking))
+                    guard saved.id == change.id, saved.customerId == customerID, saved.organizationId == recoveryScope?.organizationID else {
+                        saveNeedsReconciliation = true; saveError = "The location update couldn't be verified. Check the record before continuing."; return
+                    }
                     guard confirmWrite() else { return }
                     current = current.rebased(location: saved)
                     draft = current
@@ -746,22 +783,22 @@ final class CustomerSelfEditModel: ObservableObject {
                 guard currentAuthority() else { return }
                 try checkpoint(current, pending: .consent)
                 writeInFlight = true
-                _ = try await api.recordCustomerSmsConsent(
+                let savedConsent = try await api.recordCustomerSmsConsent(
                     customerID, grant: texts, expectedVersion: consent?.version, idempotencyKey: consentKey,
                     evidenceRef: "Customer chose this themselves in customer mode on staff's Thorbis iPhone app")
                 guard confirmWrite() else { return }
+                current = current.rebased(consent: savedConsent)
+                draft = current
                 try checkpoint(current, pending: nil)
             }
+            guard let recoveryScope else { throw CancellationError() }
+            try recoveryStore.save(.init(draft: current, pending: nil, consentKey: consentKey, completed: true), scope: recoveryScope)
             savedAll = true
-            if let recoveryScope { try? recoveryStore.remove(scope: recoveryScope) }
+            try? recoveryStore.remove(scope: recoveryScope)
         } catch is CancellationError {
             if writeInFlight { saveNeedsReconciliation = true; saveError = "Some changes may have saved. Check the customer record before trying again." }
         } catch {
-            let definiteRefusal = (error as? Problem).flatMap(\.status).map { (400..<500).contains($0) && $0 != 408 && $0 != 429 } ?? false
-            if writeInFlight && definiteRefusal {
-                do { try checkpoint(current, pending: nil); saveError = error.localizedDescription }
-                catch { saveNeedsReconciliation = true; saveError = "Some changes may have saved. Check the customer record before continuing." }
-            } else if writeInFlight || pendingWrite != nil {
+            if writeInFlight || pendingWrite != nil {
                 saveNeedsReconciliation = true
                 saveError = "Some changes may have saved. Check the customer record before trying again."
             } else {
