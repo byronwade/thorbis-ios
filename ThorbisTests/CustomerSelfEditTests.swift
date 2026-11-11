@@ -298,6 +298,60 @@ final class CustomerSelfEditTests: XCTestCase {
     }
 
     @MainActor
+    func testAuthorityChangeDuringGuardedContactStopsNewContact() async throws {
+        let id = "00000000-0000-4000-8000-000000000002"
+        let old = CustomerContactRecord(id: id, organizationId: "org", customerId: record().id, name: "Sam", role: nil,
+            email: nil, phone: nil, primary: false, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        let saved = CustomerContactRecord(id: id, organizationId: "org", customerId: record().id, name: "Sam", role: nil,
+            email: nil, phone: "555-0199", primary: false, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        let gate = URLProtocolFixture.Gate()
+        let customerJSON = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let contactJSON = String(decoding: try JSONEncoder().encode(saved), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, customerJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]), .init(200, contactJSON, gate: gate)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: MemoryCustomerSelfEditRecoveryStore(), recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [old], locations: [], smsConsent: nil)
+        draft.contacts[0].phone = "555-0199"; draft.newContactName = "New contact"
+        model.draft = draft
+        var permitted = true
+        let task = Task { await model.save(api: api, currentAuthority: { permitted }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        permitted = false; gate.release(); await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertTrue(model.saveNeedsReconciliation)
+    }
+
+    @MainActor
+    func testAuthorityChangeDuringGuardedLocationStopsConsent() async throws {
+        let id = "00000000-0000-4000-8000-000000000003"
+        let old = ServiceLocationRecord(id: id, organizationId: "org", customerId: record().id, label: "Home", kind: "service",
+            address: "1 Main", notes: nil, coordinates: nil, gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil,
+            createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        let customerJSON = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let locationJSON = String(decoding: try JSONEncoder().encode(old), as: UTF8.self)
+        let gate = URLProtocolFixture.Gate()
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, customerJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]),
+            .init(200, "{\"items\":[\(locationJSON)],\"nextCursor\":null}"), .init(200, locationJSON, gate: gate)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: MemoryCustomerSelfEditRecoveryStore(), recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [old], smsConsent: nil)
+        draft.locations[0].address = "2 Main"; draft.allowsTexts = true
+        model.draft = draft
+        var permitted = true
+        let task = Task { await model.save(api: api, currentAuthority: { permitted }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 3 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        permitted = false; gate.release(); await task.value
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertTrue(model.saveNeedsReconciliation)
+    }
+
+    @MainActor
     func testUncertainContactCreationCannotBeRetriedAsADuplicate() async throws {
         let gate = URLProtocolFixture.Gate()
         let created = CustomerContactRecord(id: "new-contact", organizationId: "org", customerId: record().id,
