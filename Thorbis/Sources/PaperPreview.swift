@@ -324,7 +324,7 @@ enum PaperPreview {
         } else if args.contains("--paper-preview-large-invoice") {
             fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789")
         } else { fixture = json }
-        if args.contains("--paper-preview-legacy-handoff-test") {
+        if args.contains("--paper-preview-legacy-handoff-test") && !args.contains("--paper-preview-job-linked-invoice") {
             fixture = fixture.replacingOccurrences(of: "\"jobId\":\"00000000-0000-4000-8000-000000002214\"", with: "\"jobId\":null")
         }
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8))
