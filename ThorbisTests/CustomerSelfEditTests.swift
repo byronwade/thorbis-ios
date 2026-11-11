@@ -430,7 +430,7 @@ final class CustomerSelfEditTests: XCTestCase {
         var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
         draft.name = "Updated Customer"; model.draft = draft
         let updated = String(decoding: try JSONEncoder().encode(record(name: "Updated Customer")), as: UTF8.self)
-        let api = APIClient(session: URLProtocolFixture.session([.init(200, updated)]), baseURL: "https://app.thorbis.com")
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, updated, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]), .init(200, updated)]), baseURL: "https://app.thorbis.com")
         await model.save(api: api)
         XCTAssertTrue(model.savedAll)
         XCTAssertEqual(try store.load(scope: recoveryScope)?.completed, true)
@@ -492,12 +492,13 @@ final class CustomerSelfEditTests: XCTestCase {
         draft.locations[0].address = "2 Main St"
         let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
         model.draft = draft
-        let api = APIClient(session: URLProtocolFixture.session([.init(200, "{\"items\":[],\"nextCursor\":null}")]), baseURL: "https://app.thorbis.com")
+        let customerJSON = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, customerJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]), .init(200, "{\"items\":[],\"nextCursor\":null}")]), baseURL: "https://app.thorbis.com")
         await model.save(api: api)
         XCTAssertFalse(model.savedAll)
         XCTAssertNotNil(model.saveError)
         XCTAssertEqual(try store.load(scope: recoveryScope)?.draft.locations.first?.address, "2 Main St")
-        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
     }
 
     @MainActor
@@ -511,7 +512,9 @@ final class CustomerSelfEditTests: XCTestCase {
         draft.locations[0].address = "2 Main St"
         let locationJSON = String(decoding: try JSONEncoder().encode(location), as: UTF8.self)
         let updatedJSON = locationJSON.replacingOccurrences(of: "1 Main St", with: "2 Main St")
+        let customerJSON = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
         let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, customerJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]),
             .init(200, "{\"items\":[],\"nextCursor\":\"page-two\"}"),
             .init(200, "{\"items\":[\(locationJSON)],\"nextCursor\":null}"), .init(200, updatedJSON)
         ]), baseURL: "https://app.thorbis.com")
@@ -519,7 +522,7 @@ final class CustomerSelfEditTests: XCTestCase {
         model.draft = draft
         await model.save(api: api)
         XCTAssertTrue(model.savedAll)
-        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 4)
     }
 
     func testRecoveryKeepsEditedFieldsAndAdoptsConcurrentUneditedValues() {
