@@ -41,6 +41,26 @@ struct FieldCustomerUpdate: Encodable {
     }
 }
 
+struct ConditionalCustomerUpdate: Encodable {
+    let update: FieldCustomerUpdate
+    let original: CustomerRecord
+    private enum Key: String, CodingKey { case expected, name, email, phone, address, preferredContact }
+    func encode(to encoder: Encoder) throws {
+        try update.encode(to: encoder)
+        var container = encoder.container(keyedBy: Key.self)
+        var expected = container.nestedContainer(keyedBy: Key.self, forKey: .expected)
+        if update.name != nil { try expected.encode(original.name, forKey: .name) }
+        func baseline(_ patch: FieldContactPatch<String>, _ value: String?, _ key: Key) throws {
+            if case .unchanged = patch { return }
+            if let value { try expected.encode(value, forKey: key) } else { try expected.encodeNil(forKey: key) }
+        }
+        try baseline(update.email, original.email, .email)
+        try baseline(update.phone, original.phone, .phone)
+        try baseline(update.address, original.address, .address)
+        try baseline(update.preferredContact, original.preferredContact, .preferredContact)
+    }
+}
+
 @MainActor
 extension APIClient {
     /// `POST /v1/customers/{id}` (customer.edit). The server records the change set in the audit log.
@@ -177,6 +197,10 @@ struct CustomerSelfEditDraft: Codable, Equatable {
             update.preferredContact = preferredContact.map { .value($0) } ?? .clear
         }
         return update
+    }
+
+    func conditionalCustomerUpdate() -> ConditionalCustomerUpdate {
+        ConditionalCustomerUpdate(update: customerUpdate, original: original)
     }
 
     var contactUpdates: [(id: String, request: FieldContactUpdate)] {
