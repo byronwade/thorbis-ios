@@ -19,8 +19,9 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let app = openPrimary(extra: ["--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved", "--paper-preview-payment-retire-on-unlock"])
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
         XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
-        XCTAssertTrue(app.staticTexts["Please hand the device back to your technician."].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["This document isn’t available any more"].waitForExistence(timeout: 20))
         XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        XCTAssertFalse(app.buttons["Job actions"].isHittable)
     }
     func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])
