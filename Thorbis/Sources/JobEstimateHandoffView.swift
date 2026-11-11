@@ -474,9 +474,12 @@ struct JobEstimateProtectedOwner: View {
     @State private var reviewingDetails: CustomerViewExit?
     var body: some View {
         Group {
-            if let exit = reviewingDetails, let details = presenter.details {
+            if let exit = reviewingDetails, let details = presenter.details, model.isCurrentJob,
+               session.can("customer.edit", feature: "core_crm") {
                 // Staff side, after authentication: the existing review and audited save.
-                CustomerSelfEditReview(model: details) { presenter.authenticatedExit(from: model, exit) }
+                CustomerSelfEditReview(model: details, currentAuthority: {
+                    presenter.active === model && model.isCurrentJob && session.can("customer.edit", feature: "core_crm")
+                }) { presenter.authenticatedExit(from: model, exit) }
             } else {
                 CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
                     JobCustomerDocumentsView(scope: model.scope, documents: model.documents, sourceGeneration: presenter.sourceGeneration,

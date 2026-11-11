@@ -293,7 +293,7 @@ struct EstimateDetailView: View {
     }
 
     private func customerMode(_ record: EstimateRecord, lease: LegacyCustomerHandoffLease) -> some View {
-        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }) { handBack in
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }, authenticateOwner: customerHandoffAuthenticate) { handBack in
             CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
                                          financing: session.can("organization.view", feature: FinancingWords.feature),
                                          currentAuthority: { legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true },
@@ -753,7 +753,7 @@ struct InvoiceDetailView: View {
     }
 
     private func customerInvoiceMode(_ record: InvoiceRecord, lease: LegacyCustomerHandoffLease) -> some View {
-        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }) { handBack in
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }, authenticateOwner: customerHandoffAuthenticate) { handBack in
             CustomerInvoicePresentation(
                 invoice: record, customerName: store.customerName(record.customerId),
                 canSign: session.can("invoice.edit", feature: "invoicing"),
@@ -798,7 +798,7 @@ struct InvoiceDetailView: View {
                 sourceStillAttached: { customerWindowAnchor.isAttached(to: source) }) { exit in
                 guard customerWindowAnchor.isAttached(to: source), let handoffAuthority,
                       handoffAuthority.isCurrent(api: api, session: session) else { return }
-                await load()
+                await load(currentAuthority: { customerWindowAnchor.isAttached(to: source) && handoffAuthority.isCurrent(api: api, session: session) })
                 guard customerWindowAnchor.isAttached(to: source), handoffAuthority.isCurrent(api: api, session: session) else { return }
                 guard case .collect(let invoiceID) = exit, invoiceID == id, paymentModel?.canRecordPayment == true,
                       paymentModel?.invoice?.id == invoiceID,
@@ -818,7 +818,7 @@ struct InvoiceDetailView: View {
                 Task {
                     guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
                     if case .collect = exit {
-                        await load()
+                        await load(currentAuthority: { customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
                         guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
                         guard paymentModel?.invoice?.id == record.id, paymentModel?.canRecordPayment == true,
                               paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true,
@@ -829,7 +829,7 @@ struct InvoiceDetailView: View {
                         showCollectPayment = true
                     }
                     guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
-                    await loadFinancing()
+                    await loadFinancing(currentAuthority: { customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
                 }
             }), legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
             lease.release(); error = "Customer view is unavailable. Please try again."; return
@@ -874,7 +874,8 @@ struct InvoiceDetailView: View {
         return true
     }
 
-    private func load() async {
+    private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority() else { return }
         let generation = session.generation
         guard expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
             record = nil
@@ -888,14 +889,14 @@ struct InvoiceDetailView: View {
         }
         guard let paymentModel else { return }
         await paymentModel.load()
-        guard session.generation == generation else { return }
+        guard currentAuthority(), session.generation == generation else { return }
         record = paymentModel.invoice
         if paymentModel.invoice != nil {
             error = nil
         } else if let loadError = paymentModel.loadError {
             error = loadError
         }
-        await loadFinancing()
+        await loadFinancing(currentAuthority: currentAuthority)
     }
 
     private func cancelFinancing(_ application: FinancingApplication) async {
@@ -908,14 +909,16 @@ struct InvoiceDetailView: View {
     }
 
     /// Reads applications back from the lender; a newly funded loan reloads the payments.
-    private func loadFinancing() async {
-        guard let record, record.status != "draft", record.status != "void",
+    private func loadFinancing(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), let record, record.status != "draft", record.status != "void",
               session.can("invoice.view", feature: FinancingWords.feature),
               let latest = try? await api.refreshFinancingApplications(invoiceID: id) else { return }
+        guard currentAuthority() else { return }
         let newlyFunded = latest.contains { $0.status == "funded" } && !financingApplications.contains { $0.status == "funded" }
         financingApplications = latest
         if newlyFunded, let paymentModel {
             await paymentModel.load()
+            guard currentAuthority() else { return }
             if let invoice = paymentModel.invoice { self.record = invoice }
         }
     }
