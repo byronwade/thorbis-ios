@@ -2,6 +2,20 @@ import XCTest
 
 @MainActor
 final class LegacyCustomerHandoffUITests: XCTestCase {
+    func testInvoiceCustomerViewReturnsToItsSourceAfterAuthentication() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-working-job", "--paper-preview-legacy-handoff-test", "--paper-preview-owner-auth", "approved"]
+        app.launch()
+        let menu = app.buttons["Customer view, edit or open the PDF"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 30)); menu.tap()
+        let show = app.buttons["Customer view"].firstMatch
+        XCTAssertTrue(show.waitForExistence(timeout: 10)); show.tap()
+        let lock = app.buttons["lock"]
+        XCTAssertTrue(lock.waitForExistence(timeout: 20)); lock.tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 20))
+        XCTAssertTrue(menu.isHittable, "Authenticated handback should return to the original invoice")
+    }
     func testCustomerDetailsRemainProtectedAfterSessionReplacement() {
         continueAfterFailure = false
         let app = XCUIApplication()

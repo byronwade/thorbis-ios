@@ -626,7 +626,10 @@ struct CustomerDetailView: View {
               record.organizationId == session.activeOrganization?.id,
               let authority = CustomerHandoffExitAuthority.capture(api: api, session: session),
               let source = customerWindowAnchor.window, customerWindowAnchor.isAttached(to: source),
-              let lease = customerView.claimLegacy() else { return }
+              let lease = customerView.claimLegacy() else {
+            error = "Customer details aren't ready. Refresh and try again."
+            return
+        }
         let content = AnyView(CustomerSelfEditView(customerID: customer.id, currentAuthority: {
             legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true &&
             session.can("customer.edit", feature: "core_crm")
@@ -635,8 +638,9 @@ struct CustomerDetailView: View {
         guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
             capability: "customer.edit", feature: "core_crm", sourceAttached: { customerWindowAnchor.isAttached(to: source) },
             onDismiss: { _ in
+                guard let exitRevision = customerView.idleRevision else { return }
                 Task {
-                    let current: @MainActor () -> Bool = { customerWindowAnchor.isAttached(to: source) && authority.isCurrent(api: api, session: session) }
+                    let current: @MainActor () -> Bool = { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && authority.isCurrent(api: api, session: session) }
                     guard current() else { return }
                     await load(currentAuthority: current)
                     guard current() else { return }
