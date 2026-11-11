@@ -114,8 +114,8 @@ final class CustomerSelfEditTests: XCTestCase {
     }
 
     func testConditionalContactPatchPreservesNullAndEmptyBaselines() throws {
-        let nullable = ConditionalContactUpdate(update: .init(phone: .value("555")), original: contact(phone: nil))
-        let empty = ConditionalContactUpdate(update: .init(phone: .value("555")), original: contact(phone: ""))
+        let nullable = ConditionalContactUpdate(update: .init(phone: .value("555")), original: ConditionalContactBaseline(contact(phone: nil)))
+        let empty = ConditionalContactUpdate(update: .init(phone: .value("555")), original: ConditionalContactBaseline(contact(phone: "")))
         XCTAssertTrue((try XCTUnwrap(json(nullable)["expected"] as? [String: Any]))["phone"] is NSNull)
         XCTAssertEqual((try XCTUnwrap(json(empty)["expected"] as? [String: Any]))["phone"] as? String, "")
     }
@@ -124,7 +124,7 @@ final class CustomerSelfEditTests: XCTestCase {
         let original = ServiceLocationRecord(id: "l1", organizationId: "org", customerId: "cust", label: "Home", kind: "service", address: "1 Main St", notes: nil,
             coordinates: .init(latitude: 36.5, longitude: -121.9), gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil,
             createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
-        let body = try json(ConditionalLocationUpdate(address: "2 Main St", original: original))
+        let body = try json(ConditionalLocationUpdate(address: "2 Main St", original: ConditionalLocationBaseline(original)))
         let expected = try XCTUnwrap(body["expected"] as? [String: Any])
         let coordinates = try XCTUnwrap(expected["coordinates"] as? [String: Double])
         XCTAssertEqual(coordinates["latitude"], 36.5)
@@ -132,6 +132,15 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertTrue(body["coordinates"] is NSNull)
         XCTAssertNil(body["notes"])
         XCTAssertEqual(expected["address"] as? String, "1 Main St")
+    }
+
+    func testPersistedLocationBaselineOmitsAccessCodes() throws {
+        let draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [location()], smsConsent: nil)
+        let body = try json(draft)
+        let baselines = try XCTUnwrap(body["conditionalLocationBaselines"] as? [[String: Any]])
+        XCTAssertNil(baselines.first?["gateCode"])
+        XCTAssertNil(baselines.first?["notes"])
+        XCTAssertEqual(baselines.first?["address"] as? String, "1 Main St")
     }
 
     @MainActor

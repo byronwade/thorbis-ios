@@ -61,9 +61,27 @@ struct ConditionalCustomerUpdate: Encodable {
     }
 }
 
+struct ConditionalContactBaseline: Codable, Equatable {
+    let id: String, organizationId: String, customerId: String, name: String
+    let email: String?, phone: String?
+    init(_ record: CustomerContactRecord) {
+        id = record.id; organizationId = record.organizationId; customerId = record.customerId
+        name = record.name; email = record.email; phone = record.phone
+    }
+}
+
+struct ConditionalLocationBaseline: Codable, Equatable {
+    let id: String, organizationId: String, customerId: String, address: String
+    let coordinates: FieldCoordinates?
+    init(_ record: ServiceLocationRecord) {
+        id = record.id; organizationId = record.organizationId; customerId = record.customerId
+        address = record.address; coordinates = record.coordinates
+    }
+}
+
 struct ConditionalContactUpdate: Encodable {
     let update: FieldContactUpdate
-    let original: CustomerContactRecord
+    let original: ConditionalContactBaseline
     private enum Key: String, CodingKey { case expected, name, email, phone }
     func encode(to encoder: Encoder) throws {
         try update.encode(to: encoder)
@@ -81,7 +99,7 @@ struct ConditionalContactUpdate: Encodable {
 
 struct ConditionalLocationUpdate: Encodable {
     let address: String
-    let original: ServiceLocationRecord
+    let original: ConditionalLocationBaseline
     private enum Key: String, CodingKey { case address, coordinates, expected }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: Key.self)
@@ -150,8 +168,8 @@ struct CustomerSelfEditDraft: Codable, Equatable {
     private(set) var originalConsentVersion: String?
     private(set) var consentBaselineKnown: Bool?
     // Nil means an older persisted draft without lossless baselines. It must be reconciled first.
-    private(set) var conditionalContactBaselines: [CustomerContactRecord]?
-    private(set) var conditionalLocationBaselines: [ServiceLocationRecord]?
+    private(set) var conditionalContactBaselines: [ConditionalContactBaseline]?
+    private(set) var conditionalLocationBaselines: [ConditionalLocationBaseline]?
 
     var name: String
     var phone: String
@@ -171,8 +189,8 @@ struct CustomerSelfEditDraft: Codable, Equatable {
         original = record
         originalConsentVersion = smsConsent?.version
         consentBaselineKnown = consentKnown
-        conditionalContactBaselines = contacts
-        conditionalLocationBaselines = locations
+        conditionalContactBaselines = contacts.map(ConditionalContactBaseline.init)
+        conditionalLocationBaselines = locations.map(ConditionalLocationBaseline.init)
         name = record.name
         phone = record.phone ?? ""
         email = record.email ?? ""
@@ -1298,15 +1316,15 @@ extension CustomerSelfEditDraft {
         guard !copy.originalContacts.contains(where: { $0.id == contact.id }) else { return copy }
         let value = Contact(id: contact.id, name: contact.name, phone: contact.phone ?? "", email: contact.email ?? "")
         copy.originalContacts.append(value); copy.contacts.append(value)
-        copy.conditionalContactBaselines?.append(contact)
+        copy.conditionalContactBaselines?.append(ConditionalContactBaseline(contact))
         return copy
     }
     /// Keep explicit customer edits while adopting newer server values for fields they never touched.
     func mergingRecovery(record: CustomerRecord, contacts latestContacts: [CustomerContactRecord], locations latestLocations: [ServiceLocationRecord],
                          preferServerForConflicts: Bool = false) -> Self {
         var copy = self
-        copy.conditionalContactBaselines = latestContacts
-        copy.conditionalLocationBaselines = latestLocations
+        copy.conditionalContactBaselines = latestContacts.map(ConditionalContactBaseline.init)
+        copy.conditionalLocationBaselines = latestLocations.map(ConditionalLocationBaseline.init)
         func useLatest<T: Equatable>(_ old: T, _ edited: T, _ latest: T) -> Bool {
             edited == old || (preferServerForConflicts && latest != old && edited != latest)
         }
@@ -1359,7 +1377,7 @@ extension CustomerSelfEditDraft {
     func rebased(contact: CustomerContactRecord) -> Self {
         var copy = self
         if let index = copy.conditionalContactBaselines?.firstIndex(where: { $0.id == contact.id }) {
-            copy.conditionalContactBaselines?[index] = contact
+            copy.conditionalContactBaselines?[index] = ConditionalContactBaseline(contact)
         }
         if let index = copy.originalContacts.firstIndex(where: { $0.id == contact.id }) {
             copy.originalContacts[index] = Contact(id: contact.id, name: contact.name, phone: contact.phone ?? "", email: contact.email ?? "")
@@ -1370,7 +1388,7 @@ extension CustomerSelfEditDraft {
     func rebased(location: ServiceLocationRecord) -> Self {
         var copy = self
         if let index = copy.conditionalLocationBaselines?.firstIndex(where: { $0.id == location.id }) {
-            copy.conditionalLocationBaselines?[index] = location
+            copy.conditionalLocationBaselines?[index] = ConditionalLocationBaseline(location)
         }
         if let index = copy.originalLocations.firstIndex(where: { $0.id == location.id }) {
             copy.originalLocations[index] = Location(id: location.id, label: location.label, address: location.address)
