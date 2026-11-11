@@ -285,6 +285,20 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testRetiredHandoffCannotReturnCollectToStaff() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Retired handoff must not open collection")
+        callback.isInverted = true
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect = exit { callback.fulfill() }
+        }
+        XCTAssertTrue(presenter.active === model)
+        model.api.invalidateRequests()
+        XCTAssertFalse(model.isCurrentJob)
+        presenter.authenticatedExit(.collect("invoice-a"))
+        await fulfillment(of: [callback], timeout: 0.5)
+    }
     func testResultAttributionUsesCanonicalSignerInsteadOfRetainedInput() async throws {
         let model = try await ready([.init(200, jobJSON), .init(200, membership([a])), .init(200, record(a)), .init(200, record(a)), .init(200, revision(a))])
         await model.refresh(); model.setSelected(a, selected: true); await model.reviewSelected()
