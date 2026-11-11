@@ -32,11 +32,13 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
         let body: String
         let gate: Gate?
         let contentType: String
-        init(_ status: Int = 200, _ body: String = "{}", gate: Gate? = nil, contentType: String = "application/json") {
+        let headers: [String: String]
+        init(_ status: Int = 200, _ body: String = "{}", gate: Gate? = nil, contentType: String = "application/json", headers: [String: String] = [:]) {
             self.status = status
             self.body = body
             self.gate = gate
             self.contentType = contentType
+            self.headers = headers
         }
     }
 
@@ -123,7 +125,7 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
         }
         guard let url = request.url,
               let response = HTTPURLResponse(url: url, statusCode: reply.status,
-                                             httpVersion: "HTTP/1.1", headerFields: ["Content-Type": reply.contentType])
+                                             httpVersion: "HTTP/1.1", headerFields: ["Content-Type": reply.contentType].merging(reply.headers) { _, new in new })
         else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(reply.body.utf8))

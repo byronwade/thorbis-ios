@@ -61,6 +61,39 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertNil(try store.load(scope: otherOrigin))
     }
 
+    @MainActor
+    func testConditionalWriteSupportComesOnlyFromFreshCustomerResponse() async throws {
+        let json = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, json, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]),
+            .init(200, json),
+            .init(200, json, headers: ["X-Thorbis-Customer-Conditional-Writes": "2"])
+        ]), baseURL: "https://app.thorbis.com")
+        let supported = try await api.customerConditionalRead(record().id)
+        let missing = try await api.customerConditionalRead(record().id)
+        let malformed = try await api.customerConditionalRead(record().id)
+        XCTAssertTrue(supported.supportsConditionalWrites)
+        XCTAssertFalse(missing.supportsConditionalWrites)
+        XCTAssertFalse(malformed.supportsConditionalWrites)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "Capability must not come from a cached earlier response")
+    }
+
+    @MainActor
+    func testConditionalSupportReadIsCancelledWhenAPIAuthorityChanges() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let json = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, json, gate: gate, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"])
+        ]), baseURL: "https://app.thorbis.com")
+        let task = Task { try await api.customerConditionalRead(record().id) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        api.invalidateRequests(); gate.release()
+        do { _ = try await task.value; XCTFail("A retired response cannot advertise support") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+
     func testNoEditsMeansNothingToSave() {
         let draft = CustomerSelfEditDraft(record: record(), contacts: [contact()], locations: [location()], smsConsent: nil)
         XCTAssertFalse(draft.hasChanges)
@@ -68,6 +101,16 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertTrue(draft.contactUpdates.isEmpty)
         XCTAssertNil(draft.newContact)
         XCTAssertTrue(draft.locationChanges.isEmpty)
+    }
+
+    func testConditionalCustomerPatchIncludesExactNullBaseline() throws {
+        var draft = CustomerSelfEditDraft(record: record(phone: nil), contacts: [], locations: [], smsConsent: nil)
+        draft.phone = "555-0100"
+        let body = try json(draft.conditionalCustomerUpdate())
+        let expected = try XCTUnwrap(body["expected"] as? [String: Any])
+        XCTAssertTrue(expected["phone"] is NSNull)
+        XCTAssertNil(expected["email"], "Unchanged fields must not be included in the baseline")
+        XCTAssertEqual(body["phone"] as? String, "555-0100")
     }
 
     func testOnlyChangedCustomerFieldsAreSentAndClearedOnesAreNull() throws {
