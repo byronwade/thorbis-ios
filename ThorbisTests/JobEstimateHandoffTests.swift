@@ -334,6 +334,14 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
         await fulfillment(of: [callback], timeout: 1)
     }
+    func testPresenterReportsWhenAnotherCustomerHandoffPreventsOpening() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let lease = try XCTUnwrap(presenter.claimLegacy())
+        XCTAssertFalse(presenter.present(model, onAuthenticatedExit: {}))
+        XCTAssertNil(presenter.active)
+        lease.release()
+    }
     func testQueuedCollectDoesNotRunAfterAnotherCustomerHandoffStarts() async throws {
         let model = try await ready([])
         let presenter = JobEstimateHandoffPresenter()

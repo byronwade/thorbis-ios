@@ -9,6 +9,7 @@ struct CustomerSelfEditRecoveryScope: Codable, Equatable {
 }
 
 enum CustomerSelfEditPendingWrite: Codable, Equatable {
+    case reviewDraft
     case customer
     case contact(String)
     case createContact
@@ -20,6 +21,7 @@ struct CustomerSelfEditRecovery: Codable, Equatable {
     var draft: CustomerSelfEditDraft
     var pending: CustomerSelfEditPendingWrite?
     var consentKey: String
+    var completed: Bool = false
 }
 
 @MainActor

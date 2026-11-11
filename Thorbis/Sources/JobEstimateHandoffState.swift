@@ -580,17 +580,17 @@ final class JobEstimateHandoffPresenter: ObservableObject {
     private var onAuthenticatedExit: (@MainActor (CustomerViewExit) async -> Void)?
     private var exitAuthority: CustomerHandoffExitAuthority?
 
-    func present(_ model: JobEstimateHandoffModel, onAuthenticatedExit: @escaping @MainActor () async -> Void) {
+    @discardableResult func present(_ model: JobEstimateHandoffModel, onAuthenticatedExit: @escaping @MainActor () async -> Void) -> Bool {
         present(model, start: .estimates) { _ in await onAuthenticatedExit() }
     }
 
-    func present(_ model: JobEstimateHandoffModel, start: CustomerViewStart, details: CustomerSelfEditModel? = nil,
+    @discardableResult func present(_ model: JobEstimateHandoffModel, start: CustomerViewStart, details: CustomerSelfEditModel? = nil,
                  sourceGeneration: UUID? = nil, invoiceUpdated: @escaping (InvoiceRecord) -> Void = { _ in },
                  sourceWindow: UIWindow? = nil,
-                 onExit: @escaping @MainActor (CustomerViewExit) async -> Void) {
+                 onExit: @escaping @MainActor (CustomerViewExit) async -> Void) -> Bool {
         guard active == nil, model.isCurrentJob,
               let authority = CustomerHandoffExitAuthority.capture(api: model.api, session: model.session),
-              arbiter.claim(.documents) else { return }
+              arbiter.claim(.documents) else { return false }
         exitAuthority = authority
         self.start = start; self.details = details
         self.sourceGeneration = sourceGeneration ?? model.session.generation
@@ -604,8 +604,9 @@ final class JobEstimateHandoffPresenter: ObservableObject {
             guard sceneWindow.present(id: id, source: sourceWindow, content: content, onDisconnect: { [weak self, weak model] in
                 guard let self, let model, self.active === model else { return }
                 self.finishExit(.done, runCallback: false)
-            }) else { finishExit(.done, runCallback: false); return }
+            }) else { finishExit(.done, runCallback: false); return false }
         }
+        return true
     }
 
     func authenticatedExit(from model: JobEstimateHandoffModel, _ exit: CustomerViewExit = .done) {
