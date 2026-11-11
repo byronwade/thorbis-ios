@@ -416,8 +416,29 @@ final class JobDocumentsUITests: XCTestCase {
         let footer = app.buttons["Collect payment"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
         XCTAssertTrue(footer.waitForExistence(timeout: 10))
-        XCTAssertLessThan(disclosure.frame.minY, footer.frame.minY)
-        XCTAssertGreaterThan(disclosure.frame.maxY, footer.frame.minY, "Fixture must exercise a partially obscured control")
+        // Money's bar is a sibling below the scroll view (221ac55), so content is hidden past the scroll
+        // view's bottom edge: the top of the bar, including its "For INV-…" line (4dd0773).
+        let list = app.scrollViews.containing(.button, identifier: "job-invoice-items-\(invoiceA)").firstMatch
+        func coverEdge() -> CGFloat { list.frame.maxY }
+        // Where the disclosure lands depends on what sits above it (job tabs flow onto a second line
+        // since #403), so slide Money until the disclosure's top 20pt show above the footer and the
+        // rest of it runs under the footer. A held, slow drag leaves no momentum to overshoot.
+        for _ in 0..<6 {
+            let edge = coverEdge()
+            // Settled when the tap point (8pt in) shows above the edge and the rest runs under it.
+            if disclosure.frame.minY >= edge - 34, disclosure.frame.minY <= edge - 14 { break }
+            let offset = disclosure.frame.minY - (edge - 24)
+            // Scrolling only follows the finger past iOS's ~10pt touch slop, so add it to each drag
+            // (which also keeps every drag long enough never to be read as a tap).
+            let distance = max(-250, min(250, offset + (offset > 0 ? 10 : -10)))
+            // Start mid-content: the footer takes no scrolls.
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: app.frame.midX, dy: app.frame.height * 0.5 + distance / 2))
+            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -distance)),
+                        withVelocity: .slow, thenHoldForDuration: 0.5)
+        }
+        XCTAssertLessThan(disclosure.frame.minY + 8, coverEdge(), "The tap point must be on the visible part")
+        XCTAssertGreaterThan(disclosure.frame.maxY, coverEdge(), "Fixture must exercise a partially obscured control")
         let point = disclosure.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
             .withOffset(CGVector(dx: 40, dy: 8))
         point.tap()

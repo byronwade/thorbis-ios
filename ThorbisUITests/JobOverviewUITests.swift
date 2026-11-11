@@ -78,7 +78,14 @@ final class JobOverviewUITests: XCTestCase {
             XCTAssertTrue(button.isHittable, section)
             XCTAssertGreaterThanOrEqual(button.frame.width, 43.5, section)
             XCTAssertGreaterThanOrEqual(button.frame.height, 43.5, section)
-            if let previous { XCTAssertLessThanOrEqual(previous.frame.maxX, button.frame.minX + 0.5, "\(section) overlaps the previous section") }
+            // #403: tabs keep whole words and flow onto a second line when four don't fit, so a tab may
+            // sit beside the previous one or start the next line below it; either way they never overlap.
+            if let previous {
+                let before = previous.frame, here = button.frame
+                let beside = before.maxX <= here.minX + 0.5
+                let below = before.maxY <= here.minY + 0.5
+                XCTAssertTrue(beside || below, "\(section) overlaps the previous section: \(before) vs \(here)")
+            }
             previous = button
         }
         let money = app.buttons["job-section-money"]
