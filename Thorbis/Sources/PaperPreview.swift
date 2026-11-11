@@ -318,12 +318,15 @@ enum PaperPreview {
     static var issuedInvoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":null,"voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
         let args = ProcessInfo.processInfo.arguments
-        let fixture: String
+        var fixture: String
         if args.contains("--paper-preview-extreme-invoice") {
             fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":999999940000")
         } else if args.contains("--paper-preview-large-invoice") {
             fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789")
         } else { fixture = json }
+        if args.contains("--paper-preview-legacy-handoff-test") {
+            fixture = fixture.replacingOccurrences(of: "\"jobId\":\"00000000-0000-4000-8000-000000002214\"", with: "\"jobId\":null")
+        }
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8))
     }
     /// The issued invoice with a condenser replacement on it, inside the lender's range.
