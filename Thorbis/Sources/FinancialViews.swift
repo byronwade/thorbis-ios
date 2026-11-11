@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct EstimatesView: View {
     /// Opened from the scorecard: only the estimates behind Close rate (TG-19), until cleared.
@@ -125,8 +126,9 @@ struct EstimateDetailView: View {
     @State private var succeeded = 0
     @State private var showRevisionEditor = false
     @State private var action = ""
-    @State private var showToCustomer = false
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
+    @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var memberPricing: MemberPricing?
     @State private var showPDF = false
     @State private var openCustomer: Customer?
@@ -254,6 +256,9 @@ struct EstimateDetailView: View {
     var body: some View {
         scrollContent
         .background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
+        .onAppear { customerWindowAnchor.visible = true }
+        .onDisappear { customerWindowAnchor.visible = false }
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -285,24 +290,25 @@ struct EstimateDetailView: View {
         } }
         .task { await loadAndMaybePresent() }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
-        .fullScreenCover(isPresented: $showToCustomer) {
-            if let record { customerMode(record) }
-        }
     }
 
-    private func customerMode(_ record: EstimateRecord) -> some View {
-        CustomerModeContainer(onUnlocked: { customerModeClosed() }) { handBack in
+    private func customerMode(_ record: EstimateRecord, lease: LegacyCustomerHandoffLease) -> some View {
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }) { handBack in
             CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
                                          financing: session.can("organization.view", feature: FinancingWords.feature),
-                                         onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
+                                         currentAuthority: { legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true },
+                                         onApproved: { if legacyHandoff.active?.lease === lease,
+                                                          legacyHandoff.active?.isCurrent(api: api, session: session) == true,
+                                                          let updated = $0 { self.record = updated } }, onDone: handBack)
         }
         .environmentObject(api)
     }
 
-    private func customerModeClosed() {
-        showToCustomer = false
+    private func customerModeClosed(authority: CustomerHandoffExitAuthority, source: UIWindow) {
         Task {
+            guard customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
             await load()
+            guard customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
             // TF-06: approved from the job's next step, the job (and its invoice step) comes back.
             if presentsOnOpen, record?.status == "approved" { dismiss() }
         }
@@ -354,16 +360,30 @@ struct EstimateDetailView: View {
     /// job's other estimates, invoices and their own details. Without a job it stays a single document.
     private func presentToCustomer() async {
         guard let record else { return }
+        guard let fallbackAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              let source = customerWindowAnchor.window else { return }
         if let jobID {
             busy = true
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
-                customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session) { _ in
-                customerModeClosed()
+                customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session, sourceWindow: source,
+                sourceStillAttached: { customerWindowAnchor.isAttached(to: source) }) { _ in
+                guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                await load()
+                guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                if presentsOnOpen, self.record?.status == "approved" { dismiss() }
             }
             busy = false
-            if opened { return }
+            if opened != .unavailable { return }
         }
-        showToCustomer = true
+        guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session),
+              let lease = customerView.claimLegacy() else { return }
+        let content = AnyView(customerMode(record, lease: lease))
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
+            sourceAttached: { customerWindowAnchor.isAttached(to: source) },
+            onDismiss: { _ in customerModeClosed(authority: fallbackAuthority, source: source) }),
+              legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
+            lease.release(); error = "Customer view is unavailable. Please try again."; return
+        }
     }
 
     private func performAction() async {
@@ -505,10 +525,9 @@ struct InvoiceDetailView: View {
     @State private var showCollectPayment = false
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var showSignature = false
-    @State private var showToCustomer = false
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
-    /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
-    @State private var collectAfterCustomer = false
+    @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var showPDF = false
     @State private var showDiscount = false
     @State private var openCustomer: Customer?
@@ -603,6 +622,9 @@ struct InvoiceDetailView: View {
         .modifier(PaperPreviewScrollAnchor())
         #endif
         .background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
+        .onAppear { customerWindowAnchor.visible = true }
+        .onDisappear { customerWindowAnchor.visible = false }
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -683,43 +705,6 @@ struct InvoiceDetailView: View {
                 .presentationDragIndicator(.visible)
             }
         } }
-        .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
-            if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
-            Task { await loadFinancing() }
-        }) {
-            if let record {
-                CustomerModeContainer(onUnlocked: { showToCustomer = false }) { handBack in
-                    CustomerInvoicePresentation(
-                        invoice: record, customerName: store.customerName(record.customerId),
-                        canSign: session.can("invoice.edit", feature: "invoicing"),
-                        onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments") ? {
-                            // Taking payment is a staff screen, so the technician unlocks first.
-                            Task {
-                                if await StaffUnlock.unlock(reason: "Unlock to take payment") {
-                                    collectAfterCustomer = true
-                                    showToCustomer = false
-                                }
-                            }
-                        } : nil,
-                        financing: session.can("invoice.payment.create", feature: FinancingWords.feature),
-                        onSigned: { updated in
-                            let paidChanged = updated.amountPaid != self.record?.amountPaid
-                            _ = accept(updated)
-                            // A funded loan is a payment the model has not seen: reload its history
-                            // so the remaining balance can still be taken.
-                            if paidChanged, let paymentModel {
-                                Task {
-                                    await paymentModel.load()
-                                    // The model is not observed here; re-reading the record redraws onPay.
-                                    if let loaded = paymentModel.invoice { self.record = loaded }
-                                }
-                            }
-                        },
-                        onDone: handBack)
-                }
-                .environmentObject(api)
-            }
-        }
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
             if let paymentModel, let record {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record, invoiceReference: displayReference(record))
@@ -767,23 +752,88 @@ struct InvoiceDetailView: View {
         invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
     }
 
+    private func customerInvoiceMode(_ record: InvoiceRecord, lease: LegacyCustomerHandoffLease) -> some View {
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }) { handBack in
+            CustomerInvoicePresentation(
+                invoice: record, customerName: store.customerName(record.customerId),
+                canSign: session.can("invoice.edit", feature: "invoicing"),
+                onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments") ? {
+                    Task {
+                        guard await StaffUnlock.unlock(reason: "Unlock to take payment"),
+                              legacyHandoff.active?.lease === lease,
+                              legacyHandoff.active?.isCurrent(api: api, session: session) == true else { return }
+                        legacyHandoff.authenticatedExit(for: lease, .collect)
+                    }
+                } : nil,
+                financing: session.can("invoice.payment.create", feature: FinancingWords.feature),
+                currentAuthority: { legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true },
+                onSigned: { updated in
+                    guard legacyHandoff.active?.lease === lease,
+                          legacyHandoff.active?.isCurrent(api: api, session: session) == true else { return }
+                    let paidChanged = updated.amountPaid != self.record?.amountPaid
+                    _ = accept(updated)
+                    if paidChanged, let paymentModel {
+                        Task {
+                            await paymentModel.load()
+                            guard legacyHandoff.active?.lease === lease,
+                                  legacyHandoff.active?.isCurrent(api: api, session: session) == true else { return }
+                            if let loaded = paymentModel.invoice { self.record = loaded }
+                        }
+                    }
+                }, onDone: handBack)
+        }.environmentObject(api)
+    }
+
     /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
     /// the job's other documents. Without a verified job it stays a single document.
     private func presentToCustomer() async {
         guard let record else { return }
+        guard let fallbackAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              let source = customerWindowAnchor.window else { return }
         if let jobID = record.jobId, expectedJobScope.map({ $0.contains(record) }) != false {
             busy = true
+            let handoffAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session)
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
-                customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session) { exit in
+                customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session, sourceWindow: source,
+                sourceStillAttached: { customerWindowAnchor.isAttached(to: source) }) { exit in
+                guard customerWindowAnchor.isAttached(to: source), let handoffAuthority,
+                      handoffAuthority.isCurrent(api: api, session: session) else { return }
                 await load()
+                guard customerWindowAnchor.isAttached(to: source), handoffAuthority.isCurrent(api: api, session: session) else { return }
                 guard case .collect(let invoiceID) = exit, invoiceID == id, paymentModel?.canRecordPayment == true,
+                      paymentModel?.invoice?.id == invoiceID,
+                      paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true, paymentModel?.loadError == nil,
                       session.can("invoice.payment.create", feature: "payments") else { return }
                 showCollectPayment = true
             }
             busy = false
-            if opened { return }
+            if opened != .unavailable { return }
         }
-        showToCustomer = true
+        guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session),
+              let lease = customerView.claimLegacy() else { return }
+        let content = AnyView(customerInvoiceMode(record, lease: lease))
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
+            capability: "invoice.view", feature: "invoicing",
+            sourceAttached: { customerWindowAnchor.isAttached(to: source) }, onDismiss: { exit in
+                Task {
+                    guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                    if case .collect = exit {
+                        await load()
+                        guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                        guard paymentModel?.invoice?.id == record.id, paymentModel?.canRecordPayment == true,
+                              paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true,
+                              paymentModel?.loadError == nil, session.can("invoice.payment.create", feature: "payments") else {
+                            error = "Refresh this invoice before collecting payment."
+                            return
+                        }
+                        showCollectPayment = true
+                    }
+                    guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                    await loadFinancing()
+                }
+            }), legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
+            lease.release(); error = "Customer view is unavailable. Please try again."; return
+        }
     }
 
     /// TF-08: issuing and collecting are one step for the tech; payment opens right after.

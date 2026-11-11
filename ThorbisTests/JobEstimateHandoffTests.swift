@@ -285,6 +285,44 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testDetachedInvoiceSourceCannotPresentAfterDelayedJobRead() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready([.init(200, jobJSON, gate: gate)])
+        let presenter = JobEstimateHandoffPresenter()
+        var attached = true
+        let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+            customerName: "Sample", start: .invoice("invoice-a"), api: model.api, session: model.session,
+            sourceStillAttached: { attached }, onExit: { _ in XCTFail("Detached source cannot receive handoff") }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+        attached = false; gate.release()
+        let result = await task.value
+        XCTAssertEqual(result, .superseded)
+        XCTAssertNil(presenter.active)
+    }
+    func testInvalidatedOrCancelledJobReadCannotFallBackToLegacyPresentation() async throws {
+        for cancel in [false, true] {
+            let gate = URLProtocolFixture.Gate()
+            let model = try await ready([.init(200, jobJSON, gate: gate)])
+            let presenter = JobEstimateHandoffPresenter()
+            let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+                customerName: "Sample", start: .invoice("invoice-a"), api: model.api, session: model.session,
+                onExit: { _ in }) }
+            defer { gate.release(); task.cancel() }
+            for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+            if cancel { task.cancel() } else { model.api.invalidateRequests() }
+            gate.release()
+            let result = await task.value
+            XCTAssertEqual(result, .superseded)
+            XCTAssertNil(presenter.active)
+        }
+    }
     func testCurrentHandoffReturnsRequestedInvoiceToStaff() async throws {
         let model = try await ready([])
         let presenter = JobEstimateHandoffPresenter()

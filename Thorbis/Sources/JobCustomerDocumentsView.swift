@@ -32,6 +32,7 @@ struct JobCustomerDocumentsView: View {
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     @State private var paper: CustomerJobPaper?
+    @State private var paperGeneration = UUID()
     @State private var book: CustomerJobDocumentID?
     @State private var openingID: String?
     @State private var paymentModel: InvoicePaymentCollectionModel?
@@ -96,7 +97,10 @@ struct JobCustomerDocumentsView: View {
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
                     canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
                     .disabled(unlocking || openingID != nil)
-                    .thorbisDestination(item: $paper) { destination in
+                    .thorbisDestination(item: Binding(get: { paper }, set: { next in
+                        if paper != next { paperGeneration = UUID() }
+                        paper = next
+                    })) { destination in
                         destinationView(destination)
                             .disabled(unlocking)
                             .navigationTitle(reference(destination))
@@ -143,7 +147,7 @@ struct JobCustomerDocumentsView: View {
             }
         }
         .task(id: session.generation) {
-            paper = nil
+            paperGeneration = UUID(); paper = nil
             book = nil
             editingDetails = false
             paymentModel = nil
@@ -255,6 +259,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     @ViewBuilder private func destinationView(_ destination: CustomerJobPaper) -> some View {
+        let presentation = paperGeneration
         switch destination {
         case .estimate(let estimate):
             if estimate.status == "sent", TechJobFlow.canShow(estimate, can: .init(
@@ -264,7 +269,9 @@ struct JobCustomerDocumentsView: View {
                     returnToDocuments: {
                         returnToJobDocuments()
                     },
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewEstimates && session.can("estimate.approve", feature: "estimates") },
                     onApproved: { approved in
+                        guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true, canViewEstimates else { return }
                         documents.markEstimatesStale(scope: scope, updated: approved, requestedID: estimate.id)
                         refreshEstimatesInBackground()
                     }, onDone: beginHandBack)
@@ -277,11 +284,13 @@ struct JobCustomerDocumentsView: View {
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
                         ? { Task { await pay(invoice.id) } } : nil, initiallySigning: signing,
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && scope.contains(invoice) },
                     onSigned: { updated in
-                        guard scope.contains(updated), updated.id == invoice.id else { return }
+                        guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true,
+                              canViewInvoices, scope.contains(updated), updated.id == invoice.id else { return }
                         documents.replaceInvoice(updated)
                         paymentModel?.acceptInvoiceMutationResponse(updated)
-                        paper = .invoice(updated, signing: false)
+                        paperGeneration = UUID(); paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
                     }, onDone: beginHandBack)
             } else {
@@ -298,7 +307,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func beginHandBack() {
-        paper = nil
+        paperGeneration = UUID(); paper = nil
         book = nil
         approving = false
         editingDetails = false
@@ -341,7 +350,7 @@ struct JobCustomerDocumentsView: View {
         guard currentWorkspace, canViewEstimates,
               let presented = paper, case .estimate = presented else { return }
         documents.markEstimatesStale(scope: scope)
-        paper = nil
+        paperGeneration = UUID(); paper = nil
         refreshEstimatesInBackground()
     }
 
@@ -367,7 +376,7 @@ struct JobCustomerDocumentsView: View {
             error = "This estimate couldn't be refreshed. Try again in a moment."
             return
         }
-        if decision { paper = .estimate(estimate) }
+        if decision { paperGeneration = UUID(); paper = .estimate(estimate) }
         else { book = .estimate(id) }
     }
 
@@ -396,7 +405,7 @@ struct JobCustomerDocumentsView: View {
                     guard CustomerDocumentAmounts(lines: latest.lines, currency: latest.currency, amountPaid: latest.amountPaid) != nil else {
                         throw Problem(title: "These invoice amounts couldn't be verified. Refresh before continuing.", status: nil, detail: nil)
                     }
-                    paper = .invoice(latest, signing: sign)
+                    paperGeneration = UUID(); paper = .invoice(latest, signing: sign)
                 } else { book = .invoice(id) }
             } else {
                 paymentModel = nil
