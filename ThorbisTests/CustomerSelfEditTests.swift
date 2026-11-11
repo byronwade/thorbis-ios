@@ -571,6 +571,9 @@ final class CustomerSelfEditTests: XCTestCase {
         model.resolveRecovery(contactAlreadySaved: false, keepConflictingEdits: false, currentAuthority: { true })
         XCTAssertEqual(model.draft?.allowsTexts, false)
         XCTAssertNil(model.draft?.textsChange)
+        let recovered = try XCTUnwrap(store.load(scope: recoveryScope))
+        XCTAssertNotEqual(recovered.consentKey, "same-key")
+        XCTAssertEqual(recovered.draft.originalConsentVersion, "v2")
     }
 
     func testRebasingAfterTheCustomerSaveLeavesNothingToRepeat() {

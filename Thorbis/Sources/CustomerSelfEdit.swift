@@ -673,6 +673,10 @@ final class CustomerSelfEditModel: ObservableObject {
             if let match = matchingNewContacts.first { current = current.addingRecoveredContact(match) }
             current.newContactName = ""; current.newContactPhone = ""; current.newContactEmail = ""
         }
+        // A recovered consent decision may have consumed the old idempotency key.
+        // After the technician reviews fresh evidence, any new attempt is a new
+        // conditional decision and must not reuse that key with a changed version.
+        if pendingWrite == .consent { consentKey = UUID().uuidString }
         do {
             try checkpoint(current, pending: nil)
             draft = current; saveNeedsReconciliation = false; recoveryEvidence = nil; saveError = nil
