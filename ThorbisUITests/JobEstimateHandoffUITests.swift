@@ -3,14 +3,13 @@ import XCTest
 @MainActor
 /// The job's ••• door to Customer view. The header or bar door has the same name, so this picks the menu row.
 func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
-                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view")).firstMatch
+    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
+                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view", "job-onsite-show-customer")).firstMatch
 }
 
-/// The Money door into Customer view. #170 renamed it "Show customer" (identifiers unchanged); the
-/// header circle has the same words, so this excludes it.
+/// The Money door opens the estimates section of Customer view.
 func thorbisShowCustomerDoor(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Show customer", "job-customer-view")).firstMatch
+    app.buttons.matching(NSPredicate(format: "identifier == %@ OR identifier == %@", "job-customer-view-bar", "job-money-customer-view")).firstMatch
 }
 
 /// A job section in the segmented row. #163 added the balance/count to its spoken label
