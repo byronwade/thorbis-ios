@@ -16,6 +16,25 @@ final class CommsInboxTests: XCTestCase {
         return try JSONDecoder().decode(BookingCallRecord.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
+    func testInvalidatedStoreClearsMemoryAndRejectsLateDraftWrites() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = CommsLocalStore(file: file)
+        let mail = CommsLocalStore.Mail(to: ["customer@example.com"], subject: "Visit", body: "private details")
+        XCTAssertNotNil(store.commitMail(mail, send: false))
+        let snapshot = try Data(contentsOf: file)
+        store.invalidate()
+        XCTAssertFalse(store.isActive)
+        XCTAssertTrue(store.threads.isEmpty)
+        XCTAssertNil(store.commitMail(mail, send: false))
+        XCTAssertNil(store.threadForPhone("5550100100"))
+        store.toggleStar("late-call")
+        XCTAssertTrue(store.callFlags.isEmpty)
+        store.saveCannedReply(name: "Private", body: "private details")
+        XCTAssertFalse(store.cannedReplies.contains(where: { $0.body == "private details" }))
+        XCTAssertEqual(try Data(contentsOf: file), snapshot, "A stale view must not write after sign-out")
+    }
+
     // MARK: Decoding
 
     func testTheLogDecodesEveryCallViewFieldAtTheServersLargestPage() async throws {
@@ -145,7 +164,7 @@ final class CommsInboxTests: XCTestCase {
         let threads = CommsCallGrouping.threads([try call("m", status: "missed", number: "+15550100142", at: "2026-11-05T14:00:00Z", duration: 0),
                                                  try call("c", at: "2026-11-05T13:00:00Z")])
         let store = CommsLocalStore(file: nil)
-        let text = store.threadForPhone("(555) 010-0144", contactName: "Danielle")
+        let text = try XCTUnwrap(store.threadForPhone("(555) 010-0144", contactName: "Danielle"))
         store.commitText(text, body: "On our way")
         let mail = try XCTUnwrap(store.commitMail(.init(to: ["a@example.com"], subject: "Hi", body: "Hello"), send: true))
         let notices = [notice("n1", read: false), notice("n2", read: true)]
@@ -180,9 +199,9 @@ final class CommsInboxTests: XCTestCase {
 
     // MARK: Texts and email on this device
 
-    func testTextsNeverSendAndFindTheirThreadByDigits() {
+    func testTextsNeverSendAndFindTheirThreadByDigits() throws {
         let store = CommsLocalStore(file: nil)
-        let id = store.threadForPhone("+1 (555) 010-0144", contactName: "Danielle")
+        let id = try XCTUnwrap(store.threadForPhone("+1 (555) 010-0144", contactName: "Danielle"))
         XCTAssertEqual(store.thread(id)?.messages, [], "A new conversation starts empty")
         store.archive(id)
         XCTAssertEqual(store.threadForPhone("555-010-0144"), id, "The same number by digits")
@@ -236,7 +255,7 @@ final class CommsInboxTests: XCTestCase {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = CommsLocalStore(file: file)
-        let id = store.threadForPhone("5550100144")
+        let id = try XCTUnwrap(store.threadForPhone("5550100144"))
         store.setComposing(id, "half written")
         store.toggleStar("call-thread-5550100100")
         store.saveCannedReply(name: "Mine", body: "Body")

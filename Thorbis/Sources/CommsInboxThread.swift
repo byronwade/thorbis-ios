@@ -881,7 +881,9 @@ struct CommsComposeSheet: View {
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 let ready = CommsCallGrouping.key(phone) != nil
-                Button { onOpen(store.threadForPhone(phone, contactName: name)) } label: {
+                Button {
+                    if let id = store.threadForPhone(phone, contactName: name) { onOpen(id) }
+                } label: {
                     Text("Start text").inkCommit(enabled: ready)
                 }
                 .buttonStyle(PressStyle())
@@ -961,6 +963,12 @@ struct CommsMailSheet: View {
     var body: some View {
         let ready = !draft.mail.to.isEmpty
         ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: requestClose) {
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invalidate-inbox") {
+                Button("Invalidate inbox session (test)") { store.invalidate() }
+                    .accessibilityIdentifier("inbox-test-invalidate")
+            }
+            #endif
             PaperFormField("To") {
                 TextField("To", text: $draft.to, prompt: .placeholder("name@example.com"))
                     .keyboardType(.emailAddress).textContentType(.emailAddress).textInputAutocapitalization(.never)
@@ -1012,7 +1020,12 @@ struct CommsMailSheet: View {
             }
         }
         .thorbisSheetPresentation([.large])
-        .interactiveDismissDisabled(hasChanges)
+        .interactiveDismissDisabled(hasChanges && store.isActive)
+        .disabled(!store.isActive)
+        .onAppear { if !store.isActive { onClose() } }
+        .onChange(of: store.isActive) { _, active in
+            if !active { onClose() }
+        }
         .alert("Keep your changes?", isPresented: $confirmClose) {
             if ready { Button("Save draft") { commit(send: false) } }
             Button("Discard changes", role: .destructive) { onClose() }

@@ -155,6 +155,7 @@ enum CommsSMS {
 /// Support. Screenshots use an in-memory store with sample conversations.
 @MainActor
 final class CommsLocalStore: ObservableObject {
+    @Published private(set) var isActive = true
     @Published private(set) var threads: [CommsLocalThread] = []
     /// Marks on call threads (star, archive, bin, read), by thread id.
     @Published private(set) var callFlags: [String: CommsThreadFlags] = [:]
@@ -188,8 +189,13 @@ final class CommsLocalStore: ObservableObject {
 
     /// Sign-out: the conversations, drafts and marks on this device go with the session, like the
     /// other on-device copies (saved copies, the outbox).
-    static func clearAll() {
+    static func invalidateCached() {
+        for store in stores.values { store.invalidate() }
         stores = [:]
+    }
+
+    static func clearAll() {
+        invalidateCached()
         if let folder { try? FileManager.default.removeItem(at: folder) }
     }
 
@@ -213,10 +219,18 @@ final class CommsLocalStore: ObservableObject {
         return store
     }
 
+    /// A retained view must not revive an old session's local data after sign-out.
+    func invalidate() {
+        isActive = false
+        threads = []
+        callFlags = [:]
+        cannedReplies = []
+    }
+
     private var stamp: String { ISO8601DateFormatter().string(from: now()) }
 
     private func save() {
-        guard let file else { return }
+        guard isActive, let file else { return }
         let snapshot = Snapshot(threads: threads, callFlags: callFlags, cannedReplies: cannedReplies)
         if let data = try? JSONEncoder().encode(snapshot) {
             try? data.write(to: file, options: [.atomic, .completeFileProtection])
@@ -236,7 +250,8 @@ final class CommsLocalStore: ObservableObject {
     /// web threadForPhone: the text conversation with this number (by digits), brought back to the
     /// inbox if it was archived or binned, or a new empty one. Returns its id.
     @discardableResult
-    func threadForPhone(_ phone: String, contactName: String? = nil) -> String {
+    func threadForPhone(_ phone: String, contactName: String? = nil) -> String? {
+        guard isActive else { return nil }
         let wanted = CommsCallGrouping.key(phone)
         if let wanted, let existing = threads.first(where: { $0.channel == .sms && CommsCallGrouping.key($0.phone) == wanted }) {
             if existing.flags.place != .inbox {
@@ -308,6 +323,7 @@ final class CommsLocalStore: ObservableObject {
     /// `threadID` when given. Returns the conversation's id.
     @discardableResult
     func commitMail(_ mail: Mail, send: Bool, threadID: String? = nil, editing messageID: String? = nil) -> String? {
+        guard isActive else { return nil }
         let to = mail.to.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         guard !to.isEmpty else { return nil }
         let subject = mail.subject.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -337,6 +353,7 @@ final class CommsLocalStore: ObservableObject {
     // MARK: Canned replies
 
     func saveCannedReply(name: String, body: String) {
+        guard isActive else { return }
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -356,6 +373,7 @@ final class CommsLocalStore: ObservableObject {
     }
 
     private func setFlags(_ id: String, _ change: (inout CommsThreadFlags) -> Void) {
+        guard isActive else { return }
         if thread(id) != nil {
             patch(id) { change(&$0.flags) }
         } else {
