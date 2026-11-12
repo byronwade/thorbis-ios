@@ -646,7 +646,8 @@ struct InvoiceDetailView: View {
         }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
         .sheet(isPresented: $showDiscount) { SheetSurface {
-            if let record, canDiscountInvoice(record) {
+            // Stay mounted if signal drops; Apply still refuses through canDiscountInvoice.
+            if let record {
                 InvoiceDiscountSheet(invoice: record, canApply: { canDiscountInvoice(record) }) { updated in _ = accept(updated) }
             }
         } }
@@ -849,21 +850,19 @@ struct InvoiceDetailView: View {
     }
 
     private func canSignInvoice(_ invoice: InvoiceRecord) -> Bool {
-        guard let current = record, current == invoice, current.status != "void",
-              current.jobId != nil, invoiceAmounts(current) != nil else { return false }
-        return session.can("invoice.edit", feature: "invoicing")
+        invoiceAllowsSignature(invoice, current: record, canEdit: session.can("invoice.edit", feature: "invoicing"))
     }
 
     private func canDiscountInvoice(_ invoice: InvoiceRecord) -> Bool {
-        guard let current = record, current == invoice, current.status == "draft",
-              invoiceAmounts(current) != nil, !session.isOffline else { return false }
-        return session.can("invoice.discount", feature: "invoicing")
+        invoiceAllowsDiscount(invoice, current: record, isOffline: session.isOffline,
+                              canDiscount: session.can("invoice.discount", feature: "invoicing"))
     }
 
     private func startCollection() {
-        guard let record, invoiceAmounts(record) != nil, let paymentModel,
-              paymentModel.invoice == record, paymentModel.canRecordPayment,
-              session.can("invoice.payment.create", feature: "payments") else { return }
+        guard let record, let paymentModel,
+              invoiceAllowsCollectionStart(record, paymentInvoice: paymentModel.invoice,
+                                           canRecordPayment: paymentModel.canRecordPayment,
+                                           canCreatePayment: session.can("invoice.payment.create", feature: "payments")) else { return }
         showCollectPayment = true
     }
 
@@ -953,6 +952,29 @@ struct InvoiceDetailView: View {
             if let invoice = paymentModel.invoice { self.record = invoice }
         }
     }
+}
+
+/// Collect, discount, and sign identify the open invoice by id. `InvoiceRecord` equality also
+/// includes `updatedAt` and `customerAuthorization`, which change on reload without invalidating those actions.
+func invoiceAllowsSignature(_ invoice: InvoiceRecord, current: InvoiceRecord?, canEdit: Bool) -> Bool {
+    guard let current, current.id == invoice.id, current.status != "void",
+          current.jobId != nil,
+          CustomerDocumentAmounts(lines: current.lines, currency: current.currency, amountPaid: current.amountPaid) != nil else { return false }
+    return canEdit
+}
+
+func invoiceAllowsDiscount(_ invoice: InvoiceRecord, current: InvoiceRecord?, isOffline: Bool, canDiscount: Bool) -> Bool {
+    guard let current, current.id == invoice.id, current.status == "draft",
+          CustomerDocumentAmounts(lines: current.lines, currency: current.currency, amountPaid: current.amountPaid) != nil,
+          !isOffline else { return false }
+    return canDiscount
+}
+
+func invoiceAllowsCollectionStart(_ record: InvoiceRecord, paymentInvoice: InvoiceRecord?,
+                                  canRecordPayment: Bool, canCreatePayment: Bool) -> Bool {
+    guard CustomerDocumentAmounts(lines: record.lines, currency: record.currency, amountPaid: record.amountPaid) != nil,
+          let paymentInvoice, paymentInvoice.id == record.id, canRecordPayment, canCreatePayment else { return false }
+    return true
 }
 
 /// One priced line, same type as the job's Invoice tab: 15/500 description over a 13pt
