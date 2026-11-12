@@ -43,10 +43,20 @@ struct InvoiceDraftRecoveryScope: Codable, Equatable, Sendable {
         isValid && Self.canonicalID(invoice.id) == invoiceID && Self.canonicalID(invoice.organizationId) == organizationID &&
             Self.canonicalID(invoice.customerId) == customerID && invoice.jobId.map(Self.canonicalID) == jobID
     }
+
+    fileprivate var submissionDomain: InvoiceDraftSubmissionDomain {
+        .init(organizationID: organizationID, origin: origin, invoiceID: invoiceID)
+    }
+}
+
+private struct InvoiceDraftSubmissionDomain: Codable, Equatable {
+    let organizationID: String
+    let origin: String
+    let invoiceID: String
 }
 
 /// Callers must derive this from a fresh, authorized server read, not cached invoice data.
-struct InvoiceDraftRecoveryAccess {
+struct InvoiceDraftRecoveryAccess: Sendable {
     let scope: InvoiceDraftRecoveryScope
     let canEdit: Bool
     let fresh: Bool
@@ -151,7 +161,7 @@ struct InvoiceDraftRecovery: Codable, Equatable, Sendable {
     }
 
     /// Exact baseline equality is intentionally conservative: changed server paper needs review.
-    func restore(access: InvoiceDraftRecoveryAccess) -> InvoiceLineEditorState? {
+    fileprivate func restore(access: InvoiceDraftRecoveryAccess) -> InvoiceLineEditorState? {
         guard isValid, writeState == .idle, access.noUnresolvedAttempts, access.fresh, access.canEdit,
               access.scope == scope, scope.matches(access.currentInvoice),
               access.currentInvoice.status == "draft", access.currentInvoice == baseline else { return nil }
@@ -160,22 +170,66 @@ struct InvoiceDraftRecovery: Codable, Equatable, Sendable {
         state.priceBookOverrideReason = priceBookOverrideReason
         return state
     }
+
+    fileprivate func matchesSubmission(_ marker: InvoiceDraftSubmissionMarker) -> Bool {
+        isValid && writeState == .idle && marker.scope == scope && marker.snapshotID == snapshotID &&
+            marker.expectedRevision == baseline.linesRevision
+    }
+
+    #if INVOICE_RECOVERY_HOST_TEST
+    func hostValidate(access: InvoiceDraftRecoveryAccess) -> InvoiceLineEditorState? { restore(access: access) }
+    #endif
+}
+
+/// Identifies one intended request; it is not authorization or proof a server mutation occurred.
+struct InvoiceDraftSubmissionMarker: Codable, Equatable, Sendable {
+    let scope: InvoiceDraftRecoveryScope
+    let snapshotID: UUID
+    let attemptID: UUID
+    let expectedRevision: Int
+    let requestSHA256: String
+
+    init(scope: InvoiceDraftRecoveryScope, snapshotID: UUID, attemptID: UUID,
+         expectedRevision: Int, requestBytes: Data) throws {
+        guard scope.isValid, expectedRevision >= 0, !requestBytes.isEmpty else {
+            throw InvoiceDraftRecoveryError.invalidData
+        }
+        self.scope = scope; self.snapshotID = snapshotID; self.attemptID = attemptID
+        self.expectedRevision = expectedRevision
+        self.requestSHA256 = SHA256.hash(data: requestBytes).map { String(format: "%02x", $0) }.joined()
+    }
+
+    fileprivate var isValid: Bool {
+        scope.isValid && expectedRevision >= 0 && requestSHA256.count == 64 &&
+            requestSHA256.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+    }
+
+    func matchesRequest(_ bytes: Data) -> Bool {
+        !bytes.isEmpty && SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() == requestSHA256
+    }
+}
+
+/// A snapshot checked at one point in time, not a lease or permission to submit later.
+struct InvoiceDraftRecoveryAuthorized: Sendable {
+    fileprivate let snapshot: InvoiceDraftRecovery
+    fileprivate let access: InvoiceDraftRecoveryAccess
+    func editorState() -> InvoiceLineEditorState? { snapshot.restore(access: access) }
 }
 
 enum InvoiceDraftRecoveryError: Error { case invalidScope, keychain(OSStatus), invalidData, unresolvedWrite }
 
 protocol InvoiceDraftRecoveryStoring {
     func list(scope: InvoiceDraftRecoveryScope) async throws -> [UUID]
-    func load(scope: InvoiceDraftRecoveryScope, snapshotID: UUID) async throws -> InvoiceDraftRecovery?
     func save(_ recovery: InvoiceDraftRecovery) async throws
-    func removeResolved(scope: InvoiceDraftRecoveryScope, snapshotID: UUID) async throws
+    func hasPendingSubmission(scope: InvoiceDraftRecoveryScope) async throws -> Bool
+    func beginSubmission(_ marker: InvoiceDraftSubmissionMarker, access: InvoiceDraftRecoveryAccess) async throws
+    func restore(scope: InvoiceDraftRecoveryScope, snapshotID: UUID, access: InvoiceDraftRecoveryAccess) async throws -> InvoiceDraftRecoveryAuthorized?
 }
 
 /// Internal boundary enables deterministic failure and duplicate-ID tests without changing user Keychain.
 protocol InvoiceRecoveryKeychainTransport: Sendable {
     func add(_ attributes: [String: Any]) -> OSStatus
     func find(_ attributes: [String: Any]) -> (OSStatus, CFTypeRef?)
-    func delete(_ attributes: [String: Any]) -> OSStatus
 }
 
 private struct SystemInvoiceRecoveryKeychain: InvoiceRecoveryKeychainTransport {
@@ -185,7 +239,6 @@ private struct SystemInvoiceRecoveryKeychain: InvoiceRecoveryKeychainTransport {
         let status = SecItemCopyMatching(attributes as CFDictionary, &result)
         return (status, result)
     }
-    func delete(_ attributes: [String: Any]) -> OSStatus { SecItemDelete(attributes as CFDictionary) }
 }
 
 actor KeychainInvoiceDraftRecoveryStore: InvoiceDraftRecoveryStoring {
@@ -204,6 +257,59 @@ actor KeychainInvoiceDraftRecoveryStore: InvoiceDraftRecoveryStoring {
     private func query(_ scope: InvoiceDraftRecoveryScope, _ snapshotID: UUID) throws -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
          kSecAttrAccount as String: try prefix(scope) + snapshotID.uuidString]
+    }
+
+    private func markerQuery(_ scope: InvoiceDraftRecoveryScope) throws -> [String: Any] {
+        guard scope.isValid else { throw InvoiceDraftRecoveryError.invalidScope }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let digest = SHA256.hash(data: try encoder.encode(scope.submissionDomain)).map { String(format: "%02x", $0) }.joined()
+        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+         kSecAttrAccount as String: "submission:" + digest]
+    }
+
+    private func pendingMarker(scope: InvoiceDraftRecoveryScope) throws -> InvoiceDraftSubmissionMarker? {
+        var lookup = try markerQuery(scope)
+        lookup[kSecReturnData as String] = true; lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+        let (status, result) = transport.find(lookup)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw InvoiceDraftRecoveryError.keychain(status) }
+        guard let data = result as? Data else { throw InvoiceDraftRecoveryError.invalidData }
+        let marker = try JSONDecoder().decode(InvoiceDraftSubmissionMarker.self, from: data)
+        guard marker.isValid, marker.scope.submissionDomain == scope.submissionDomain else { throw InvoiceDraftRecoveryError.invalidData }
+        return marker
+    }
+
+    /// Does not disclose the prior actor, job, customer, request or attempt.
+    func hasPendingSubmission(scope: InvoiceDraftRecoveryScope) throws -> Bool { try pendingMarker(scope: scope) != nil }
+
+    /// Create the fence before any send. An error, including an ambiguous add, must never permit a send.
+    func beginSubmission(_ marker: InvoiceDraftSubmissionMarker, access: InvoiceDraftRecoveryAccess) throws {
+        guard try pendingMarker(scope: marker.scope) == nil else { throw InvoiceDraftRecoveryError.unresolvedWrite }
+        guard marker.isValid, let snapshot = try load(scope: marker.scope, snapshotID: marker.snapshotID),
+              snapshot.matchesSubmission(marker), snapshot.restore(access: access) != nil else { throw InvoiceDraftRecoveryError.invalidData }
+        for id in try list(scope: marker.scope) {
+            guard let entry = try load(scope: marker.scope, snapshotID: id) else { throw InvoiceDraftRecoveryError.invalidData }
+            guard entry.writeState == .idle else { throw InvoiceDraftRecoveryError.unresolvedWrite }
+        }
+        var insert = try markerQuery(marker.scope)
+        insert[kSecValueData as String] = try JSONEncoder().encode(marker)
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = transport.add(insert)
+        if status == errSecDuplicateItem { throw InvoiceDraftRecoveryError.unresolvedWrite }
+        guard status == errSecSuccess else { throw InvoiceDraftRecoveryError.keychain(status) }
+    }
+
+    /// A pending marker fences all snapshots. Callers still need a separate cross-process send protocol.
+    func restore(scope: InvoiceDraftRecoveryScope, snapshotID: UUID, access: InvoiceDraftRecoveryAccess) throws -> InvoiceDraftRecoveryAuthorized? {
+        guard try pendingMarker(scope: scope) == nil else { return nil }
+        for id in try list(scope: scope) {
+            guard let entry = try load(scope: scope, snapshotID: id) else { throw InvoiceDraftRecoveryError.invalidData }
+            guard entry.writeState == .idle else { return nil }
+        }
+        guard let value = try load(scope: scope, snapshotID: snapshotID) else { return nil }
+        guard try pendingMarker(scope: scope) == nil else { return nil }
+        guard value.restore(access: access) != nil else { return nil }
+        return InvoiceDraftRecoveryAuthorized(snapshot: value, access: access)
     }
 
     func list(scope: InvoiceDraftRecoveryScope) throws -> [UUID] {
@@ -225,7 +331,7 @@ actor KeychainInvoiceDraftRecoveryStore: InvoiceDraftRecoveryStoring {
         return resultIDs.sorted { $0.uuidString < $1.uuidString }
     }
 
-    func load(scope: InvoiceDraftRecoveryScope, snapshotID: UUID) throws -> InvoiceDraftRecovery? {
+    private func load(scope: InvoiceDraftRecoveryScope, snapshotID: UUID) throws -> InvoiceDraftRecovery? {
         var lookup = try query(scope, snapshotID)
         lookup[kSecReturnData as String] = true; lookup[kSecMatchLimit as String] = kSecMatchLimitOne
         let (status, result) = transport.find(lookup)
@@ -238,9 +344,25 @@ actor KeychainInvoiceDraftRecoveryStore: InvoiceDraftRecoveryStoring {
         return recovered
     }
 
+    #if INVOICE_RECOVERY_HOST_TEST
+    func hostPendingMarker(scope: InvoiceDraftRecoveryScope) throws -> InvoiceDraftSubmissionMarker? { try pendingMarker(scope: scope) }
+    func hostLoad(scope: InvoiceDraftRecoveryScope, snapshotID: UUID) throws -> InvoiceDraftRecovery? {
+        try load(scope: scope, snapshotID: snapshotID)
+    }
+    func hostInject(_ recovery: InvoiceDraftRecovery) throws {
+        var insert = try query(recovery.scope, recovery.snapshotID)
+        insert[kSecValueData as String] = try JSONEncoder().encode(recovery)
+        let status = transport.add(insert)
+        guard status == errSecSuccess else { throw InvoiceDraftRecoveryError.keychain(status) }
+    }
+    #endif
+
     /// Each snapshot is immutable. A duplicate ID is an error, never an overwrite.
     func save(_ recovery: InvoiceDraftRecovery) throws {
         guard recovery.isValid else { throw InvoiceDraftRecoveryError.invalidData }
+        // Unmarked uncertain snapshots cannot be discovered across other actor scopes.
+        guard recovery.writeState == .idle else { throw InvoiceDraftRecoveryError.unresolvedWrite }
+        guard try pendingMarker(scope: recovery.scope) == nil else { throw InvoiceDraftRecoveryError.unresolvedWrite }
         var insert = try query(recovery.scope, recovery.snapshotID)
         insert[kSecValueData as String] = try JSONEncoder().encode(recovery)
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
@@ -248,11 +370,5 @@ actor KeychainInvoiceDraftRecoveryStore: InvoiceDraftRecoveryStoring {
         guard status == errSecSuccess else { throw InvoiceDraftRecoveryError.keychain(status) }
     }
 
-    /// Unknown in-flight outcomes are retained until an explicit reconciliation path exists.
-    func removeResolved(scope: InvoiceDraftRecoveryScope, snapshotID: UUID) throws {
-        guard let existing = try load(scope: scope, snapshotID: snapshotID) else { return }
-        guard existing.writeState == .idle else { throw InvoiceDraftRecoveryError.unresolvedWrite }
-        let status = transport.delete(try query(scope, snapshotID))
-        guard status == errSecSuccess || status == errSecItemNotFound else { throw InvoiceDraftRecoveryError.keychain(status) }
-    }
+    // No deletion or marker clearing until a cross-process-safe reconciliation and retention policy exists.
 }
