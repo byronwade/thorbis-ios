@@ -109,10 +109,12 @@ final class DrawerGearMenuUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch(); app.openDrawer()
         let workspace = app.buttons["drawer-workspace-menu"]
-        XCTAssertGreaterThanOrEqual(workspace.frame.height, 44)
-        workspace.tap()
+        XCTAssertTrue(workspace.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(app.thorbisUsableFrame(of: workspace)?.height ?? 0, 44)
+        app.thorbisTapCentre(workspace)
         let settings = app.buttons.matching(NSPredicate(format: "label == %@", "Settings")).firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 5)); settings.tap()
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        app.thorbisTapCentre(settings)
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10)
                       || app.buttons["Sign out"].waitForExistence(timeout: 5),
                       "Settings must open from the workspace menu")
@@ -274,13 +276,16 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.waitForShell()
         if landscape {
             XCUIDevice.shared.orientation = .landscapeLeft
-            _ = XCTWaiter.wait(for: [XCTestExpectation(description: "rotation settles")], timeout: 2)
+            let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                app.frame.width > app.frame.height
+            }, object: app)
+            _ = XCTWaiter.wait(for: [rotated], timeout: 5)
         }
         if app.usesTabletLayout { return assertSidebarFootOnScreen(app, landscape: landscape) }
         app.openDrawer()
         let gear = app.drawerRow("settings")
         XCTAssertTrue(gear.waitForExistence(timeout: 5))
-        gear.tap()
+        app.thorbisTapCentre(gear)
         // "Saved on this phone" carries its count after a comma; the gear itself reads "Settings and
         // businesses", so the other rows are matched exactly. The drawer's own "Saved on this phone"
         // row (under On this phone) sits behind the open menu, so it is left out.
@@ -291,14 +296,14 @@ final class DrawerGearMenuUITests: XCTestCase {
         let screen = app.windows.firstMatch.frame
         for row in rows {
             XCTAssertTrue(row.exists, row.description)
-            XCTAssertTrue(row.isHittable, "\(row.label) must be reachable")
+            XCTAssertNotNil(app.thorbisUsableFrame(of: row), "\(row.label) must be reachable")
             XCTAssertTrue(screen.contains(row.frame), "\(row.label) must be fully on screen: \(row.frame) in \(screen)")
         }
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = landscape ? "Gear menu landscape" : "Gear menu portrait"
         shot.lifetime = .keepAlways
         add(shot)
-        rows[2].tap()
+        app.thorbisTapCentre(rows[2])
         XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS %@", "Settings")).firstMatch.waitForExistence(timeout: 5)
                       || app.staticTexts["Settings"].waitForExistence(timeout: 5), "Settings opens from the menu")
     }

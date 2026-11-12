@@ -9,16 +9,22 @@ extension XCUIApplication {
     var drawerMenu: XCUIElement { buttons["drawer-menu"] }
 
     /// Opens the drawer from the menu circle and waits for it to show.
+    ///
+    /// Never reads `isHittable` or calls `.tap()` on the circle: after rotation and at XXXL the
+    /// control exists with an invalid activation point, and XCTest fails before a coordinate tap
+    /// can run. A missed centre tap is retried, then the root edge-swipe opens the drawer.
     @discardableResult
     func openDrawer(timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) -> Bool {
         let menu = drawerMenu
         XCTAssertTrue(menu.waitForExistence(timeout: timeout), "No menu circle on this screen", file: file, line: line)
-        if menu.isHittable {
-            menu.tap()
-        } else {
-            menu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        }
-        let shown = buttons["drawer-search"].waitForExistence(timeout: 5)
+        let search = buttons["drawer-search"]
+        if thorbisUsableFrame(of: search) != nil { return true }
+        thorbisTapCentre(menu, fallback: CGVector(dx: 0.07, dy: 0.08))
+        if search.waitForExistence(timeout: 2) { return true }
+        thorbisTapCentre(menu, fallback: CGVector(dx: 0.07, dy: 0.08))
+        if search.waitForExistence(timeout: 2) { return true }
+        swipeInFromLeftEdge(atY: 0.35)
+        let shown = search.waitForExistence(timeout: 5)
         XCTAssertTrue(shown, "The drawer did not open", file: file, line: line)
         return shown
     }
@@ -54,7 +60,7 @@ extension XCUIApplication {
         let row = drawerRow(id)
         _ = row.waitForExistence(timeout: 2)
         let list = scrollViews["drawer-rows"]
-        for _ in 0..<6 where !row.isHittable {
+        for _ in 0..<6 where thorbisUsableFrame(of: row) == nil {
             guard list.exists else { return }
             list.swipeUp(velocity: .slow)
         }

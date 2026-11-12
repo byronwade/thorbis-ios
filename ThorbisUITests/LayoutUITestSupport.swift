@@ -124,6 +124,31 @@ extension XCUIApplication {
         return expected.waitForExistence(timeout: timeout)
     }
 
+    /// Finite, on-screen frame. Never asks XCTest for hittability: `isHittable` and `.tap()` throw
+    /// on iOS 26 when the activation point is `{{inf, inf}, {0, 0}}` (rotation, XXXL, pinning tabs).
+    func thorbisUsableFrame(of element: XCUIElement) -> CGRect? {
+        guard element.exists else { return nil }
+        let frame = element.frame
+        guard frame.minX.isFinite, frame.minY.isFinite, frame.width.isFinite, frame.height.isFinite,
+              frame.width > 1, frame.height > 1 else { return nil }
+        let bounds = windows.firstMatch.exists ? windows.firstMatch.frame : self.frame
+        let mid = CGPoint(x: frame.midX, y: frame.midY)
+        guard bounds.contains(mid) else { return nil }
+        return frame
+    }
+
+    /// Centre-taps `element` once its frame is usable. Falls back to an app-relative point only
+    /// when the element still has no finite frame after a short wait.
+    func thorbisTapCentre(_ element: XCUIElement, fallback: CGVector = CGVector(dx: 0.5, dy: 0.5)) {
+        let deadline = Date().addingTimeInterval(3)
+        while thorbisUsableFrame(of: element) == nil, Date() < deadline { usleep(200_000) }
+        if thorbisUsableFrame(of: element) != nil {
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        } else {
+            coordinate(withNormalizedOffset: fallback).tap()
+        }
+    }
+
     /// A swipe in from the screen's left edge at `y` (normalized), the phone drawer's and the iPad
     /// sidebar's gesture.
     func swipeInFromLeftEdge(atY y: CGFloat = 0.5) {
