@@ -5,6 +5,126 @@ import XCTest
 /// it was opened from, nothing saves from the sheet, and "Done" returns to the builder for review.
 @MainActor
 final class EstimateCatalogReviewUITests: XCTestCase {
+    func testLongEstimateOptionCanAddFromItsHeading() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision", "--paper-preview-long-catalog-sections"]
+        app.launch()
+        XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
+        let add = app.buttons.matching(identifier: "estimate-add-item-heading")
+            .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
+        for _ in 0..<8 where !add.exists { app.swipeUp() }
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertTrue(add.isHittable)
+        XCTAssertGreaterThanOrEqual(add.frame.height, 44)
+        add.tap()
+        let destination = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "To ", "Full system replacement")).firstMatch
+        XCTAssertTrue(destination.waitForExistence(timeout: 10))
+        let search = app.textFields["price-book-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("Replace capacitor")
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
+        XCTAssertTrue(item.waitForExistence(timeout: 10)); item.tap()
+        let doneWithItem = app.buttons.matching(identifier: "price-book-done")
+            .matching(NSPredicate(format: "label == %@", "Done · 1 item")).firstMatch
+        XCTAssertTrue(doneWithItem.waitForExistence(timeout: 10), "The picker must confirm the item was added before closing")
+        app.buttons["price-book-done"].tap()
+        XCTAssertTrue(search.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Option package title"].exists)
+        openPicker(add, in: app)
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("Replace capacitor")
+        let selected = app.buttons.matching(identifier: "price-book-item-00000000-0000-4000-8000-000000009201")
+            .matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 10), "The added item must remain in the chosen option")
+        app.buttons["price-book-done"].tap()
+        let other = app.buttons.matching(identifier: "estimate-add-item-heading")
+            .matching(NSPredicate(format: "value CONTAINS %@", "Second system option")).firstMatch
+        for _ in 0..<12 where !other.exists { app.swipeUp() }
+        XCTAssertTrue(other.waitForExistence(timeout: 10))
+        openPicker(other, in: app)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "To ", "Second system option")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("Replace capacitor")
+        let otherItem = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
+        XCTAssertTrue(otherItem.waitForExistence(timeout: 10))
+        XCTAssertEqual(otherItem.value as? String, "Not added", "A different option must not inherit the first option's draft quantity")
+    }
+
+    func testEstimateHeadingActionRespectsEditPermission() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision", "--paper-preview-long-catalog-sections", "--paper-preview-deny-document-edit"]
+        app.launch()
+        XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
+        let add = app.buttons.matching(identifier: "estimate-add-item-heading")
+            .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
+        for _ in 0..<8 where !add.exists { app.swipeUp() }
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertFalse(add.isEnabled)
+    }
+
+    func testEstimateHeadingActionRespectsLineLimit() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision", "--paper-preview-max-catalog-sections"]
+        app.launch()
+        XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
+        let add = app.buttons.matching(identifier: "estimate-add-item-heading")
+            .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
+        for _ in 0..<8 where !add.exists { app.swipeUp() }
+        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        XCTAssertFalse(add.isEnabled, "The option must respect its 500-line limit")
+    }
+
+    func testEstimateHeadingActionAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision", "--paper-preview-long-catalog-sections", "--paper-preview-large-option-range", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
+        let total = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "2 options", "The customer chooses one")).firstMatch
+        XCTAssertTrue(total.waitForExistence(timeout: 10), "The full option summary must remain available")
+        let low = app.staticTexts["estimate-total-value-0"]
+        let high = app.staticTexts["estimate-total-value-1"]
+        XCTAssertTrue(low.exists && high.exists, "Each end of the range needs its own visible line")
+        XCTAssertEqual(low.label, "$120.00")
+        XCTAssertEqual(high.label, "– $1,199,999.88")
+        XCTAssertGreaterThanOrEqual(high.frame.minY, low.frame.maxY)
+        XCTAssertLessThanOrEqual(high.frame.maxX, app.frame.maxX)
+        for _ in 0..<20 where high.frame.maxY > app.frame.height * 0.68 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
+        }
+        XCTAssertLessThan(high.frame.maxY, app.frame.height * 0.75, "The full amount should be above the fixed save action")
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Estimate total at largest text"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        let add = app.buttons.matching(identifier: "estimate-add-item-heading")
+            .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
+        for _ in 0..<30 where !add.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25)))
+        }
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertTrue(add.isHittable, "Shortcut frame: \(add.frame); app hierarchy: \(app.debugDescription)")
+        XCTAssertGreaterThanOrEqual(add.frame.height, 44)
+        add.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "To ", "Full system replacement")).firstMatch.waitForExistence(timeout: 10))
+    }
+
+    func testShortEstimateOptionKeepsItsExistingAddAction() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "estimate-revision"]
+        app.launch()
+        XCTAssertTrue(app.textFields["Option package title"].waitForExistence(timeout: 30))
+        let heading = app.buttons.matching(identifier: "estimate-add-item-heading")
+            .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
+        XCTAssertFalse(heading.exists)
+        let existing = app.buttons.matching(identifier: "estimate-add-item")
+            .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
+        XCTAssertTrue(existing.exists)
+    }
+
     func testCustomerMenuKeepsItsVisibleAccessibilityLabelWithoutOverride() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "new-estimate"]

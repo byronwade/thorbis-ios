@@ -164,7 +164,7 @@ struct EstimateRevisionEditorView: View {
             if let removed {
                 LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
             }
-            if !keyboardUp { footerTotal }
+            if !keyboardUp && !typeSize.isAccessibilitySize { footerTotal }
             if let descriptionProblem {
                 FieldProblem(message: descriptionProblem)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -211,6 +211,10 @@ struct EstimateRevisionEditorView: View {
             }
 
             estimateHeading
+            if typeSize.isAccessibilitySize {
+                footerTotal
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             mainSection
             optionSections
             Text(editingDraft

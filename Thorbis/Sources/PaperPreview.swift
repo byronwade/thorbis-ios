@@ -223,6 +223,15 @@ enum PaperPreview {
         fields.forEach { object[$0.key] = $0.value }
         return try! JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: object))
     }
+    /// Synthetic long lists for catalog-entry navigation checks; no writes or real records.
+    private static func longCatalogLines(offset: Int = 0) -> [FieldLine] {
+        let count = ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") ? 500 : 12
+        return (0..<count).map { index in
+            FieldLine(id: String(format: "00000000-0000-4000-8000-%012d", 88000 + offset + index),
+                      description: "Sample work item \(index + 1)", quantity: 1,
+                      unitPrice: FieldMoney(amount: offset > 0 && ProcessInfo.processInfo.arguments.contains("--paper-preview-large-option-range") ? 9_999_999 : 1000, currency: "USD"), source: nil)
+        }
+    }
     /// `job-history`: the job is at the customer's Home, with past visits there and its equipment.
     /// `job-history-empty`: nothing on file for the place, so the section stays hidden.
     static var isPropertyHistoryPreview: Bool { enabled && screen == "job-history" }
@@ -251,7 +260,19 @@ enum PaperPreview {
     }
     static var estimate: EstimateRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002218","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","createdByUserId":"00000000-0000-4000-8000-000000000001","status":"sent","currentRevisionNumber":2,"title":"AC repair and compressor replacement","lines":[{"id":"00000000-0000-4000-8000-000000009211","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}},{"id":"00000000-0000-4000-8000-000000009212","description":"Replace compressor","quantity":1,"unitPrice":{"amount":85000,"currency":"USD"},"source":{"kind":"price_book","priceBookItemId":"00000000-0000-4000-8000-000000009201","priceBookRevision":4,"originalDescription":"Replace compressor","originalUnitPrice":{"amount":85000,"currency":"USD"},"addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z","overriddenFields":[]}}],"options":[{"id":"00000000-0000-4000-8000-000000009213","title":"Full system replacement","description":"Includes new compressor and efficiency inspection","lines":[{"id":"00000000-0000-4000-8000-000000009214","description":"System replacement","quantity":1,"unitPrice":{"amount":225000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}}],"totalAmount":225000,"currency":"USD"}],"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z","sentAt":"2026-07-20T12:00:00Z"}"#
-        return try! JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+        let record = try! JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+        guard (ProcessInfo.processInfo.arguments.contains("--paper-preview-long-catalog-sections") ||
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections")),
+              let option = record.options?.first else { return record }
+        let lines = longCatalogLines()
+        let extended = FieldEstimateOption(id: option.id, title: option.title, description: option.description,
+                                           lines: lines, totalAmount: lines.count * 1000, currency: "USD")
+        let otherLines = longCatalogLines(offset: 1000)
+        let second = FieldEstimateOption(id: "00000000-0000-4000-8000-000000000103", title: "Second system option",
+                                         description: "Another sample option.", lines: otherLines,
+                                         totalAmount: otherLines.count * 1000, currency: "USD")
+        let options = try! JSONSerialization.jsonObject(with: JSONEncoder().encode([extended, second]))
+        return changed(record, ["options": options])
     }
     /// Never-issued draft of the sample estimate, so the editor can be screenshotted before it is sent.
     static var draftEstimate: EstimateRecord {
@@ -317,7 +338,11 @@ enum PaperPreview {
     }
     static var invoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"draft","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":null,"paidAt":null,"voidedAt":null,"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
-        return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
+        let record = try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
+        guard ProcessInfo.processInfo.arguments.contains("--paper-preview-long-catalog-sections") ||
+              ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") else { return record }
+        let lines = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(longCatalogLines()))
+        return changed(record, ["lines": lines])
     }
     static var issuedInvoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":null,"voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
@@ -1403,6 +1428,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-deny-document-edit") {
+                capabilities.removeAll { ["invoice.edit", "estimate.create"].contains($0) }
+            }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-no-customer-handoff") {
                 capabilities.removeAll { ["estimate.view", "invoice.view", "customer.edit"].contains($0) }
             }
