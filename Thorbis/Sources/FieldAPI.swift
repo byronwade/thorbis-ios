@@ -1050,6 +1050,11 @@ extension APIClient {
         return page.items
     }
 
+    /// Recovery must inspect the complete collection before the technician confirms an uncertain contact.
+    func allContactsForRecovery(_ customerID: String, currentAuthority: @MainActor () -> Bool) async throws -> [CustomerContactRecord] {
+        try await allFieldPages(fieldPath("/v1/customers", id: customerID, suffix: "/contacts"), isCurrent: currentAuthority)
+    }
+
     func createFieldContact(_ customerID: String, request: FieldContactCreate) async throws -> CustomerContactRecord {
         try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/contacts"), body: request)
     }
@@ -1057,6 +1062,10 @@ extension APIClient {
     func updateFieldContact(_ customerID: String, _ contactID: String, request: FieldContactUpdate) async throws -> CustomerContactRecord {
         let path = try fieldContactPath(customerID, contactID)
         return try await send("POST", path, body: request)
+    }
+
+    func updateFieldContactConditionally(_ customerID: String, _ contactID: String, request: ConditionalContactUpdate) async throws -> CustomerContactRecord {
+        try await send("POST", fieldContactPath(customerID, contactID), body: request)
     }
 
     func removeFieldContact(_ customerID: String, _ contactID: String) async throws {
@@ -1074,6 +1083,10 @@ extension APIClient {
         return page.items
     }
 
+    func allLocationsForRecovery(_ customerID: String, currentAuthority: @MainActor () -> Bool) async throws -> [ServiceLocationRecord] {
+        try await allFieldPages(fieldPath("/v1/customers", id: customerID, suffix: "/locations"), isCurrent: currentAuthority)
+    }
+
     func createFieldLocation(_ customerID: String, request: FieldLocationCreate) async throws -> ServiceLocationRecord {
         try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/locations"), body: request)
     }
@@ -1081,6 +1094,10 @@ extension APIClient {
     func updateFieldLocation(_ customerID: String, _ locationID: String, request: FieldLocationUpdate) async throws -> ServiceLocationRecord {
         let path = try fieldLocationPath(customerID, locationID)
         return try await send("POST", path, body: request)
+    }
+
+    func updateFieldLocationConditionally(_ customerID: String, _ locationID: String, request: ConditionalLocationUpdate) async throws -> ServiceLocationRecord {
+        try await send("POST", fieldLocationPath(customerID, locationID), body: request)
     }
 
     func removeFieldLocation(_ customerID: String, _ locationID: String) async throws {
@@ -1227,7 +1244,7 @@ struct CustomerSmsConsent: Codable, Hashable {
 extension APIClient {
     /// Nil until a decision has been recorded.
     func customerSmsConsent(_ customerID: String) async throws -> CustomerSmsConsent? {
-        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"))
+        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"), requireFresh: true)
     }
 
     /// Records an explicit decision the customer gave staff. Online only; the key makes a retry safe.

@@ -32,10 +32,12 @@ struct JobCustomerDocumentsView: View {
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     @State private var paper: CustomerJobPaper?
+    @State private var paperGeneration = UUID()
     @State private var book: CustomerJobDocumentID?
     @State private var openingID: String?
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var error: String?
+    @State private var documentSelectionRevision = UUID()
     @State private var unlocking = false
     @State private var approving = false
     @State private var editingDetails = false
@@ -92,12 +94,29 @@ struct JobCustomerDocumentsView: View {
                     initial: initial, actionError: error, refresh: refresh,
                     reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
                     signInvoice: { id in Task { await openInvoice(id, decision: true, sign: true) } },
-                    payInvoice: { id in Task { await openInvoice(id, payment: true) } },
+                    payInvoice: { id in
+                        #if DEBUG
+                        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-recheck-fails") {
+                            PaperPreviewProtocol.failDocumentPaymentRecheck()
+                        }
+                        #endif
+                        Task { await openInvoice(id, payment: true) }
+                    },
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
-                    canPayInvoice: session.can("invoice.payment.create", feature: "payments"))
+                    canPayInvoice: session.can("invoice.payment.create", feature: "payments"),
+                    onSelectionChanged: { documentSelectionRevision = UUID(); error = nil })
                     .disabled(unlocking || openingID != nil)
-                    .thorbisDestination(item: $paper) { destination in
-                        destinationView(destination)
+                    .thorbisDestination(item: Binding(get: { paper }, set: { next in
+                        if paper != next { paperGeneration = UUID() }
+                        paper = next
+                    })) { destination in
+                        VStack(spacing: 0) {
+                            if case .invoice = destination, let error {
+                                CustomerProblemBanner(message: error)
+                                    .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                            }
+                            destinationView(destination)
+                        }
                             .disabled(unlocking)
                             .navigationTitle(reference(destination))
                             .toolbar {
@@ -135,7 +154,9 @@ struct JobCustomerDocumentsView: View {
         }
         .thorbisDestination(isPresented: $editingDetails) {
             if currentWorkspace, canEditDetails, let details {
-                CustomerSelfEditForm(model: details) { editingDetails = false }
+                CustomerSelfEditForm(model: details, currentAuthority: {
+                    currentWorkspace && handoff?.isCurrentJob == true && session.can("customer.edit", feature: "core_crm")
+                }) { editingDetails = false }
                     .navigationTitle("Your details")
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             } else {
@@ -143,7 +164,7 @@ struct JobCustomerDocumentsView: View {
             }
         }
         .task(id: session.generation) {
-            paper = nil
+            paperGeneration = UUID(); paper = nil
             book = nil
             editingDetails = false
             paymentModel = nil
@@ -255,6 +276,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     @ViewBuilder private func destinationView(_ destination: CustomerJobPaper) -> some View {
+        let presentation = paperGeneration
         switch destination {
         case .estimate(let estimate):
             if estimate.status == "sent", TechJobFlow.canShow(estimate, can: .init(
@@ -264,7 +286,9 @@ struct JobCustomerDocumentsView: View {
                     returnToDocuments: {
                         returnToJobDocuments()
                     },
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewEstimates && session.can("estimate.approve", feature: "estimates") },
                     onApproved: { approved in
+                        guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true, canViewEstimates else { return }
                         documents.markEstimatesStale(scope: scope, updated: approved, requestedID: estimate.id)
                         refreshEstimatesInBackground()
                     }, onDone: beginHandBack)
@@ -277,11 +301,13 @@ struct JobCustomerDocumentsView: View {
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
                         ? { Task { await pay(invoice.id) } } : nil, initiallySigning: signing,
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && scope.contains(invoice) },
                     onSigned: { updated in
-                        guard scope.contains(updated), updated.id == invoice.id else { return }
+                        guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true,
+                              canViewInvoices, scope.contains(updated), updated.id == invoice.id else { return }
                         documents.replaceInvoice(updated)
                         paymentModel?.acceptInvoiceMutationResponse(updated)
-                        paper = .invoice(updated, signing: false)
+                        paperGeneration = UUID(); paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
                     }, onDone: beginHandBack)
             } else {
@@ -298,7 +324,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func beginHandBack() {
-        paper = nil
+        paperGeneration = UUID(); paper = nil
         book = nil
         approving = false
         editingDetails = false
@@ -341,7 +367,7 @@ struct JobCustomerDocumentsView: View {
         guard currentWorkspace, canViewEstimates,
               let presented = paper, case .estimate = presented else { return }
         documents.markEstimatesStale(scope: scope)
-        paper = nil
+        paperGeneration = UUID(); paper = nil
         refreshEstimatesInBackground()
     }
 
@@ -367,12 +393,13 @@ struct JobCustomerDocumentsView: View {
             error = "This estimate couldn't be refreshed. Try again in a moment."
             return
         }
-        if decision { paper = .estimate(estimate) }
+        if decision { paperGeneration = UUID(); paper = .estimate(estimate) }
         else { book = .estimate(id) }
     }
 
     private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
         guard openingID == nil, currentWorkspace, canViewInvoices else { return }
+        error = nil
         openingID = id
         defer { openingID = nil }
         let generation = session.generation
@@ -396,7 +423,7 @@ struct JobCustomerDocumentsView: View {
                     guard CustomerDocumentAmounts(lines: latest.lines, currency: latest.currency, amountPaid: latest.amountPaid) != nil else {
                         throw Problem(title: "These invoice amounts couldn't be verified. Refresh before continuing.", status: nil, detail: nil)
                     }
-                    paper = .invoice(latest, signing: sign)
+                    paperGeneration = UUID(); paper = .invoice(latest, signing: sign)
                 } else { book = .invoice(id) }
             } else {
                 paymentModel = nil
@@ -406,16 +433,36 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func pay(_ invoiceID: String) async {
-        let generation = session.generation
-        guard !unlocking, currentWorkspace, paymentModel?.invoice?.id == invoiceID,
-              paymentModel?.canRecordPayment == true,
-              session.can("invoice.payment.create", feature: "payments") else { return }
+        guard !unlocking, currentWorkspace else { return }
+        guard paymentModel?.invoice?.id == invoiceID, paymentModel?.canRecordPayment == true,
+              canViewInvoices, handoff?.isCurrentJob == true,
+              session.can("invoice.payment.create", feature: "payments"),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            error = "Payment isn't ready. Ask your technician to check this invoice."
+            return
+        }
+        error = nil
+        let selectionRevision = documentSelectionRevision
+        let presentationRevision = paperGeneration
+        let originalPaper = paper
+        let originalBook = book
         unlocking = true
         defer { unlocking = false }
         let unlocked = await authenticateOwner("Unlock to take payment")
-        if unlocked, session.generation == generation, currentWorkspace {
+        #if DEBUG
+        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-retire-on-unlock") {
+            api.invalidateRequests()
+        }
+        #endif
+        let current = currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices &&
+            session.can("invoice.payment.create", feature: "payments") && authority.isCurrent(api: api, session: session) &&
+            documentSelectionRevision == selectionRevision && paperGeneration == presentationRevision &&
+            paper == originalPaper && book == originalBook && paymentModel?.invoice?.id == invoiceID &&
+            paymentModel?.canRecordPayment == true
+        guard current else { return }
+        if unlocked {
             requestPayment(invoiceID)
-        } else if session.generation == generation, currentWorkspace {
+        } else {
             error = "Your technician needs to unlock before taking payment."
         }
     }

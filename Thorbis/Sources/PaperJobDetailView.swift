@@ -29,8 +29,10 @@ struct JobDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var customerPaymentInvoiceID: String?
     @State private var documentInvoiceID: String?
+    @State private var overviewDocument: OverviewJobDocumentRoute?
     @State private var notes: [JobNoteRecord] = []
     @State private var note = ""
     /// Speech-to-text into `note`; it only fills the draft, saving still goes through `saveNote`.
@@ -48,6 +50,8 @@ struct JobDetailView: View {
     @State private var tabsPinned = false
     @StateObject private var documents = JobDocumentCollections()
     @State private var documentGeneration: UUID?
+    @State private var overviewEstimatesAuthority: CustomerHandoffExitAuthority?
+    @State private var overviewInvoicesAuthority: CustomerHandoffExitAuthority?
     private var invoiceRead: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     private var invoices: [InvoiceRecord] { invoiceRead?.records ?? [] }
     private var invoicesLoaded: Bool { invoiceRead != nil }
@@ -286,6 +290,7 @@ struct JobDetailView: View {
             }
         }
         .background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .foregroundStyle(Theme.foreground)
         // v2 Record room: sections are space and a 13 Medium label, no panels ("the page is one pour").
         .environment(\.paperRecordRoom, true)
@@ -316,6 +321,33 @@ struct JobDetailView: View {
         .thorbisDestination(item: $documentInvoiceID) { id in
             InvoiceDetailView(id: id, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
                 .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
+        }
+        .thorbisDestination(item: $overviewDocument) { route in
+            if overviewDocumentIsCurrent(route) {
+                switch route.kind {
+                case .estimate:
+                    EstimateDetailView(id: route.documentID, jobID: route.scope.jobID)
+                        .onDisappear { if let job { Task { await loadJobEstimates(job); await loadInvoices(); await loadCloseout() } } }
+                case .invoice:
+                    InvoiceDetailView(id: route.documentID, expectedJobScope: route.scope,
+                                      invoiceReference: jobInvoiceReference(route.documentID))
+                        .onDisappear { Task { await loadInvoices(); await loadCloseout() } }
+                        .task {
+                            #if DEBUG
+                            if ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-retire") {
+                                await PaperPreview.expireDocumentSessionForTesting(session)
+                            } else if PaperPreview.isJobDocumentsPreview,
+                                      ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-revalidate") {
+                                try? await Task.sleep(for: .seconds(5))
+                                guard !Task.isCancelled else { return }
+                                await session.revalidate()
+                            }
+                            #endif
+                        }
+                }
+            } else {
+                ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text("Return to the job and refresh to open this document."))
+            }
         }
         .thorbisDestination(item: $reviewInvoiceID) { id in
             InvoiceDetailView(id: id, returnsWhenPaid: true, expectedJobScope: job.flatMap { scope(for: $0) }, invoiceReference: jobInvoiceReference(id))
@@ -372,6 +404,14 @@ struct JobDetailView: View {
             }
         } }
         .task(id: customerAuthorityToken) {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload"),
+               let authority = overviewInvoicesAuthority, !authority.isCurrent(api: api, session: session) {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+            }
+            #endif
             if customerAuthorityID != customerAuthorityToken {
                 customerAuthorityID = customerAuthorityToken
                 locations = []
@@ -443,7 +483,7 @@ struct JobDetailView: View {
             }
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
-        .onAppear { if job != nil { Task { await load() } } }
+        .onAppear { customerWindowAnchor.visible = true; if job != nil { Task { await load() } } }
         .onChange(of: session.can("customer.view", feature: "core_crm")) { _, _ in
             locations = []
             locationsContext = nil
@@ -459,7 +499,7 @@ struct JobDetailView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
-        .onDisappear { dictation.stop() }
+        .onDisappear { customerWindowAnchor.visible = false; dictation.stop() }
         .onChange(of: selectedTab) { previous, tab in
             if tab != "Activity" { dictation.stop(); noteFocused = false }
             if tab == "Money" { Task { await loadInvoices() } }
@@ -1545,19 +1585,40 @@ struct JobDetailView: View {
             let loading = (canEstimates && !estimatesLoaded) || (canInvoices && !invoicesLoaded)
             JobPanelSection(title: "Money", actionTitle: "Open", actionIdentifier: "job-money-open",
                             action: { withMotion(.snappy) { selectedTab = "Money" } }) {
+                #if DEBUG
+                if PaperPreview.isJobDocumentsPreview,
+                   ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload") {
+                    Button("Preview revalidate") { Task { await session.revalidate() } }
+                        .accessibilityIdentifier("job-overview-revalidate")
+                }
+                #endif
                 ForEach(estimates) { estimate in
                     let options = estimate.options ?? []
                     let (word, tint) = estimateWord(estimate.status)
-                    moneyLine(options.isEmpty ? "Estimate EST-\(estimate.id.suffix(4).uppercased())" : "Estimate · \(options.count) \(options.count == 1 ? "option" : "options")",
-                              amount: options.isEmpty ? paperLinesTotal(estimate.lines).map { jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } : nil,
-                              word: word, tint: tint)
+                    Button { openOverviewEstimate(estimate, job: job) } label: {
+                        moneyLine("Estimate EST-\(estimate.id.suffix(4).uppercased())" + (options.isEmpty ? "" : " · \(options.count) \(options.count == 1 ? "option" : "options")"),
+                                  amount: options.isEmpty ? paperLinesTotal(estimate.lines).map { jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } : nil,
+                                  word: word, tint: tint)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens this estimate")
+                    .accessibilityIdentifier("job-overview-estimate-\(estimate.id)")
+                    .disabled(estimateRead?.freshIDs.contains(estimate.id) != true || overviewEstimatesAuthority?.isCurrent(api: api, session: session) != true)
                 }
                 ForEach(bills) { invoice in
                     let due = TechJobFlow.due(invoice)
                     let (word, tint) = invoiceWord(invoice, due: due)
                     let amount = invoice.status == "issued" ? due : paperLinesTotal(invoice.lines)
-                    moneyLine("Invoice \(jobInvoiceReference(invoice.id))",
-                              amount: amount.map { jobShortMoney($0, currency: invoice.currency) }, word: word, tint: tint)
+                    Button {
+                        openOverviewInvoice(invoice, job: job)
+                    } label: {
+                        moneyLine("Invoice \(jobInvoiceReference(invoice.id))",
+                                  amount: amount.map { jobShortMoney($0, currency: invoice.currency) }, word: word, tint: tint)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens this invoice")
+                    .accessibilityIdentifier("job-overview-invoice-\(invoice.id)")
+                    .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true || overviewInvoicesAuthority?.isCurrent(api: api, session: session) != true)
                 }
                 if estimates.isEmpty && bills.isEmpty {
                     if loading { SkeletonRows(count: 1, leading: false, inset: 16) }
@@ -1617,6 +1678,7 @@ struct JobDetailView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 11)
         .frame(maxWidth: stacked ? .infinity : nil, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
@@ -1985,22 +2047,57 @@ struct JobDetailView: View {
                                 customerID: job.customerId, originEstimateID: job.estimateId)
     }
 
+    private func overviewDocumentIsCurrent(_ route: OverviewJobDocumentRoute) -> Bool {
+        guard route.authority.isCurrent(api: api, session: session),
+              documentGeneration == session.generation,
+              session.can("job.view", feature: "jobs"), let job,
+              scope(for: job) == route.scope else { return false }
+        switch route.kind {
+        case .estimate: return session.can("estimate.view", feature: "estimates")
+        case .invoice: return session.can("invoice.view", feature: "invoicing")
+        }
+    }
+
+    private func openOverviewEstimate(_ estimate: EstimateRecord, job: JobRecord) {
+        guard session.can("job.view", feature: "jobs"), session.can("estimate.view", feature: "estimates"),
+              overviewEstimatesAuthority?.isCurrent(api: api, session: session) == true,
+              documentGeneration == session.generation, let scope = scope(for: job),
+              let read = estimateRead, read.scope == scope, read.freshIDs.contains(estimate.id),
+              scope.contains(estimate, requestedID: estimate.id),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        overviewDocument = OverviewJobDocumentRoute(documentID: estimate.id, kind: .estimate, scope: scope, authority: authority)
+    }
+
+    private func openOverviewInvoice(_ invoice: InvoiceRecord, job: JobRecord) {
+        guard session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
+              overviewInvoicesAuthority?.isCurrent(api: api, session: session) == true,
+              documentGeneration == session.generation, let scope = scope(for: job),
+              let read = invoiceRead, read.scope == scope, read.freshIDs.contains(invoice.id),
+              scope.contains(invoice),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        selectedInvoiceID = invoice.id
+        overviewDocument = OverviewJobDocumentRoute(documentID: invoice.id, kind: .invoice, scope: scope, authority: authority)
+    }
+
     private var documentReadIssue: String? {
         if estimatesFailed && invoicesFailed { return "Couldn't load all estimates and invoices for this job." }
         return estimateRead?.issue ?? invoiceRead?.issue
     }
 
     private func loadJobEstimates(_ job: JobRecord) async {
-        guard session.can("estimate.view", feature: "estimates"), let scope = scope(for: job) else {
+        guard session.can("estimate.view", feature: "estimates"), let scope = scope(for: job),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            overviewEstimatesAuthority = nil
             documents.clearEstimates()
             return
         }
         let generation = session.generation
         let published = await documents.loadEstimates(scope: scope, api: api) {
-            session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
+            authority.isCurrent(api: api, session: session) && session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
                 self.job?.id == scope.jobID && self.job?.customerId == scope.customerID
         }
-        guard session.generation == generation, published else { return }
+        guard session.generation == generation, authority.isCurrent(api: api, session: session), published else { return }
+        overviewEstimatesAuthority = authority
     }
 
     private func invoiceContent(_ job: JobRecord) -> some View {
@@ -2511,28 +2608,29 @@ struct JobDetailView: View {
     /// Customer view: the job's one protected customer handoff (estimates, invoices, the customer's
     /// own details) with one staff hand-back. Every customer-facing door on the job opens it.
     private func openCustomerView(_ start: CustomerViewStart) {
-        guard let job, scope(for: job) != nil, canOpenCustomerView else { return }
+        guard let job, scope(for: job) != nil, canOpenCustomerView,
+              let source = customerWindowAnchor.window, customerWindowAnchor.isAttached(to: source),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            error = "Customer view isn't ready. Refresh this job and try again."
+            return
+        }
         let model = JobEstimateHandoffModel(job: job, customerName: store.customerName(job.customerId), documents: documents, api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
-        let originalScope = model.scope, actorID = session.user?.id
-        let generation = session.generation, apiGeneration = api.requestGeneration,
-            copyRevision = api.savedCopyScopeRevision, origin = api.normalizedOrigin
-        let current: @MainActor () -> Bool = { [weak api, weak session] in
-            guard let api, let session else { return false }
-            return session.user?.id == actorID && session.activeOrganization?.id == originalScope.organizationID &&
-                session.generation == generation && api.requestGeneration == apiGeneration &&
-                api.savedCopyScopeRevision == copyRevision && api.normalizedOrigin == origin &&
-                session.can("job.view", feature: "jobs")
-        }
-        estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
-                                         invoiceUpdated: updateInvoice) { exit in
+        let opened = estimateHandoffPresenter.present(model, start: start, details: details, sourceGeneration: documentGeneration,
+                                         invoiceUpdated: updateInvoice, sourceWindow: source) { exit in
+            guard let exitRevision = estimateHandoffPresenter.idleRevision else { return }
+            let current: @MainActor () -> Bool = {
+                estimateHandoffPresenter.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) &&
+                authority.isCurrent(api: api, session: session) && session.can("job.view", feature: "jobs") && self.job?.id == job.id
+            }
             guard current() else { return }
             // The customer may have changed a phone, an email or a contact in their own hands.
-            await loadContacts(job)
+            await loadContacts(job, currentAuthority: current)
             guard current() else { return }
             if case .collect(let invoiceID) = exit { customerPaymentInvoiceID = invoiceID }
-            await finishCustomerDocuments()
+            await finishCustomerDocuments(currentAuthority: current)
         }
+        if !opened { error = "Customer view couldn't open. Try again." }
     }
 
     private func buildEstimate() {
@@ -2621,16 +2719,19 @@ struct JobDetailView: View {
     }
 
     private func loadInvoices() async {
-        guard session.can("invoice.view", feature: "invoicing"), let job, let scope = scope(for: job) else {
+        guard session.can("invoice.view", feature: "invoicing"), let job, let scope = scope(for: job),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            overviewInvoicesAuthority = nil
             documents.clearInvoices()
             return
         }
         let generation = session.generation
         let published = await documents.loadInvoices(scope: scope, api: api) {
-            session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
+            authority.isCurrent(api: api, session: session) && session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
                 self.job?.id == scope.jobID && self.job?.customerId == scope.customerID
         }
-        guard session.generation == generation, published else { return }
+        guard session.generation == generation, authority.isCurrent(api: api, session: session), published else { return }
+        overviewInvoicesAuthority = authority
         if let selectedInvoice {
             selectedInvoiceID = selectedInvoice.id
             await loadInvoicePayments(for: selectedInvoice)
@@ -2707,7 +2808,8 @@ struct JobDetailView: View {
         }
     }
 
-    private func finishCustomerDocuments() async {
+    private func finishCustomerDocuments(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority() else { return }
         let requestedID = customerPaymentInvoiceID
         customerPaymentInvoiceID = nil
         let generation = session.generation
@@ -2716,14 +2818,15 @@ struct JobDetailView: View {
         let copyRevision = api.savedCopyScopeRevision
         let origin = api.normalizedOrigin
         if let job { await loadJobEstimates(job) }
+        guard currentAuthority() else { return }
         await loadInvoices()
-        guard session.generation == generation, let requestedID,
+        guard currentAuthority(), session.generation == generation, let requestedID,
               session.can("invoice.payment.create", feature: "payments"),
               invoiceRead?.freshIDs.contains(requestedID) == true,
               let invoice = invoices.first(where: { $0.id == requestedID }) else { return }
         selectedInvoiceID = requestedID
         await loadInvoicePayments(for: invoice)
-        guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
+        guard currentAuthority(), !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
               api.requestGeneration == apiGeneration, api.savedCopyScopeRevision == copyRevision,
               api.normalizedOrigin == origin else { return }
         presentPayment(for: requestedID)
@@ -2829,8 +2932,8 @@ struct JobDetailView: View {
     }
 
     /// JS-06: every contact and the account; the header's Call and Text reach the primary one.
-    private func loadContacts(_ job: JobRecord) async {
-        guard let context = customerContext(job) else { return }
+    private func loadContacts(_ job: JobRecord, currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), let context = customerContext(job) else { return }
         let generation = session.generation
         if contactsContext != context {
             contacts = []
@@ -2846,8 +2949,9 @@ struct JobDetailView: View {
         }
         do {
             let people = try await api.fieldContacts(job.customerId)
+            guard currentAuthority() else { return }
             let account = try? await api.fieldCustomer(job.customerId)
-            guard stillCurrent() else { return }
+            guard currentAuthority(), stillCurrent() else { return }
             let verified = people.filter { $0.organizationId == job.organizationId && $0.customerId == job.customerId }
             let verifiedAccount = account.flatMap { $0.organizationId == job.organizationId && $0.id == job.customerId ? $0 : nil }
             contacts = verified
@@ -3072,6 +3176,17 @@ private struct JobInvoiceItemsDisclosure: View {
 struct OpenedEstimate: Identifiable, Hashable {
     let id: String
     let present: Bool
+}
+
+private struct OverviewJobDocumentRoute: Identifiable, Hashable {
+    enum Kind { case estimate, invoice }
+    let id = UUID()
+    let documentID: String
+    let kind: Kind
+    let scope: JobDocumentScope
+    let authority: CustomerHandoffExitAuthority
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 /// Invoice ids this phone has seen per job, so a technician (whose invoice list is empty by

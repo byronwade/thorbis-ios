@@ -13,6 +13,30 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-12-job-and-inbox",
+            date: "2026-11-12",
+            highlights: [
+                .init(symbol: "doc.text", title: "Open job documents faster",
+                      detail: "Tap an estimate or invoice on the job overview to open that document."),
+                .init(symbol: "clock.arrow.circlepath", title: "Browse past jobs in batches",
+                      detail: "Load more past jobs on a customer profile, or show the full history."),
+                .init(symbol: "envelope", title: "Keep an email draft",
+                      detail: "Save a draft before choosing a recipient and recover your words if saving fails."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-11-customer-handoff",
+            date: "2026-11-11",
+            highlights: [
+                .init(symbol: "person.text.rectangle", title: "Review customer changes",
+                      detail: "Review saved customer changes together before trying an interrupted update again."),
+                .init(symbol: "creditcard", title: "Return to the right invoice",
+                      detail: "After customer review, return to the invoice you opened to collect its payment."),
+                .init(symbol: "arrow.clockwise", title: "Know when payment needs a check",
+                      detail: "If payment details need a refresh, the customer sees what to do next."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-ipad-schedule-list",
             date: "2026-11-05",
             highlights: [

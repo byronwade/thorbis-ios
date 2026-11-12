@@ -449,6 +449,7 @@ struct JobEstimateHandoffView: View {
             let _ = { context.continueTitle = nextPending(after: id) == nil ? "See approvals" : "Next estimate" }()
             CustomerEstimatePresentation(estimate: item.estimate, jobID: model.scope.jobID, customerName: model.customerName,
                 preselectedOptionID: item.optionID, handoff: context,
+                currentAuthority: { context.current() && context.canApprove() },
                 onApproved: { _ in }, onDone: {
                     if let next = nextPending(after: id) { checkpointID = next }
                     else { checkpointID = nil; reviewing = false }
@@ -473,9 +474,12 @@ struct JobEstimateProtectedOwner: View {
     @State private var reviewingDetails: CustomerViewExit?
     var body: some View {
         Group {
-            if let exit = reviewingDetails, let details = presenter.details {
+            if let exit = reviewingDetails, let details = presenter.details, model.isCurrentJob,
+               session.can("customer.edit", feature: "core_crm") {
                 // Staff side, after authentication: the existing review and audited save.
-                CustomerSelfEditReview(model: details) { presenter.authenticatedExit(exit) }
+                CustomerSelfEditReview(model: details, currentAuthority: {
+                    presenter.active === model && model.isCurrentJob && session.can("customer.edit", feature: "core_crm")
+                }) { presenter.authenticatedExit(from: model, exit) }
             } else {
                 CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
                     JobCustomerDocumentsView(scope: model.scope, documents: model.documents, sourceGeneration: presenter.sourceGeneration,
@@ -495,7 +499,7 @@ struct JobEstimateProtectedOwner: View {
         if model.isCurrentJob, presenter.details?.hasChanges == true, session.can("customer.edit", feature: "core_crm") {
             reviewingDetails = exit
         } else {
-            presenter.authenticatedExit(exit)
+            presenter.authenticatedExit(from: model, exit)
         }
     }
     private func authenticateOwner() async -> Bool {

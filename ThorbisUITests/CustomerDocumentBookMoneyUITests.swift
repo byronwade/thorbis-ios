@@ -2,6 +2,27 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testPayExplainsWhenFreshPaymentHistoryCannotBeVerified() {
+        let app = openPrimary(extra: ["--paper-preview-job-documents-money", "--paper-preview-job-invoice-signed", "--paper-preview-payment-recheck-fails"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        let message = app.staticTexts["Payment isn't ready. Ask your technician to check this invoice."]
+        XCTAssertTrue(message.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        XCTAssertFalse(message.exists, "A payment warning must not follow the customer to another invoice")
+    }
+
+    func testPayCannotLeaveCustomerViewAfterAuthorityIsRetiredDuringUnlock() {
+        let app = openPrimary(extra: ["--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved", "--paper-preview-payment-retire-on-unlock"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        XCTAssertTrue(app.staticTexts["This document isn’t available any more"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        XCTAssertFalse(app.buttons["Job actions"].isHittable)
+    }
     func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch

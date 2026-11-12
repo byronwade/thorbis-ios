@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
 // MARK: - Recording playback
 
@@ -499,6 +500,7 @@ struct CommsLocalThreadView: View {
     @ObservedObject var store: CommsLocalStore
     @Environment(\.dismiss) private var dismiss
     @State private var mail: CommsMailDraft?
+    @State private var recoveredThreadID: String?
 
     var body: some View {
         let thread = store.thread(threadID)
@@ -553,7 +555,13 @@ struct CommsLocalThreadView: View {
             }
         }
         .sheet(item: $mail) { draft in
-            CommsMailSheet(draft: draft, store: store) { _ in mail = nil } onClose: { mail = nil }
+            CommsMailSheet(draft: draft, store: store) { id in
+                mail = nil
+                if id != threadID { recoveredThreadID = id }
+            } onClose: { mail = nil }
+        }
+        .thorbisDestination(item: $recoveredThreadID) { id in
+            CommsLocalThreadView(threadID: id, store: store).tabletReadable()
         }
         .onAppear { if thread?.unread == true { store.setUnread(threadID, false) } }
     }
@@ -880,7 +888,9 @@ struct CommsComposeSheet: View {
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 let ready = CommsCallGrouping.key(phone) != nil
-                Button { onOpen(store.threadForPhone(phone, contactName: name)) } label: {
+                Button {
+                    if let id = store.threadForPhone(phone, contactName: name) { onOpen(id) }
+                } label: {
                     Text("Start text").inkCommit(enabled: ready)
                 }
                 .buttonStyle(PressStyle())
@@ -933,21 +943,56 @@ struct CommsMailDraft: Identifiable {
     var mail: CommsLocalStore.Mail {
         .init(to: Self.addresses(to), cc: Self.addresses(cc), bcc: Self.addresses(bcc), subject: subject, body: body)
     }
+
+    /// Explicit recovery copy, including all fields the technician entered.
+    var recoveryText: String {
+        "To: \(to)\nCc: \(cc)\nBcc: \(bcc)\nSubject: \(subject)\n\n\(body)"
+    }
 }
 
 /// The email composer (web compose.tsx): To, Cc and Bcc, subject, body. Save draft keeps it on
-/// this device; Send queues it, because no email provider is connected.
+/// this device; queued messages do not send automatically.
 struct CommsMailSheet: View {
     @State var draft: CommsMailDraft
     @ObservedObject var store: CommsLocalStore
     let onSaved: (String) -> Void
     let onClose: () -> Void
     @State private var showCopies = false
+    @State private var confirmClose = false
+    @State private var saveFailure: CommsLocalStore.MailSaveFailure?
+    private let original: CommsLocalStore.Mail
     @FocusState private var toFocused: Bool
+
+    init(draft: CommsMailDraft, store: CommsLocalStore, onSaved: @escaping (String) -> Void, onClose: @escaping () -> Void) {
+        _draft = State(initialValue: draft)
+        self.original = draft.mail
+        self.store = store
+        self.onSaved = onSaved
+        self.onClose = onClose
+    }
+
+    private var hasChanges: Bool { draft.mail != original }
+    private var canSave: Bool {
+        let mail = draft.mail
+        return !mail.to.isEmpty || !mail.cc.isEmpty || !mail.bcc.isEmpty ||
+            !mail.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !mail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         let ready = !draft.mail.to.isEmpty
-        ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: onClose) {
+        ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: requestClose) {
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invalidate-inbox") {
+                Button("Invalidate inbox session (test)") { store.invalidate() }
+                    .accessibilityIdentifier("inbox-test-invalidate")
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-conflict-inbox"),
+               let threadID = draft.threadID, let messageID = draft.messageID {
+                Button("Remove original draft (test)") { store.discardDraft(threadID, messageID: messageID) }
+                    .accessibilityIdentifier("inbox-test-conflict")
+            }
+            #endif
             PaperFormField("To") {
                 TextField("To", text: $draft.to, prompt: .placeholder("name@example.com"))
                     .keyboardType(.emailAddress).textContentType(.emailAddress).textInputAutocapitalization(.never)
@@ -979,25 +1024,58 @@ struct CommsMailSheet: View {
             PaperFormField("Message") {
                 TextField("Message", text: $draft.body, prompt: .placeholder("Write your email"), axis: .vertical)
                     .lineLimit(6...14).font(Theme.font(16)).fieldWell()
+                    .accessibilityIdentifier("inbox-mail-body")
             }
-            Text("Send queues it \u{2014} no email provider is connected. Drafts stay on this device.")
+            Text("Email is not connected. Queued messages stay on this device and are not sent automatically.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+            if let saveFailure {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(saveFailure == .storage
+                         ? "The save could not be confirmed. Copy your email, reopen the app, and check drafts before trying again."
+                         : saveFailure == .recipient ? "Add a recipient before queueing this email."
+                         : "This draft or conversation changed. Your text is still here; save a new draft to keep it.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if saveFailure == .conflict {
+                        Button("Save as new draft") { saveSeparateDraft() }
+                            .font(Theme.font(15, weight: .medium))
+                            .accessibilityIdentifier("inbox-mail-save-copy")
+                    } else if saveFailure == .storage {
+                        Button("Copy email") { UIPasteboard.general.string = draft.recoveryText }
+                            .font(Theme.font(15, weight: .medium))
+                            .accessibilityIdentifier("inbox-mail-copy-text")
+                    }
+                }
+            }
             VStack(spacing: 4) {
-                Button { commit(send: true) } label: { Text("Send").inkCommit(enabled: ready) }
+                Button { commit(send: true) } label: { Text("Queue on device").inkCommit(enabled: ready) }
                     .buttonStyle(PressStyle())
-                    .disabled(!ready)
-                    .accessibilityHint("Queues the email. It won\u{2019}t go out until an email provider is connected.")
+                    .disabled(!ready || saveFailure == .storage)
+                    .accessibilityHint("Saves the email on this device. It will not send automatically.")
                     .accessibilityIdentifier("inbox-mail-send")
                 Button { commit(send: false) } label: {
                     Text("Save draft").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
-                .disabled(!ready)
+                .disabled(!canSave || saveFailure == .storage)
             }
         }
         .thorbisSheetPresentation([.large])
+        .interactiveDismissDisabled(hasChanges && store.isActive)
+        .disabled(!store.isActive)
+        .onAppear { if !store.isActive { onClose() } }
+        .onChange(of: store.isActive) { _, active in
+            if !active { onClose() }
+        }
+        .alert("Keep your changes?", isPresented: $confirmClose) {
+            if canSave && saveFailure != .storage { Button("Save draft") { commit(send: false) } }
+            Button("Discard changes", role: .destructive) { onClose() }
+            Button("Keep editing", role: .cancel) { }
+        } message: {
+            Text(canSave ? "Save this draft on your device or discard your changes." : "Keep editing or discard your changes.")
+        }
         // A new email starts at To; a reply or a saved draft already has one.
         .task {
             guard draft.to.isEmpty else { return }
@@ -1006,8 +1084,28 @@ struct CommsMailSheet: View {
         }
     }
 
+    private func requestClose() {
+        guard hasChanges else { onClose(); return }
+        // The keyboard can cover the confirmation's cancel action on iPhone.
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        confirmClose = true
+    }
+
     private func commit(send: Bool) {
-        guard let id = store.commitMail(draft.mail, send: send, threadID: draft.threadID, editing: draft.messageID) else { return }
+        guard saveFailure != .storage else { return }
+        guard let id = store.commitMail(draft.mail, send: send, threadID: draft.threadID, editing: draft.messageID,
+                                        expected: draft.messageID == nil ? nil : original) else {
+            if store.isActive { saveFailure = store.lastMailSaveFailure ?? .storage }
+            return
+        }
+        onSaved(id)
+    }
+
+    private func saveSeparateDraft() {
+        guard let id = store.commitMail(draft.mail, send: false) else {
+            if store.isActive { saveFailure = store.lastMailSaveFailure ?? .storage }
+            return
+        }
         onSaved(id)
     }
 }

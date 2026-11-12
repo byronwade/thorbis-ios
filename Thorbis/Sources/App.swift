@@ -17,9 +17,12 @@ struct ThorbisApp: App {
     @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
     @State private var lastSavedCopyCheck = Date.distantPast
-    @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
+    @StateObject private var estimateHandoff: JobEstimateHandoffPresenter
+    @StateObject private var legacyHandoff = LegacyCustomerPresenter()
 
     init() {
+        _estimateHandoff = StateObject(wrappedValue: JobEstimateHandoffPresenter(
+            arbiter: CustomerHandoffArbiter(), sceneWindow: CustomerProtectedSceneWindow()))
         // Popovers put the keyboard away before opening; they need to know whether it is up.
         ThorbisKeyboard.watch()
         #if DEBUG
@@ -45,6 +48,7 @@ struct ThorbisApp: App {
             return try await Store.fetchAuthorized(api: api, session: session)
         }
         session.onInvalidate = { [weak store, weak pendingMedia] in
+            CommsLocalStore.invalidateCached()
             DayPrefetch.shared.cancel()
             store?.invalidate()
             pendingMedia?.bind(nil)
@@ -173,7 +177,7 @@ struct ThorbisApp: App {
                 #endif
             }
             }
-            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil }, set: { _ in })) {
+            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil && !estimateHandoff.usesSceneWindow }, set: { _ in })) {
                 if let model = estimateHandoff.active {
                     JobEstimateProtectedOwner(model: model, presenter: estimateHandoff)
                 }
@@ -181,6 +185,7 @@ struct ThorbisApp: App {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.canvas)
             .environmentObject(estimateHandoff)
+            .environmentObject(legacyHandoff)
             .environmentObject(api)
             .environmentObject(store)
             .environmentObject(session)

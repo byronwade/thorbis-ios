@@ -67,6 +67,185 @@ final class CommsInboxUITests: XCTestCase {
         attach(app, "Text draft saved")
     }
 
+    func testEmailCloseProtectsChangesAndSavesDraft() {
+        let app = launch(["--paper-preview-inbox-section", "email"])
+        let compose = app.buttons["New email"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20))
+        compose.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        let body = app.textViews["inbox-mail-body"].exists ? app.textViews["inbox-mail-body"] : app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 5))
+        body.tap()
+        body.typeText("Checking your appointment")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Save this draft on your device or discard your changes."].waitForExistence(timeout: 5))
+        app.buttons["Keep editing"].tap()
+        to.tap()
+        to.typeText("customer@example.com")
+        XCTAssertTrue(app.buttons["Queue on device"].exists)
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        app.buttons["Keep editing"].tap()
+        XCTAssertTrue(to.exists)
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let save = app.alerts["Keep your changes?"].buttons["Save draft"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(app.staticTexts["Draft"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+    }
+
+    func testSaveEmailDraftBeforeAddingRecipient() {
+        let app = launch(["--paper-preview-inbox-section", "email"])
+        let compose = app.buttons["New email"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20))
+        compose.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10))
+        body.tap()
+        body.typeText("Scope of work")
+        XCTAssertFalse(app.buttons["inbox-mail-send"].isEnabled)
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
+        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        XCTAssertTrue(app.staticTexts["Scope of work"].waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Draft"].firstMatch.exists)
+        let options = app.buttons["Options for this email"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        options.tap()
+        let edit = app.buttons["Edit draft"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
+        let recipient = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(recipient.waitForExistence(timeout: 5))
+        recipient.tap()
+        recipient.typeText("customer@example.com")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let updatedSaves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
+        updatedSaves.element(boundBy: max(0, updatedSaves.count - 1)).tap()
+        XCTAssertTrue(app.staticTexts["customer@example.com"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+    }
+
+    func testReplyDraftSurvivesDragAndDiscardedEdits() {
+        let app = launch(["--paper-preview-inbox-thread", "email"])
+        let reply = app.buttons["inbox-email-reply"]
+        XCTAssertTrue(reply.waitForExistence(timeout: 20), app.debugDescription)
+        reply.tap()
+        let field = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("Original reply")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        app.buttons["Keep editing"].tap()
+        let grabber = app.buttons["Sheet Grabber"].firstMatch
+        XCTAssertTrue(grabber.waitForExistence(timeout: 5))
+        grabber.swipeDown()
+        XCTAssertTrue(field.exists, "Dragging must not dismiss unsaved reply")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
+        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        XCTAssertTrue(app.staticTexts["Original reply"].waitForExistence(timeout: 10))
+        let options = app.buttons["Options for this email"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        options.tap()
+        let edit = app.buttons["Edit draft"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText(" changed")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+        XCTAssertTrue(app.staticTexts["Original reply"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Original reply changed"].exists)
+    }
+
+    func testInvalidatingSessionClosesDirtyComposer() {
+        let app = launch(["--paper-preview-inbox-section", "email", "--paper-preview-invalidate-inbox"])
+        let compose = app.buttons["New email"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20))
+        compose.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10))
+        body.tap()
+        body.typeText("Private unsaved details")
+        let invalidate = app.buttons["inbox-test-invalidate"]
+        XCTAssertTrue(invalidate.exists)
+        invalidate.tap()
+        XCTAssertTrue(body.waitForNonExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Private unsaved details"].exists)
+    }
+
+    func testDeletedDraftCanBeRecoveredAsNewLocalDraft() {
+        let app = launch(["--paper-preview-inbox-section", "email", "--paper-preview-conflict-inbox"])
+        let compose = app.buttons["New email"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20))
+        compose.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        to.tap()
+        to.typeText("customer@example.com")
+        let body = app.textFields["inbox-mail-body"]
+        body.tap()
+        body.typeText("Original")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
+        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        XCTAssertTrue(app.staticTexts["Original"].waitForExistence(timeout: 10))
+        app.buttons["Options for this email"].firstMatch.tap()
+        let edit = app.buttons["Edit draft"].firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 5))
+        edit.tap()
+        XCTAssertTrue(body.waitForExistence(timeout: 5))
+        body.tap()
+        body.typeText(" revised")
+        let remove = app.buttons["inbox-test-conflict"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5))
+        remove.tap()
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let updatedSaves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
+        updatedSaves.element(boundBy: max(0, updatedSaves.count - 1)).tap()
+        let copy = app.buttons["inbox-mail-save-copy"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 10), app.debugDescription)
+        copy.tap()
+        let recovered = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Original", "revised")).firstMatch
+        XCTAssertTrue(recovered.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+    }
+
+    func testEmailStorageFailureKeepsTextAndPreventsBlindRetry() {
+        let app = launch(["--paper-preview-inbox-section", "email", "--paper-preview-inbox-storage-failure"])
+        let compose = app.buttons["New email"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20))
+        compose.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        to.tap()
+        to.typeText("customer@example.com")
+        let body = app.textFields["inbox-mail-body"]
+        body.tap()
+        body.typeText("Keep these details")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
+        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        let copy = app.buttons["inbox-mail-copy-text"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(body.exists)
+        XCTAssertTrue((body.value as? String)?.contains("Keep these details") ?? false)
+        XCTAssertFalse(app.buttons["inbox-mail-send"].isEnabled)
+    }
+
     /// New text and New email open with the first field ready to type.
     func testComposeSheetsFocusTheirFirstField() {
         for (section, pencil, field) in [("texts", "New text", "inbox-new-text-phone"), ("email", "New email", "inbox-mail-to")] {

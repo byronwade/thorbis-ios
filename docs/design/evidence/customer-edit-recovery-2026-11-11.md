@@ -1,0 +1,9 @@
+# Customer edit recovery (in progress)
+
+Customer detail edits can span several independent server requests. A lost response to contact creation cannot be automatically retried: the current server command creates a new ID and exposes no idempotency key. The draft records a scoped write-ahead copy before a mutation, and an uncertain request requires an explicit technician review of fresh customer data. A contact create is not retried automatically.
+
+The recovery copy is held in device-only Keychain, scoped to the verified actor, organization, customer and API origin. It intentionally survives sign-out so the same authorized actor can recover unsaved edits; before showing a retained draft the app requires a fresh server read of the customer and complete contact/location collections, verifies their organization and customer IDs, and verifies retained child IDs are present. A missing child or unavailable authorization keeps the draft hidden. Keychain retention across uninstall depends on iOS behavior and has not been qualified. Successful completion writes a completed marker before deleting the copy so a failed deletion cannot replay saved changes.
+
+The recovery comparison preserves unrelated newer values and requires a technician choice for same-field conflicts. The current server's customer, contact and location updates do not expose conditional versions, so another write between the comparison and save can still overwrite a concurrent edit. This is an unresolved release blocker; a server-side conditional-write contract and end-to-end verification are required. If an uncertain contact creation cannot be found, the draft remains held and can be checked again; absence is not proof that a delayed request cannot still finish.
+
+This record describes an in-progress candidate. The completed tests for earlier handoff sources do not qualify this recovery implementation, sign-out/reinstall behavior, real-device accessibility, or live server behavior.

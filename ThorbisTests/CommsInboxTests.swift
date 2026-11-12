@@ -16,6 +16,25 @@ final class CommsInboxTests: XCTestCase {
         return try JSONDecoder().decode(BookingCallRecord.self, from: JSONSerialization.data(withJSONObject: object))
     }
 
+    func testInvalidatedStoreClearsMemoryAndRejectsLateDraftWrites() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = CommsLocalStore(file: file)
+        let mail = CommsLocalStore.Mail(to: ["customer@example.com"], subject: "Visit", body: "private details")
+        XCTAssertNotNil(store.commitMail(mail, send: false))
+        let snapshot = try Data(contentsOf: file)
+        store.invalidate()
+        XCTAssertFalse(store.isActive)
+        XCTAssertTrue(store.threads.isEmpty)
+        XCTAssertNil(store.commitMail(mail, send: false))
+        XCTAssertNil(store.threadForPhone("5550100100"))
+        store.toggleStar("late-call")
+        XCTAssertTrue(store.callFlags.isEmpty)
+        store.saveCannedReply(name: "Private", body: "private details")
+        XCTAssertFalse(store.cannedReplies.contains(where: { $0.body == "private details" }))
+        XCTAssertEqual(try Data(contentsOf: file), snapshot, "A stale view must not write after sign-out")
+    }
+
     // MARK: Decoding
 
     func testTheLogDecodesEveryCallViewFieldAtTheServersLargestPage() async throws {
@@ -145,7 +164,7 @@ final class CommsInboxTests: XCTestCase {
         let threads = CommsCallGrouping.threads([try call("m", status: "missed", number: "+15550100142", at: "2026-11-05T14:00:00Z", duration: 0),
                                                  try call("c", at: "2026-11-05T13:00:00Z")])
         let store = CommsLocalStore(file: nil)
-        let text = store.threadForPhone("(555) 010-0144", contactName: "Danielle")
+        let text = try XCTUnwrap(store.threadForPhone("(555) 010-0144", contactName: "Danielle"))
         store.commitText(text, body: "On our way")
         let mail = try XCTUnwrap(store.commitMail(.init(to: ["a@example.com"], subject: "Hi", body: "Hello"), send: true))
         let notices = [notice("n1", read: false), notice("n2", read: true)]
@@ -180,9 +199,9 @@ final class CommsInboxTests: XCTestCase {
 
     // MARK: Texts and email on this device
 
-    func testTextsNeverSendAndFindTheirThreadByDigits() {
+    func testTextsNeverSendAndFindTheirThreadByDigits() throws {
         let store = CommsLocalStore(file: nil)
-        let id = store.threadForPhone("+1 (555) 010-0144", contactName: "Danielle")
+        let id = try XCTUnwrap(store.threadForPhone("+1 (555) 010-0144", contactName: "Danielle"))
         XCTAssertEqual(store.thread(id)?.messages, [], "A new conversation starts empty")
         store.archive(id)
         XCTAssertEqual(store.threadForPhone("555-010-0144"), id, "The same number by digits")
@@ -201,6 +220,119 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertFalse(store.thread(id)!.messages.contains { $0.status == .received }, "Nothing reads as delivered")
     }
 
+    func testEmailDraftCanBeSavedBeforeChoosingRecipient() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = CommsLocalStore(file: file)
+        let initial = CommsLocalStore.Mail(to: [], subject: "Visit", body: "Work summary")
+        let threadID = try XCTUnwrap(store.commitMail(initial, send: false))
+        let reloaded = CommsLocalStore(file: file)
+        let original = try XCTUnwrap(reloaded.thread(threadID))
+        XCTAssertEqual(original.recipientlessDraft, true)
+        let draft = try XCTUnwrap(original.messages.first)
+        XCTAssertEqual(draft.status, .draft)
+        XCTAssertEqual(original.contactName, "Draft email")
+        XCTAssertNil(original.email)
+        XCTAssertNil(reloaded.commitMail(initial, send: true, threadID: threadID, editing: draft.id, expected: initial))
+        let updated = CommsLocalStore.Mail(to: ["customer@example.com"], subject: "Visit", body: "Work summary")
+        XCTAssertEqual(reloaded.commitMail(updated, send: false, threadID: threadID, editing: draft.id, expected: initial), threadID)
+        let saved = try XCTUnwrap(reloaded.thread(threadID))
+        XCTAssertEqual(saved.messages.count, 1)
+        XCTAssertEqual(saved.messages.first?.to, ["customer@example.com"])
+        XCTAssertEqual(saved.email, "customer@example.com")
+        XCTAssertEqual(saved.contactName, "customer@example.com")
+        XCTAssertEqual(reloaded.commitMail(initial, send: false, threadID: threadID, editing: draft.id, expected: updated), threadID)
+        XCTAssertNil(reloaded.thread(threadID)?.email)
+        XCTAssertEqual(reloaded.thread(threadID)?.contactName, "Draft email")
+    }
+
+    func testOlderConversationSnapshotWithoutDraftMarkerStillDecodes() throws {
+        let thread = CommsLocalThread(id: "old", contactName: "Customer", phone: "", email: "customer@example.com", channel: .email, subject: nil, unread: false, flags: CommsThreadFlags(), messages: [], composing: nil)
+        let encoded = try JSONEncoder().encode(thread)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "recipientlessDraft")
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(CommsLocalThread.self, from: legacy)
+        XCTAssertEqual(decoded.contactName, "Customer")
+        XCTAssertNil(decoded.recipientlessDraft)
+    }
+
+    func testEditingExistingEmailDoesNotReplaceItsContactAssociation() throws {
+        let store = CommsLocalStore(file: nil)
+        let original = CommsLocalStore.Mail(to: ["original@example.com"], subject: "Visit", body: "Hi")
+        let id = try XCTUnwrap(store.commitMail(original, send: false))
+        let message = try XCTUnwrap(store.thread(id)?.messages.first)
+        let changed = CommsLocalStore.Mail(to: ["other@example.com"], subject: "Visit", body: "Updated")
+        XCTAssertEqual(store.commitMail(changed, send: false, threadID: id, editing: message.id, expected: original), id)
+        XCTAssertEqual(store.thread(id)?.contactName, "original@example.com")
+        XCTAssertEqual(store.thread(id)?.email, "original@example.com")
+        XCTAssertEqual(store.thread(id)?.messages.first?.to, ["other@example.com"])
+    }
+
+    func testEmailRecoveryCopyIncludesAllEnteredFields() {
+        var draft = CommsMailDraft(to: "customer@example.com", subject: "Visit")
+        draft.cc = "office@example.com"
+        draft.bcc = "private@example.com"
+        draft.body = "Scope details"
+        XCTAssertEqual(draft.recoveryText, "To: customer@example.com\nCc: office@example.com\nBcc: private@example.com\nSubject: Visit\n\nScope details")
+    }
+
+    func testEmailSaveFailureDoesNotPublishDraftOrClaimSuccess() throws {
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let file = parent.appendingPathComponent("inbox.json") // The parent deliberately does not exist.
+        let store = CommsLocalStore(file: file)
+        let draft = CommsLocalStore.Mail(to: ["a@example.com"], subject: "Visit", body: "Keep my words")
+        XCTAssertNil(store.commitMail(draft, send: false))
+        XCTAssertEqual(store.lastMailSaveFailure, .storage)
+        XCTAssertTrue(store.threads.isEmpty)
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        XCTAssertNil(store.commitMail(draft, send: false), "An uncertain write must not be retried blindly")
+        XCTAssertNil(store.threadForPhone("5550100100"))
+        let reloaded = CommsLocalStore(file: file)
+        let id = try XCTUnwrap(reloaded.commitMail(draft, send: false))
+        XCTAssertNil(reloaded.lastMailSaveFailure)
+        XCTAssertEqual(CommsLocalStore(file: file).thread(id)?.messages.first?.body, "Keep my words")
+    }
+
+    func testMissingPersistentStorageCannotClaimEmailSave() {
+        let store = CommsLocalStore(file: nil, requiresPersistence: true)
+        let draft = CommsLocalStore.Mail(to: [], subject: "Visit", body: "Keep my words")
+        XCTAssertNil(store.commitMail(draft, send: false))
+        XCTAssertEqual(store.lastMailSaveFailure, .storage)
+        XCTAssertTrue(store.threads.isEmpty)
+    }
+
+    func testUnreadableSnapshotIsNotOverwrittenAsEmptyInbox() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let corrupt = Data("{not a valid inbox".utf8)
+        try corrupt.write(to: file)
+        let store = CommsLocalStore(file: file, requiresPersistence: true)
+        XCTAssertTrue(store.storageBlocked)
+        let draft = CommsLocalStore.Mail(to: ["a@example.com"], subject: "Visit", body: "New")
+        XCTAssertNil(store.commitMail(draft, send: false))
+        XCTAssertNil(store.threadForPhone("5550100100"))
+        XCTAssertEqual(try Data(contentsOf: file), corrupt)
+    }
+
+    func testStaleEmailEditorCannotOverwriteOrResurrectDraft() throws {
+        let store = CommsLocalStore(file: nil)
+        let original = CommsLocalStore.Mail(to: ["a@example.com"], subject: "Visit", body: "First")
+        let id = try XCTUnwrap(store.commitMail(original, send: false))
+        let message = try XCTUnwrap(store.thread(id)?.messages.first)
+        let newer = CommsLocalStore.Mail(to: ["a@example.com"], subject: "Visit", body: "Newer edit")
+        XCTAssertEqual(store.commitMail(newer, send: false, threadID: id, editing: message.id, expected: original), id)
+        let stale = CommsLocalStore.Mail(to: ["a@example.com"], subject: "Visit", body: "Stale edit")
+        XCTAssertNil(store.commitMail(stale, send: false, threadID: id, editing: message.id, expected: original))
+        XCTAssertEqual(store.thread(id)?.messages.first?.body, "Newer edit")
+        store.discardDraft(id, messageID: message.id)
+        XCTAssertNil(store.commitMail(stale, send: false, threadID: id, editing: message.id, expected: original))
+        XCTAssertNil(store.commitMail(stale, send: false, threadID: id), "A reply cannot silently create a new thread")
+        XCTAssertNil(store.thread(id))
+        XCTAssertTrue(store.threads.isEmpty)
+    }
+
     func testEmailQueuesOrDraftsAndAnOnlyDraftDiscardsItsThread() throws {
         let store = CommsLocalStore(file: nil)
         XCTAssertNil(store.commitMail(.init(to: [" "], subject: "", body: "x"), send: true), "An email needs someone to go to")
@@ -209,7 +341,7 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertEqual(draft.status, .draft)
         XCTAssertEqual(draft.subject, "(no subject)")
         XCTAssertEqual(draft.cc, ["b@example.com"])
-        store.commitMail(.init(to: ["a@example.com"], subject: "Visit", body: "Hello"), send: true, threadID: id, editing: draft.id)
+        store.commitMail(.init(to: ["a@example.com"], subject: "Visit", body: "Hello"), send: true, threadID: id, editing: draft.id, expected: .init(to: ["a@example.com"], cc: ["b@example.com"], subject: "", body: "Hi"))
         XCTAssertEqual(store.thread(id)?.messages.count, 1, "Editing replaces the draft")
         XCTAssertEqual(store.thread(id)?.messages.first?.status, .queued)
 
@@ -236,7 +368,7 @@ final class CommsInboxTests: XCTestCase {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("inbox-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let store = CommsLocalStore(file: file)
-        let id = store.threadForPhone("5550100144")
+        let id = try XCTUnwrap(store.threadForPhone("5550100144"))
         store.setComposing(id, "half written")
         store.toggleStar("call-thread-5550100100")
         store.saveCannedReply(name: "Mine", body: "Body")

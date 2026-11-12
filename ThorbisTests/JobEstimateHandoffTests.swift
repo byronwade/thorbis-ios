@@ -285,6 +285,102 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await Task.yield()
         XCTAssertNil(releasedModel, "The presenter/context callbacks must not retain the exited private model")
     }
+    func testDetachedInvoiceSourceCannotPresentAfterDelayedJobRead() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let model = try await ready([.init(200, jobJSON, gate: gate)])
+        let presenter = JobEstimateHandoffPresenter()
+        var attached = true
+        let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+            customerName: "Sample", start: .invoice("invoice-a"), api: model.api, session: model.session,
+            sourceStillAttached: { attached }, onExit: { _ in XCTFail("Detached source cannot receive handoff") }) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+        attached = false; gate.release()
+        let result = await task.value
+        XCTAssertEqual(result, .superseded)
+        XCTAssertNil(presenter.active)
+    }
+    func testInvalidatedOrCancelledJobReadCannotFallBackToLegacyPresentation() async throws {
+        for cancel in [false, true] {
+            let gate = URLProtocolFixture.Gate()
+            let model = try await ready([.init(200, jobJSON, gate: gate)])
+            let presenter = JobEstimateHandoffPresenter()
+            let task = Task { await presenter.openCustomerView(jobID: jobID, customerID: customer,
+                customerName: "Sample", start: .invoice("invoice-a"), api: model.api, session: model.session,
+                onExit: { _ in }) }
+            defer { gate.release(); task.cancel() }
+            for _ in 0..<100 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }) {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            XCTAssertTrue(URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs/\(jobID)" }))
+            if cancel { task.cancel() } else { model.api.invalidateRequests() }
+            gate.release()
+            let result = await task.value
+            XCTAssertEqual(result, .superseded)
+            XCTAssertNil(presenter.active)
+        }
+    }
+    func testCurrentHandoffReturnsRequestedInvoiceToStaff() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Current handoff returns the selected invoice")
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect("invoice-a") = exit { callback.fulfill() }
+        }
+        XCTAssertTrue(presenter.active === model)
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
+        await fulfillment(of: [callback], timeout: 1)
+    }
+    func testPresenterReportsWhenAnotherCustomerHandoffPreventsOpening() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let lease = try XCTUnwrap(presenter.claimLegacy())
+        XCTAssertFalse(presenter.present(model, onAuthenticatedExit: {}))
+        XCTAssertNil(presenter.active)
+        lease.release()
+    }
+    func testQueuedCollectDoesNotRunAfterAnotherCustomerHandoffStarts() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Earlier collection must not run behind a newer handoff")
+        callback.isInverted = true
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect = exit { callback.fulfill() }
+        }
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
+        let lease = try XCTUnwrap(presenter.claimLegacy())
+        await fulfillment(of: [callback], timeout: 0.5)
+        lease.release()
+    }
+    func testQueuedCollectDoesNotRunAfterAuthorityChanges() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Queued collection must not use retired authority")
+        callback.isInverted = true
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect = exit { callback.fulfill() }
+        }
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
+        model.api.invalidateRequests()
+        await fulfillment(of: [callback], timeout: 0.5)
+    }
+    func testRetiredHandoffCannotReturnCollectToStaff() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter()
+        let callback = expectation(description: "Retired handoff must not open collection")
+        callback.isInverted = true
+        presenter.present(model, start: .invoice("invoice-a")) { exit in
+            if case .collect = exit { callback.fulfill() }
+        }
+        XCTAssertTrue(presenter.active === model)
+        model.api.invalidateRequests()
+        XCTAssertFalse(model.isCurrentJob)
+        presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
+        await fulfillment(of: [callback], timeout: 0.5)
+    }
     func testResultAttributionUsesCanonicalSignerInsteadOfRetainedInput() async throws {
         let model = try await ready([.init(200, jobJSON), .init(200, membership([a])), .init(200, record(a)), .init(200, record(a)), .init(200, revision(a))])
         await model.refresh(); model.setSelected(a, selected: true); await model.reviewSelected()
