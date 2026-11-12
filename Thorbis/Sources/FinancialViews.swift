@@ -543,8 +543,8 @@ struct InvoiceDetailView: View {
         if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
             items.append(ThorbisMenuItem("Edit line items", icon: "pencil") { showEditDraft = true })
         }
-        if record.status == "draft", !session.isOffline, session.can("invoice.discount", feature: "invoicing") {
-            items.append(ThorbisMenuItem("Add discount", icon: "tag") { showDiscount = true })
+        if canDiscountInvoice(record) {
+            items.append(ThorbisMenuItem("Add discount", icon: "tag") { if canDiscountInvoice(record) { showDiscount = true } })
         }
         items.append(ThorbisMenuItem("View PDF", icon: "doc.text") { showPDF = true })
         if let application = financingApplications.first, application.isOpen,
@@ -568,12 +568,13 @@ struct InvoiceDetailView: View {
                 if let record {
                     // v2 Evidence: the question ("Invoice 2209") and its status word, then what's owed
                     // now at 30pt; the quiet properties; the lines with their totals; then payments.
-                    let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-                    let due = max(total - record.amountPaid, 0)
+                    let amounts = invoiceAmounts(record)
+                    let paidInFull = amounts.map { $0.due == 0 && $0.paid > 0 } ?? false
                     EvidenceHeader(title: "Invoice \(displayReference(record).dropFirst(4))", status: DocumentStatus(invoice: record),
-                                   figureLabel: record.status == "draft" ? "Total" : due == 0 && record.amountPaid > 0 ? "Paid in full" : "Balance due",
-                                   cents: due == 0 && record.amountPaid > 0 ? record.amountPaid : due, currency: record.currency,
-                                   statusIdentifier: "invoice-chip-status", titleIdentifier: "invoice-detail-title")
+                                   figureLabel: record.status == "draft" ? "Total" : paidInFull ? "Paid in full" : "Balance due",
+                                   cents: paidInFull ? amounts?.paid : amounts?.due, currency: record.currency,
+                                   statusIdentifier: "invoice-chip-status", titleIdentifier: "invoice-detail-title",
+                                   figureIdentifier: amounts == nil ? "invoice-invalid-total" : "document-figure")
                     invoiceProperties(record)
                         .thorbisConfirm("Cancel this application?", message: "The customer's link stops working.",
                                         isPresented: $confirmCancelFinancing,
@@ -591,8 +592,8 @@ struct InvoiceDetailView: View {
                             WaitingToSyncLabel()
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
-                        Button { showSignature = true } label: {
+                    } else if amounts != nil, record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
+                        Button { if canSignInvoice(record) { showSignature = true } } label: {
                             Label("Get customer signature", systemImage: "signature")
                                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -600,15 +601,16 @@ struct InvoiceDetailView: View {
                         }
                         .buttonStyle(PressStyle())
                     }
-                    DocumentLinesSection(label: "Line items", lines: record.lines, totalLabel: "Total", total: total, currency: record.currency,
-                                         extraRows: record.amountPaid > 0 && record.status != "draft"
-                                            ? [("Paid", money(record.amountPaid, currency: record.currency)), ("Balance due", money(due, currency: record.currency))]
-                                            : [])
+                    DocumentLinesSection(label: "Line items", lines: record.lines, totalLabel: "Total", total: amounts?.total, currency: record.currency,
+                                         extraRows: amounts.map { value in
+                                             record.amountPaid > 0 && record.status != "draft"
+                                                ? [("Paid", money(record.amountPaid, currency: record.currency)), ("Balance due", money(value.due, currency: record.currency))] : []
+                                         } ?? [])
                     if let paymentModel {
                         InvoicePaymentsSection(
                             model: paymentModel,
                             invoice: record,
-                            onCollectPayment: { showCollectPayment = true },
+                            onCollectPayment: { startCollection() },
                             onInvoiceUpdated: { _ = accept($0) }
                         )
                     }
@@ -644,24 +646,25 @@ struct InvoiceDetailView: View {
         }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
         .sheet(isPresented: $showDiscount) { SheetSurface {
-            if let record {
-                InvoiceDiscountSheet(invoice: record) { updated in _ = accept(updated) }
+            if let record, canDiscountInvoice(record) {
+                InvoiceDiscountSheet(invoice: record, canApply: { canDiscountInvoice(record) }) { updated in _ = accept(updated) }
             }
         } }
         .sheet(isPresented: $showSignature) { SheetSurface {
-            if let record, let jobID = record.jobId {
-                let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-                SignatureCaptureSheet(title: "Sign for \(money(total, currency: record.currency))",
+            if let record, let jobID = record.jobId, let amounts = invoiceAmounts(record) {
+                SignatureCaptureSheet(title: "Sign for \(money(amounts.total, currency: record.currency))",
                                       summary: "By signing, \(store.customerName(record.customerId)) authorizes the work and charges on this invoice.",
                                       jobID: jobID, suggestedName: store.customerName(record.customerId),
                                       queueOffline: { png, assetID, signer, signedAt in
+                                          guard canSignInvoice(record) else { return false }
                                           // OF-01: the ink stays on the phone and authorizes this exact revision once online.
-                                          outbox.enqueueSignature(png, payload: .init(jobId: jobID, invoiceId: record.id,
+                                          return outbox.enqueueSignature(png, payload: .init(jobId: jobID, invoiceId: record.id,
                                                                                       expectedLinesRevision: record.linesRevision,
                                                                                       signerName: signer, signedAt: signedAt,
                                                                                       clientAssetId: assetID),
                                                                   policyVersion: session.policyVersion ?? 0) != nil
                                       }) { signature in
+                    guard canSignInvoice(record) else { return "Refresh this invoice before signing." }
                     do {
                         let updated = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
                         return accept(updated) ? nil : paymentModel?.loadError
@@ -675,14 +678,14 @@ struct InvoiceDetailView: View {
             if let paymentModel {
                 InvoiceDetailFooter(
                     model: paymentModel,
-                    canCollect: session.can("invoice.payment.create", feature: "payments"),
-                    canIssue: session.can("invoice.issue", feature: "invoicing"),
+                    canCollect: record.flatMap(invoiceAmounts) != nil && session.can("invoice.payment.create", feature: "payments"),
+                    canIssue: record.flatMap(invoiceAmounts) != nil && session.can("invoice.issue", feature: "invoicing"),
                     issueTitle: issueCollects ? "Issue and collect payment" : "Issue invoice",
                     busy: busy,
-                    onCollect: { showCollectPayment = true },
+                    onCollect: { startCollection() },
                     onIssue: { confirmIssue = true }
                 )
-            } else if let record, record.status == "draft", session.can("invoice.issue", feature: "invoicing") {
+            } else if let record, record.status == "draft", invoiceAmounts(record) != nil, session.can("invoice.issue", feature: "invoicing") {
                 PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                     .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
                     .background(Theme.canvas)
@@ -707,7 +710,9 @@ struct InvoiceDetailView: View {
             }
         } }
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
-            if let paymentModel, let record {
+            if let paymentModel, let record, let paymentInvoice = paymentModel.invoice,
+               paymentInvoice.id == record.id, invoiceAmounts(record) != nil, invoiceAmounts(paymentInvoice) != nil,
+               session.can("invoice.payment.create", feature: "payments") {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record, invoiceReference: displayReference(record))
                     .thorbisSheetSurface()
                     .presentationDetents([.large])
@@ -805,7 +810,7 @@ struct InvoiceDetailView: View {
                       paymentModel?.invoice?.id == invoiceID,
                       paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true, paymentModel?.loadError == nil,
                       session.can("invoice.payment.create", feature: "payments") else { return }
-                showCollectPayment = true
+                startCollection()
             }
             busy = false
             if opened != .unavailable { return }
@@ -828,7 +833,7 @@ struct InvoiceDetailView: View {
                             error = "Refresh this invoice before collecting payment."
                             return
                         }
-                        showCollectPayment = true
+                        startCollection()
                     }
                     guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
                     await loadFinancing(currentAuthority: { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
@@ -839,9 +844,32 @@ struct InvoiceDetailView: View {
     }
 
     /// TF-08: issuing and collecting are one step for the tech; payment opens right after.
+    private func invoiceAmounts(_ invoice: InvoiceRecord) -> CustomerDocumentAmounts? {
+        CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+    }
+
+    private func canSignInvoice(_ invoice: InvoiceRecord) -> Bool {
+        guard let current = record, current == invoice, current.status != "void",
+              current.jobId != nil, invoiceAmounts(current) != nil else { return false }
+        return session.can("invoice.edit", feature: "invoicing")
+    }
+
+    private func canDiscountInvoice(_ invoice: InvoiceRecord) -> Bool {
+        guard let current = record, current == invoice, current.status == "draft",
+              invoiceAmounts(current) != nil, !session.isOffline else { return false }
+        return session.can("invoice.discount", feature: "invoicing")
+    }
+
+    private func startCollection() {
+        guard let record, invoiceAmounts(record) != nil, let paymentModel,
+              paymentModel.invoice == record, paymentModel.canRecordPayment,
+              session.can("invoice.payment.create", feature: "payments") else { return }
+        showCollectPayment = true
+    }
+
     private func issueThenCollect() async {
         guard await issue(), issueCollects, paymentModel?.canRecordPayment == true else { return }
-        showCollectPayment = true
+        startCollection()
     }
 
     private func returnIfPaid() {
@@ -852,7 +880,8 @@ struct InvoiceDetailView: View {
         session.can("invoice.issue", feature: "invoicing") && session.can("invoice.payment.create", feature: "payments")
     }
     @discardableResult private func issue() async -> Bool {
-        guard let current = record else { return false }
+        guard let current = record, current.status == "draft", invoiceAmounts(current) != nil,
+              session.can("invoice.issue", feature: "invoicing") else { return false }
         busy = true
         defer { busy = false }
         do {
@@ -1235,23 +1264,42 @@ func money(_ cents: Int, currency: String) -> String {
 /// The Estimates header's subtitle: what's waiting on customers and how much.
 func estimatesSummary(_ estimates: [EstimateRecord]) -> String {
     let waiting = estimates.filter { $0.status == "sent" }
-    let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
-    return waiting.isEmpty ? "Nothing waiting on customers" : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))"
+    guard !waiting.isEmpty else { return "Nothing waiting on customers" }
+    var total = 0
+    for estimate in waiting {
+        guard let amount = CustomerDocumentAmounts(lines: estimate.lines, currency: "USD")?.total else {
+            return "\(waiting.count) waiting on customers · Total unavailable"
+        }
+        let (next, overflow) = total.addingReportingOverflow(amount)
+        guard !overflow else { return "\(waiting.count) waiting on customers · Total unavailable" }
+        total = next
+    }
+    return "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))"
 }
 
 /// The Invoices header's subtitle: what's owed and on how many invoices.
 func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
     let unpaid = invoices.filter { $0.status == "issued" }
-    let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD"))\u{00A0}owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
+    guard !unpaid.isEmpty else { return "Everything is paid" }
+    let count = "\(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
+    var owed = 0
+    for invoice in unpaid {
+        guard invoice.currency == "USD",
+              let amount = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) else {
+            return "Balance unavailable on \(count)"
+        }
+        let (next, overflow) = owed.addingReportingOverflow(amount.due)
+        guard !overflow else { return "Balance unavailable on \(count)" }
+        owed = next
+    }
+    return "\(money(owed, currency: "USD"))\u{00A0}owed on \(count)"
 }
-
-
 
 /// Web parity: discount a draft invoice. The amount and a reason the customer sees ("Discount —
 /// Loyalty"), checked here against the total so the server's refusal is the rare case.
 struct InvoiceDiscountSheet: View {
     let invoice: InvoiceRecord
+    let canApply: () -> Bool
     let applied: (InvoiceRecord) -> Void
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
@@ -1263,7 +1311,7 @@ struct InvoiceDiscountSheet: View {
     @State private var busy = false
     @FocusState private var amountFocused: Bool
 
-    private var total: Int { invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount } }
+    private var total: Int? { CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)?.total }
 
     /// "150", "150.5", "$1,250.00" → cents; nil when it isn't a plain amount.
     private var cents: Int? {
@@ -1279,7 +1327,7 @@ struct InvoiceDiscountSheet: View {
         ThorbisModalSheet(title: "Add discount", onClose: busy ? nil : { dismiss() },
                           commitTitle: "Apply discount", commitSymbol: "tag", busy: busy,
                           commitIdentifier: "invoice-discount-apply", commit: { Task { await press() } }) {
-            FormField(label: "Amount", help: "Comes off the invoice total of \(money(total, currency: invoice.currency)).",
+            FormField(label: "Amount", help: total.map { "Comes off the invoice total of \(money($0, currency: invoice.currency))." } ?? "Invoice total unavailable. Refresh before applying a discount.",
                       error: amountProblem) {
                 TextField("", text: $amount, prompt: .placeholder("50.00"))
                     .font(Theme.font(16)).monospacedDigit()
@@ -1309,6 +1357,7 @@ struct InvoiceDiscountSheet: View {
     /// Validate on commit: say what's missing under the field instead of locking the button.
     private func press() async {
         guard !busy else { return }
+        guard canApply(), let total else { error = "Invoice total unavailable. Refresh before applying a discount."; return }
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let cents else { amountProblem = "Enter an amount, like 50.00."; return }
         guard cents <= total else { amountProblem = "A discount can\u{2019}t be more than the invoice total."; return }

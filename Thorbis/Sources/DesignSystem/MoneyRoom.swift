@@ -22,11 +22,12 @@ struct EvidenceHeader: View {
     /// A quieter line under the title (an estimate's own name).
     var subtitle: String? = nil
     let figureLabel: String
-    let cents: Int
+    let cents: Int?
     let currency: String
     var statusIdentifier: String? = nil
     /// The title's identifier (the room hides the navigation bar title, so tests find it here).
     var titleIdentifier = "document-title"
+    var figureIdentifier = "document-figure"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -52,7 +53,7 @@ struct EvidenceHeader: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 Text(figureLabel).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                Text(money(cents, currency: currency))
+                Text(cents.map { money($0, currency: currency) } ?? "Unavailable")
                     .font(Theme.moneyHeroFont).tracking(-0.6)
                     .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
                     .lineLimit(1).minimumScaleFactor(0.6)
@@ -61,6 +62,7 @@ struct EvidenceHeader: View {
             }
             .padding(.top, 20)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(figureIdentifier)
             .accessibilityAddTraits(.updatesFrequently)
         }
         .foregroundStyle(Theme.foreground)
