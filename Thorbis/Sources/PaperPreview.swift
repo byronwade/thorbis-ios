@@ -939,6 +939,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         // a short one, the sent estimate, the booking call, status changes and photos.
         if PaperPreview.screen == "job-activity" {
             if path == "/v1/jobs/\(PaperPreview.jobID)/notes" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-large-activity") {
+                    let notes: [[String: Any]] = (0..<80).map { index in
+                        ["id": String(format: "00000000-0000-4000-8001-%012d", index),
+                         "organizationId": org, "jobId": PaperPreview.jobID, "authorUserId": actor,
+                         "body": "Sample activity note \(index)", "createdAt": today(hour: 9, minute: 15)]
+                    }
+                    return ["items": notes]
+                }
                 return ["items": [
                     ["id": "00000000-0000-4000-8000-000000009002", "organizationId": org, "jobId": PaperPreview.jobID, "authorUserId": actor,
                      "body": "Sample note: Outdoor unit is behind the shed; the path floods after rain, so bring boot covers. The dog is friendly but jumps, keep the side gate shut. Customer works from home and asked for a text before anyone rings the bell. Upstairs thermostat was replaced last spring by another company.",

@@ -2,6 +2,28 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testLargeSameDayActivityRemainsScrollableAndFilterable() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-activity", "--paper-preview-large-activity"]
+        app.launch()
+        let filter = app.buttons["activity-filter"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 25))
+        let notes = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Sample activity note"))
+        XCTAssertTrue(notes.firstMatch.waitForExistence(timeout: 20))
+        let initialLabels = (0..<notes.count).map { notes.element(boundBy: $0).label }
+        XCTAssertLessThan(notes.count, 80, "The initial accessibility tree should not instantiate every note")
+        let content = app.scrollViews.firstMatch
+        for _ in 0..<8 { content.swipeUp() }
+        let laterLabels = (0..<notes.count).map { notes.element(boundBy: $0).label }
+        XCTAssertFalse(laterLabels.isEmpty)
+        XCTAssertTrue(laterLabels.contains { !initialLabels.contains($0) }, "Scrolling must reveal more of the same-day history")
+        for _ in 0..<12 where !filter.isHittable { content.swipeDown() }
+        XCTAssertTrue(filter.isHittable)
+        filter.tap()
+        menuRow(app, "Notes").tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
+    }
     func testPhotosAreDirectlyReachableFromMoneyAndActivityStillOpens() {
         continueAfterFailure = false
         let app = preview("job", working: true)
