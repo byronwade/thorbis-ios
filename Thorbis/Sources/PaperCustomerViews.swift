@@ -447,15 +447,15 @@ struct CustomerDetailView: View {
         })
     }
 
-    /// Details always open (address first), the open job, membership, contacts, places, equipment,
-    /// then the customer's activity.
+    /// Lead with the open job, then customer details, membership, contacts, places, equipment,
+    /// and activity.
     @ViewBuilder private var overview: some View {
+        if session.can("job.view", feature: "jobs") { nextVisit }
         if record == nil && error == nil {
             PaperCard { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
         } else {
             details
         }
-        if session.can("job.view", feature: "jobs") { nextVisit }
         CustomerMembershipSection(customerID: customer.id)
         contactsSection.id("customer-contacts")
         locationsSection
@@ -593,17 +593,30 @@ struct CustomerDetailView: View {
             // One heading and one word: "Open job", and "Late" when a booked visit's time has passed
             // (never "Past scheduled time" above a row that says "Scheduled").
             let late = ["scheduled", "dispatched"].contains(job.status) && (JobFiltering.date(job.scheduledFor).map { $0 < .now } ?? false)
-            PaperSection(summary.openCount > 1 ? "Open jobs" : "Open job", count: summary.openCount > 1 ? summary.openCount : nil) {
-                NavigationLink(value: job) {
-                    // The jobs row grammar: the street, the problem, when and who; the status word trails.
-                    JobRoomRow(job: job, street: street(for: job.locationId),
-                               when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
-                               who: tech(job.assignedToUserId), late: late, titleLines: 3, inset: PaperCardMetrics.inset)
+            VStack(alignment: .leading, spacing: 0) {
+                PaperSection(title: summary.openCount > 1 ? "Open jobs" : "Open job", count: summary.openCount > 1 ? summary.openCount : nil) {
+                    NavigationLink(value: job) {
+                        // The jobs row grammar: the street, the problem, when and who; the status word trails.
+                        JobRoomRow(job: job, street: street(for: job.locationId),
+                                   when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
+                                   who: tech(job.assignedToUserId), late: late, titleLines: 3, inset: PaperCardMetrics.inset)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityIdentifier("customer-next-visit")
+                } accessory: {
+                    if summary.openCount > 1 && !typeSize.isAccessibilitySize { seeAllJobs }
                 }
-                .buttonStyle(RowPressStyle())
-                .accessibilityIdentifier("customer-next-visit")
+                if summary.openCount > 1 && typeSize.isAccessibilitySize { seeAllJobs }
             }
         }
+    }
+
+    private var seeAllJobs: some View {
+        Button("See all jobs") { tab = "Jobs" }
+            .font(Theme.font(14, weight: .medium))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .accessibilityIdentifier("customer-see-all-jobs")
     }
 
     private func street(for locationID: String?) -> String? {

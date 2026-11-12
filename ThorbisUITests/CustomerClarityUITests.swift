@@ -82,6 +82,36 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Edit location"].waitForExistence(timeout: 5))
     }
 
+    func testMultipleOpenJobsAreEasyToFindFromCustomerOverview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-two-open-jobs"]
+        app.launch()
+        let visit = app.buttons["customer-next-visit"]
+        let allJobs = app.buttons["customer-see-all-jobs"]
+        XCTAssertTrue(visit.waitForExistence(timeout: 30))
+        XCTAssertTrue(allJobs.waitForExistence(timeout: 10))
+        XCTAssertTrue(allJobs.isHittable)
+        XCTAssertLessThan(visit.frame.minY, app.otherElements["customer-details"].frame.minY)
+        allJobs.tap()
+        XCTAssertTrue(app.staticTexts["Water heater service"].waitForExistence(timeout: 15))
+    }
+
+    func testMultipleOpenJobsShortcutAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-customer-two-open-jobs", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        app.swipeUp()
+        let shortcut = app.buttons["customer-see-all-jobs"]
+        XCTAssertTrue(shortcut.waitForExistence(timeout: 15))
+        for _ in 0..<6 where !shortcut.isHittable { app.swipeUp() }
+        XCTAssertTrue(shortcut.isHittable)
+        shortcut.tap()
+        XCTAssertTrue(app.staticTexts["Water heater service"].waitForExistence(timeout: 15))
+    }
+
     func testNextVisitStaysReadableAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -115,6 +145,9 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 30))
         XCTAssertGreaterThan(name.frame.height, 40)
         let visit = app.buttons["customer-next-visit"]
+        // At accessibility sizes the tall header initially leaves this row offscreen.
+        // Scroll before querying hittability: XCTest cannot calculate a hit point for a zero-height offscreen row.
+        app.swipeUp()
         for _ in 0..<10 where !visit.isHittable { app.swipeUp() }
         XCTAssertTrue(visit.isHittable)
         let title = app.staticTexts["Air conditioning is not cooling the upstairs rooms after several hours of running"]
