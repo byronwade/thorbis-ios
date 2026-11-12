@@ -2237,7 +2237,7 @@ struct JobDetailView: View {
     /// at the bottom of the screen (see `composer`).
     private func activityContent(_ job: JobRecord) -> some View {
         let days = activityDays(job)
-        return VStack(alignment: .leading, spacing: 18) {
+        return LazyVStack(alignment: .leading, spacing: 18) {
             if days.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     activityFilterLabel(title: "Activity")
@@ -2249,7 +2249,7 @@ struct JobDetailView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     if index == 0 { activityFilterLabel(title: dayTitle(group.day), count: group.entries.count) }
                     else { JobPanelLabel(title: dayTitle(group.day), count: "\(group.entries.count)") }
-                    VStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(group.entries.enumerated()), id: \.element.id) { position, entry in
                             timelineRow(entry, showsDay: false, isFirst: position == 0, isLast: position == group.entries.count - 1, inset: 4)
                         }
