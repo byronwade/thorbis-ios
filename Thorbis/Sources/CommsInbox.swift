@@ -321,8 +321,8 @@ struct CommsInboxView: View {
         more
         if !loading && list.isEmpty { empty }
         if section.showsLocal && access.workspace {
-            Text(section == .email ? "No email provider is connected, so Send queues an email instead of sending it."
-                                   : "Texts and email are kept on this device. Nothing sends until a provider is connected.")
+            Text(section == .email ? "Email is not connected. Drafts and queued emails stay on this device and do not send automatically."
+                                   : "Texts and emails are kept on this device and do not send automatically.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, Theme.gutter).padding(.top, 20)

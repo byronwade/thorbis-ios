@@ -67,6 +67,37 @@ final class CommsInboxUITests: XCTestCase {
         attach(app, "Text draft saved")
     }
 
+    func testEmailCloseProtectsChangesAndSavesDraft() {
+        let app = launch(["--paper-preview-inbox-section", "email"])
+        let compose = app.buttons["New email"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20))
+        compose.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        let body = app.textViews["inbox-mail-body"].exists ? app.textViews["inbox-mail-body"] : app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 5))
+        body.tap()
+        body.typeText("Checking your appointment")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Add a recipient to save this draft, or keep editing."].waitForExistence(timeout: 5))
+        app.buttons["Keep editing"].tap()
+        to.tap()
+        to.typeText("customer@example.com")
+        XCTAssertTrue(app.buttons["Queue on device"].exists)
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        app.buttons["Keep editing"].tap()
+        XCTAssertTrue(to.exists)
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
+        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
+        let save = saves.element(boundBy: max(0, saves.count - 1))
+        XCTAssertTrue(save.waitForExistence(timeout: 5))
+        save.tap()
+        XCTAssertTrue(app.staticTexts["Draft"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+    }
+
     /// New text and New email open with the first field ready to type.
     func testComposeSheetsFocusTheirFirstField() {
         for (section, pencil, field) in [("texts", "New text", "inbox-new-text-phone"), ("email", "New email", "inbox-mail-to")] {
