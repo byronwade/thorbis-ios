@@ -62,6 +62,28 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertNil(choose([first, foreign], [first.id, foreign.id]))
     }
 
+    func testOverviewCollectionKeepsTheIdentifiedInvoiceWhenItsBalanceChanges() throws {
+        let decoder = JSONDecoder()
+        let original = try decoder.decode(InvoiceRecord.self, from: Data(invoice(50).utf8))
+        let partial = try decoder.decode(InvoiceRecord.self, from: Data(invoice(50, paid: 2500).utf8))
+        let second = try decoder.decode(InvoiceRecord.self, from: Data(invoice(51).utf8))
+        let displayed = JobInvoiceDirectPayment.singleStep(invoices: [original], scope: scope(),
+                                                           freshIDs: [original.id], isComplete: true, canCollect: true)
+        let refreshed = JobInvoiceDirectPayment.singleStep(invoices: [partial], scope: scope(),
+                                                           freshIDs: [partial.id], isComplete: true, canCollect: true)
+        XCTAssertEqual(displayed, .collect(invoiceID: original.id, due: 10000, currency: "USD"))
+        XCTAssertEqual(refreshed, .collect(invoiceID: partial.id, due: 7500, currency: "USD"))
+        XCTAssertNotEqual(displayed, refreshed, "A later balance is a new shortcut value, not a new invoice")
+        XCTAssertTrue(JobInvoiceDirectPayment.sameInvoice(try XCTUnwrap(displayed), as: refreshed))
+        XCTAssertTrue(JobInvoiceDirectPayment.sameInvoice(try XCTUnwrap(displayed), as: displayed))
+        XCTAssertFalse(JobInvoiceDirectPayment.sameInvoice(try XCTUnwrap(displayed),
+            as: .collect(invoiceID: second.id, due: 10000, currency: "USD")))
+        XCTAssertFalse(JobInvoiceDirectPayment.sameInvoice(try XCTUnwrap(displayed), as: nil))
+        XCTAssertFalse(JobInvoiceDirectPayment.sameInvoice(try XCTUnwrap(displayed), as: .createInvoice))
+        XCTAssertNil(JobInvoiceDirectPayment.singleStep(invoices: [partial, second], scope: scope(),
+                                                       freshIDs: [partial.id, second.id], isComplete: true, canCollect: true))
+    }
+
     func testPaymentRouteNeverUsesAFormerOrMissingInvoice() async throws {
         let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#)])
         let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())

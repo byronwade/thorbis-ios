@@ -65,6 +65,13 @@ enum JobInvoiceDirectPayment {
               let due = TechJobFlow.due(invoice), due > 0 else { return nil }
         return .collect(invoiceID: invoice.id, due: due, currency: invoice.currency)
     }
+
+    /// The person chose this invoice; a later due amount is not a different bill.
+    static func sameInvoice(_ displayed: TechJobStep, as refreshed: TechJobStep?) -> Bool {
+        guard case let .collect(displayedID, _, _) = displayed,
+              case let .collect(refreshedID, _, _) = refreshed else { return false }
+        return displayedID == refreshedID
+    }
 }
 
 /// Multiple job entry points may ask for the same model while its first read

@@ -1611,7 +1611,7 @@ struct JobDetailView: View {
                     .buttonStyle(RowPressStyle())
                     .accessibilityHint("Opens this estimate")
                     .accessibilityIdentifier("job-overview-estimate-\(estimate.id)")
-                    .disabled(estimateRead?.freshIDs.contains(estimate.id) != true || overviewEstimatesAuthority?.isCurrent(api: api, session: session) != true)
+                    .disabled(estimateRead?.freshIDs.contains(estimate.id) != true || overviewEstimatesAuthority?.isCurrent(api: api, session: session) != true || overviewPaymentRefreshing)
                 }
                 ForEach(bills) { invoice in
                     let due = TechJobFlow.due(invoice)
@@ -1626,7 +1626,7 @@ struct JobDetailView: View {
                     .buttonStyle(RowPressStyle())
                     .accessibilityHint("Opens this invoice")
                     .accessibilityIdentifier("job-overview-invoice-\(invoice.id)")
-                    .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true || overviewInvoicesAuthority?.isCurrent(api: api, session: session) != true)
+                    .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true || overviewInvoicesAuthority?.isCurrent(api: api, session: session) != true || overviewPaymentRefreshing)
                 }
                 if estimates.isEmpty && bills.isEmpty {
                     if loading { SkeletonRows(count: 1, leading: false, inset: 16) }
@@ -2081,7 +2081,8 @@ struct JobDetailView: View {
     }
 
     private func collectOverviewInvoice(_ displayedStep: TechJobStep) async {
-        guard case .collect = displayedStep, !overviewPaymentRefreshing, let job, overviewDirectPaymentStep(job) == displayedStep,
+        guard case .collect = displayedStep, !overviewPaymentRefreshing, let job,
+              JobInvoiceDirectPayment.sameInvoice(displayedStep, as: overviewDirectPaymentStep(job)),
               let expectedScope = scope(for: job),
               let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
         overviewPaymentRefreshing = true
@@ -2096,9 +2097,9 @@ struct JobDetailView: View {
         }
         let published = await documents.loadInvoices(scope: expectedScope, api: api, isCurrent: current)
         guard current() else { return }
-        guard published else { withMotion(.snappy) { selectedTab = "Money" }; return }
-        overviewInvoicesAuthority = authority
-        guard let job = self.job, overviewDirectPaymentStep(job) == displayedStep else {
+        // A later list read can replace this request without clearing the invoices already shown.
+        if published { overviewInvoicesAuthority = authority }
+        guard let job = self.job, JobInvoiceDirectPayment.sameInvoice(displayedStep, as: overviewDirectPaymentStep(job)) else {
             withMotion(.snappy) { selectedTab = "Money" }
             return
         }
@@ -2124,6 +2125,7 @@ struct JobDetailView: View {
               let read = estimateRead, read.scope == scope, read.freshIDs.contains(estimate.id),
               scope.contains(estimate, requestedID: estimate.id),
               let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        overviewNavigationRevision = UUID()
         overviewDocument = OverviewJobDocumentRoute(documentID: estimate.id, kind: .estimate, scope: scope, authority: authority)
     }
 
@@ -2135,6 +2137,7 @@ struct JobDetailView: View {
               scope.contains(invoice),
               let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
         selectedInvoiceID = invoice.id
+        overviewNavigationRevision = UUID()
         overviewDocument = OverviewJobDocumentRoute(documentID: invoice.id, kind: .invoice, scope: scope, authority: authority)
     }
 

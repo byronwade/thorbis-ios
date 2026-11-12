@@ -52,6 +52,12 @@ final class JobDocumentsUITests: XCTestCase {
         collect.tap()
         XCTAssertTrue(app.staticTexts["job-overview-payment-hold"].waitForExistence(timeout: 20))
         XCTAssertFalse(collect.isEnabled, "Collection stays busy until payment details finish loading")
+        let invoice = app.buttons["job-overview-invoice-\(invoiceA)"]
+        XCTAssertTrue(invoice.exists)
+        XCTAssertFalse(invoice.isEnabled, "Opening an invoice cannot run over in-flight collection")
+        let estimate = app.buttons["job-overview-estimate-\(estimateA)"]
+        XCTAssertTrue(estimate.exists)
+        XCTAssertFalse(estimate.isEnabled, "Opening an estimate cannot run over in-flight collection")
         app.buttons["job-section-activity"].tap()
         let sheet = app.navigationBars["Collect payment"]
         let noSheet = expectation(for: NSPredicate(format: "exists == true"), evaluatedWith: sheet)
