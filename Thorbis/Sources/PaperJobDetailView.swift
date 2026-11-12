@@ -1574,7 +1574,7 @@ struct JobDetailView: View {
         }
     }
 
-    /// The job's estimates and invoices with their status words; Open goes to Money.
+    /// The job's estimates and invoices with their status words; See all goes to Money.
     @ViewBuilder
     private func moneyPanel(_ job: JobRecord) -> some View {
         let canEstimates = session.can("estimate.view", feature: "estimates")
@@ -1583,7 +1583,8 @@ struct JobDetailView: View {
             let estimates = canEstimates ? jobEstimates : []
             let bills = canInvoices ? invoices : []
             let loading = (canEstimates && !estimatesLoaded) || (canInvoices && !invoicesLoaded)
-            JobPanelSection(title: "Money", actionTitle: "Open", actionIdentifier: "job-money-open",
+            let title = canEstimates && canInvoices ? "Estimates & invoices" : (canEstimates ? "Estimates" : "Invoices & payments")
+            JobPanelSection(title: title, actionTitle: "See all", actionIdentifier: "job-money-open",
                             action: { withMotion(.snappy) { selectedTab = "Money" } }) {
                 #if DEBUG
                 if PaperPreview.isJobDocumentsPreview,
