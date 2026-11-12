@@ -242,7 +242,11 @@ enum PaperPreview {
     static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
     /// `job`, `job-onsite`, `job-activity`: the redesigned job screen, at its Home site with photos.
     static var isJobScreenPreview: Bool { enabled && ["job", "job-onsite", "job-activity"].contains(screen) }
-    static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview }
+    static var isPaymentCollectionPreview: Bool {
+        screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview ||
+        (enabled && screen == "invoice-detail" && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-overflow") ||
+                                        ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-collection-authorized")))
+    }
     static var paymentLinkPreview: FieldInvoicePayLink? {
         let args = ProcessInfo.processInfo.arguments
         guard enabled, screen == "invoice-payment",
@@ -345,10 +349,20 @@ enum PaperPreview {
         return changed(record, ["lines": lines])
     }
     static var issuedInvoice: InvoiceRecord {
+        if screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-detail-draft") {
+            let draft = invoice
+            guard ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-overflow") else { return draft }
+            var lines = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.lines)) as! [[String: Any]]
+            lines[0]["quantity"] = 2
+            lines[0]["unitPrice"] = ["amount": Int.max, "currency": draft.currency]
+            return changed(draft, ["lines": lines])
+        }
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":null,"voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
         let args = ProcessInfo.processInfo.arguments
         var fixture: String
-        if args.contains("--paper-preview-extreme-invoice") {
+        if args.contains("--paper-preview-invoice-overflow") {
+            fixture = json.replacingOccurrences(of: #""quantity":1,"unitPrice":{"amount":12000"#, with: #""quantity":2,"unitPrice":{"amount":9223372036854775807"#)
+        } else if args.contains("--paper-preview-extreme-invoice") {
             fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":999999940000")
         } else if args.contains("--paper-preview-large-invoice") {
             fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789")
@@ -1428,6 +1442,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-discount-authorized") { capabilities.append("invoice.discount") }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-deny-document-edit") {
                 capabilities.removeAll { ["invoice.edit", "estimate.create"].contains($0) }
             }
