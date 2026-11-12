@@ -5,12 +5,14 @@ final class FakeKeychain: InvoiceRecoveryKeychainTransport, @unchecked Sendable 
     private let lock = NSLock()
     private var entries: [String: Data] = [:]
     var failingAdd = false
+    var addThenFail = false
     func add(_ attrs: [String: Any]) -> OSStatus {
         lock.lock(); defer { lock.unlock() }
         if failingAdd { return errSecNotAvailable }
         guard let key = attrs[kSecAttrAccount as String] as? String, let data = attrs[kSecValueData as String] as? Data else { return errSecParam }
         guard entries[key] == nil else { return errSecDuplicateItem }
-        entries[key] = data; return errSecSuccess
+        entries[key] = data
+        return addThenFail ? errSecNotAvailable : errSecSuccess
     }
     func find(_ attrs: [String: Any]) -> (OSStatus, CFTypeRef?) {
         lock.lock(); defer { lock.unlock() }
@@ -21,11 +23,6 @@ final class FakeKeychain: InvoiceRecoveryKeychainTransport, @unchecked Sendable 
         }
         guard let key = attrs[kSecAttrAccount as String] as? String, let data = entries[key] else { return (errSecItemNotFound, nil) }
         return (errSecSuccess, data as NSData)
-    }
-    func delete(_ attrs: [String: Any]) -> OSStatus {
-        lock.lock(); defer { lock.unlock() }
-        guard let key = attrs[kSecAttrAccount as String] as? String, entries.removeValue(forKey: key) != nil else { return errSecItemNotFound }
-        return errSecSuccess
     }
 }
 
@@ -61,6 +58,10 @@ struct InvoiceLineEditorState: Equatable {
         do { try await store.save(value); return true }
         catch InvoiceDraftRecoveryError.keychain(let status) where status == errSecDuplicateItem { return false }
     }
+    static func attemptBegin(_ marker: InvoiceDraftSubmissionMarker, access: InvoiceDraftRecoveryAccess, using store: KeychainInvoiceDraftRecoveryStore) async throws -> Bool {
+        do { try await store.beginSubmission(marker, access: access); return true }
+        catch InvoiceDraftRecoveryError.unresolvedWrite { return false }
+    }
     static func main() async throws {
         let scope = InvoiceDraftRecoveryScope(actorID: "a", organizationID: "o", origin: "https://app.thorbis.com", invoiceID: "i", customerID: "c", jobID: "j")
         let invoice = InvoiceRecord(id: "i", organizationId: "o", customerId: "c", jobId: "j", status: "draft", linesRevision: 3)
@@ -74,20 +75,20 @@ struct InvoiceLineEditorState: Equatable {
         let encoded = try JSONEncoder().encode(saved)
         let decoded = try JSONDecoder().decode(InvoiceDraftRecovery.self, from: encoded)
         let good = InvoiceDraftRecoveryAccess(scope: scope, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)
-        precondition(decoded.restore(access: good) == state)
+        precondition(decoded.hostValidate(access: good) == state)
         let uncertain = try InvoiceDraftRecovery(scope: scope, state: state, writeState: .inFlightOrUncertain)
-        precondition(uncertain.restore(access: good) == nil)
-        precondition(decoded.restore(access: .init(scope: scope, canEdit: false, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
-        precondition(decoded.restore(access: .init(scope: scope, canEdit: true, fresh: false, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
-        precondition(decoded.restore(access: .init(scope: scope, canEdit: true, fresh: true, noUnresolvedAttempts: false, currentInvoice: invoice)) == nil)
+        precondition(uncertain.hostValidate(access: good) == nil)
+        precondition(decoded.hostValidate(access: .init(scope: scope, canEdit: false, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
+        precondition(decoded.hostValidate(access: .init(scope: scope, canEdit: true, fresh: false, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
+        precondition(decoded.hostValidate(access: .init(scope: scope, canEdit: true, fresh: true, noUnresolvedAttempts: false, currentInvoice: invoice)) == nil)
         let wrong = InvoiceDraftRecoveryScope(actorID: "b", organizationID: "o", origin: scope.origin, invoiceID: "i", customerID: "c", jobID: "j")
-        precondition(decoded.restore(access: .init(scope: wrong, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
+        precondition(decoded.hostValidate(access: .init(scope: wrong, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
         let revised = InvoiceRecord(id: "i", organizationId: "o", customerId: "c", jobId: "j", status: "draft", linesRevision: 4)
-        precondition(decoded.restore(access: .init(scope: scope, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: revised)) == nil)
+        precondition(decoded.hostValidate(access: .init(scope: scope, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: revised)) == nil)
         let issued = InvoiceRecord(id: "i", organizationId: "o", customerId: "c", jobId: "j", status: "issued", linesRevision: 3)
-        precondition(decoded.restore(access: .init(scope: scope, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: issued)) == nil)
+        precondition(decoded.hostValidate(access: .init(scope: scope, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: issued)) == nil)
         let differentOrigin = InvoiceDraftRecoveryScope(actorID: "a", organizationID: "o", origin: "https://other.example", invoiceID: "i", customerID: "c", jobID: "j")
-        precondition(decoded.restore(access: .init(scope: differentOrigin, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
+        precondition(decoded.hostValidate(access: .init(scope: differentOrigin, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)) == nil)
         let canonical = InvoiceDraftRecoveryScope(actorID: "a", organizationID: "o", origin: "HTTPS://APP.THORBIS.COM:443/", invoiceID: "i", customerID: "c", jobID: "j")
         precondition(canonical == scope)
         let unsafeOrigin = InvoiceDraftRecoveryScope(actorID: "a", organizationID: "o", origin: "https://user@app.thorbis.com/path", invoiceID: "i", customerID: "c", jobID: "j")
@@ -96,19 +97,19 @@ struct InvoiceLineEditorState: Equatable {
         var baseline = corrupt["baseline"] as! [String: Any]
         baseline["organizationId"] = "other"; corrupt["baseline"] = baseline
         let corruptBaseline = try JSONDecoder().decode(InvoiceDraftRecovery.self, from: JSONSerialization.data(withJSONObject: corrupt))
-        precondition(corruptBaseline.restore(access: good) == nil)
+        precondition(corruptBaseline.hostValidate(access: good) == nil)
         corrupt = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
         var rows = corrupt["lines"] as! [[String: Any]]
         rows.append(rows[0]); corrupt["lines"] = rows
         let duplicate = try JSONDecoder().decode(InvoiceDraftRecovery.self, from: JSONSerialization.data(withJSONObject: corrupt))
-        precondition(duplicate.restore(access: good) == nil)
+        precondition(duplicate.hostValidate(access: good) == nil)
         corrupt = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
         rows = corrupt["lines"] as! [[String: Any]]
         rows[0]["originalLineID"] = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
         rows[1]["originalLineID"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         corrupt["lines"] = rows
         let duplicateOriginal = try JSONDecoder().decode(InvoiceDraftRecovery.self, from: JSONSerialization.data(withJSONObject: corrupt))
-        precondition(duplicateOriginal.restore(access: good) == nil)
+        precondition(duplicateOriginal.hostValidate(access: good) == nil)
         let wrongOrganization = InvoiceDraftRecoveryScope(actorID: "a", organizationID: "other", origin: scope.origin, invoiceID: "i", customerID: "c", jobID: "j")
         do { _ = try InvoiceDraftRecovery(scope: wrongOrganization, state: InvoiceLineEditorState(invoice: revised), writeState: .idle); preconditionFailure("mismatched scope accepted") }
         catch InvoiceDraftRecoveryError.invalidScope { }
@@ -116,26 +117,83 @@ struct InvoiceLineEditorState: Equatable {
         try await first.save(saved)
         do { try await second.save(saved); preconditionFailure("duplicate overwrote a snapshot") }
         catch InvoiceDraftRecoveryError.keychain(let status) { precondition(status == errSecDuplicateItem) }
-        try await second.save(uncertain)
+        let otherUncertain = try InvoiceDraftRecovery(scope: differentOrigin, state: state, writeState: .inFlightOrUncertain)
+        try await second.hostInject(otherUncertain)
         let listed = try await first.list(scope: scope)
-        precondition(Set(listed) == Set([saved.snapshotID, uncertain.snapshotID]))
-        let loaded = try await first.load(scope: scope, snapshotID: saved.snapshotID)
+        precondition(listed == [saved.snapshotID])
+        let loaded = try await first.hostLoad(scope: scope, snapshotID: saved.snapshotID)
         precondition(loaded == saved)
-        let outsider = try await first.list(scope: wrong)
-        precondition(outsider.isEmpty)
+        let outsider = try await first.list(scope: differentOrigin)
+        precondition(outsider == [otherUncertain.snapshotID])
+        let otherIdle = try InvoiceDraftRecovery(scope: differentOrigin, state: state, writeState: .idle)
+        try await first.save(otherIdle)
+        let otherAccess = InvoiceDraftRecoveryAccess(scope: differentOrigin, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)
+        let otherBlocked = try await first.restore(scope: differentOrigin, snapshotID: otherIdle.snapshotID, access: otherAccess)
+        precondition(otherBlocked == nil, "uncertain snapshot must fence all older idle snapshots")
+        let otherMarker = try InvoiceDraftSubmissionMarker(scope: differentOrigin, snapshotID: otherIdle.snapshotID,
+            attemptID: UUID(), expectedRevision: invoice.linesRevision, requestBytes: Data("b request".utf8))
+        do { try await first.beginSubmission(otherMarker, access: otherAccess); preconditionFailure("uncertain snapshot allowed submission") }
+        catch InvoiceDraftRecoveryError.unresolvedWrite { }
         let raced = try InvoiceDraftRecovery(scope: scope, state: state, writeState: .idle)
         async let resultA = attemptSave(raced, using: first)
         async let resultB = attemptSave(raced, using: second)
         let raceResults = try await [resultA, resultB]
         precondition(raceResults.filter { $0 }.count == 1)
-        try await first.removeResolved(scope: scope, snapshotID: raced.snapshotID)
-        do { try await first.removeResolved(scope: scope, snapshotID: uncertain.snapshotID); preconditionFailure("uncertain outcome removed") }
+        let otherActorSnapshot = try InvoiceDraftRecovery(scope: wrong, state: state, writeState: .idle)
+        try await first.save(otherActorSnapshot)
+        let marker = try InvoiceDraftSubmissionMarker(scope: scope, snapshotID: saved.snapshotID,
+            attemptID: UUID(), expectedRevision: invoice.linesRevision,
+            requestBytes: Data("a request".utf8))
+        precondition(marker.matchesRequest(Data("a request".utf8)))
+        precondition(!marker.matchesRequest(Data("different request".utf8)))
+        try await first.beginSubmission(marker, access: good)
+        let blocked = try await second.restore(scope: scope, snapshotID: saved.snapshotID, access: good)
+        precondition(blocked == nil, "a pending submission must fence an earlier idle snapshot")
+        let reopened = KeychainInvoiceDraftRecoveryStore(transport: backend)
+        let persistedMarker = try await reopened.hostPendingMarker(scope: scope)
+        precondition(persistedMarker == marker)
+        let reassigned = InvoiceDraftRecoveryScope(actorID: "a", organizationID: "o", origin: scope.origin, invoiceID: "i", customerID: "different-customer", jobID: "different-job")
+        let reassignedPending = try await reopened.hasPendingSubmission(scope: reassigned)
+        precondition(reassignedPending, "customer or job reassignment must not evade an unresolved invoice attempt")
+        let reassignedAccess = InvoiceDraftRecoveryAccess(scope: reassigned, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)
+        let reassignedRestore = try await reopened.restore(scope: reassigned, snapshotID: saved.snapshotID, access: reassignedAccess)
+        precondition(reassignedRestore == nil)
+        let otherActorAccess = InvoiceDraftRecoveryAccess(scope: wrong, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)
+        let otherActorRestore = try await reopened.restore(scope: wrong, snapshotID: otherActorSnapshot.snapshotID, access: otherActorAccess)
+        precondition(otherActorRestore == nil, "a different actor must not evade an unresolved invoice attempt")
+        let otherActorPending = try await reopened.hasPendingSubmission(scope: wrong)
+        precondition(otherActorPending, "a different actor must see a generic unresolved status")
+        do { try await second.beginSubmission(marker, access: good); preconditionFailure("second attempt bypassed pending fence") }
         catch InvoiceDraftRecoveryError.unresolvedWrite { }
-        try await second.removeResolved(scope: scope, snapshotID: saved.snapshotID)
+        let raceScope = InvoiceDraftRecoveryScope(actorID: "race", organizationID: "o", origin: "https://race.example", invoiceID: "i", customerID: "c", jobID: "j")
+        let raceSnapshot = try InvoiceDraftRecovery(scope: raceScope, state: state, writeState: .idle)
+        let raceAccess = InvoiceDraftRecoveryAccess(scope: raceScope, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)
+        try await first.save(raceSnapshot)
+        let markerA = try InvoiceDraftSubmissionMarker(scope: raceScope, snapshotID: raceSnapshot.snapshotID, attemptID: UUID(), expectedRevision: 3, requestBytes: Data("c request".utf8))
+        let markerB = try InvoiceDraftSubmissionMarker(scope: raceScope, snapshotID: raceSnapshot.snapshotID, attemptID: UUID(), expectedRevision: 3, requestBytes: Data("d request".utf8))
+        async let beginA = attemptBegin(markerA, access: raceAccess, using: first)
+        async let beginB = attemptBegin(markerB, access: raceAccess, using: second)
+        let begins = try await [beginA, beginB]
+        precondition(begins.filter { $0 }.count == 1)
+        let afterRace = try await first.restore(scope: raceScope, snapshotID: raceSnapshot.snapshotID, access: raceAccess)
+        precondition(afterRace == nil)
+        let ambiguousScope = InvoiceDraftRecoveryScope(actorID: "ambiguous", organizationID: "o", origin: "https://ambiguous.example", invoiceID: "i", customerID: "c", jobID: "j")
+        let ambiguousSnapshot = try InvoiceDraftRecovery(scope: ambiguousScope, state: state, writeState: .idle)
+        let ambiguousAccess = InvoiceDraftRecoveryAccess(scope: ambiguousScope, canEdit: true, fresh: true, noUnresolvedAttempts: true, currentInvoice: invoice)
+        try await first.save(ambiguousSnapshot)
+        let ambiguousMarker = try InvoiceDraftSubmissionMarker(scope: ambiguousScope, snapshotID: ambiguousSnapshot.snapshotID, attemptID: UUID(), expectedRevision: 3, requestBytes: Data("e request".utf8))
+        backend.addThenFail = true
+        do { try await first.beginSubmission(ambiguousMarker, access: ambiguousAccess); preconditionFailure("ambiguous marker add reported success") }
+        catch InvoiceDraftRecoveryError.keychain(let status) { precondition(status == errSecNotAvailable) }
+        backend.addThenFail = false
+        let afterAmbiguous = try await second.restore(scope: ambiguousScope, snapshotID: ambiguousSnapshot.snapshotID, access: ambiguousAccess)
+        precondition(afterAmbiguous == nil)
+        do { try await first.save(try InvoiceDraftRecovery(scope: scope, state: state, writeState: .idle)); preconditionFailure("pending outcome allowed a new snapshot") }
+        catch InvoiceDraftRecoveryError.unresolvedWrite { }
         let remaining = try await first.list(scope: scope)
-        precondition(remaining == [uncertain.snapshotID])
+        precondition(Set(remaining) == Set([saved.snapshotID, raced.snapshotID]))
         backend.failingAdd = true
-        do { try await first.save(try InvoiceDraftRecovery(scope: scope, state: state, writeState: .idle)); preconditionFailure("keychain failure ignored") }
+        do { try await first.save(try InvoiceDraftRecovery(scope: differentOrigin, state: state, writeState: .idle)); preconditionFailure("keychain failure ignored") }
         catch InvoiceDraftRecoveryError.keychain(let status) { precondition(status == errSecNotAvailable) }
         print("invoice recovery: raw text, provenance, scope and freshness checks passed")
     }
