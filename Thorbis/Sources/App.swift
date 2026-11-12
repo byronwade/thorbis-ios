@@ -48,6 +48,7 @@ struct ThorbisApp: App {
             return try await Store.fetchAuthorized(api: api, session: session)
         }
         session.onInvalidate = { [weak store, weak pendingMedia] in
+            CommsLocalStore.invalidateCached()
             DayPrefetch.shared.cancel()
             store?.invalidate()
             pendingMedia?.bind(nil)

@@ -25,7 +25,8 @@ final class InboxTextPresenter: ObservableObject {
     func open(phone: String, name: String?) -> Bool {
         guard let identity, CommsCallGrouping.key(phone) != nil else { return false }
         let store = CommsLocalStore.shared(actorID: identity.actorID, organizationID: identity.organizationID)
-        opening = Opening(id: store.threadForPhone(phone, contactName: name),
+        guard let threadID = store.threadForPhone(phone, contactName: name) else { return false }
+        opening = Opening(id: threadID,
                           actorID: identity.actorID, organizationID: identity.organizationID)
         return true
     }
