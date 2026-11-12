@@ -763,6 +763,7 @@ struct BuilderLineRow: View {
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Close line")
+        .accessibilityIdentifier("close-line")
     }
 
     private var quantityValue: Int { Int(quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0 }
@@ -979,6 +980,8 @@ struct EstimateLineGroupsEditor: View {
     @Binding var expandedLine: UUID?
     /// EB-13: "Show on estimate" on Materials, once the workspace stores it.
     var materialsSwitch = false
+    /// Keep Close line and Remove clear of the keyboard's trailing Done and of Save.
+    var lineActionsLeading = false
     let removed: (EstimateRevisionLineDraft, Int) -> Void
 
     var body: some View {
@@ -1037,7 +1040,9 @@ struct EstimateLineGroupsEditor: View {
                                                       action: { lines.resetToPriceBook(id: line.id) }) : nil,
             menuItems: items, expanded: expandedLine == line.id,
             toggle: { withAnimation(Self.spring) { expandedLine = expandedLine == line.id ? nil : line.id } },
-            remove: { remove(line.id) }, focus: focus, dragPayload: line.id.uuidString
+            remove: { remove(line.id) }, focus: focus, dragPayload: line.id.uuidString,
+            descriptionIdentifier: "line-description",
+            lineActionsLeading: lineActionsLeading
         )
         .accessibilityAction(named: "Move up") { if canMoveUp { withAnimation(Self.spring) { lines.moveLine(id: line.id, by: -1) } } }
         .accessibilityAction(named: "Move down") { if canMoveDown { withAnimation(Self.spring) { lines.moveLine(id: line.id, by: 1) } } }
@@ -1100,6 +1105,7 @@ struct EstimateBuilderSection<Header: View>: View {
     var showTotal = true
     var memberPricing: MemberPricing? = nil
     var materialsSwitch = false
+    var lineActionsLeading = false
     var menuItems: [ThorbisMenuItem] = []
     let addItem: () -> Void
     var addDiscount: (() -> Void)? = nil
@@ -1132,7 +1138,8 @@ struct EstimateBuilderSection<Header: View>: View {
                 VStack(alignment: .leading, spacing: 0) {
                     header
                     EstimateLineGroupsEditor(lines: $lines, disabled: disabled, focus: focus,
-                                             expandedLine: $expandedLine, materialsSwitch: materialsSwitch, removed: removed)
+                                             expandedLine: $expandedLine, materialsSwitch: materialsSwitch,
+                                             lineActionsLeading: lineActionsLeading, removed: removed)
                     Button(action: addItem) {
                         HStack(spacing: 10) {
                             Image(systemName: "plus").font(.system(size: 15, weight: .medium))
@@ -1191,12 +1198,12 @@ extension EstimateBuilderSection where Header == EmptyView {
     init(label: String, caption: String? = nil, lines: Binding<[EstimateRevisionLineDraft]>, disabled: Bool,
          focus: FocusState<EstimateBuilderFocus?>.Binding, expandedLine: Binding<UUID?>, totalLabel: String = "Total",
          showTotal: Bool = true, memberPricing: MemberPricing? = nil, materialsSwitch: Bool = false,
-         menuItems: [ThorbisMenuItem] = [],
+         lineActionsLeading: Bool = false, menuItems: [ThorbisMenuItem] = [],
          addItem: @escaping () -> Void, addDiscount: (() -> Void)? = nil,
          removed: @escaping (EstimateRevisionLineDraft, Int) -> Void) {
         self.init(label: label, caption: caption, lines: lines, disabled: disabled, focus: focus, expandedLine: expandedLine,
                   totalLabel: totalLabel, showTotal: showTotal, memberPricing: memberPricing,
-                  materialsSwitch: materialsSwitch, menuItems: menuItems,
+                  materialsSwitch: materialsSwitch, lineActionsLeading: lineActionsLeading, menuItems: menuItems,
                   addItem: addItem, addDiscount: addDiscount, removed: removed) { EmptyView() }
     }
 }

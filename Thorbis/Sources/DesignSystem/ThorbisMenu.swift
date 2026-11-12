@@ -210,6 +210,31 @@ extension View {
     }
 }
 
+/// How tall a fitted popover may be. Portrait keeps the previous 460pt cap; a compact-height
+/// window (landscape phone) has to leave room for the arrow, safe area and the control the menu
+/// grows from, or the first rows sit off-screen. Compact also ignores a stale portrait window
+/// height after rotation, which would otherwise let the panel size itself to 460pt.
+enum ThorbisMenuMetrics {
+    static let portraitCap: CGFloat = 460
+    static let chrome: CGFloat = 140
+    static let compactChrome: CGFloat = 190
+    static let compactWindowCap: CGFloat = 430
+    static let minimum: CGFloat = 160
+
+    static func maxHeight(window: CGFloat, compactHeight: Bool = false) -> CGFloat {
+        if compactHeight {
+            let short = window > 0 ? min(window, compactWindowCap) : 390
+            return min(portraitCap, max(minimum, short - compactChrome))
+        }
+        if window <= 0 { return portraitCap }
+        return min(portraitCap, max(minimum, window - chrome))
+    }
+
+    static func fittedHeight(estimated: CGFloat, window: CGFloat, compactHeight: Bool = false) -> CGFloat {
+        min(max(estimated, 0), maxHeight(window: window, compactHeight: compactHeight))
+    }
+}
+
 /// The popover's content: an optional caption, the rows, and destructive rows in their own group.
 /// Sized to its rows (about 260pt wide, wider at accessibility sizes) and scrolls only when it
 /// would outgrow the screen.
@@ -220,6 +245,7 @@ struct ThorbisMenuPanel: View {
     let onSelect: (ThorbisMenuItem) -> Void
     var onClose: () -> Void = {}
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shown = false
 
@@ -228,22 +254,30 @@ struct ThorbisMenuPanel: View {
         return typeSize >= .xxLarge ? 300 : 264
     }
 
+    private var rows: some View {
+        ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect)
+    }
+
+    /// Inflated on purpose: a short estimate lets the popover size itself taller than the room
+    /// above a landscape gear, and the first rows sit off-screen.
     private var estimatedHeight: CGFloat {
         let row: CGFloat = customerFacing ? 58 : 46
-        let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? row : row + 16) }
-        return (rows + (title == nil ? 12 : 44) + 16) * typeSize.sheetHeightScale
+        let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? row : row + 28) }
+        return (rows + (title == nil ? 12 : 52) + 24) * typeSize.sheetHeightScale
     }
 
     var body: some View {
-        Group {
-            if estimatedHeight > 460 {
-                ScrollView { ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect) }
-                    .frame(height: 460)
-            } else {
-                ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect)
-            }
+        let cap = ThorbisMenuMetrics.maxHeight(window: ThorbisMenuWindow.height,
+                                               compactHeight: verticalSizeClass == .compact)
+        let height = min(max(estimatedHeight, 1), cap)
+        // A popover sizes to its child's *ideal* height. ViewThatFits + maxHeight does not change
+        // that ideal, so the gear menu still grew past a ~402pt landscape window. An explicit
+        // height on a ScrollView does, and the first rows (Saved work) stay on screen.
+        ScrollView {
+            rows
         }
-        .frame(width: width)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: width, height: height)
         // design.thorbis.com Motion: a menu fades in at 120ms ease-out; it does not fly.
         .opacity(shown || reduceMotion ? 1 : 0)
         .onAppear { withAnimation(.easeOut(duration: 0.12)) { shown = true } }

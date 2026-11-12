@@ -180,6 +180,7 @@ struct ThorbisKeyboardDoneBar: ToolbarContent {
             Spacer()
             Button("Done", action: action)
                 .buttonStyle(ThorbisBarButtonStyle(prominent: true))
+                .accessibilityIdentifier("keyboard-done")
         }
     }
 }

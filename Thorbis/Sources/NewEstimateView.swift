@@ -209,7 +209,7 @@ struct NewEstimateView: View {
                 else if showProblems() { Task { await save() } }
             }
         }
-        // The floating keyboard accessory is 44pt high and otherwise sits over Save.
+        // The floating keyboard accessory is ~44pt plus chrome and otherwise sits over Save.
         .padding(.bottom, keyboardUp ? 48 : 0)
         .background(Theme.canvas)
     }
@@ -260,7 +260,7 @@ struct NewEstimateView: View {
             EstimateBuilderSection(
                 label: lines.isEmpty ? "Items" : "Items · \(lines.count)",
                 lines: editableLines, disabled: !recovery.canEdit, focus: $focus, expandedLine: $expandedLine,
-                showTotal: false, materialsSwitch: storesLineGroups,
+                showTotal: false, materialsSwitch: storesLineGroups, lineActionsLeading: keyboardUp,
                 addItem: { picker = EstimateBuilderTarget() },
                 removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
             )

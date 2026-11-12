@@ -41,13 +41,12 @@ func thorbisStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIEl
     let element = query.firstMatch
     XCTAssertTrue(element.waitForExistence(timeout: 15), "Missing \(identifier)")
     func onScreenHittable() -> [XCUIElement] {
-        let foot: CGFloat = identifier.hasPrefix("job-section-") ? app.windows.firstMatch.frame.height - 150 : .greatestFiniteMagnitude
+        let bounds = app.windows.firstMatch.exists ? app.windows.firstMatch.frame : app.frame
+        let foot: CGFloat = identifier.hasPrefix("job-section-") ? bounds.height - 150 : .greatestFiniteMagnitude
         return query.allElementsBoundByIndex.filter { button in
-            guard button.isHittable, button.isEnabled else { return false }
-            let frame = button.frame
-            return frame.width > 1 && frame.height > 1
-                && app.frame.contains(CGPoint(x: frame.midX, y: frame.midY))
-                && frame.maxY <= foot
+            guard button.exists, button.isEnabled else { return false }
+            guard let frame = app.thorbisUsableFrame(of: button) else { return false }
+            return frame.maxY <= foot
         }
     }
     // Job tabs start under Overview's map and pin once scrolled; other screens can still be
@@ -59,7 +58,8 @@ func thorbisStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIEl
     }
     for _ in 0..<10 where onScreenHittable().isEmpty {
         let frame = element.frame
-        nudge(down: frame.height > 1 && frame.midY < app.frame.minY + 80)
+        let tooHigh = frame.height.isFinite && frame.height > 1 && frame.midY.isFinite && frame.midY < app.frame.minY + 80
+        nudge(down: tooHigh)
     }
     for _ in 0..<8 where onScreenHittable().isEmpty { nudge(down: true) }
     var previous: CGRect?

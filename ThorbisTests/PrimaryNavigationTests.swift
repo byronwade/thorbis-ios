@@ -48,6 +48,21 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(DrawerMotion.cornerRadius(topInset: 47), 44)
     }
 
+    func testMenuPanelFitsInsideAShortLandscapeWindow() {
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 260, window: 874), 260)
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 500, window: 874), 460)
+        let landscape = ThorbisMenuMetrics.fittedHeight(estimated: 320, window: 402)
+        XCTAssertEqual(landscape, 262)
+        XCTAssertLessThan(landscape, 402)
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 80, window: 402), 80)
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 200, window: 0), 200)
+        let compact = ThorbisMenuMetrics.maxHeight(window: 402, compactHeight: true)
+        XCTAssertEqual(compact, 212)
+        XCTAssertEqual(ThorbisMenuMetrics.maxHeight(window: 874, compactHeight: true), 240,
+                       "A stale portrait window height after rotate still caps to the short side")
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 320, window: 402, compactHeight: true), 212)
+    }
+
     // MARK: Sidebar places (Cream sheet: every place a role can reach, grouped)
 
     func testWebSidebarUsesActiveWorkspacesAndSingleDestinationRows() {
