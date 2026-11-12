@@ -1900,6 +1900,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
         }
+        if arguments.contains("--paper-preview-customer-two-open-jobs"),
+           let original = listed.first(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
+            var second = original
+            second["id"] = "00000000-0000-4000-8000-000000002299"
+            second["title"] = "Water heater service"
+            listed.append(second)
+        }
         if PaperPreview.isJobScreenPreview || PaperPreview.screen == "customer-jobs",
            let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
             listed[index]["locationId"] = PaperPreview.homeLocationID
