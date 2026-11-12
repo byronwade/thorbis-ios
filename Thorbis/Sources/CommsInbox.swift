@@ -315,6 +315,12 @@ struct CommsInboxView: View {
         if section.showsNotices, access.notices, let error = model.noticesError {
             ErrorBanner(message: error) { await model.refreshNotices(api: api) }
         }
+        if local.storageBlocked {
+            Text("Inbox storage could not be confirmed. Reopen the app and check drafts before making changes.")
+                .font(Theme.font(13)).foregroundStyle(Theme.warning)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Theme.gutter).padding(.top, 12)
+        }
         let list = items
         if loading && list.isEmpty { ListRoomSkeleton(count: 6, threeLines: false) }
         rows(list)

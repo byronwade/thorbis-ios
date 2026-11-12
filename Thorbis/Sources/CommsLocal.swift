@@ -158,6 +158,8 @@ enum CommsSMS {
 /// Support. Screenshots use an in-memory store with sample conversations.
 @MainActor
 final class CommsLocalStore: ObservableObject {
+    enum MailSaveFailure: Equatable { case conflict, storage, unavailable, recipient }
+    @Published private(set) var lastMailSaveFailure: MailSaveFailure?
     @Published private(set) var isActive = true
     @Published private(set) var threads: [CommsLocalThread] = []
     /// Marks on call threads (star, archive, bin, read), by thread id.
@@ -165,6 +167,8 @@ final class CommsLocalStore: ObservableObject {
     @Published private(set) var cannedReplies: [CommsCannedReply] = CommsCannedReply.builtIns
 
     private let file: URL?
+    private let requiresPersistence: Bool
+    private var persistenceUncertain = false
     private let now: () -> Date
 
     private struct Snapshot: Codable {
@@ -173,13 +177,26 @@ final class CommsLocalStore: ObservableObject {
         var cannedReplies: [CommsCannedReply]?
     }
 
-    init(file: URL?, now: @escaping () -> Date = Date.init) {
+    init(file: URL?, requiresPersistence: Bool = false, now: @escaping () -> Date = Date.init) {
         self.file = file
+        self.requiresPersistence = requiresPersistence
         self.now = now
-        if let file, let data = try? Data(contentsOf: file), let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
-            threads = snapshot.threads
-            callFlags = snapshot.callFlags
-            cannedReplies = snapshot.cannedReplies ?? CommsCannedReply.builtIns
+        if let file {
+            do {
+                let data = try Data(contentsOf: file)
+                let snapshot = try JSONDecoder().decode(Snapshot.self, from: data)
+                threads = snapshot.threads
+                callFlags = snapshot.callFlags
+                cannedReplies = snapshot.cannedReplies ?? CommsCannedReply.builtIns
+            } catch {
+                let failure = error as NSError
+                // A genuinely missing file is a new inbox. Other read or decode failures
+                // must not turn an existing, possibly recoverable inbox into an empty one.
+                if failure.domain != NSCocoaErrorDomain || failure.code != NSFileReadNoSuchFileError {
+                    persistenceUncertain = true
+                    lastMailSaveFailure = .storage
+                }
+            }
         }
     }
 
@@ -209,7 +226,12 @@ final class CommsLocalStore: ObservableObject {
         let store: CommsLocalStore
         #if DEBUG
         if PaperPreview.enabled {
-            store = CommsLocalStore(file: nil)
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-storage-failure") {
+                let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathComponent("inbox.json")
+                store = CommsLocalStore(file: missing, requiresPersistence: true)
+            } else {
+                store = CommsLocalStore(file: nil)
+            }
             store.seedPreview()
             stores[key] = store
             return store
@@ -217,7 +239,7 @@ final class CommsLocalStore: ObservableObject {
         #endif
         let safe = key.filter { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
         if let folder { try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-        store = CommsLocalStore(file: folder?.appendingPathComponent("\(safe).json"))
+        store = CommsLocalStore(file: folder?.appendingPathComponent("\(safe).json"), requiresPersistence: true)
         stores[key] = store
         return store
     }
@@ -230,10 +252,12 @@ final class CommsLocalStore: ObservableObject {
         cannedReplies = []
     }
 
+    var storageBlocked: Bool { persistenceUncertain || (requiresPersistence && file == nil) }
+    private var canMutate: Bool { isActive && !storageBlocked }
     private var stamp: String { ISO8601DateFormatter().string(from: now()) }
 
     private func save() {
-        guard isActive, let file else { return }
+        guard canMutate, let file else { return }
         let snapshot = Snapshot(threads: threads, callFlags: callFlags, cannedReplies: cannedReplies)
         if let data = try? JSONEncoder().encode(snapshot) {
             try? data.write(to: file, options: [.atomic, .completeFileProtection])
@@ -243,7 +267,7 @@ final class CommsLocalStore: ObservableObject {
     func thread(_ id: String) -> CommsLocalThread? { threads.first { $0.id == id } }
 
     private func patch(_ id: String, _ change: (inout CommsLocalThread) -> Void) {
-        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
+        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }) else { return }
         change(&threads[index])
         save()
     }
@@ -254,7 +278,7 @@ final class CommsLocalStore: ObservableObject {
     /// inbox if it was archived or binned, or a new empty one. Returns its id.
     @discardableResult
     func threadForPhone(_ phone: String, contactName: String? = nil) -> String? {
-        guard isActive else { return nil }
+        guard canMutate else { return nil }
         let wanted = CommsCallGrouping.key(phone)
         if let wanted, let existing = threads.first(where: { $0.channel == .sms && CommsCallGrouping.key($0.phone) == wanted }) {
             if existing.flags.place != .inbox {
@@ -275,7 +299,7 @@ final class CommsLocalStore: ObservableObject {
     // MARK: Texts
 
     func setComposing(_ id: String, _ body: String) {
-        guard let index = threads.firstIndex(where: { $0.id == id }), threads[index].composing != body else { return }
+        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }), threads[index].composing != body else { return }
         threads[index].composing = body
         save()
     }
@@ -284,7 +308,7 @@ final class CommsLocalStore: ObservableObject {
     @discardableResult
     func commitText(_ id: String, body: String, scheduledAt: Date? = nil) -> Bool {
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, thread(id) != nil else { return false }
+        guard canMutate, !text.isEmpty, thread(id) != nil else { return false }
         let message = CommsLocalMessage(id: UUID().uuidString.lowercased(), channel: .sms, direction: .outbound, at: stamp, body: text,
                                         status: scheduledAt == nil ? .draft : .queued,
                                         scheduledAt: scheduledAt.map { ISO8601DateFormatter().string(from: $0) })
@@ -303,7 +327,7 @@ final class CommsLocalStore: ObservableObject {
 
     /// Discards a draft message. A conversation that was only ever that draft goes with it.
     func discardDraft(_ threadID: String, messageID: String) {
-        guard let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return }
+        guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return }
         if thread.messages.count == 1 && thread.channel == .email {
             threads.removeAll { $0.id == threadID }
             save()
@@ -320,48 +344,82 @@ final class CommsLocalStore: ObservableObject {
         var bcc: [String] = []
         var subject: String
         var body: String
+
+        static func snapshot(_ message: CommsLocalMessage) -> Mail {
+            Mail(to: message.to ?? [], cc: message.cc ?? [], bcc: message.bcc ?? [],
+                 subject: message.subject == "(no subject)" ? "" : (message.subject ?? ""), body: message.body)
+        }
     }
 
     /// web commitMail: saving makes a Draft; Send makes it Queued, never sent. Replies into
     /// `threadID` when given. Returns the conversation's id.
     @discardableResult
-    func commitMail(_ mail: Mail, send: Bool, threadID: String? = nil, editing messageID: String? = nil) -> String? {
-        guard isActive else { return nil }
+    func commitMail(_ mail: Mail, send: Bool, threadID: String? = nil, editing messageID: String? = nil, expected: Mail? = nil) -> String? {
+        lastMailSaveFailure = nil
+        guard isActive else { lastMailSaveFailure = .unavailable; return nil }
+        guard !persistenceUncertain, file != nil || !requiresPersistence else {
+            lastMailSaveFailure = .storage
+            return nil
+        }
+        if let threadID, thread(threadID) == nil { lastMailSaveFailure = .conflict; return nil }
+        if let messageID {
+            guard let threadID, let expected, let current = thread(threadID)?.messages.first(where: { $0.id == messageID }),
+                  current.channel == .email, current.status == .draft, Mail.snapshot(current) == expected else {
+                lastMailSaveFailure = .conflict
+                return nil
+            }
+        }
         let to = mail.to.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard !send || !to.isEmpty else { return nil }
+        guard !send || !to.isEmpty else { lastMailSaveFailure = .recipient; return nil }
         let subject = mail.subject.trimmingCharacters(in: .whitespacesAndNewlines)
         let message = CommsLocalMessage(id: messageID ?? UUID().uuidString.lowercased(), channel: .email, direction: .outbound, at: stamp,
                                         body: mail.body, status: send ? .queued : .draft,
                                         subject: subject.isEmpty ? "(no subject)" : subject, to: to,
                                         cc: mail.cc.isEmpty ? nil : mail.cc, bcc: mail.bcc.isEmpty ? nil : mail.bcc)
-        if let threadID, thread(threadID) != nil {
-            patch(threadID) { thread in
-                if let messageID, let index = thread.messages.firstIndex(where: { $0.id == messageID && $0.status == .draft }) {
-                    thread.messages[index] = message
-                } else {
-                    thread.messages.append(message)
-                }
-                if thread.subject == nil, !subject.isEmpty { thread.subject = subject }
-                if thread.recipientlessDraft == true, let messageID, thread.messages.count == 1, thread.messages[0].id == messageID {
-                    thread.email = to.first
-                    thread.contactName = to.first ?? "Draft email"
-                }
+        var candidate = threads
+        let resultID: String
+        if let threadID, let index = candidate.firstIndex(where: { $0.id == threadID }) {
+            if let messageID, let messageIndex = candidate[index].messages.firstIndex(where: { $0.id == messageID }) {
+                candidate[index].messages[messageIndex] = message
+            } else {
+                candidate[index].messages.append(message)
             }
-            return threadID
+            if candidate[index].subject == nil, !subject.isEmpty { candidate[index].subject = subject }
+            if candidate[index].recipientlessDraft == true, let messageID,
+               candidate[index].messages.count == 1, candidate[index].messages[0].id == messageID {
+                candidate[index].email = to.first
+                candidate[index].contactName = to.first ?? "Draft email"
+            }
+            resultID = threadID
+        } else {
+            let thread = CommsLocalThread(id: "t-\(UUID().uuidString.lowercased())", contactName: to.first ?? "Draft email", phone: "", email: to.first,
+                                          channel: .email, subject: subject.isEmpty ? "(no subject)" : subject, unread: false,
+                                          flags: CommsThreadFlags(), messages: [message], composing: nil,
+                                          recipientlessDraft: to.isEmpty ? true : nil)
+            candidate.insert(thread, at: 0)
+            resultID = thread.id
         }
-        let thread = CommsLocalThread(id: "t-\(UUID().uuidString.lowercased())", contactName: to.first ?? "Draft email", phone: "", email: to.first,
-                                      channel: .email, subject: subject.isEmpty ? "(no subject)" : subject, unread: false,
-                                      flags: CommsThreadFlags(), messages: [message], composing: nil,
-                                      recipientlessDraft: to.isEmpty ? true : nil)
-        threads.insert(thread, at: 0)
-        save()
-        return thread.id
+        if let file {
+            do {
+                let snapshot = Snapshot(threads: candidate, callFlags: callFlags, cannedReplies: cannedReplies)
+                let data = try JSONEncoder().encode(snapshot)
+                try data.write(to: file, options: [.atomic, .completeFileProtection])
+            } catch {
+                // A failed atomic write can have an unknown outcome. Freeze further writes
+                // until a fresh store reloads the disk; never overwrite or retry blindly.
+                persistenceUncertain = true
+                lastMailSaveFailure = .storage
+                return nil
+            }
+        }
+        threads = candidate
+        return resultID
     }
 
     // MARK: Canned replies
 
     func saveCannedReply(name: String, body: String) {
-        guard isActive else { return }
+        guard canMutate else { return }
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -370,6 +428,7 @@ final class CommsLocalStore: ObservableObject {
     }
 
     func deleteCannedReply(_ id: String) {
+        guard canMutate else { return }
         cannedReplies.removeAll { $0.id == id }
         save()
     }
@@ -381,7 +440,7 @@ final class CommsLocalStore: ObservableObject {
     }
 
     private func setFlags(_ id: String, _ change: (inout CommsThreadFlags) -> Void) {
-        guard isActive else { return }
+        guard canMutate else { return }
         if thread(id) != nil {
             patch(id) { change(&$0.flags) }
         } else {
@@ -404,7 +463,7 @@ final class CommsLocalStore: ObservableObject {
 
     /// Opening a call thread reads it; the calls' own seen marks take over again.
     func clearCallUnread(_ id: String) {
-        guard callFlags[id]?.unread != nil else { return }
+        guard canMutate, callFlags[id]?.unread != nil else { return }
         callFlags[id]?.unread = nil
         save()
     }
