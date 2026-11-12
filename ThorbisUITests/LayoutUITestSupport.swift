@@ -35,6 +35,45 @@ extension XCUIApplication {
         return !keyboardShowing
     }
 
+    /// Puts the software keyboard away so later controls are hittable.
+    ///
+    /// Phone: the shared modal's Save bar ends the form above the keyboard, so interactive
+    /// dismissal only runs when a drag continues onto the keyboard. One short drag often
+    /// undershoots at accessibility sizes, when the keyboard is most of the screen. iPad: the
+    /// keyboard's own Hide key; a drag in the centered sheet never reaches it.
+    @discardableResult
+    func dismissSoftwareKeyboard(from form: XCUIElement? = nil, timeout: TimeInterval = 8) -> Bool {
+        if waitForKeyboardToHide(timeout: 0.4) { return true }
+        let form = form ?? scrollViews.firstMatch
+        let deadline = Date().addingTimeInterval(timeout)
+        while keyboardShowing && Date() < deadline {
+            let hide = keyboards.buttons["Hide keyboard"]
+            if hide.exists && hide.isHittable {
+                hide.tap()
+                if waitForKeyboardToHide(timeout: 1) { return true }
+            }
+            let keyboard = keyboards.firstMatch
+            guard keyboard.exists, keyboard.frame.height > 1 else { break }
+            if !usesTabletLayout && form.exists {
+                // Scroll the form off its top first so the downward drag dismisses the keyboard
+                // instead of pulling the sheet down.
+                form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55))
+                    .press(forDuration: 0.05, thenDragTo: form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.18)),
+                           withVelocity: .slow, thenHoldForDuration: 0.1)
+                if waitForKeyboardToHide(timeout: 0.5) { return true }
+                form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.18))
+                    .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)),
+                           withVelocity: .slow, thenHoldForDuration: 0.2)
+                if waitForKeyboardToHide(timeout: 0.5) { return true }
+            }
+            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
+                .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)),
+                       withVelocity: .slow, thenHoldForDuration: 0.2)
+            if waitForKeyboardToHide(timeout: 0.8) { return true }
+        }
+        return waitForKeyboardToHide(timeout: 1)
+    }
+
     /// Shows the iPad sidebar when it is hidden (portrait, or folded in landscape).
     func showSidebar(file: StaticString = #filePath, line: UInt = #line) {
         if buttons["sidebar-search"].waitForExistence(timeout: 2), buttons["sidebar-search"].isHittable { return }

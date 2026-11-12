@@ -13,26 +13,11 @@ final class AdaptiveControlsUITests: XCTestCase {
         XCTAssertTrue(residential.waitForExistence(timeout: 30))
         let form = app.scrollViews.containing(.button, identifier: "Residential").firstMatch
         XCTAssertTrue(form.waitForExistence(timeout: 10))
-        // Phone: the form ends above the pinned Save bar, so the drag carries on into the keyboard
-        // for the interactive dismissal to take it. Scroll the form off its top first, so the
-        // downward drag scrolls the form rather than pulling the sheet down.
-        let keyboard = app.keyboards.firstMatch
-        _ = keyboard.waitForExistence(timeout: 5)
-        if keyboard.exists && !app.usesTabletLayout {
-            form.swipeUp()
-            form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.25))
-                .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.35)))
-        } else {
-            form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.29))
-                .press(forDuration: 0.1, thenDragTo: form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.46)))
-        }
-        // iPad: the form is a centered sheet the keyboard does not cover, so a drag in it does not
-        // reach the keyboard; the iPad keyboard's own key puts it away.
-        let hide = app.keyboards.buttons["Hide keyboard"]
-        for _ in 0..<3 where app.usesTabletLayout && !app.waitForKeyboardToHide(timeout: 1) {
-            if hide.exists && hide.isHittable { hide.tap() }
-        }
-        _ = app.waitForKeyboardToHide(timeout: 3)
+        // Name focuses on appear, so the keyboard covers Type at accessibility sizes. Interactive
+        // dismissal has to continue onto the keyboard (the Save bar ends the form above it); a
+        // single short drag often undershoots when the keyboard is most of the screen.
+        _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+        XCTAssertTrue(app.dismissSoftwareKeyboard(from: form), "Dismiss the keyboard before navigating the form.")
         XCTAssertFalse(app.keyboardShowing, "Dismiss the keyboard before navigating the form.")
         // The pinned Save bar is disabled in the read-only preview, and a disabled bar does not
         // block XCUI's hit test: a choice behind it reports hittable while a tap lands on the bar.

@@ -38,19 +38,50 @@ func thorbisRevealInCustomerView(_ element: XCUIElement, in app: XCUIApplication
 
 func thorbisStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
     let query = app.buttons.matching(identifier: identifier)
+    let element = query.firstMatch
+    XCTAssertTrue(element.waitForExistence(timeout: 15), "Missing \(identifier)")
+    func onScreenHittable() -> [XCUIElement] {
+        let foot: CGFloat = identifier.hasPrefix("job-section-") ? app.windows.firstMatch.frame.height - 150 : .greatestFiniteMagnitude
+        return query.allElementsBoundByIndex.filter { button in
+            guard button.isHittable, button.isEnabled else { return false }
+            let frame = button.frame
+            return frame.width > 1 && frame.height > 1
+                && app.frame.contains(CGPoint(x: frame.midX, y: frame.midY))
+                && frame.maxY <= foot
+        }
+    }
+    // Job tabs start under Overview's map and pin once scrolled; other screens can still be
+    // settling. Look both ways with short held drags so momentum does not throw the control away.
+    func nudge(down: Bool) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.38 : 0.64))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.56 : 0.46))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+    for _ in 0..<10 where onScreenHittable().isEmpty {
+        let frame = element.frame
+        nudge(down: frame.height > 1 && frame.midY < app.frame.minY + 80)
+    }
+    for _ in 0..<8 where onScreenHittable().isEmpty { nudge(down: true) }
     var previous: CGRect?
     let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-        let matches = query.allElementsBoundByIndex.filter { $0.isHittable && $0.isEnabled }
-        guard matches.count == 1 else { previous = nil; return false }
-        let frame = matches[0].frame
-        guard frame.width > 0, frame.height > 0, app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { previous = nil; return false }
+        guard let frame = onScreenHittable().first?.frame else { previous = nil; return false }
         defer { previous = frame }
         return previous == frame
     }, object: app)
-    XCTAssertEqual(XCTWaiter.wait(for: [stable], timeout: 10), .completed, "One enabled, unobscured control must have stable geometry before a tap")
-    let matches = query.allElementsBoundByIndex.filter { $0.isHittable && $0.isEnabled }
-    XCTAssertEqual(matches.count, 1)
-    return matches.first ?? query.element(boundBy: 0)
+    XCTAssertEqual(XCTWaiter.wait(for: [stable], timeout: 10), .completed,
+                   "An enabled, unobscured \(identifier) must have stable geometry before a tap")
+    let matches = onScreenHittable()
+    XCTAssertFalse(matches.isEmpty, "\(identifier) is not hittable")
+    return matches[0]
+}
+
+/// Taps a stable control at its centre. XCTest's `.tap()` can still report "not hittable" when the
+/// hierarchy shifts between the wait and the tap (pinned job tabs, Overview's map finishing).
+@discardableResult
+func thorbisTapStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+    let button = thorbisStableButton(app, identifier)
+    button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    return button
 }
 
 @MainActor
