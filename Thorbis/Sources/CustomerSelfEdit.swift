@@ -726,7 +726,7 @@ final class CustomerSelfEditModel: ObservableObject {
                         loadError = "Saved customer changes couldn't be verified. Return to your technician."
                         return
                     }
-                    let verified = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await SavedCopies.$liveOnly.withValue(true) {
                         let current = try await api.fieldCustomer(customerID, requireFresh: true)
                         guard currentAuthority(), current.id == customerID, current.organizationId == recoveryScope.organizationID else { throw CancellationError() }
                         let contacts = try await api.allContactsForRecovery(customerID, currentAuthority: currentAuthority)
@@ -737,14 +737,10 @@ final class CustomerSelfEditModel: ObservableObject {
                             _ = try await api.customerSmsConsent(customerID)
                             guard currentAuthority() else { throw CancellationError() }
                         }
-                        let contactIDs = Set(contacts.map(\.id)), locationIDs = Set(locations.map(\.id))
-                        return saved.draft.originalContacts.allSatisfy { contactIDs.contains($0.id) } &&
-                            saved.draft.originalLocations.allSatisfy { locationIDs.contains($0.id) }
                     }
-                    guard currentAuthority(), verified else {
-                        loadError = "Some saved customer changes can't be verified. Return to your technician."
-                        return
-                    }
+                    // Missing original contacts or locations are reviewed against the live record;
+                    // blocking here would trap the keychain draft and skip staff recovery.
+                    guard currentAuthority() else { return }
                     recoveryLoaded = true
                     draft = saved.draft; pendingWrite = saved.pending ?? .reviewDraft; consentKey = saved.consentKey
                     saveNeedsReconciliation = true
@@ -879,7 +875,10 @@ final class CustomerSelfEditModel: ObservableObject {
                     guard authority() else { return }
                     guard let existing = records.first(where: { $0.id == change.id }),
                           existing.organizationId == recoveryScope?.organizationID, existing.customerId == customerID else {
-                        throw Problem(title: "A service location changed or was removed. Review the customer record before saving.", status: 409, detail: nil)
+                        try checkpoint(current, pending: .reviewDraft)
+                        saveNeedsReconciliation = true
+                        saveError = "A service location changed or was removed. Review the customer record before saving."
+                        return
                     }
                     try checkpoint(current, pending: .location(change.id))
                     writeInFlight = true
@@ -1265,7 +1264,7 @@ struct CustomerSelfEditView: View {
         } else {
             CustomerModeContainer(onUnlocked: {
                 guard currentAuthority() else { return }
-                if model.hasChanges { staffReview = true } else { onFinished() }
+                if model.hasChanges || model.saveNeedsReconciliation { staffReview = true } else { onFinished() }
             }, authenticateOwner: customerHandoffAuthenticate) { handBack in
                 CustomerSelfEditForm(model: model, currentAuthority: currentAuthority, done: handBack)
             }

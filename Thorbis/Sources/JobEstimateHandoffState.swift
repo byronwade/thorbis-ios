@@ -604,7 +604,11 @@ final class JobEstimateHandoffPresenter: ObservableObject {
             guard sceneWindow.present(id: id, source: sourceWindow, content: content, onDisconnect: { [weak self, weak model] in
                 guard let self, let model, self.active === model else { return }
                 self.finishExit(.done, runCallback: false)
-            }) else { finishExit(.done, runCallback: false); return false }
+            }) else {
+                // Keep the verified job handoff on the in-app cover when the scene host cannot attach.
+                sceneOwnerID = nil
+                usesSceneWindow = false
+            }
         }
         return true
     }

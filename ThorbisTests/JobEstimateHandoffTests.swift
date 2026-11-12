@@ -334,6 +334,23 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         presenter.authenticatedExit(.collect(invoiceID: "invoice-a"))
         await fulfillment(of: [callback], timeout: 1)
     }
+    func testSceneHostFailureKeepsCustomerViewOnInAppCover() async throws {
+        let model = try await ready([])
+        let presenter = JobEstimateHandoffPresenter(sceneWindow: CustomerProtectedSceneWindow())
+        XCTAssertTrue(presenter.present(model, start: .estimates, sourceWindow: UIWindow()) { _ in })
+        XCTAssertTrue(presenter.active === model)
+        XCTAssertFalse(presenter.usesSceneWindow)
+    }
+    func testOpenCustomerViewPresentsInAppCoverWhenSceneHostCannotAttach() async throws {
+        let model = try await ready([.init(200, jobJSON)])
+        let presenter = JobEstimateHandoffPresenter(sceneWindow: CustomerProtectedSceneWindow())
+        let result = await presenter.openCustomerView(jobID: jobID, customerID: customer,
+            customerName: "Sample", start: .invoice("invoice-a"), api: model.api, session: model.session,
+            sourceWindow: UIWindow(), onExit: { _ in XCTFail("Failed scene present must not exit") })
+        XCTAssertEqual(result, .presented)
+        XCTAssertNotNil(presenter.active)
+        XCTAssertFalse(presenter.usesSceneWindow)
+    }
     func testPresenterReportsWhenAnotherCustomerHandoffPreventsOpening() async throws {
         let model = try await ready([])
         let presenter = JobEstimateHandoffPresenter()

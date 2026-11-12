@@ -496,7 +496,8 @@ struct JobEstimateProtectedOwner: View {
     }
     /// Only the authenticated technician leaves; changed details are reviewed before staff screens return.
     private func leave(_ exit: CustomerViewExit) {
-        if model.isCurrentJob, presenter.details?.hasChanges == true, session.can("customer.edit", feature: "core_crm") {
+        if model.isCurrentJob, presenter.details?.hasChanges == true || presenter.details?.saveNeedsReconciliation == true,
+           session.can("customer.edit", feature: "core_crm") {
             reviewingDetails = exit
         } else {
             presenter.authenticatedExit(from: model, exit)

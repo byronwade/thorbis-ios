@@ -461,7 +461,7 @@ final class CustomerSelfEditTests: XCTestCase {
     }
 
     @MainActor
-    func testRecoveryDoesNotRevealDraftWhenSavedContactCannotBeVerified() async throws {
+    func testMissingOriginalContactRestoresDraftForStaffReview() async throws {
         let store = MemoryCustomerSelfEditRecoveryStore()
         let draft = CustomerSelfEditDraft(record: record(), contacts: [contact()], locations: [], smsConsent: nil)
         try store.save(.init(draft: draft, pending: .contact("c1"), consentKey: "key"), scope: recoveryScope)
@@ -472,8 +472,10 @@ final class CustomerSelfEditTests: XCTestCase {
         ]), baseURL: "https://app.thorbis.com")
         let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
         await model.load(api: api)
-        XCTAssertNil(model.draft)
-        XCTAssertNotNil(model.loadError)
+        XCTAssertEqual(model.draft?.contacts.first?.id, "c1")
+        XCTAssertTrue(model.saveNeedsReconciliation, "A missing original still needs staff recovery instead of blocking the form")
+        XCTAssertFalse(model.hasChanges, "Unlock must open review from reconciliation, not only from remaining edits")
+        XCTAssertNil(model.loadError)
         XCTAssertNotNil(try store.load(scope: recoveryScope), "Unverified edits remain protected on device")
     }
 
@@ -511,9 +513,44 @@ final class CustomerSelfEditTests: XCTestCase {
         let api = APIClient(session: URLProtocolFixture.session([.init(200, customerJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]), .init(200, "{\"items\":[],\"nextCursor\":null}")]), baseURL: "https://app.thorbis.com")
         await model.save(api: api)
         XCTAssertFalse(model.savedAll)
+        XCTAssertTrue(model.saveNeedsReconciliation)
         XCTAssertNotNil(model.saveError)
         XCTAssertEqual(try store.load(scope: recoveryScope)?.draft.locations.first?.address, "2 Main St")
+        XCTAssertEqual(try store.load(scope: recoveryScope)?.pending, .reviewDraft)
         XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        await model.save(api: api)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "A missing location must be reviewed before later writes retry")
+    }
+
+    @MainActor
+    func testMissingLocationAfterEarlierWriteHoldsRemainingEditsForReview() async throws {
+        let store = MemoryCustomerSelfEditRecoveryStore()
+        let location = ServiceLocationRecord(id: UUID().uuidString, organizationId: "org", customerId: record().id,
+            label: "Home", kind: "service", address: "1 Main St", notes: nil, coordinates: nil,
+            gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil,
+            createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [location], smsConsent: nil)
+        draft.name = "Updated Customer"
+        draft.locations[0].address = "2 Main St"
+        draft.allowsTexts = true
+        let beforeJSON = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let afterJSON = String(decoding: try JSONEncoder().encode(record(name: "Updated Customer")), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, beforeJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]),
+            .init(200, afterJSON),
+            .init(200, "{\"items\":[],\"nextCursor\":null}")
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
+        model.draft = draft
+        await model.save(api: api)
+        XCTAssertFalse(model.savedAll)
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        XCTAssertEqual(model.draft?.name, "Updated Customer")
+        XCTAssertEqual(model.draft?.locations.first?.address, "2 Main St")
+        XCTAssertEqual(model.draft?.allowsTexts, true)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET", "POST", "GET"])
+        await model.save(api: api)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "Consent must wait until the removed location is reviewed")
     }
 
     @MainActor
