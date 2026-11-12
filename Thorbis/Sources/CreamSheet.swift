@@ -244,6 +244,7 @@ struct PlacesList: View {
     @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
     @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
     @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
+    @State private var workspaceExpansion: [PlaceSection: Bool] = [:]
     let sections: DrawerSections
     let title: (MenuItem) -> String
     let isCurrent: (MenuItem) -> Bool
@@ -322,11 +323,25 @@ struct PlacesList: View {
                 if group.items.count == 1, let item = group.items.first {
                     place(item)
                 } else if let first = group.items.first {
-                    PlaceRow(title: group.section.rawValue, symbol: first.symbol, tint: first.sidebarTint,
-                             here: false, count: nil, id: "\(idPrefix)-workspace-\(group.section.rawValue.lowercased())") { openPlace(first) }
-                        .accessibilityValue(group.expanded ? "Expanded" : "Collapsed")
-                        .accessibilityHint("Opens \(title(first))")
-                    if group.expanded {
+                    let expanded = workspaceExpansion[group.section] ?? group.expanded
+                    let workspaceID = "\(idPrefix)-workspace-\(group.section.rawValue.lowercased())"
+                    HStack(spacing: 0) {
+                        PlaceRow(title: group.section.rawValue, symbol: first.symbol, tint: first.sidebarTint,
+                                 here: false, count: nil, id: workspaceID) { openPlace(first) }
+                            .accessibilityHint("Opens \(title(first))")
+                        Button { workspaceExpansion[group.section] = !expanded } label: {
+                            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.muted)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(group.section.rawValue)")
+                        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                        .accessibilityIdentifier("\(workspaceID)-disclosure")
+                    }
+                    if expanded {
                         ForEach(group.items) { item in place(item).padding(.leading, 16) }
                     }
                 }
@@ -350,6 +365,9 @@ struct PlacesList: View {
                 heading(phoneHeading)
                 savedWorkRow(savedWork)
             }
+        }
+        .onChange(of: sections.places.first(where: isCurrent)) { _, place in
+            if let place { workspaceExpansion[place.placeSection] = true }
         }
         .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
         .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
