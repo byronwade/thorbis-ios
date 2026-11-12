@@ -147,11 +147,18 @@ struct InvoiceLineEditorView: View {
             invoiceEditorHeading
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("invoice-line-count")
-                    .padding(.horizontal, 4)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
+                            .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                            .accessibilityIdentifier("invoice-line-count")
+                        Spacer(minLength: 0)
+                        if editor.lines.count > 3 && !dynamicTypeSize.isAccessibilitySize { headingAddItem }
+                    }
+                    if editor.lines.count > 3 && dynamicTypeSize.isAccessibilitySize { headingAddItem }
+                }
+                .padding(.horizontal, 4)
                 PaperCard {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(editor.lines) { line in
@@ -187,6 +194,19 @@ struct InvoiceLineEditorView: View {
         .padding(.bottom, 24)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
+    }
+
+    private var headingAddItem: some View {
+        Button { showPriceBook = true } label: {
+            Label("Add item", systemImage: "plus")
+                .font(Theme.font(14, weight: .medium))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(linesDisabled || editor.lines.count >= 500)
+        .accessibilityHint(canUsePriceBook ? "Opens the price book" : "Adds a custom line item")
+        .accessibilityIdentifier("invoice-add-item-heading")
     }
 
     /// The shared builder line, over an invoice draft line. Quantities still go through
