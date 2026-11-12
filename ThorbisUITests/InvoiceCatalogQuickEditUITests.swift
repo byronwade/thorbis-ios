@@ -7,6 +7,62 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testDraftInvoiceOffersDirectLineItemEditing() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<8 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 20))
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["invoice-add-item"].exists)
+    }
+
+    func testDirectLineEditingAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<20 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+    }
+
+    func testDirectLineEditingRequiresDraftAndPermission() {
+        for arguments in [["--paper-preview-invoice-detail-draft", "--paper-preview-deny-document-edit"], []] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail"] + arguments
+            app.launch()
+            XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+            XCTAssertFalse(app.buttons["invoice-detail-edit-items"].exists)
+            app.terminate()
+        }
+    }
+
+    func testInvalidDraftStillAllowsEditingForCorrection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-overflow"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<8 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        XCTAssertTrue(edit.isHittable)
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+    }
+
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
