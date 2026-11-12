@@ -1,6 +1,19 @@
 import SwiftUI
 import UIKit
 
+enum CustomerJobHistory {
+    static let initialCount = 4
+    static func nextCount(total: Int, visible: Int) -> Int {
+        min(25, max(0, total - visible))
+    }
+    static func firstByID<Record, ID: Hashable>(_ records: [Record], id: KeyPath<Record, ID>) -> [ID: Record] {
+        records.reduce(into: [:]) { result, record in
+            let key = record[keyPath: id]
+            if result[key] == nil { result[key] = record }
+        }
+    }
+}
+
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
     @EnvironmentObject var api: APIClient
@@ -291,7 +304,7 @@ struct CustomerDetailView: View {
     @State private var pricing: MemberPricing?
     /// The customer's jobs as GET /v1/jobs?customerId returns them: the notes line for Jobs.
     @State private var jobRecords: [JobRecord] = []
-    @State private var visiblePastCount = 4
+    @State private var visiblePastCount = CustomerJobHistory.initialCount
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
 
@@ -1004,10 +1017,8 @@ struct CustomerDetailView: View {
         let past = ordered.filter { ["completed", "canceled"].contains($0.status) }
         // Keep history approachable and avoid constructing every old row at once.
         let shownPast = Array(past.prefix(visiblePastCount))
-        let nextCount = min(25, past.count - shownPast.count)
-        let recordsByID = jobRecords.reduce(into: [String: JobRecord]()) { result, record in
-            if result[record.id] == nil { result[record.id] = record }
-        }
+        let nextCount = CustomerJobHistory.nextCount(total: past.count, visible: shownPast.count)
+        let recordsByID = CustomerJobHistory.firstByID(jobRecords, id: \.id)
         return VStack(alignment: .leading, spacing: 18) {
             if !open.isEmpty {
                 PaperSection("Open", count: open.count) {
