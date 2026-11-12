@@ -8,6 +8,30 @@ final class JobDocumentsUITests: XCTestCase {
     private let estimateA = "00000000-0000-4000-8000-000000002218"
     private let addonA = "00000000-0000-4000-8000-000000002238"
 
+    func testOverviewInvoiceOpensTheExactDocumentInOneTap() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
+        let row = app.buttons["job-overview-invoice-\(invoiceA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(row)
+        XCTAssertTrue(row.isHittable)
+        row.tap()
+        let title = app.staticTexts["invoice-detail-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        XCTAssertTrue(title.label.contains("2209"), title.label)
+    }
+
+    func testOverviewEstimateOpensTheExactDocumentInOneTap() {
+        continueAfterFailure = false
+        let app = preview()
+        let row = app.buttons["job-overview-estimate-\(estimateA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(row)
+        XCTAssertTrue(row.isHittable)
+        row.tap()
+        XCTAssertTrue(app.staticTexts["Estimate 2218"].waitForExistence(timeout: 10))
+    }
+
     func testCreatingFirstInvoiceOpensTheReturnedDraftOnlyOnce() {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-create-invoice"])

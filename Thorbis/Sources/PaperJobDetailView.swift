@@ -1550,16 +1550,31 @@ struct JobDetailView: View {
                 ForEach(estimates) { estimate in
                     let options = estimate.options ?? []
                     let (word, tint) = estimateWord(estimate.status)
-                    moneyLine(options.isEmpty ? "Estimate EST-\(estimate.id.suffix(4).uppercased())" : "Estimate · \(options.count) \(options.count == 1 ? "option" : "options")",
-                              amount: options.isEmpty ? paperLinesTotal(estimate.lines).map { jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } : nil,
-                              word: word, tint: tint)
+                    Button { openEstimate = OpenedEstimate(id: estimate.id, present: false) } label: {
+                        moneyLine(options.isEmpty ? "Estimate EST-\(estimate.id.suffix(4).uppercased())" : "Estimate · \(options.count) \(options.count == 1 ? "option" : "options")",
+                                  amount: options.isEmpty ? paperLinesTotal(estimate.lines).map { jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } : nil,
+                                  word: word, tint: tint)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens this estimate")
+                    .accessibilityIdentifier("job-overview-estimate-\(estimate.id)")
+                    .disabled(estimateRead?.freshIDs.contains(estimate.id) != true)
                 }
                 ForEach(bills) { invoice in
                     let due = TechJobFlow.due(invoice)
                     let (word, tint) = invoiceWord(invoice, due: due)
                     let amount = invoice.status == "issued" ? due : paperLinesTotal(invoice.lines)
-                    moneyLine("Invoice \(jobInvoiceReference(invoice.id))",
-                              amount: amount.map { jobShortMoney($0, currency: invoice.currency) }, word: word, tint: tint)
+                    Button {
+                        selectedInvoiceID = invoice.id
+                        documentInvoiceID = invoice.id
+                    } label: {
+                        moneyLine("Invoice \(jobInvoiceReference(invoice.id))",
+                                  amount: amount.map { jobShortMoney($0, currency: invoice.currency) }, word: word, tint: tint)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens this invoice")
+                    .accessibilityIdentifier("job-overview-invoice-\(invoice.id)")
+                    .disabled(invoiceRead?.freshIDs.contains(invoice.id) != true)
                 }
                 if estimates.isEmpty && bills.isEmpty {
                     if loading { SkeletonRows(count: 1, leading: false, inset: 16) }
