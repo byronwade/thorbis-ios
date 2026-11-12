@@ -2,6 +2,29 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoRollupUITests: XCTestCase {
+    func testCustomerPhotosAreReachableDirectlyFromOverview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records",
+                               "--paper-preview-customer-photo-rollup"]
+        app.launch()
+        let overview = app.buttons["Overview"].firstMatch
+        XCTAssertTrue(overview.waitForExistence(timeout: 20))
+        overview.tap()
+        let photosTab = app.buttons["Photos"].firstMatch
+        XCTAssertTrue(photosTab.waitForExistence(timeout: 5), "Photos should be reachable without scrolling past job history")
+        XCTAssertTrue(photosTab.isHittable)
+        photosTab.tap()
+        XCTAssertTrue(app.staticTexts["35"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
+        let first = app.buttons["customer-photo-00000000-0000-4000-8000-000000031000"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        bringClearOfNewJob(first, in: app)
+        XCTAssertTrue(first.isHittable)
+        first.tap()
+        XCTAssertTrue(app.navigationBars["Photo"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["AC photo 1"].waitForExistence(timeout: 10))
+    }
     /// The customer page pins its New job commit at the bottom (#203). A photo partly under it still
     /// reads as hittable, but a tap at its centre lands on the bar, so scroll in short drags until the
     /// photo sits between the header and the bar, then let the scroll settle.

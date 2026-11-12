@@ -327,7 +327,7 @@ struct CustomerDetailView: View {
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/customers/\(customer.id)")).padding(.horizontal, -Theme.gutter)
                 customerIdentity
                 actionCircles
-                PaperTabs(options: ["Overview", jobsLabel, "Money"], selection: tabBinding, textTabs: true)
+                PaperTabs(options: ["Overview", jobsLabel, "Photos", "Money"], selection: tabBinding, wrapOverflow: true, textTabs: true)
                     .padding(.horizontal, -Theme.gutter)
                 if let error {
                     ErrorBanner(message: error) { await load() }
@@ -336,6 +336,7 @@ struct CustomerDetailView: View {
                 case "Jobs":
                     if session.can("job.view", feature: "jobs") { jobsSection }
                     else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
+                case "Photos": recordsParts([.photos])
                 case "Money": moneySection
                 default: overview
                 }
