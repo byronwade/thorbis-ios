@@ -1033,7 +1033,7 @@ struct CustomerDetailView: View {
                         let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 12))
                         actions {
                             Button { withMotion { visiblePastCount += nextCount } } label: {
-                                Text("Show \(nextCount) more older job\(nextCount == 1 ? "" : "s")")
+                                Text("Show next \(nextCount) older job\(nextCount == 1 ? "" : "s")")
                                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                     .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                             }
