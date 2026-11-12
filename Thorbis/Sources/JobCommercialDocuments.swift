@@ -50,6 +50,15 @@ enum JobInvoiceRecoveryContext {
 
 /// A direct action only for the exact, freshly listed invoice on this job.
 enum JobInvoiceDirectPayment {
+    /// Only shortcut selection when the entire scoped list is known and fresh.
+    static func singleStep(invoices: [InvoiceRecord], scope: JobDocumentScope, freshIDs: Set<String>,
+                           isComplete: Bool, canCollect: Bool) -> TechJobStep? {
+        guard isComplete, canCollect,
+              invoices.allSatisfy({ scope.contains($0) && freshIDs.contains($0.id) }) else { return nil }
+        let steps = invoices.compactMap { step(invoice: $0, scope: scope, freshIDs: freshIDs, canCollect: canCollect) }
+        return steps.count == 1 ? steps[0] : nil
+    }
+
     static func step(invoice: InvoiceRecord, scope: JobDocumentScope, freshIDs: Set<String>,
                      canCollect: Bool) -> TechJobStep? {
         guard canCollect, freshIDs.contains(invoice.id), scope.contains(invoice), invoice.status == "issued",
