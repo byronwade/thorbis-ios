@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
 // MARK: - Recording playback
 
@@ -936,18 +937,30 @@ struct CommsMailDraft: Identifiable {
 }
 
 /// The email composer (web compose.tsx): To, Cc and Bcc, subject, body. Save draft keeps it on
-/// this device; Send queues it, because no email provider is connected.
+/// this device; queued messages do not send automatically.
 struct CommsMailSheet: View {
     @State var draft: CommsMailDraft
     @ObservedObject var store: CommsLocalStore
     let onSaved: (String) -> Void
     let onClose: () -> Void
     @State private var showCopies = false
+    @State private var confirmClose = false
+    private let original: CommsLocalStore.Mail
     @FocusState private var toFocused: Bool
+
+    init(draft: CommsMailDraft, store: CommsLocalStore, onSaved: @escaping (String) -> Void, onClose: @escaping () -> Void) {
+        _draft = State(initialValue: draft)
+        self.original = draft.mail
+        self.store = store
+        self.onSaved = onSaved
+        self.onClose = onClose
+    }
+
+    private var hasChanges: Bool { draft.mail != original }
 
     var body: some View {
         let ready = !draft.mail.to.isEmpty
-        ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: onClose) {
+        ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: requestClose) {
             PaperFormField("To") {
                 TextField("To", text: $draft.to, prompt: .placeholder("name@example.com"))
                     .keyboardType(.emailAddress).textContentType(.emailAddress).textInputAutocapitalization(.never)
@@ -979,15 +992,16 @@ struct CommsMailSheet: View {
             PaperFormField("Message") {
                 TextField("Message", text: $draft.body, prompt: .placeholder("Write your email"), axis: .vertical)
                     .lineLimit(6...14).font(Theme.font(16)).fieldWell()
+                    .accessibilityIdentifier("inbox-mail-body")
             }
-            Text("Send queues it \u{2014} no email provider is connected. Drafts stay on this device.")
+            Text("Email is not connected. Queued messages stay on this device and are not sent automatically.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 4) {
-                Button { commit(send: true) } label: { Text("Send").inkCommit(enabled: ready) }
+                Button { commit(send: true) } label: { Text("Queue on device").inkCommit(enabled: ready) }
                     .buttonStyle(PressStyle())
                     .disabled(!ready)
-                    .accessibilityHint("Queues the email. It won\u{2019}t go out until an email provider is connected.")
+                    .accessibilityHint("Saves the email on this device. It will not send automatically.")
                     .accessibilityIdentifier("inbox-mail-send")
                 Button { commit(send: false) } label: {
                     Text("Save draft").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
@@ -998,12 +1012,27 @@ struct CommsMailSheet: View {
             }
         }
         .thorbisSheetPresentation([.large])
+        .interactiveDismissDisabled(hasChanges)
+        .alert("Keep your changes?", isPresented: $confirmClose) {
+            if ready { Button("Save draft") { commit(send: false) } }
+            Button("Discard changes", role: .destructive) { onClose() }
+            Button("Keep editing", role: .cancel) { }
+        } message: {
+            Text(ready ? "Save this draft on your device or discard your changes." : "Add a recipient to save this draft, or keep editing.")
+        }
         // A new email starts at To; a reply or a saved draft already has one.
         .task {
             guard draft.to.isEmpty else { return }
             try? await Task.sleep(for: .milliseconds(400))
             toFocused = true
         }
+    }
+
+    private func requestClose() {
+        guard hasChanges else { onClose(); return }
+        // The keyboard can cover the confirmation's cancel action on iPhone.
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        confirmClose = true
     }
 
     private func commit(send: Bool) {
