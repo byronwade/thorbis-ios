@@ -78,6 +78,9 @@ struct CommsLocalThread: Codable, Identifiable, Equatable {
     var messages: [CommsLocalMessage]
     /// The text being written and not yet saved as a message (web draftsStore).
     var composing: String?
+    /// True only for a new local email created before a recipient was chosen.
+    /// Optional preserves decoding of conversations saved by older app versions.
+    var recipientlessDraft: Bool? = nil
 
     var latest: CommsLocalMessage? { messages.last }
     var latestAt: String? { latest?.at }
@@ -325,7 +328,7 @@ final class CommsLocalStore: ObservableObject {
     func commitMail(_ mail: Mail, send: Bool, threadID: String? = nil, editing messageID: String? = nil) -> String? {
         guard isActive else { return nil }
         let to = mail.to.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard !to.isEmpty else { return nil }
+        guard !send || !to.isEmpty else { return nil }
         let subject = mail.subject.trimmingCharacters(in: .whitespacesAndNewlines)
         let message = CommsLocalMessage(id: messageID ?? UUID().uuidString.lowercased(), channel: .email, direction: .outbound, at: stamp,
                                         body: mail.body, status: send ? .queued : .draft,
@@ -339,12 +342,17 @@ final class CommsLocalStore: ObservableObject {
                     thread.messages.append(message)
                 }
                 if thread.subject == nil, !subject.isEmpty { thread.subject = subject }
+                if thread.recipientlessDraft == true, let messageID, thread.messages.count == 1, thread.messages[0].id == messageID {
+                    thread.email = to.first
+                    thread.contactName = to.first ?? "Draft email"
+                }
             }
             return threadID
         }
-        let thread = CommsLocalThread(id: "t-\(UUID().uuidString.lowercased())", contactName: to[0], phone: "", email: to[0],
+        let thread = CommsLocalThread(id: "t-\(UUID().uuidString.lowercased())", contactName: to.first ?? "Draft email", phone: "", email: to.first,
                                       channel: .email, subject: subject.isEmpty ? "(no subject)" : subject, unread: false,
-                                      flags: CommsThreadFlags(), messages: [message], composing: nil)
+                                      flags: CommsThreadFlags(), messages: [message], composing: nil,
+                                      recipientlessDraft: to.isEmpty ? true : nil)
         threads.insert(thread, at: 0)
         save()
         return thread.id

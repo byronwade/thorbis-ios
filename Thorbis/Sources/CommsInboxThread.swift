@@ -959,6 +959,12 @@ struct CommsMailSheet: View {
     }
 
     private var hasChanges: Bool { draft.mail != original }
+    private var canSave: Bool {
+        let mail = draft.mail
+        return !mail.to.isEmpty || !mail.cc.isEmpty || !mail.bcc.isEmpty ||
+            !mail.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !mail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         let ready = !draft.mail.to.isEmpty
@@ -1016,7 +1022,7 @@ struct CommsMailSheet: View {
                         .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
-                .disabled(!ready)
+                .disabled(!canSave)
             }
         }
         .thorbisSheetPresentation([.large])
@@ -1027,11 +1033,11 @@ struct CommsMailSheet: View {
             if !active { onClose() }
         }
         .alert("Keep your changes?", isPresented: $confirmClose) {
-            if ready { Button("Save draft") { commit(send: false) } }
+            if canSave { Button("Save draft") { commit(send: false) } }
             Button("Discard changes", role: .destructive) { onClose() }
             Button("Keep editing", role: .cancel) { }
         } message: {
-            Text(ready ? "Save this draft on your device or discard your changes." : "Add a recipient to save this draft, or keep editing.")
+            Text(canSave ? "Save this draft on your device or discard your changes." : "Keep editing or discard your changes.")
         }
         // A new email starts at To; a reply or a saved draft already has one.
         .task {
