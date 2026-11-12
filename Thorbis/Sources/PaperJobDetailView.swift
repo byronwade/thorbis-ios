@@ -1325,7 +1325,7 @@ struct JobDetailView: View {
                     if let id = selectedInvoice?.id { presentPayment(for: id) }
                 }
         } else if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
-            PaperActionBar(title: "Show customer", symbol: "iphone") { openCustomerView(.estimates) }
+            PaperActionBar(title: "Customer view · Estimates", symbol: "iphone") { openCustomerView(.estimates) }
                 .accessibilityIdentifier("job-customer-view-bar")
         } else if canBuildEstimate {
             PaperActionBar(title: "Build an estimate", symbol: "doc.badge.plus", action: buildEstimate)
@@ -1412,12 +1412,13 @@ struct JobDetailView: View {
             } else {
                 customerRow(job, name: store.customerName(job.customerId), opens: false)
             }
-            // Hands the phone to the customer for their estimates, invoices and details.
+            // On-site, this door appears in Tools; keep it here for other job states.
+            if !isOnSite {
             Button { openCustomerView(.home) } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "iphone").font(.system(size: 16, weight: .medium)).frame(width: 36)
                         .accessibilityHidden(true)
-                    Text("Show customer").font(Theme.font(15, weight: .medium))
+                    Text("Customer view").font(Theme.font(15, weight: .medium))
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                         .accessibilityHidden(true)
@@ -1429,9 +1430,10 @@ struct JobDetailView: View {
             }
             .buttonStyle(RowPressStyle())
             .disabled(!canOpenCustomerView)
-            .accessibilityLabel("Show customer")
+            .accessibilityLabel("Customer view")
             .accessibilityHint("Hands the device to the customer for their estimates, invoices and details")
             .accessibilityIdentifier("job-customer-view")
+            }
             if job.pauseReason != nil || job.pauseNextAction != nil {
                 VStack(alignment: .leading, spacing: 3) {
                     JobStatusWord(word: "Paused", color: Theme.warning)
@@ -1751,6 +1753,31 @@ struct JobDetailView: View {
         let columns = typeSize.isAccessibilitySize ? 2 : typeSize >= .xLarge ? 3 : 4
         return VStack(alignment: .leading, spacing: 6) {
         JobPanelLabel(title: "Tools")
+        if canOpenCustomerView {
+            Button { openCustomerView(.home) } label: {
+                HStack(alignment: .center, spacing: 12) {
+                    Image(systemName: "iphone")
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 36, height: 36)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Customer view").font(Theme.font(15, weight: .medium))
+                        Text(customerHandoffSummary).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityIdentifier("job-onsite-show-customer")
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: 14))
+        }
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: columns), spacing: 8) {
             JobToolTile(title: "Photo", symbol: "camera", enabled: canCapture && UIImagePickerController.isSourceTypeAvailable(.camera),
                         hint: "Opens the camera and adds the photo to this job") { openCapture(.camera(stage: nil)) }
@@ -2018,7 +2045,7 @@ struct JobDetailView: View {
                 if !jobEstimates.isEmpty, !moneyBarIsCustomerView, canOpenCustomerView {
                     // A quiet text button: the screen's one ink commit stays the bar at the bottom.
                     Button { openCustomerView(.estimates) } label: {
-                        Label("Show customer", systemImage: "iphone")
+                        Label("Customer view · Estimates", systemImage: "iphone")
                             .font(Theme.font(15, weight: .medium))
                             .foregroundStyle(Theme.foreground)
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -2657,6 +2684,14 @@ struct JobDetailView: View {
         JobEstimateCreation.canOpen(canCreate: session.can("estimate.create", feature: "estimates"),
                                     canView: session.can("estimate.view", feature: "estimates"),
                                     estimatesComplete: estimateRead?.isComplete == true)
+    }
+
+    private var customerHandoffSummary: String {
+        var items: [String] = []
+        if session.can("estimate.view", feature: "estimates") { items.append("Estimates") }
+        if session.can("invoice.view", feature: "invoicing") { items.append("invoices") }
+        if session.can("customer.edit", feature: "core_crm") { items.append("customer details") }
+        return ListFormatter.localizedString(byJoining: items)
     }
 
     private var canOpenCustomerView: Bool {
