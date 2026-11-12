@@ -1102,16 +1102,25 @@ struct DocumentLinesSection: View {
             // The column hint only when the label fits beside it on one line; a long option name
             // ("Option 1 · Full system replacement") keeps the row to itself instead of wrapping.
             if let onEdit {
-                SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
-                    if !typeSize.isAccessibilitySize { editItemsButton(onEdit) }
+                ViewThatFits(in: .horizontal) {
+                    SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
+                        if !typeSize.isAccessibilitySize {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                if !lines.isEmpty {
+                                    Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                        .accessibilityHidden(true)
+                                }
+                                editItemsButton(onEdit)
+                            }
+                        }
+                    }
+                    SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
+                        if !typeSize.isAccessibilitySize { editItemsButton(onEdit) }
+                    }
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 2)
                 if typeSize.isAccessibilitySize { editItemsButton(onEdit) }
-                if !lines.isEmpty && !typeSize.isAccessibilitySize {
-                    Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .accessibilityHidden(true)
-                        .padding(.horizontal, 4).padding(.bottom, 2)
-                }
             } else {
                 ViewThatFits(in: .horizontal) {
                     SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
