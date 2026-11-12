@@ -37,14 +37,13 @@ extension XCUIApplication {
 
     /// Puts the software keyboard away so later controls are hittable.
     ///
-    /// Drag the keyboard itself first: New customer is interactively dismissible while Name is
-    /// empty, so a long drag that starts on the form can pull the sheet down (#460). Hide
-    /// keyboard works on iPad, where a form drag never reaches the keyboard. Only then swipe
-    /// the form off its top and continue a short drag onto the keyboard.
+    /// Never drag the form: New customer is interactively dismissible while Name is empty, so a
+    /// downward pan can close the sheet (#460), and at accessibility sizes the focused name field
+    /// fills the remaining viewport so the pan never reaches the scroll view. Done (MA-16) and
+    /// Hide keyboard do not pull the sheet.
     @discardableResult
-    func dismissSoftwareKeyboard(from form: XCUIElement? = nil, timeout: TimeInterval = 8) -> Bool {
+    func dismissSoftwareKeyboard(from _: XCUIElement? = nil, timeout: TimeInterval = 8) -> Bool {
         if waitForKeyboardToHide(timeout: 0.4) { return true }
-        let form = form ?? scrollViews.firstMatch
         let deadline = Date().addingTimeInterval(timeout)
         while keyboardShowing && Date() < deadline {
             let hide = keyboards.buttons["Hide keyboard"]
@@ -52,20 +51,17 @@ extension XCUIApplication {
                 hide.tap()
                 if waitForKeyboardToHide(timeout: 1) { return true }
             }
-            let keyboard = keyboards.firstMatch
-            guard keyboard.exists, keyboard.frame.height > 1 else { break }
-            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
-                .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)),
-                       withVelocity: .slow, thenHoldForDuration: 0.2)
-            if waitForKeyboardToHide(timeout: 0.8) { return true }
-            if !usesTabletLayout && form.exists {
-                form.swipeUp()
-                if waitForKeyboardToHide(timeout: 0.4) { return true }
-                form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.4))
-                    .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55)),
-                           withVelocity: .slow, thenHoldForDuration: 0.2)
+            let done = buttons["keyboard-done"].firstMatch.exists
+                ? buttons["keyboard-done"].firstMatch
+                : buttons["Done"].firstMatch
+            if done.waitForExistence(timeout: 1) {
+                if done.isHittable {
+                    done.tap()
+                } else {
+                    done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                }
+                if waitForKeyboardToHide(timeout: 1) { return true }
             }
-            if waitForKeyboardToHide(timeout: 0.8) { return true }
         }
         return waitForKeyboardToHide(timeout: 1)
     }

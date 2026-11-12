@@ -13,10 +13,16 @@ final class AdaptiveControlsUITests: XCTestCase {
         XCTAssertTrue(residential.waitForExistence(timeout: 30))
         let form = app.scrollViews.containing(.button, identifier: "Residential").firstMatch
         XCTAssertTrue(form.waitForExistence(timeout: 10))
-        // Name focuses on appear, so the keyboard covers Type at accessibility sizes. Interactive
-        // dismissal has to continue onto the keyboard (the Save bar ends the form above it); a
-        // single short drag often undershoots when the keyboard is most of the screen.
+        // Name focuses on appear, so the keyboard covers Type at accessibility sizes. Do not drag
+        // the form: the empty sheet is still interactively dismissible (#460), and a signed run
+        // showed form-to-keyboard pans leave the keyboard up. Done (and Hide keyboard on iPad)
+        // puts it away without pulling the sheet.
         _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+        XCTAssertTrue(
+            app.buttons["keyboard-done"].waitForExistence(timeout: 5)
+                || app.keyboards.buttons["Hide keyboard"].waitForExistence(timeout: 1),
+            "Done must appear above the keyboard so the form can be used at this size."
+        )
         XCTAssertTrue(app.dismissSoftwareKeyboard(from: form), "Dismiss the keyboard before navigating the form.")
         XCTAssertFalse(app.keyboardShowing, "Dismiss the keyboard before navigating the form.")
         // The pinned Save bar is disabled in the read-only preview, and a disabled bar does not

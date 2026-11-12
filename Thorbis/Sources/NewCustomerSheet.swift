@@ -41,7 +41,8 @@ struct NewCustomerSheet: View {
         ThorbisModalSheet(title: "New customer", closeLabel: "Cancel", onClose: busy ? nil : { dismiss() },
                           detents: [.large], commitTitle: "Save customer", commitSymbol: "person.badge.plus", busy: busy,
                           commitDisabledReason: canCreate ? nil : "Your role can't add customers. Ask your office.",
-                          commit: { Task { await commit() } }) {
+                          commit: { Task { await commit() } },
+                          onKeyboardDone: { focused = nil }) {
                 // v2 form: the label stays above, examples as placeholders, help under the field and
                 // the error in its place, related fields clustered by space, optional fields marked.
                 VStack(alignment: .leading, spacing: 32) {
