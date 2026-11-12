@@ -229,7 +229,7 @@ enum PaperPreview {
         return (0..<count).map { index in
             FieldLine(id: String(format: "00000000-0000-4000-8000-%012d", 88000 + offset + index),
                       description: "Sample work item \(index + 1)", quantity: 1,
-                      unitPrice: FieldMoney(amount: 1000, currency: "USD"), source: nil)
+                      unitPrice: FieldMoney(amount: offset > 0 && ProcessInfo.processInfo.arguments.contains("--paper-preview-large-option-range") ? 9_999_999 : 1000, currency: "USD"), source: nil)
         }
     }
     /// `job-history`: the job is at the customer's Home, with past visits there and its equipment.

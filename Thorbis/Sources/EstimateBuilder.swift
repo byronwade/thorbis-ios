@@ -1262,6 +1262,7 @@ struct LineRemovedToast: View {
 
 /// The running total pinned above the commit (MF-04, EB-14), with the member price under it.
 struct EstimateBuilderTotal: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     var label = "Total"
     let value: String
     var detail: String? = nil
@@ -1280,6 +1281,23 @@ struct EstimateBuilderTotal: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(label).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.muted)
+                    ForEach(Array(value.components(separatedBy: "–").enumerated()), id: \.offset) { index, part in
+                        let text = index == 0 ? part : "– " + part
+                        ViewThatFits(in: .horizontal) {
+                            Text(text).font(Theme.monoFont(24, weight: .medium)).fixedSize()
+                            Text(text).font(.system(size: 24, weight: .medium, design: .monospaced)).fixedSize()
+                            Text(text).font(Theme.monoFont(24, weight: .medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(Theme.foreground)
+                        .accessibilityIdentifier("estimate-total-value-\(index)")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
             HStack(alignment: .firstTextBaseline) {
                 Text(label).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 12)
@@ -1288,6 +1306,7 @@ struct EstimateBuilderTotal: View {
                     .foregroundStyle(Theme.foreground)
                     .contentTransition(.numericText())
                     .lineLimit(1).minimumScaleFactor(0.6)
+            }
             }
             if let detail {
                 Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
