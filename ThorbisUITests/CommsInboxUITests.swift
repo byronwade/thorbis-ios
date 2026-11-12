@@ -90,8 +90,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(to.exists)
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
-        let save = saves.element(boundBy: max(0, saves.count - 1))
+        let save = app.alerts["Keep your changes?"].buttons["Save draft"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.tap()
         XCTAssertTrue(app.staticTexts["Draft"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
