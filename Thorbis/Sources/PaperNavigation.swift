@@ -341,9 +341,11 @@ struct RootView: View {
     }
 
     /// Runs the closing change on the drawer's spring and keeps the contents built until it lands.
+    /// `.removed` never fires: rows stay in the tree while `drawerSettling` is true, so the
+    /// completion that clears that flag would wait on a removal that cannot happen.
     private func settleShut(_ change: () -> Void) {
         drawerSettling = true
-        withAnimation(drawerAnimation, completionCriteria: .removed) {
+        withAnimation(drawerAnimation, completionCriteria: .logicallyComplete) {
             change()
         } completion: {
             if !drawerOpen && drawerDrag == 0 { drawerSettling = false }

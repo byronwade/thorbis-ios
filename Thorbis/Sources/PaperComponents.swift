@@ -956,7 +956,8 @@ private struct KeyboardDoneButton: ViewModifier {
     func body(content: Content) -> some View {
         content
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear.frame(height: keyboardShown ? 52 : 0).allowsHitTesting(false)
+                // The accessory pill is 44pt plus toolbar chrome; 52pt left it overlapping Save.
+                Color.clear.frame(height: keyboardShown ? 72 : 0).allowsHitTesting(false)
             }
             .toolbar {
                 ThorbisKeyboardDoneBar {

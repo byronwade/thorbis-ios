@@ -231,6 +231,7 @@ struct FieldProblem: View {
         .padding(.top, 2)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Error: \(message)")
+        .accessibilityIdentifier("field-problem")
     }
 }
 

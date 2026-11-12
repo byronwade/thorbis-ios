@@ -138,6 +138,51 @@ extension XCUIApplication {
         let limit = windows.firstMatch.frame.height - footHeight
         for _ in 0..<6 where !element.isHittable || element.frame.maxY > limit { swipeUp(velocity: .slow) }
     }
+
+    /// MA-16 Done above the keyboard (toolbar or the New customer sheet). The line's Close
+    /// control also reads "Done" on screen; tests must not match that one.
+    var keyboardDoneButton: XCUIElement { buttons["keyboard-done"] }
+
+    /// Waits until price-book search exists, trying both element types.
+    func waitForPriceBookSearch(timeout: TimeInterval = 10) -> XCUIElement {
+        let field = textFields["price-book-search"]
+        if field.waitForExistence(timeout: timeout) { return field }
+        let search = searchFields["price-book-search"]
+        _ = search.waitForExistence(timeout: 2)
+        return search.exists ? search : field
+    }
+
+    func waitForLineDescription(timeout: TimeInterval = 10) -> XCUIElement {
+        let field = textFields["line-description"]
+        if field.waitForExistence(timeout: timeout) { return field }
+        let view = textViews["line-description"]
+        _ = view.waitForExistence(timeout: 2)
+        return view.exists ? view : field
+    }
+
+    func waitForDescriptionLengthWarning(timeout: TimeInterval = 5) -> XCUIElement {
+        let pred = NSPredicate(format: "label BEGINSWITH %@", "Error: Item descriptions can be up to 200 characters")
+        let marked = otherElements.matching(identifier: "field-problem").matching(pred).firstMatch
+        if marked.waitForExistence(timeout: timeout) { return marked }
+        let texts = staticTexts.matching(pred).firstMatch
+        _ = texts.waitForExistence(timeout: 2)
+        return texts.exists ? texts : marked
+    }
+
+    /// Reveals an estimate/invoice "Add item" row and opens the price book. `.tap()` can miss when
+    /// the pinned Save bar is still settling; the stable centre is the same path as Money tabs.
+    func openPriceBook(from add: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(add.waitForExistence(timeout: 30), "Add item did not appear", file: file, line: line)
+        let clear = frame.height * 0.7
+        for _ in 0..<10 {
+            guard add.exists else { break }
+            if add.frame.maxY > 1 && add.frame.maxY <= clear { break }
+            coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+                .press(forDuration: 0.05, thenDragTo: coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        }
+        add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(buttons["price-book-done"].waitForExistence(timeout: 10), "Add item opens the price book", file: file, line: line)
+    }
 }
 
 extension XCTestCase {

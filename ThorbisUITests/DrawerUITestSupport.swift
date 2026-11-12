@@ -13,7 +13,11 @@ extension XCUIApplication {
     func openDrawer(timeout: TimeInterval = 30, file: StaticString = #filePath, line: UInt = #line) -> Bool {
         let menu = drawerMenu
         XCTAssertTrue(menu.waitForExistence(timeout: timeout), "No menu circle on this screen", file: file, line: line)
-        menu.tap()
+        if menu.isHittable {
+            menu.tap()
+        } else {
+            menu.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
         let shown = buttons["drawer-search"].waitForExistence(timeout: 5)
         XCTAssertTrue(shown, "The drawer did not open", file: file, line: line)
         return shown

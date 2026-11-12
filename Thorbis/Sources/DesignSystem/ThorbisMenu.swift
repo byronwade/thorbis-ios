@@ -210,6 +210,25 @@ extension View {
     }
 }
 
+/// How tall a fitted popover may be. Portrait keeps the previous 460pt cap; landscape (and any
+/// short window) has to leave room for the arrow, safe area and the control the menu grows from,
+/// or the first rows sit off-screen and fail hit-testing.
+enum ThorbisMenuMetrics {
+    static let portraitCap: CGFloat = 460
+    static let chrome: CGFloat = 140
+    static let minimum: CGFloat = 160
+
+    static func fittedHeight(estimated: CGFloat, window: CGFloat) -> CGFloat {
+        let cap: CGFloat
+        if window <= 0 {
+            cap = portraitCap
+        } else {
+            cap = min(portraitCap, max(minimum, window - chrome))
+        }
+        return min(max(estimated, 0), cap)
+    }
+}
+
 /// The popover's content: an optional caption, the rows, and destructive rows in their own group.
 /// Sized to its rows (about 260pt wide, wider at accessibility sizes) and scrolls only when it
 /// would outgrow the screen.
@@ -235,12 +254,14 @@ struct ThorbisMenuPanel: View {
     }
 
     var body: some View {
+        let height = ThorbisMenuMetrics.fittedHeight(estimated: estimatedHeight, window: ThorbisMenuWindow.height)
         Group {
-            if estimatedHeight > 460 {
+            if estimatedHeight > height {
                 ScrollView { ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect) }
-                    .frame(height: 460)
+                    .frame(height: height)
             } else {
                 ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect)
+                    .frame(maxHeight: height)
             }
         }
         .frame(width: width)

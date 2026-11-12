@@ -39,7 +39,7 @@ final class CustomerViewUITests: XCTestCase {
         back(app)
 
         // Your details: the customer's own self-edit.
-        let details = app.buttons["customer-view-details"]
+        let details = revealCustomerDetails(in: app)
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         reveal(details, in: app)
         details.tap()
@@ -95,7 +95,8 @@ final class CustomerViewUITests: XCTestCase {
         let app = launch()
         let door = app.buttons["job-customer-view"]
         XCTAssertTrue(door.waitForExistence(timeout: 20)); door.tap()
-        let details = app.buttons["customer-view-details"]
+        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        let details = revealCustomerDetails(in: app)
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         reveal(details, in: app)
         details.tap()
@@ -130,11 +131,31 @@ final class CustomerViewUITests: XCTestCase {
         if exit.waitForExistence(timeout: 5) { exit.tap() } else { app.buttons["Technician: unlock to leave customer mode"].tap() }
     }
 
+    /// Details sit under estimates and invoices; iOS 26 snapshots often omit off-screen SwiftUI rows.
+    private func revealCustomerDetails(in app: XCUIApplication) -> XCUIElement {
+        let details = app.buttons["customer-view-details"]
+        let list = documentsList(in: app)
+        for _ in 0..<8 where !details.exists {
+            if list.exists {
+                list.swipeUp(velocity: .slow)
+            } else {
+                app.swipeUp(velocity: .slow)
+            }
+        }
+        return details
+    }
+
+    private func documentsList(in app: XCUIApplication) -> XCUIElement {
+        let scroll = app.scrollViews["customer-job-documents-list"]
+        return scroll.exists ? scroll : app.otherElements["customer-job-documents-list"]
+    }
+
     /// Large cards can report hittable while their centre is still behind the fixed hand-back footer.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        let list = app.scrollViews["customer-job-documents-list"]
+        let list = documentsList(in: app)
         let bottom = app.buttons["Hand back to the technician"].firstMatch.frame.minY
-        for _ in 0..<8 where !(element.isHittable && element.frame.maxY < bottom) {
+        for _ in 0..<8 where !(element.isHittable && (bottom == 0 || element.frame.maxY < bottom)) {
+            guard list.exists else { return }
             list.swipeUp(velocity: .slow)
         }
     }

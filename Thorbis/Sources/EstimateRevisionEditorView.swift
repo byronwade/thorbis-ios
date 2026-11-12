@@ -283,7 +283,8 @@ struct EstimateRevisionEditorView: View {
             label: hasOptions ? "Main estimate" : (editor.lines.isEmpty ? "Items" : "Items · \(editor.lines.count)"),
             caption: hasOptions ? "Saved with every revision. With options, the customer chooses one option." : nil,
             lines: editableLines, disabled: sectionsDisabled, focus: $focus, expandedLine: $expandedLine,
-            totalLabel: "Subtotal", showTotal: hasOptions, memberPricing: memberPricing, materialsSwitch: storesLineGroups, menuItems: menu,
+            totalLabel: "Subtotal", showTotal: hasOptions, memberPricing: memberPricing, materialsSwitch: storesLineGroups,
+            lineActionsLeading: keyboardUp, menuItems: menu,
             addItem: { picker = EstimateBuilderTarget() },
             addDiscount: canDiscount && !hasOptions ? { discountTarget = EstimateBuilderTarget() } : nil,
             removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
@@ -334,7 +335,8 @@ struct EstimateRevisionEditorView: View {
         let disabled = sectionsDisabled || !optionsFeatureEnabled
         return EstimateBuilderSection(
             label: label, lines: binding.lines, disabled: disabled, focus: $focus, expandedLine: $expandedLine,
-            totalLabel: "Option total", memberPricing: memberPricing, materialsSwitch: storesLineGroups, menuItems: menu,
+            totalLabel: "Option total", memberPricing: memberPricing, materialsSwitch: storesLineGroups,
+            lineActionsLeading: keyboardUp, menuItems: menu,
             addItem: { picker = EstimateBuilderTarget(optionID: option.id) },
             addDiscount: canDiscount ? { discountTarget = EstimateBuilderTarget(optionID: option.id) } : nil,
             removed: { line, lineIndex in withAnimation { removed = RemovedLine(line: line, index: lineIndex, optionID: option.id) } }

@@ -202,17 +202,9 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
     }
 
     private func addSampleItem(in app: XCUIApplication) {
-        let add = app.buttons.matching(identifier: "estimate-add-item").firstMatch
-        XCTAssertTrue(add.waitForExistence(timeout: 30))
-        let clear = app.frame.height * 0.7
-        for _ in 0..<10 where !add.isHittable || add.frame.maxY > clear {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
-                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
-        }
-        XCTAssertTrue(add.isHittable)
-        add.tap()
-        let search = app.textFields["price-book-search"]
-        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        app.openPriceBook(from: app.buttons.matching(identifier: "estimate-add-item").firstMatch)
+        let search = app.waitForPriceBookSearch()
+        XCTAssertTrue(search.exists)
         search.tap()
         search.typeText("Replace capacitor")
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009201"]
@@ -231,7 +223,7 @@ final class EstimateCreationRecoveryUITests: XCTestCase {
         let line = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Replace capacitor")).firstMatch
         XCTAssertTrue(line.waitForExistence(timeout: 10))
         line.tap()
-        let description = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Line description")).firstMatch
+        let description = app.waitForLineDescription()
         let quantity = app.textFields["Quantity"]
         let price = app.textFields.matching(NSPredicate(format: "label BEGINSWITH %@", "Price ")).firstMatch
         XCTAssertTrue(description.waitForExistence(timeout: 5))

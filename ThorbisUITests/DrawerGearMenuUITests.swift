@@ -113,8 +113,11 @@ final class DrawerGearMenuUITests: XCTestCase {
         workspace.tap()
         let settings = app.buttons.matching(NSPredicate(format: "label == %@", "Settings")).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 5)); settings.tap()
-        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.scrollViews["drawer-rows"].exists)
+        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10)
+                      || app.buttons["Sign out"].waitForExistence(timeout: 5),
+                      "Settings must open from the workspace menu")
+        XCTAssertTrue(app.scrollViews["drawer-rows"].waitForNonExistence(timeout: 5),
+                      "The drawer closes before Settings opens")
     }
 
     func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {

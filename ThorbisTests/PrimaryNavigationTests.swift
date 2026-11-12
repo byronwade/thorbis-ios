@@ -48,6 +48,16 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(DrawerMotion.cornerRadius(topInset: 47), 44)
     }
 
+    func testMenuPanelFitsInsideAShortLandscapeWindow() {
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 260, window: 874), 260)
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 500, window: 874), 460)
+        let landscape = ThorbisMenuMetrics.fittedHeight(estimated: 320, window: 402)
+        XCTAssertEqual(landscape, 262)
+        XCTAssertLessThan(landscape, 402)
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 80, window: 402), 80)
+        XCTAssertEqual(ThorbisMenuMetrics.fittedHeight(estimated: 200, window: 0), 200)
+    }
+
     // MARK: Sidebar places (Cream sheet: every place a role can reach, grouped)
 
     func testWebSidebarUsesActiveWorkspacesAndSingleDestinationRows() {
