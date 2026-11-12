@@ -182,6 +182,64 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertTrue(inbox.messages.isEmpty)
     }
 
+    func testInboxStoreIsInvalidatedBeforeSignOutNetworkCompletes() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, features),
+            .init(200, "{}", gate: gate)
+        ])
+        session.onInvalidate = { CommsLocalStore.invalidateCached() }
+        session.onSignedOut = { CommsLocalStore.clearAll() }
+        await session.restore()
+        let old = CommsLocalStore.shared(actorID: actor, organizationID: first)
+        let mail = CommsLocalStore.Mail(to: ["person@example.invalid"], subject: "Private", body: "Old workspace")
+        XCTAssertNotNil(old.commitMail(mail, send: false))
+        let task = Task { await session.signOut() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 5 { try await Task.sleep(for: .milliseconds(10)) }
+        defer { gate.release() }
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, "/api/auth/sign-out")
+        XCTAssertFalse(old.isActive)
+        XCTAssertTrue(old.threads.isEmpty)
+        XCTAssertNil(old.commitMail(mail, send: false))
+        gate.release()
+        await task.value
+        XCTAssertEqual(session.phase, .signedOut)
+        let fresh = CommsLocalStore.shared(actorID: actor, organizationID: first)
+        XCTAssertTrue(fresh.threads.isEmpty, "Sign-out removes the prior saved local copy")
+        CommsLocalStore.clearAll()
+    }
+
+    func testInboxStoreIsInvalidatedBeforeWorkspaceSwitchCompletes() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let memberships = #"[{"id":"019f0000-0000-7000-8000-000000000001","name":"First"},{"id":"019f0000-0000-7000-8000-000000000002","name":"Second"}]"#
+        let selectedSession = activeSession.replacingOccurrences(of: first, with: second)
+        let selectedCatalog = catalog.replacingOccurrences(of: first, with: second)
+        let selectedFeatures = features.replacingOccurrences(of: first, with: second)
+        let (session, _) = controller([
+            .init(200, activeSession), .init(200, memberships), .init(200, catalog), .init(200, features),
+            .init(200, "{}", gate: gate), .init(200, selectedSession), .init(200, selectedCatalog), .init(200, selectedFeatures)
+        ])
+        session.onInvalidate = { CommsLocalStore.invalidateCached() }
+        session.onSignedOut = { CommsLocalStore.clearAll() }
+        await session.restore()
+        let old = CommsLocalStore.shared(actorID: actor, organizationID: first)
+        let mail = CommsLocalStore.Mail(to: ["person@example.invalid"], subject: "Private", body: "Old workspace")
+        XCTAssertNotNil(old.commitMail(mail, send: false))
+        let task = Task { await session.selectOrganization(id: second) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 5 { try await Task.sleep(for: .milliseconds(10)) }
+        defer { gate.release() }
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, "/api/auth/organization/set-active")
+        XCTAssertFalse(old.isActive)
+        XCTAssertTrue(old.threads.isEmpty)
+        XCTAssertNil(old.commitMail(mail, send: false))
+        gate.release()
+        await task.value
+        XCTAssertEqual(session.activeOrganization?.id, second)
+        let other = CommsLocalStore.shared(actorID: actor, organizationID: second)
+        XCTAssertTrue(other.threads.isEmpty, "The next workspace cannot see the old workspace's draft")
+        CommsLocalStore.clearAll()
+    }
+
     func testMultipleMembershipsRequireExplicitSelection() async {
         let organizations = #"[{"id":"019f0000-0000-7000-8000-000000000001","name":"First"},{"id":"019f0000-0000-7000-8000-000000000002","name":"Second"}]"#
         let (session, _) = controller([.init(200, inactiveSession), .init(200, organizations)])
