@@ -2,7 +2,13 @@ import Foundation
 
 // CUSTOMER_HISTORY_SOURCE
 
-struct Record { let id: Int; let value: String }
+final class Counter { var reads = 0 }
+struct Record {
+    let key: Int
+    let value: String
+    let counter: Counter
+    var id: Int { counter.reads += 1; return key }
+}
 
 @main struct Probe {
     static func main() {
@@ -22,10 +28,13 @@ struct Record { let id: Int; let value: String }
         precondition(CustomerJobHistory.nextCount(total: 4, visible: 9) == 0)
         print("PASS 600 jobs reachable in bounded batches and Show all")
 
-        let records = (0..<600).map { Record(id: $0, value: "first") } + [Record(id: 12, value: "duplicate")]
+        let counter = Counter()
+        let records = (0..<600).map { Record(key: $0, value: "first", counter: counter) }
+            + [Record(key: 12, value: "duplicate", counter: counter)]
         let indexed = CustomerJobHistory.firstByID(records, id: \.id)
         precondition(indexed.count == 600 && indexed[12]?.value == "first")
         precondition(indexed[599]?.value == "first" && indexed[600] == nil)
-        print("PASS indexed first-match identity and missing ID")
+        precondition(counter.reads == records.count)
+        print("PASS indexed first-match identity and one ID read per record")
     }
 }
