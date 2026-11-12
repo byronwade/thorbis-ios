@@ -1264,18 +1264,36 @@ func money(_ cents: Int, currency: String) -> String {
 /// The Estimates header's subtitle: what's waiting on customers and how much.
 func estimatesSummary(_ estimates: [EstimateRecord]) -> String {
     let waiting = estimates.filter { $0.status == "sent" }
-    let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
-    return waiting.isEmpty ? "Nothing waiting on customers" : "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))"
+    guard !waiting.isEmpty else { return "Nothing waiting on customers" }
+    var total = 0
+    for estimate in waiting {
+        guard let amount = CustomerDocumentAmounts(lines: estimate.lines, currency: "USD")?.total else {
+            return "\(waiting.count) waiting on customers · Total unavailable"
+        }
+        let (next, overflow) = total.addingReportingOverflow(amount)
+        guard !overflow else { return "\(waiting.count) waiting on customers · Total unavailable" }
+        total = next
+    }
+    return "\(waiting.count) waiting on customers · \(money(total, currency: "USD"))"
 }
 
 /// The Invoices header's subtitle: what's owed and on how many invoices.
 func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
     let unpaid = invoices.filter { $0.status == "issued" }
-    let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD"))\u{00A0}owed on \(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
+    guard !unpaid.isEmpty else { return "Everything is paid" }
+    let count = "\(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")"
+    var owed = 0
+    for invoice in unpaid {
+        guard invoice.currency == "USD",
+              let amount = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) else {
+            return "Balance unavailable on \(count)"
+        }
+        let (next, overflow) = owed.addingReportingOverflow(amount.due)
+        guard !overflow else { return "Balance unavailable on \(count)" }
+        owed = next
+    }
+    return "\(money(owed, currency: "USD"))\u{00A0}owed on \(count)"
 }
-
-
 
 /// Web parity: discount a draft invoice. The amount and a reason the customer sees ("Discount —
 /// Loyalty"), checked here against the total so the server's refusal is the rare case.
