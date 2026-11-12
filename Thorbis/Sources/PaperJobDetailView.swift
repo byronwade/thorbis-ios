@@ -57,6 +57,8 @@ struct JobDetailView: View {
     private var invoicesLoaded: Bool { invoiceRead != nil }
     private var invoicesFailed: Bool { invoiceRead?.isComplete == false }
     @State private var selectedInvoiceID: String?
+    @State private var overviewPaymentRefreshing = false
+    @State private var overviewNavigationRevision = UUID()
     @State private var invoicePaymentModel: InvoicePaymentCollectionModel?
     @State private var loadedInvoiceModelID: String?
     @State private var invoicePaymentLoads = JobInvoicePaymentLoads()
@@ -65,6 +67,7 @@ struct JobDetailView: View {
     @State private var activityFilterBeforePhotos = "All"
     #if DEBUG
     @State private var previewPaymentRevalidated = false
+    @State private var previewOverviewPaymentHold = false
     #endif
     @State private var showSchedule = false
     private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
@@ -499,8 +502,9 @@ struct JobDetailView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { dictation.stop() }
         }
-        .onDisappear { customerWindowAnchor.visible = false; dictation.stop() }
+        .onDisappear { customerWindowAnchor.visible = false; overviewNavigationRevision = UUID(); dictation.stop() }
         .onChange(of: selectedTab) { previous, tab in
+            overviewNavigationRevision = UUID()
             if tab != "Activity" { dictation.stop(); noteFocused = false }
             if tab == "Money" { Task { await loadInvoices() } }
             // Photos added under Activity show in the Overview count straight away (JS-09).
@@ -1587,6 +1591,9 @@ struct JobDetailView: View {
             JobPanelSection(title: title, actionTitle: "See all", actionIdentifier: "job-money-open",
                             action: { withMotion(.snappy) { selectedTab = "Money" } }) {
                 #if DEBUG
+                if previewOverviewPaymentHold {
+                    Text("Preview payment loading").accessibilityIdentifier("job-overview-payment-hold")
+                }
                 if PaperPreview.isJobDocumentsPreview,
                    ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload") {
                     Button("Preview revalidate") { Task { await session.revalidate() } }
@@ -1624,6 +1631,21 @@ struct JobDetailView: View {
                 if estimates.isEmpty && bills.isEmpty {
                     if loading { SkeletonRows(count: 1, leading: false, inset: 16) }
                     else { JobPanelRow(title: "No estimates or invoices yet", titleSize: 15) }
+                }
+                if let step = overviewDirectPaymentStep(job), case let .collect(invoiceID, _, _) = step {
+                    Button {
+                        Task { await collectOverviewInvoice(step) }
+                    } label: {
+                        Label("Collect payment · \(jobInvoiceReference(invoiceID))", systemImage: "creditcard")
+                            .font(Theme.font(15, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityLabel("Collect payment for invoice \(jobInvoiceReference(invoiceID))")
+                    .accessibilityIdentifier("job-overview-collect")
+                    .disabled(overviewPaymentRefreshing)
                 }
                 if let balance = invoiceBalanceCents, balance > 0 {
                     // What is owed now, in the type colour; it opens Money.
@@ -2046,6 +2068,42 @@ struct JobDetailView: View {
         guard job.id == jobId, job.organizationId == session.activeOrganization?.id else { return nil }
         return JobDocumentScope(jobID: job.id, organizationID: job.organizationId,
                                 customerID: job.customerId, originEstimateID: job.estimateId)
+    }
+
+    private func overviewDirectPaymentStep(_ job: JobRecord) -> TechJobStep? {
+        guard session.can("job.view", feature: "jobs"), session.can("invoice.view", feature: "invoicing"),
+              session.can("invoice.payment.create", feature: "payments"),
+              overviewInvoicesAuthority?.isCurrent(api: api, session: session) == true,
+              documentGeneration == session.generation, let scope = scope(for: job),
+              let read = invoiceRead, read.scope == scope, read.unavailableIDs.isEmpty else { return nil }
+        return JobInvoiceDirectPayment.singleStep(invoices: read.records, scope: scope, freshIDs: read.freshIDs,
+                                                  isComplete: read.isComplete, canCollect: true)
+    }
+
+    private func collectOverviewInvoice(_ displayedStep: TechJobStep) async {
+        guard case .collect = displayedStep, !overviewPaymentRefreshing, let job, overviewDirectPaymentStep(job) == displayedStep,
+              let expectedScope = scope(for: job),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        overviewPaymentRefreshing = true
+        var handedOff = false
+        defer { if !handedOff { overviewPaymentRefreshing = false } }
+        let generation = session.generation
+        let navigationRevision = overviewNavigationRevision
+        let current: @MainActor () -> Bool = {
+            !Task.isCancelled && selectedTab == "Overview" && overviewNavigationRevision == navigationRevision &&
+            authority.isCurrent(api: api, session: session) && session.generation == generation &&
+            self.job.flatMap { scope(for: $0) } == expectedScope
+        }
+        let published = await documents.loadInvoices(scope: expectedScope, api: api, isCurrent: current)
+        guard current() else { return }
+        guard published else { withMotion(.snappy) { selectedTab = "Money" }; return }
+        overviewInvoicesAuthority = authority
+        guard let job = self.job, overviewDirectPaymentStep(job) == displayedStep else {
+            withMotion(.snappy) { selectedTab = "Money" }
+            return
+        }
+        handedOff = true
+        run(displayedStep, current: current) { overviewPaymentRefreshing = false }
     }
 
     private func overviewDocumentIsCurrent(_ route: OverviewJobDocumentRoute) -> Bool {
@@ -2639,7 +2697,8 @@ struct JobDetailView: View {
         showNewEstimate = true
     }
 
-    private func run(_ step: TechJobStep) {
+    private func run(_ step: TechJobStep, current: @escaping @MainActor () -> Bool = { true },
+                     onCompletion: (@MainActor () -> Void)? = nil) {
         switch step {
         case .transition(let target): runTransition(target)
         case .buildEstimate: buildEstimate()
@@ -2656,6 +2715,7 @@ struct JobDetailView: View {
         case .reviewInvoice(let id): reviewInvoiceID = id
         case .collect(let invoiceID, _, _):
             Task {
+                defer { onCompletion?() }
                 let generation = session.generation
                 let authority = session.authorityRevision
                 let apiGeneration = api.requestGeneration
@@ -2666,7 +2726,14 @@ struct JobDetailView: View {
                 if let invoice = invoices.first(where: { $0.id == invoiceID && expectedScope.contains($0) }) {
                     await loadInvoicePayments(for: invoice)
                 }
-                guard !Task.isCancelled, session.generation == generation, session.authorityRevision == authority,
+                #if DEBUG
+                if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-payment-hold") {
+                    previewOverviewPaymentHold = true
+                    try? await Task.sleep(for: .seconds(6))
+                    previewOverviewPaymentHold = false
+                }
+                #endif
+                guard !Task.isCancelled, current(), session.generation == generation, session.authorityRevision == authority,
                       api.requestGeneration == apiGeneration, api.normalizedOrigin == origin,
                       api.savedCopyScopeRevision == copyRevision,
                       let currentJob = self.job, scope(for: currentJob) == expectedScope else { return }

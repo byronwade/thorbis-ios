@@ -45,6 +45,23 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertNil(JobInvoiceDirectPayment.step(invoice: foreign, scope: scope(), freshIDs: [foreign.id], canCollect: true))
     }
 
+    func testOverviewPaymentShortcutRequiresOneUnambiguousFreshInvoice() throws {
+        let decoder = JSONDecoder()
+        let first = try decoder.decode(InvoiceRecord.self, from: Data(invoice(50).utf8))
+        let second = try decoder.decode(InvoiceRecord.self, from: Data(invoice(51).utf8))
+        let paid = try decoder.decode(InvoiceRecord.self, from: Data(invoice(53, paid: 10000).utf8))
+        let foreign = try decoder.decode(InvoiceRecord.self, from: Data(invoice(54, job: 101).utf8))
+        func choose(_ records: [InvoiceRecord], _ fresh: Set<String>, _ complete: Bool = true, _ canCollect: Bool = true) -> TechJobStep? {
+            JobInvoiceDirectPayment.singleStep(invoices: records, scope: scope(), freshIDs: fresh, isComplete: complete, canCollect: canCollect)
+        }
+        XCTAssertEqual(choose([first, paid], [first.id, paid.id]), .collect(invoiceID: first.id, due: 10000, currency: "USD"))
+        XCTAssertNil(choose([first, second], [first.id, second.id]))
+        XCTAssertNil(choose([first, paid], [first.id]))
+        XCTAssertNil(choose([first], [first.id], false))
+        XCTAssertNil(choose([first], [first.id], true, false))
+        XCTAssertNil(choose([first, foreign], [first.id, foreign.id]))
+    }
+
     func testPaymentRouteNeverUsesAFormerOrMissingInvoice() async throws {
         let client = api([.init(200, invoice(50)), .init(200, #"{"items":[]}"#)])
         let model = InvoicePaymentCollectionModel(api: client, invoiceID: id(50), expectedJobScope: scope())

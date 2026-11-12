@@ -695,6 +695,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var failPaymentRecheck = false
         var paymentPermissionRevoked = false
         var invoiceReads = 0
+        var overviewInvoiceListReads = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
@@ -716,7 +717,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -1031,6 +1032,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }]
             }
             if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-collect-delayed") {
+                    let read = scenario.lock.withLock { scenario.overviewInvoiceListReads += 1; return scenario.overviewInvoiceListReads }
+                    if read > 1 { Thread.sleep(forTimeInterval: 6) }
+                }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") {
                     return ["items": scenario.lock.withLock { scenario.completionCreated } ? [jsonObject(PaperPreview.invoice)!] : []]
                 }

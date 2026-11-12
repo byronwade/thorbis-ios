@@ -8,11 +8,73 @@ final class JobDocumentsUITests: XCTestCase {
     private let estimateA = "00000000-0000-4000-8000-000000002218"
     private let addonA = "00000000-0000-4000-8000-000000002238"
 
+    func testOverviewCollectsTheOnlyPayableInvoiceWithoutOpeningMoney() {
+        continueAfterFailure = false
+        let app = preview()
+        let collect = app.buttons["job-overview-collect"]
+        findOverviewElement(collect, in: app)
+        XCTAssertTrue(collect.exists)
+        app.scrollClearOfFoot(collect)
+        XCTAssertTrue(collect.isHittable)
+        XCTAssertTrue(collect.label.contains("2209"), collect.label)
+        collect.tap()
+        XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 15))
+        let identity = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertTrue(identity.label.contains("2209"), identity.label)
+    }
+
+    func testLeavingOverviewCancelsDelayedCollectionShortcut() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-overview-collect-delayed"])
+        let collect = app.buttons["job-overview-collect"]
+        findOverviewElement(collect, in: app)
+        XCTAssertTrue(collect.exists)
+        app.scrollClearOfFoot(collect)
+        collect.tap()
+        let activity = app.buttons["job-section-activity"]
+        XCTAssertTrue(activity.waitForExistence(timeout: 10))
+        activity.tap()
+        let sheet = app.navigationBars["Collect payment"]
+        let noSheet = expectation(for: NSPredicate(format: "exists == true"), evaluatedWith: sheet)
+        noSheet.isInverted = true
+        waitForExpectations(timeout: 9)
+        XCTAssertFalse(sheet.exists)
+    }
+
+    func testLeavingOverviewDuringPaymentLoadDoesNotOpenCollection() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-overview-payment-hold"])
+        let collect = app.buttons["job-overview-collect"]
+        findOverviewElement(collect, in: app)
+        XCTAssertTrue(collect.exists)
+        app.scrollClearOfFoot(collect)
+        collect.tap()
+        XCTAssertTrue(app.staticTexts["job-overview-payment-hold"].waitForExistence(timeout: 20))
+        XCTAssertFalse(collect.isEnabled, "Collection stays busy until payment details finish loading")
+        app.buttons["job-section-activity"].tap()
+        let sheet = app.navigationBars["Collect payment"]
+        let noSheet = expectation(for: NSPredicate(format: "exists == true"), evaluatedWith: sheet)
+        noSheet.isInverted = true
+        waitForExpectations(timeout: 9)
+        XCTAssertFalse(sheet.exists)
+    }
+
+    func testOverviewRequiresSelectionForMultiplePayableInvoices() {
+        let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
+        let invoice = app.buttons["job-overview-invoice-\(invoiceA)"]
+        findOverviewElement(invoice, in: app)
+        XCTAssertTrue(invoice.exists)
+        XCTAssertFalse(app.buttons["job-overview-collect"].exists)
+        XCTAssertTrue(app.buttons["job-money-open"].exists)
+    }
+
     func testOverviewInvoiceOpensTheExactDocumentInOneTap() {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
         let row = app.buttons["job-overview-invoice-\(invoiceA)"]
-        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        findOverviewElement(row, in: app)
+        XCTAssertTrue(row.exists)
         app.scrollClearOfFoot(row)
         XCTAssertTrue(row.isHittable)
         row.tap()
@@ -644,6 +706,12 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(show.isHittable)
         show.tap()
         XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+    }
+
+    private func findOverviewElement(_ element: XCUIElement, in app: XCUIApplication) {
+        // The overview is lazy; offscreen rows do not exist until scrolling materializes them.
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
+        for _ in 0..<12 where !element.exists { app.swipeUp() }
     }
 
     private func preview(extra: [String] = []) -> XCUIApplication {
