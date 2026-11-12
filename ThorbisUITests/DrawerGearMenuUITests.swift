@@ -117,6 +117,26 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertFalse(app.scrollViews["drawer-rows"].exists)
     }
 
+    func testWorkspaceDisclosureRevealsPlacesWithoutOpeningAnotherScreen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office"]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let disclosure = app.buttons["\(prefix)-workspace-work-disclosure"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
+        XCTAssertEqual(disclosure.value as? String, "Expanded")
+        disclosure.tap()
+        XCTAssertEqual(disclosure.value as? String, "Collapsed")
+        XCTAssertFalse(app.buttons["\(prefix)-estimates"].exists)
+        disclosure.tap()
+        XCTAssertEqual(disclosure.value as? String, "Expanded")
+        XCTAssertTrue(app.buttons["\(prefix)-estimates"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["\(prefix)-invoices"].exists)
+        XCTAssertTrue(app.buttons["\(prefix)-jobs"].exists)
+    }
+
     func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -140,7 +160,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertLessThan(estimates.frame.minY, invoices.frame.minY)
         let work = app.buttons["\(prefix)-workspace-work"]
         XCTAssertTrue(work.exists)
-        XCTAssertEqual(work.value as? String, "Expanded")
+        XCTAssertEqual(app.buttons["\(prefix)-workspace-work-disclosure"].value as? String, "Expanded")
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Web-aligned sidebar"
         shot.lifetime = .keepAlways
