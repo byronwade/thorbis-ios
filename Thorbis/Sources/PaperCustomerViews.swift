@@ -291,7 +291,7 @@ struct CustomerDetailView: View {
     @State private var pricing: MemberPricing?
     /// The customer's jobs as GET /v1/jobs?customerId returns them: the notes line for Jobs.
     @State private var jobRecords: [JobRecord] = []
-    @State private var showAllPast = false
+    @State private var visiblePastCount = 4
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
 
@@ -1002,15 +1002,19 @@ struct CustomerDetailView: View {
         let ordered = CustomerJobOrder.sorted(jobs)
         let open = ordered.filter { !["completed", "canceled"].contains($0.status) }
         let past = ordered.filter { ["completed", "canceled"].contains($0.status) }
-        // CustomerJobs.dc.html: four past jobs, then "Show N older jobs" (nothing is dropped).
-        let shownPast = showAllPast ? past : Array(past.prefix(4))
+        // Keep history approachable and avoid constructing every old row at once.
+        let shownPast = Array(past.prefix(visiblePastCount))
+        let nextCount = min(25, past.count - shownPast.count)
+        let recordsByID = jobRecords.reduce(into: [String: JobRecord]()) { result, record in
+            if result[record.id] == nil { result[record.id] = record }
+        }
         return VStack(alignment: .leading, spacing: 18) {
             if !open.isEmpty {
                 PaperSection("Open", count: open.count) {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(open.enumerated()), id: \.element.id) { index, job in
                             if index > 0 { WellDivider(leading: JobListRowContent.dividerInset) }
-                            customerJobRow(job, open: true)
+                            customerJobRow(job, open: true, record: recordsByID[job.id])
                         }
                     }
                 }
@@ -1018,18 +1022,25 @@ struct CustomerDetailView: View {
             if !past.isEmpty {
                 VStack(spacing: 0) {
                     PaperSection("Past", count: past.count) {
-                        VStack(spacing: 0) {
+                        LazyVStack(spacing: 0) {
                             ForEach(Array(shownPast.enumerated()), id: \.element.id) { index, job in
                                 if index > 0 { WellDivider() }
-                                customerJobRow(job, open: false)
+                                customerJobRow(job, open: false, record: recordsByID[job.id])
                             }
                         }
                     }
                     if past.count > shownPast.count {
-                        Button { withMotion { showAllPast = true } } label: {
-                            Text("Show \(past.count - shownPast.count) older job\(past.count - shownPast.count == 1 ? "" : "s")")
-                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                        HStack(spacing: 12) {
+                            Button { withMotion { visiblePastCount += nextCount } } label: {
+                                Text("Show \(nextCount) more older job\(nextCount == 1 ? "" : "s")")
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                            }
+                            if past.count - shownPast.count > nextCount {
+                                Button("Show all") { withMotion { visiblePastCount = past.count } }
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .frame(minHeight: 44)
+                            }
                         }
                         .buttonStyle(PressStyle())
                         .padding(.top, 4)
@@ -1046,8 +1057,7 @@ struct CustomerDetailView: View {
         }
     }
 
-    private func customerJobRow(_ job: Job, open: Bool) -> some View {
-        let full = jobRecords.first { $0.id == job.id }
+    private func customerJobRow(_ job: Job, open: Bool, record full: JobRecord?) -> some View {
         return NavigationLink(value: job) {
             if open {
                 // Open work, in the jobs row grammar: the street, the problem, when and who.
