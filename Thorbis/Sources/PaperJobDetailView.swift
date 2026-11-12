@@ -1551,7 +1551,7 @@ struct JobDetailView: View {
                     let options = estimate.options ?? []
                     let (word, tint) = estimateWord(estimate.status)
                     Button { openEstimate = OpenedEstimate(id: estimate.id, present: false) } label: {
-                        moneyLine(options.isEmpty ? "Estimate EST-\(estimate.id.suffix(4).uppercased())" : "Estimate · \(options.count) \(options.count == 1 ? "option" : "options")",
+                        moneyLine("Estimate EST-\(estimate.id.suffix(4).uppercased())" + (options.isEmpty ? "" : " · \(options.count) \(options.count == 1 ? "option" : "options")"),
                                   amount: options.isEmpty ? paperLinesTotal(estimate.lines).map { jobShortMoney($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") } : nil,
                                   word: word, tint: tint)
                     }
