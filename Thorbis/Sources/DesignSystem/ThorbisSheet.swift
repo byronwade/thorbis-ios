@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Scaffold
 
@@ -84,8 +85,12 @@ struct ThorbisModalSheet<Content: View>: View {
     var destructive = false
     var commitIdentifier: String? = nil
     var commit: () -> Void = {}
+    /// Number pads and accessibility sizes have no Return; Done under the commit puts the keyboard
+    /// away (MA-16). A form drag would pull an empty New customer sheet (#460).
+    var onKeyboardDone: (() -> Void)? = nil
     @ViewBuilder var content: () -> Content
     @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var keyboardShown = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -104,30 +109,46 @@ struct ThorbisModalSheet<Content: View>: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let commitTitle {
-                VStack(alignment: .leading, spacing: 8) {
-                    Button(action: commit) {
-                        HStack(spacing: 7) {
-                            if busy { ProgressView().tint(destructive ? .white : Theme.onInk) }
-                            else if let commitSymbol { Image(systemName: commitSymbol).accessibilityHidden(true) }
-                            Text(commitTitle)
+            VStack(alignment: .leading, spacing: 0) {
+                if let commitTitle {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button(action: commit) {
+                            HStack(spacing: 7) {
+                                if busy { ProgressView().tint(destructive ? .white : Theme.onInk) }
+                                else if let commitSymbol { Image(systemName: commitSymbol).accessibilityHidden(true) }
+                                Text(commitTitle)
+                            }
+                            .modifier(CommitLook(destructive: destructive, enabled: commitDisabledReason == nil))
                         }
-                        .modifier(CommitLook(destructive: destructive, enabled: commitDisabledReason == nil))
+                        .buttonStyle(PressStyle())
+                        .disabled(busy || commitDisabledReason != nil)
+                        .accessibilityHint(commitDisabledReason ?? "")
+                        .accessibilityIdentifier(commitIdentifier ?? "sheet-commit")
+                        if let commitDisabledReason {
+                            Text(commitDisabledReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityHidden(true)
+                        }
                     }
-                    .buttonStyle(PressStyle())
-                    .disabled(busy || commitDisabledReason != nil)
-                    .accessibilityHint(commitDisabledReason ?? "")
-                    .accessibilityIdentifier(commitIdentifier ?? "sheet-commit")
-                    if let commitDisabledReason {
-                        Text(commitDisabledReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityHidden(true)
-                    }
+                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, keyboardShown && onKeyboardDone != nil ? 4 : 12)
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 12)
-                .background(Theme.surface)
+                if onKeyboardDone != nil, keyboardShown {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Button("Done") {
+                            onKeyboardDone?()
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        }
+                        .buttonStyle(ThorbisBarButtonStyle(prominent: true))
+                        .accessibilityIdentifier("keyboard-done")
+                    }
+                    .padding(.horizontal, Theme.gutter).padding(.top, commitTitle == nil ? 8 : 0).padding(.bottom, 8)
+                }
             }
+            .background(Theme.surface)
         }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in keyboardShown = true }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
         .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(Theme.foreground)
         .background(Theme.surface)

@@ -35,6 +35,37 @@ extension XCUIApplication {
         return !keyboardShowing
     }
 
+    /// Puts the software keyboard away so later controls are hittable.
+    ///
+    /// Never drag the form: New customer is interactively dismissible while Name is empty, so a
+    /// downward pan can close the sheet (#460), and at accessibility sizes the focused name field
+    /// fills the remaining viewport so the pan never reaches the scroll view. Done (MA-16) and
+    /// Hide keyboard do not pull the sheet.
+    @discardableResult
+    func dismissSoftwareKeyboard(from _: XCUIElement? = nil, timeout: TimeInterval = 8) -> Bool {
+        if waitForKeyboardToHide(timeout: 0.4) { return true }
+        let deadline = Date().addingTimeInterval(timeout)
+        while keyboardShowing && Date() < deadline {
+            let hide = keyboards.buttons["Hide keyboard"]
+            if hide.exists && hide.isHittable {
+                hide.tap()
+                if waitForKeyboardToHide(timeout: 1) { return true }
+            }
+            let done = buttons["keyboard-done"].firstMatch.exists
+                ? buttons["keyboard-done"].firstMatch
+                : buttons["Done"].firstMatch
+            if done.waitForExistence(timeout: 1) {
+                if done.isHittable {
+                    done.tap()
+                } else {
+                    done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                }
+                if waitForKeyboardToHide(timeout: 1) { return true }
+            }
+        }
+        return waitForKeyboardToHide(timeout: 1)
+    }
+
     /// Shows the iPad sidebar when it is hidden (portrait, or folded in landscape).
     func showSidebar(file: StaticString = #filePath, line: UInt = #line) {
         if buttons["sidebar-search"].waitForExistence(timeout: 2), buttons["sidebar-search"].isHittable { return }
