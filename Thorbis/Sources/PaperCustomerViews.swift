@@ -1030,7 +1030,8 @@ struct CustomerDetailView: View {
                         }
                     }
                     if past.count > shownPast.count {
-                        HStack(spacing: 12) {
+                        let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 12))
+                        actions {
                             Button { withMotion { visiblePastCount += nextCount } } label: {
                                 Text("Show \(nextCount) more older job\(nextCount == 1 ? "" : "s")")
                                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
@@ -1039,7 +1040,7 @@ struct CustomerDetailView: View {
                             if past.count - shownPast.count > nextCount {
                                 Button("Show all") { withMotion { visiblePastCount = past.count } }
                                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .frame(minHeight: 44)
+                                    .frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil, minHeight: 44)
                             }
                         }
                         .buttonStyle(PressStyle())
