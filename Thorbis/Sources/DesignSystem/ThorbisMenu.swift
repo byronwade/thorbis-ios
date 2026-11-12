@@ -261,7 +261,6 @@ struct ThorbisMenuPanel: View {
                     .frame(height: height)
             } else {
                 ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect)
-                    .frame(maxHeight: height)
             }
         }
         .frame(width: width)
