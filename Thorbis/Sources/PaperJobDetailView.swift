@@ -1678,6 +1678,7 @@ struct JobDetailView: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 11)
         .frame(maxWidth: stacked ? .infinity : nil, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
 
