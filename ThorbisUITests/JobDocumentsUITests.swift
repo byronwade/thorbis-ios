@@ -19,6 +19,11 @@ final class JobDocumentsUITests: XCTestCase {
         let title = app.staticTexts["invoice-detail-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
         XCTAssertTrue(title.label.contains("2209"), title.label)
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        thorbisStableButton(app, "job-section-money").tap()
+        let selected = app.staticTexts["job-collect-selected-invoice"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        XCTAssertTrue(selected.label.contains("2209"), selected.label)
     }
 
     func testOverviewEstimateOpensTheExactDocumentInOneTap() {
@@ -30,6 +35,48 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(row.isHittable)
         row.tap()
         XCTAssertTrue(app.staticTexts["Estimate 2218"].waitForExistence(timeout: 10))
+    }
+
+    func testOverviewInvoiceRetiresWhenSessionIsReplaced() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-overview-retire", "--paper-preview-description-replace-session"])
+        let row = app.buttons["job-overview-invoice-\(invoiceA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(row)
+        row.tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+    }
+
+    func testOverviewInvoiceRetiresWhenAuthorityIsRevalidated() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-overview-revalidate"])
+        let row = app.buttons["job-overview-invoice-\(invoiceA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(row)
+        row.tap()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+    }
+
+    func testOverviewInvoiceCannotOpenFromOldReadDuringAuthorityReload() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-overview-hold-reload"])
+        let row = app.buttons["job-overview-invoice-\(invoiceA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: row)
+        waitForExpectations(timeout: 10)
+        let refresh = app.buttons["job-overview-revalidate"]
+        app.scrollClearOfFoot(refresh)
+        XCTAssertTrue(refresh.isHittable)
+        refresh.tap()
+        expectation(for: NSPredicate(format: "enabled == false"), evaluatedWith: row)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: row)
+        waitForExpectations(timeout: 20)
     }
 
     func testCreatingFirstInvoiceOpensTheReturnedDraftOnlyOnce() {
