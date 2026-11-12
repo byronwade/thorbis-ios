@@ -70,7 +70,7 @@ struct CustomerRecordsView: View {
         let columns = dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.flexible())]
             : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
-        return VStack(alignment: .leading, spacing: 8) {
+        return LazyVStack(alignment: .leading, spacing: 8) {
             heading("Photos", count: compilation.photoCount, symbol: "photo", incomplete: incomplete)
             if incomplete {
                 ErrorBanner(message: "Some photos may be missing or duplicated. Please try again.") {
