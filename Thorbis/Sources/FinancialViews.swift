@@ -605,7 +605,11 @@ struct InvoiceDetailView: View {
                                          extraRows: amounts.map { value in
                                              record.amountPaid > 0 && record.status != "draft"
                                                 ? [("Paid", money(record.amountPaid, currency: record.currency)), ("Balance due", money(value.due, currency: record.currency))] : []
-                                         } ?? [])
+                                         } ?? [],
+                                         onEdit: record.status == "draft" && session.can("invoice.edit", feature: "invoicing") ? {
+                                             guard self.record == record, !busy, session.can("invoice.edit", feature: "invoicing") else { return }
+                                             showEditDraft = true
+                                         } : nil, editDisabled: busy)
                     if let paymentModel {
                         InvoicePaymentsSection(
                             model: paymentModel,
@@ -1089,23 +1093,38 @@ struct DocumentLinesSection: View {
     let currency: String
     var extraRows: [(String, String)] = []
     var memberLine: String? = nil
+    var onEdit: (() -> Void)? = nil
+    var editDisabled = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The column hint only when the label fits beside it on one line; a long option name
             // ("Option 1 · Full system replacement") keeps the row to itself instead of wrapping.
-            ViewThatFits(in: .horizontal) {
+            if let onEdit {
                 SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
-                    if !lines.isEmpty && !typeSize.isAccessibilitySize {
-                        Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                    }
+                    if !typeSize.isAccessibilitySize { editItemsButton(onEdit) }
                 }
-                SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) { EmptyView() }
+                if typeSize.isAccessibilitySize { editItemsButton(onEdit) }
+                if !lines.isEmpty && !typeSize.isAccessibilitySize {
+                    Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .accessibilityHidden(true)
+                        .padding(.horizontal, 4).padding(.bottom, 2)
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
+                        if !lines.isEmpty && !typeSize.isAccessibilitySize {
+                            Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) { EmptyView() }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 2)
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.bottom, 2)
             Well {
                 if !note.isEmpty {
                     Text(note).font(Theme.font(15)).foregroundStyle(Theme.subtle)
@@ -1138,6 +1157,20 @@ struct DocumentLinesSection: View {
                     .padding(.horizontal, 4).padding(.top, 8)
             }
         }
+    }
+
+    private func editItemsButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label("Edit items", systemImage: "pencil")
+                .font(Theme.font(14, weight: .medium))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.brandText)
+        .disabled(editDisabled)
+        .accessibilityHint("Opens the invoice editor")
+        .accessibilityIdentifier("invoice-detail-edit-items")
     }
 }
 
