@@ -104,7 +104,8 @@ enum PaperPreview {
     @MainActor static var descriptionOpened = false
     @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
         let args = ProcessInfo.processInfo.arguments
-        guard isJobDocumentsPreview, args.contains("--paper-preview-description-expire-session") || args.contains("--paper-preview-description-revoke-permission") || args.contains("--paper-preview-description-replace-session") else { return }
+        guard isJobDocumentsPreview || (screen == "present-estimate" && args.contains("--paper-preview-option-long-description")),
+              args.contains("--paper-preview-description-expire-session") || args.contains("--paper-preview-description-revoke-permission") || args.contains("--paper-preview-description-replace-session") else { return }
         try? await Task.sleep(for: .seconds(10))
         guard !Task.isCancelled else { return }
         if args.contains("--paper-preview-description-revoke-permission") {
@@ -280,9 +281,12 @@ enum PaperPreview {
         let replace = [line(6, "3-ton high-efficiency condenser matched to your existing furnace and coil.", 1, 690_000, list: 766_700),
                        line(7, "Installation and haul-away of the old unit, permit and an efficiency check after install.", 1, 220_000),
                        line(8, "Ten-year warranty registration with the manufacturer.", 1, 75_000)]
+        let repairDescription = ProcessInfo.processInfo.arguments.contains("--paper-preview-option-long-description")
+            ? "Replace the failed capacitor and clean the coil. We will protect the work area, check the electrical connections, clean both coils and test the system under normal conditions.\n\nFinal detail: we will explain the results and leave the work area clean."
+            : "Replace the failed capacitor and clean the coil."
         return EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: customerID, createdByUserId: estimate.createdByUserId,
                               locationId: nil, status: "sent", currentRevisionNumber: 2, title: "AC not cooling", lines: [],
-                              options: [option(1, "Repair", "Replace the failed capacitor and clean the coil.", repair),
+                              options: [option(1, "Repair", repairDescription, repair),
                                         option(2, "Repair and protect", "The repair plus a surge protector and a one-year parts warranty.", better),
                                         option(3, "Replace", "A new high-efficiency unit with a ten-year warranty.", replace)],
                               createdAt: estimate.createdAt, updatedAt: estimate.updatedAt, sentAt: estimate.sentAt, approvedAt: nil, declinedAt: nil)

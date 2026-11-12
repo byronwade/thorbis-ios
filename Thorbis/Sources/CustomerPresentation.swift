@@ -113,6 +113,7 @@ struct CustomerEstimatePresentation: View {
     let financing: Bool
 
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var flow: CustomerEstimateFlow
@@ -130,6 +131,7 @@ struct CustomerEstimatePresentation: View {
     @State private var openingReview = false
     @State private var openingError: String?
     @State private var reviewGeneration: UUID?
+    @State private var reviewSessionGeneration: UUID?
     @State private var reviewRequestID = UUID()
     @StateObject private var handoffObservation: CustomerEstimateHandoffObservation
     private var handoff: CustomerEstimateHandoffContext? { handoffObservation.context }
@@ -295,12 +297,6 @@ struct CustomerEstimatePresentation: View {
                     Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
-                    if !option.description.isEmpty {
-                        Text(option.description).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 4)
-                    }
                     if let saved = customerSavingsText(option.lines, currency: option.currency) {
                         Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
                             .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
@@ -324,6 +320,12 @@ struct CustomerEstimatePresentation: View {
             .accessibilityLabel(selected ? "\(option.title), selected" : "Choose \(option.title)")
             .accessibilityValue("Total \(total)")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            if !option.description.isEmpty {
+                optionDescription(option)
+                    .foregroundStyle(Theme.subtle)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Selection is the blue ring and the radio; the screen's only ink is the commit (CP-07).
@@ -331,6 +333,26 @@ struct CustomerEstimatePresentation: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .strokeBorder(selected ? Theme.brand : Theme.border, lineWidth: selected ? 2 : 1))
         .animation(.easeOut(duration: 0.15), value: selected)
+    }
+
+    @ViewBuilder private func optionDescription(_ option: FieldEstimateOption) -> some View {
+        if let jobID, let revision = flow.issuedRevision {
+            let record = flow.estimate
+            let scope = JobDocumentScope(jobID: jobID, organizationID: record.organizationId, customerID: record.customerId)
+            let access = DocumentDescriptionAccess(
+                identity: .estimate(scope: scope, record: record, issued: revision),
+                organizationID: record.organizationId, capability: "estimate.view", feature: "estimates",
+                sourceGeneration: reviewSessionGeneration, fresh: reviewReady,
+                active: flow.step == .choose && currentAuthority() && handoff?.current() != false,
+                scopeValid: scope.contains(record, requestedID: record.id) && revision.estimateId == record.id &&
+                    revision.revisionNumber == record.currentRevisionNumber &&
+                    (revision.options?.contains(where: { $0.id == option.id }) == true))
+            ReadOnlyDocumentDescription(text: option.description, fontSize: type.small, access: access,
+                                        customerFacing: true, accessibilityContext: "\(option.title) option")
+        } else {
+            // Standalone presentations without a job retain their complete original description.
+            Text(option.description).font(Theme.customerFont(type.small)).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// "What's included": the chosen option (or the single scope) with every line in full,
@@ -578,12 +600,14 @@ struct CustomerEstimatePresentation: View {
                 flow.selectedOptionID = handoff.reviewed.optionID
                 flow.step = handoff.outcome?.isApproved == true ? .done : .sign
                 reviewGeneration = api.requestGeneration
+                reviewSessionGeneration = session.generation
                 return
             }
         }
-        let requestID = UUID(), generation = api.requestGeneration
+        let requestID = UUID(), generation = api.requestGeneration, sessionGeneration = session.generation
         reviewRequestID = requestID
         reviewGeneration = nil
+        reviewSessionGeneration = nil
         openingReview = true
         openingError = nil
         error = nil
@@ -603,6 +627,7 @@ struct CustomerEstimatePresentation: View {
             guard currentAuthority(), reviewRequestID == requestID, generation == api.requestGeneration else { return }
             try flow.useIssuedRevision(revision)
             reviewGeneration = generation
+            reviewSessionGeneration = sessionGeneration
         } catch is CancellationError {
         } catch {
             guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
