@@ -37,10 +37,10 @@ extension XCUIApplication {
 
     /// Puts the software keyboard away so later controls are hittable.
     ///
-    /// Phone: the shared modal's Save bar ends the form above the keyboard, so interactive
-    /// dismissal only runs when a drag continues onto the keyboard. One short drag often
-    /// undershoots at accessibility sizes, when the keyboard is most of the screen. iPad: the
-    /// keyboard's own Hide key; a drag in the centered sheet never reaches it.
+    /// Drag the keyboard itself first: New customer is interactively dismissible while Name is
+    /// empty, so a long drag that starts on the form can pull the sheet down (#460). Hide
+    /// keyboard works on iPad, where a form drag never reaches the keyboard. Only then swipe
+    /// the form off its top and continue a short drag onto the keyboard.
     @discardableResult
     func dismissSoftwareKeyboard(from form: XCUIElement? = nil, timeout: TimeInterval = 8) -> Bool {
         if waitForKeyboardToHide(timeout: 0.4) { return true }
@@ -54,21 +54,17 @@ extension XCUIApplication {
             }
             let keyboard = keyboards.firstMatch
             guard keyboard.exists, keyboard.frame.height > 1 else { break }
-            if !usesTabletLayout && form.exists {
-                // Scroll the form off its top first so the downward drag dismisses the keyboard
-                // instead of pulling the sheet down.
-                form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55))
-                    .press(forDuration: 0.05, thenDragTo: form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.18)),
-                           withVelocity: .slow, thenHoldForDuration: 0.1)
-                if waitForKeyboardToHide(timeout: 0.5) { return true }
-                form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.18))
-                    .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.85)),
-                           withVelocity: .slow, thenHoldForDuration: 0.2)
-                if waitForKeyboardToHide(timeout: 0.5) { return true }
-            }
-            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.08))
-                .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)),
+            keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
+                .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8)),
                        withVelocity: .slow, thenHoldForDuration: 0.2)
+            if waitForKeyboardToHide(timeout: 0.8) { return true }
+            if !usesTabletLayout && form.exists {
+                form.swipeUp()
+                if waitForKeyboardToHide(timeout: 0.4) { return true }
+                form.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.4))
+                    .press(forDuration: 0.1, thenDragTo: keyboard.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.55)),
+                           withVelocity: .slow, thenHoldForDuration: 0.2)
+            }
             if waitForKeyboardToHide(timeout: 0.8) { return true }
         }
         return waitForKeyboardToHide(timeout: 1)
