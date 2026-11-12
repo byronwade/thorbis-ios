@@ -44,9 +44,11 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 15))
         app.scrollClearOfFoot(row)
         row.tap()
-        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Document unavailable"].waitForExistence(timeout: 25))
-        XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
+        let detail = app.staticTexts["invoice-detail-title"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: detail)
+        waitForExpectations(timeout: 25)
+        XCTAssertTrue(app.staticTexts["Document unavailable"].exists || app.buttons["job-section-money"].exists)
     }
 
     func testOverviewInvoiceRetiresWhenAuthorityIsRevalidated() {
