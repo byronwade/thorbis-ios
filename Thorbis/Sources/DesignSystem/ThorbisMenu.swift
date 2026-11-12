@@ -258,17 +258,26 @@ struct ThorbisMenuPanel: View {
         ThorbisMenuRows(items: items, title: title, customerFacing: customerFacing, onSelect: onSelect)
     }
 
+    /// Inflated on purpose: a short estimate lets the popover size itself taller than the room
+    /// above a landscape gear, and the first rows sit off-screen.
+    private var estimatedHeight: CGFloat {
+        let row: CGFloat = customerFacing ? 58 : 46
+        let rows = items.reduce(CGFloat(0)) { $0 + ($1.subtitle == nil ? row : row + 28) }
+        return (rows + (title == nil ? 12 : 52) + 24) * typeSize.sheetHeightScale
+    }
+
     var body: some View {
         let cap = ThorbisMenuMetrics.maxHeight(window: ThorbisMenuWindow.height,
                                                compactHeight: verticalSizeClass == .compact)
-        // Whole when it fits the room the popover is given; otherwise scroll from the top so the
-        // first rows (Saved work on the gear) stay on screen in landscape.
-        ViewThatFits(in: .vertical) {
+        let height = min(max(estimatedHeight, 1), cap)
+        // A popover sizes to its child's *ideal* height. ViewThatFits + maxHeight does not change
+        // that ideal, so the gear menu still grew past a ~402pt landscape window. An explicit
+        // height on a ScrollView does, and the first rows (Saved work) stay on screen.
+        ScrollView {
             rows
-            ScrollView { rows }.scrollBounceBehavior(.basedOnSize)
         }
-        .frame(width: width)
-        .frame(maxHeight: cap)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: width, height: height)
         // design.thorbis.com Motion: a menu fades in at 120ms ease-out; it does not fly.
         .opacity(shown || reduceMotion ? 1 : 0)
         .onAppear { withAnimation(.easeOut(duration: 0.12)) { shown = true } }

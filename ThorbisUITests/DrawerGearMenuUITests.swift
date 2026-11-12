@@ -288,16 +288,24 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.thorbisTapCentre(gear)
         // "Saved on this phone" carries its count after a comma; the gear itself reads "Settings and
         // businesses", so the other rows are matched exactly. The drawer's own "Saved on this phone"
-        // row (under On this phone) sits behind the open menu, so it is left out.
-        let rows = [app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Saved on this phone", "drawer-saved-work")).firstMatch]
-            + ["Add a business", "Settings", "Edit menu"].map { app.buttons.matching(NSPredicate(format: "label == %@", $0)).firstMatch }
-        XCTAssertTrue(rows[0].waitForExistence(timeout: 5), "Saved work shows in the gear menu")
+        // row (under On this phone) sits behind the open menu, so it is left out. The popover is the
+        // last match (JobOverviewUITests.menuRow).
+        let savedPred = NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Saved on this phone", "drawer-saved-work")
+        XCTAssertTrue(app.buttons.matching(savedPred).firstMatch.waitForExistence(timeout: 5), "Saved work shows in the gear menu")
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "menu fades in")], timeout: 1)
+        let rows = [app.thorbisFrontButton(matching: savedPred)]
+            + ["Add a business", "Settings", "Edit menu"].map {
+                app.thorbisFrontButton(matching: NSPredicate(format: "label == %@", $0))
+            }
         let screen = app.windows.firstMatch.frame
         for row in rows {
             XCTAssertTrue(row.exists, row.description)
-            XCTAssertNotNil(app.thorbisUsableFrame(of: row), "\(row.label) must be reachable")
-            XCTAssertTrue(screen.contains(row.frame), "\(row.label) must be fully on screen: \(row.frame) in \(screen)")
+            let deadline = Date().addingTimeInterval(2)
+            while app.thorbisUsableFrame(of: row) == nil, Date() < deadline { usleep(200_000) }
+            let dump = app.thorbisFrameDump(row, name: "gear-menu")
+            XCTContext.runActivity(named: dump) { _ in }
+            XCTAssertNotNil(app.thorbisUsableFrame(of: row), "\(row.label) must be reachable. \(dump)")
+            XCTAssertTrue(screen.contains(row.frame), "\(row.label) must be fully on screen: \(dump)")
         }
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = landscape ? "Gear menu landscape" : "Gear menu portrait"

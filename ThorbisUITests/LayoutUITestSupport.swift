@@ -137,6 +137,25 @@ extension XCUIApplication {
         return frame
     }
 
+    /// The front-most matching button. A `ThorbisMenu` popover sits above the page, so `firstMatch`
+    /// can be a row behind it with an invalid frame.
+    func thorbisFrontButton(matching predicate: NSPredicate) -> XCUIElement {
+        let query = buttons.matching(predicate)
+        _ = query.firstMatch.waitForExistence(timeout: 5)
+        let matches = query.allElementsBoundByIndex
+        if let usable = matches.reversed().first(where: { thorbisUsableFrame(of: $0) != nil }) {
+            return usable
+        }
+        return matches.last ?? query.firstMatch
+    }
+
+    func thorbisFrameDump(_ element: XCUIElement, name: String) -> String {
+        let frame = element.frame
+        let bounds = windows.firstMatch.exists ? windows.firstMatch.frame : self.frame
+        let usable = thorbisUsableFrame(of: element)
+        return "\(name) label=\(element.label) id=\(element.identifier) frame=\(frame) window=\(bounds) app=\(self.frame) usable=\(usable as Any)"
+    }
+
     /// Centre-taps `element` once its frame is usable. Falls back to an app-relative point only
     /// when the element still has no finite frame after a short wait.
     func thorbisTapCentre(_ element: XCUIElement, fallback: CGVector = CGVector(dx: 0.5, dy: 0.5)) {
