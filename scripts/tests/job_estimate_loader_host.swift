@@ -37,6 +37,7 @@ struct Problem: Error { let status: Int? }
     var failure: String?
     var foreign: String?
     var denied: String?
+    var savedID: String?
     init(ids: [String], failure: String? = nil) { self.ids = ids; self.failure = failure }
     func fieldJobEstimateLinks(_ id: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
         ids.map { .init(jobId: id, estimateId: $0) }
@@ -50,13 +51,37 @@ struct Problem: Error { let status: Int? }
         if id == foreign { return .init(id: "foreign") }
         return .init(id: id)
     }
-    func savedCopyDate(_ path: String) -> Date? { nil }
+    func savedCopyDate(_ path: String) -> Date? { path == savedID.map { "/v1/estimates/\($0)" } ? Date() : nil }
 }
 
 @main struct Probe {
     @MainActor static func main() async {
         let scope = JobDocumentScope(jobID: "job", organizationID: "org", customerID: "customer", originEstimateID: nil)
         let ids = (0..<12).map(String.init)
+        let pagedAPI = APIClient(ids: ids)
+        let page = await JobDocumentsLoader.estimatesForPage(scope: scope, api: pagedAPI, ids: ["0", "1"],
+                                                               previous: nil, membershipFresh: true, membershipComplete: false,
+                                                               isCurrent: { true })!
+        precondition(pagedAPI.started == ["0", "1"], "Only requested page details should be fetched")
+        precondition(page.records.map(\.id) == ["0", "1"] && !page.isComplete, "Incomplete membership must not authorize approval")
+        let second = await JobDocumentsLoader.estimatesForPage(scope: scope, api: pagedAPI, ids: ["0", "1", "2"],
+                                                                 previous: page, membershipFresh: true, membershipComplete: true,
+                                                                 isCurrent: { true })!
+        precondition(pagedAPI.started == ["0", "1", "2"], "Previous page details must not be refetched")
+        precondition(second.records.map(\.id) == ["0", "1", "2"] && second.isComplete)
+        let stale = await JobDocumentsLoader.estimatesForPage(scope: scope, api: pagedAPI, ids: ["0", "1", "2"],
+                                                                previous: second, membershipFresh: false, membershipComplete: true,
+                                                                isCurrent: { true })!
+        precondition(!stale.isComplete && stale.freshIDs.isEmpty, "Cached membership must not enable approval")
+        let failedPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: APIClient(ids: ids, failure: "1"), ids: ["0", "1"],
+                                                                    previous: nil, membershipFresh: true, membershipComplete: true,
+                                                                    isCurrent: { true })!
+        precondition(!failedPage.isComplete && failedPage.unavailableIDs == ["1"], "A failed detail must keep the full set incomplete")
+        let savedAPI = APIClient(ids: ids); savedAPI.savedID = "1"
+        let savedPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: savedAPI, ids: ["0", "1"],
+                                                                   previous: nil, membershipFresh: true, membershipComplete: true,
+                                                                   isCurrent: { true })!
+        precondition(!savedPage.isComplete && !savedPage.freshIDs.contains("1"), "Saved details cannot make the set complete")
         let api = APIClient(ids: ids, failure: "5")
         var partials: [JobDocumentRead<EstimateRecord>] = []
         let result = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: nil, isCurrent: { true },

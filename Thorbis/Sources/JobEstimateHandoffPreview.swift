@@ -165,7 +165,19 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates", interruptMembership {
             interruptMembership = false; return .init(status: 200, payload: [:], error: URLError(.networkConnectionLost))
         }
-        if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates" { return .init(status:200,payload:["items":ids.filter { !removedFirst || $0 != Self.a }.map { ["id":$0,"jobId":PaperPreview.jobID,"estimateId":$0,"linkedAt":now] }]) }
+        if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
+            let all = ids.filter { !removedFirst || $0 != Self.a }
+            if flags.contains("--paper-preview-handoff-many-estimates") {
+                let cursor = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "cursor" })?.value
+                let start = cursor.flatMap { all.firstIndex(of: $0).map { $0 + 1 } } ?? 0
+                let end = min(start + 10, all.count)
+                let slice = Array(all[start..<end])
+                var payload: [String: Any] = ["items": slice.map { ["id":$0,"jobId":PaperPreview.jobID,"estimateId":$0,"linkedAt":now] }]
+                if end < all.count { payload["nextCursor"] = slice.last }
+                return .init(status: 200, payload: payload)
+            }
+            return .init(status:200,payload:["items":all.map { ["id":$0,"jobId":PaperPreview.jobID,"estimateId":$0,"linkedAt":now] }])
+        }
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return .init(status:200,payload:["items":[]]) }
         for id in ids {
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }

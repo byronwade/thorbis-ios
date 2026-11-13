@@ -29,6 +29,7 @@ final class JobEstimateMembershipPager {
     /// Approval must independently revalidate exact selected memberships and terms.
     /// These are historical scan facts, not proof of current authority or a server snapshot.
     var scanReachedEnd: Bool { started && exhausted }
+    var pagesUsedOnlyFreshResponses: Bool { started && !sawUnverifiedPage }
     var scanUsedOnlyFreshResponses: Bool { scanReachedEnd && !sawUnverifiedPage }
     var canLoadMore: Bool { !exhausted && !inFlight }
 

@@ -177,7 +177,7 @@ struct JobEstimateHandoffView: View {
         LazyVStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.jobTitle).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : model.loading ? "Loading more estimates…" : "Some estimates still need a refresh")
+                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : model.loading ? "Loading estimates…" : model.canLoadMoreEstimates ? "More estimates are available for this job." : "Some estimates still need a refresh")
                     .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
             if !model.approvalAuthority {
@@ -190,6 +190,13 @@ struct JobEstimateHandoffView: View {
                 else { Text("Opening current job estimates…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
             }
             ForEach(model.records) { record in estimateCard(record) }
+            if model.canLoadMoreEstimates {
+                CustomerSecondaryButton(title: "Load more estimates", type: type) {
+                    Task { await model.loadMoreEstimates() }
+                }
+                .disabled(model.loading)
+                .accessibilityIdentifier("handoff-load-more-estimates")
+            }
             ForEach(model.unavailableIDs, id: \.self) { id in
                 VStack(alignment: .leading, spacing: 8) {
                     Text("EST-\(id.suffix(4).uppercased()) · Unavailable").font(Theme.customerFont(type.body, weight: .medium))

@@ -129,6 +129,13 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(door.waitForExistence(timeout: 45)); door.tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(first.waitForExistence(timeout: 45)); selectEstimate(app, first)
+        XCTAssertTrue(app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"].exists, "A loaded estimate can be read before loading every page")
+        XCTAssertFalse(app.buttons["handoff-review-selected"].isEnabled, "Partial membership must not authorize approval")
+        let more = app.buttons["handoff-load-more-estimates"]
+        for _ in 0..<3 {
+            for _ in 0..<30 where !more.isHittable { app.scrollViews["job-estimate-handoff"].swipeUp() }
+            XCTAssertTrue(more.isHittable); more.tap()
+        }
         let last = app.buttons["handoff-select-00000000-0000-4000-8000-000000082038"]
         let list = app.scrollViews["job-estimate-handoff"]
         for _ in 0..<60 where !last.isHittable { list.swipeUp() }

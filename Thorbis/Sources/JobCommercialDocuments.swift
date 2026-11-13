@@ -358,6 +358,39 @@ enum JobDocumentsLoader {
         }
     }
 
+    /// Fetch only the newly requested membership page; keep previously loaded pages in order.
+    static func estimatesForPage(scope: JobDocumentScope, api: APIClient, ids: [String],
+                                 previous: JobDocumentRead<EstimateRecord>?, membershipFresh: Bool,
+                                 membershipComplete: Bool,
+                                 isCurrent: @escaping @MainActor () -> Bool) async -> JobDocumentRead<EstimateRecord>? {
+        guard isCurrent(), !Task.isCancelled else { return nil }
+        let old = previous?.scope == scope ? previous : nil
+        let present = Set((old?.records.map(\.id) ?? []) + (old?.unavailableIDs ?? []))
+        let incoming = unique(ids).filter { !present.contains($0) }
+        let details = EstimateDetails(ids: incoming, scope: scope, api: api, retained: [],
+                                      linksSaved: !membershipFresh, includeRetained: false,
+                                      isCurrent: isCurrent, onPartial: { _ in })
+        await runBoundedMainActorOperations(count: incoming.count, limit: 4) { index in await details.fetch(index) }
+        guard isCurrent(), !Task.isCancelled else { return nil }
+        var records = old?.records ?? []
+        var fresh = old?.freshIDs ?? []
+        var unavailable = old?.unavailableIDs ?? []
+        var failed = false
+        for (index, slot) in details.slots.enumerated() {
+            guard let slot else { return nil }
+            if slot.failed { failed = true }
+            if let record = slot.record {
+                records.append(record)
+                if slot.fresh { fresh.insert(record.id) }
+            } else { unavailable.append(incoming[index]) }
+        }
+        if !membershipFresh { fresh.removeAll() }
+        return .init(scope: scope, records: records, freshIDs: fresh,
+                     isComplete: membershipComplete && membershipFresh && !failed && unavailable.isEmpty &&
+                         records.allSatisfy { fresh.contains($0.id) },
+                     unavailableIDs: unavailable, kind: "estimates")
+    }
+
     static func estimates(scope: JobDocumentScope, api: APIClient,
                           retaining previous: JobDocumentRead<EstimateRecord>?,
                           isCurrent: @escaping @MainActor () -> Bool,
