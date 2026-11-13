@@ -49,22 +49,8 @@ jobs:
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
             -resultBundlePath "${{ runner.temp }}/ThorbisTests.xcresult" \
             -parallel-testing-enabled NO \
-            -only-testing:ThorbisTests/JobEstimateHandoffModelTests \
-            -only-testing:ThorbisTests/JobEstimateHandoffSelectionTests \
-            -only-testing:ThorbisTests/JobCommercialDocumentsTests \
-            -only-testing:ThorbisTests/FieldAPITests/testConcurrentEstimateReadsRetainTheirOwnProvenance \
-            -only-testing:ThorbisTests/FieldAPITests/testJobEstimateMembershipFetchesOneFreshPageOnly \
-            -only-testing:ThorbisTests/FieldAPITests/testJobEstimateMembershipRequestsOnlyChosenCursor \
-            -only-testing:ThorbisTests/FieldAPITests/testJobEstimateMembershipSavedPagesRemainCursorScoped \
-            -only-testing:ThorbisTests/FieldAPITests/testJobEstimateMembershipDoesNotHideDeniedAccess \
-            -only-testing:ThorbisTests/FieldAPITests/testJobEstimateMembershipDiscardsPageWhenAuthorityRetires \
-            -only-testing:ThorbisTests/FieldAPITests/testJobEstimateMembershipAcceptsEquivalentOriginCapitalization \
-            -only-testing:ThorbisTests/FieldAPITests/testLiveSingleEstimateMembershipUsesExactPathAndBypassesCache \
-            -only-testing:ThorbisTests/CustomerEstimateReviewTests/testIssuedRevisionDoesNotUseSavedCopyAfterConnectionDrops \
-            -only-testing:ThorbisTests/CustomerEstimateReviewTests/testIssuedRevisionDenialCannotFallBackToSavedCopy \
             -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testLongEstimateListKeepsSelectionsFromBothEnds \
             -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testCustomerCanReadEstimateBeforeSelectingIt \
-            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testTwoSameTitleEstimatesApproveIndependentlyInOneProtectedHandoff \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
             DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= test
       - name: Save test evidence
