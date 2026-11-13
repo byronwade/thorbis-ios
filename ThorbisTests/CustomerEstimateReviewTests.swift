@@ -9,6 +9,28 @@ final class CustomerEstimateReviewTests: XCTestCase {
     private let locationID = "00000000-0000-4000-8000-000000000104"
     private let paperHash = String(repeating: "a", count: 64)
 
+    func testIssuedRevisionRejectsEmptyBaseScope() throws {
+        var invalid = revision
+        invalid["lines"] = []
+        invalid["totalAmount"] = 0
+        XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionRejectsEmptyOptionScope() throws {
+        var invalid = revision
+        invalid["options"] = [["id": "00000000-0000-4000-8000-000000000201", "title": "Package",
+                               "description": "Example", "lines": [], "totalAmount": 0, "currency": "USD"]]
+        XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionAllowsNonemptyZeroPricedScope() throws {
+        var valid = revision
+        valid["lines"] = [["id": "line-1", "description": "No charge visit", "quantity": 1,
+                           "unitPrice": ["amount": 0, "currency": "USD"]]]
+        valid["totalAmount"] = 0
+        XCTAssertNoThrow(try decodedRevision(valid).validate(for: localEstimate()))
+    }
+
     func testReviewReadsCurrentAggregateThenExactImmutableTerms() async throws {
         let api = client([.init(200, try json(aggregate)), .init(200, try json(revision))])
         let review = try await api.customerIssuedEstimateRevision(for: localEstimate())
