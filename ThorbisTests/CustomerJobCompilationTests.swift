@@ -158,7 +158,12 @@ final class CustomerJobCompilationTests: XCTestCase {
             routes["/v1/jobs/\(jobID)/invoices"] = .init(200, page([invoice(id: invoiceIDs[index], jobID: jobID)]))
         }
         let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
-        let request = Task { try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true) }
+        let request = Task { @MainActor in
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+            return (compiled.estimates.map(\.jobID), compiled.estimates.map { $0.items.map(\.id) },
+                    compiled.invoices.map(\.jobID), compiled.invoices.map { $0.items.map(\.id) },
+                    compiled.estimatesOffJob.isEmpty, compiled.invoicesOffJob.isEmpty)
+        }
         defer { gate.release(); request.cancel() }
         let laterPath = "/v1/jobs/\(jobIDs[1])/invoices"
         for _ in 0..<250 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == laterPath }) {
@@ -167,13 +172,13 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == laterPath }, "A later job should progress while the first job is held")
         XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/jobs/\(jobIDs[0])/invoices" })
         gate.release()
-        let compiled = try await request.value
-        XCTAssertEqual(compiled.estimates.map(\.jobID), jobIDs)
-        XCTAssertEqual(compiled.estimates.map { $0.items.map(\.id) }, estimateIDs.map { [$0] })
-        XCTAssertEqual(compiled.invoices.map(\.jobID), jobIDs)
-        XCTAssertEqual(compiled.invoices.map { $0.items.map(\.id) }, invoiceIDs.map { [$0] })
-        XCTAssertTrue(compiled.estimatesOffJob.isEmpty)
-        XCTAssertTrue(compiled.invoicesOffJob.isEmpty)
+        let (estimateJobs, estimates, invoiceJobs, invoices, noOffJobEstimates, noOffJobInvoices) = try await request.value
+        XCTAssertEqual(estimateJobs, jobIDs)
+        XCTAssertEqual(estimates, estimateIDs.map { [$0] })
+        XCTAssertEqual(invoiceJobs, jobIDs)
+        XCTAssertEqual(invoices, invoiceIDs.map { [$0] })
+        XCTAssertTrue(noOffJobEstimates)
+        XCTAssertTrue(noOffJobInvoices)
     }
 
     func testMoneyCompilationKeepsJobGroupingAndSkipsUnrelatedCollections() async throws {
