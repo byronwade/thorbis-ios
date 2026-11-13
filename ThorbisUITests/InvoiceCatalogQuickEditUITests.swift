@@ -23,7 +23,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 10))
         canvas.tap()
         canvas.typeText(" extra detail")
-        app.buttons["Done"].firstMatch.tap()
+        app.navigationBars.buttons["Done"].firstMatch.tap()
         XCTAssertTrue(canvas.waitForNonExistence(timeout: 10))
         XCTAssertTrue((inline.value as? String ?? "").contains("extra detail"), "The canvas edits must remain in the current invoice draft")
     }
