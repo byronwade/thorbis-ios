@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Combine
 
 /// A server-produced customer presentation. It is not a signed invoice.
 struct CustomerInvoiceSummary: Decodable, Sendable {
@@ -187,7 +188,10 @@ final class CustomerSummarySigningContext {
     func freeze(signerName: String, signedAt: String, png: Data) throws -> CustomerSummaryFrozenSignature {
         try checkCurrent()
         let name = signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 120, !png.isEmpty, png.count <= 8 * 1024 * 1024,
+        guard png.count <= 512 * 1024 else {
+            throw Problem(title: "Signature is too large. Clear it and sign again.", status: nil, detail: nil)
+        }
+        guard !name.isEmpty, name.count <= 120, !png.isEmpty,
               ISO8601DateFormatter().date(from: signedAt) != nil else {
             throw Problem(title: "Enter your name and signature", status: nil, detail: nil)
         }
@@ -201,6 +205,11 @@ final class CustomerSummarySigningContext {
             clientAssetID: UUID().uuidString.lowercased(), idempotencyKey: UUID().uuidString.lowercased())
         frozen = value
         return value
+    }
+    func signature() throws -> CustomerSummaryFrozenSignature {
+        try checkCurrent()
+        guard let frozen else { throw Problem(title: "Signature isn't ready", status: nil, detail: nil) }
+        return frozen
     }
     func acceptUploadedMedia(_ asset: MediaAssetRecord) throws {
         try checkCurrent()
@@ -226,6 +235,94 @@ final class CustomerSummarySigningContext {
         return attempt
     }
     func retire() { retired = true; frozen = nil; uploadedMediaID = nil }
+}
+
+/// Handoff-owned signing state. Callers must scope `current` to the actor, job, session,
+/// capability, activation and API generation; neither navigation nor a sheet owns this object.
+@MainActor
+final class CustomerSummarySigningCoordinator: ObservableObject {
+    enum Phase: Equatable { case idle, checking, unsigned, submitting, signed, unavailable }
+    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var hasFrozenSignature = false
+    @Published private(set) var errorMessage: String?
+    private(set) var receipt: CustomerInvoiceSummaryReceipt?
+    private let summary: CustomerInvoiceSummary
+    private let context: CustomerSummarySigningContext
+    private let current: @MainActor () -> Bool
+    private let lookup: @MainActor () async throws -> CustomerSummaryAuthorizationState
+    private let upload: @MainActor (CustomerSummaryFrozenSignature) async throws -> MediaAssetRecord
+    private let submit: @MainActor (CustomerSummarySigningAttempt) async throws -> CustomerInvoiceSummaryReceipt
+    private var generation = UUID()
+    private var running = false
+    private var retired = false
+
+    init(summary: CustomerInvoiceSummary, actorID: String, current: @escaping @MainActor () -> Bool,
+         lookup: @escaping @MainActor () async throws -> CustomerSummaryAuthorizationState,
+         upload: @escaping @MainActor (CustomerSummaryFrozenSignature) async throws -> MediaAssetRecord,
+         submit: @escaping @MainActor (CustomerSummarySigningAttempt) async throws -> CustomerInvoiceSummaryReceipt) {
+        self.summary = summary; self.current = current; self.lookup = lookup; self.upload = upload; self.submit = submit
+        context = CustomerSummarySigningContext(summary: summary, actorID: actorID, current: current)
+    }
+    private func valid(_ token: UUID) -> Bool {
+        !Task.isCancelled && !retired && generation == token && current()
+    }
+    func checkStatus() async {
+        guard !running, !retired, current() else { return }
+        running = true; let token = generation; phase = .checking; receipt = nil; errorMessage = nil
+        defer { if generation == token { running = false } }
+        do {
+            let result = try await lookup()
+            guard valid(token) else { return }
+            switch result {
+            case .unsigned: phase = .unsigned
+            case .signed(let value):
+                guard value.matches(summary: summary, signerName: value.signerName, signedAt: value.signedAt) else { phase = .unavailable; return }
+                receipt = value; phase = .signed
+            }
+        } catch { if valid(token) { phase = .unavailable } }
+    }
+    func sign(signerName: String, signedAt: String, png: Data) async {
+        guard !running, phase == .unsigned, !retired, current() else { return }
+        errorMessage = nil
+        do {
+            let signature = try context.freeze(signerName: signerName, signedAt: signedAt, png: png)
+            hasFrozenSignature = true
+            await perform(signature)
+        } catch {
+            if current(), !retired { errorMessage = (error as? Problem)?.title ?? "Check your signature and try again." }
+        }
+    }
+    func retryFrozen() async {
+        guard !running, phase == .unsigned, !retired, current(), let signature = try? context.signature() else { return }
+        await perform(signature)
+    }
+    private func perform(_ signature: CustomerSummaryFrozenSignature) async {
+        guard !running, !retired, current() else { return }
+        running = true; let token = generation; phase = .submitting
+        defer { if generation == token { running = false } }
+        do {
+            if (try? context.attempt()) == nil {
+                let asset = try await upload(signature)
+                guard valid(token) else { return }
+                try context.acceptUploadedMedia(asset)
+            }
+            guard valid(token) else { return }
+            let attempt = try context.attempt()
+            let value = try await submit(attempt)
+            guard valid(token) else { return }
+            guard value.matches(summary: summary, signerName: attempt.signerName, signedAt: attempt.signedAt) else { phase = .unavailable; return }
+            receipt = value; phase = .signed
+        } catch { if valid(token) { phase = .unavailable } }
+    }
+    /// Suspend a departed destination without discarding an uncertain attempt. The next
+    /// activation must perform a fresh status check before retrying those same terms.
+    func deactivate() {
+        generation = UUID(); running = false; receipt = nil; errorMessage = nil; phase = .idle
+    }
+    func retire() {
+        retired = true; generation = UUID(); running = false; receipt = nil; hasFrozenSignature = false; errorMessage = nil
+        context.retire(); phase = .idle
+    }
 }
 
 @MainActor

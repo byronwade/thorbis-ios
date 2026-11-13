@@ -66,6 +66,14 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         receipt["signedAt"] = "2026-11-13T12:00:00Z"
         var handoffCurrent = true
         let handoff = CustomerSummarySigningContext(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { handoffCurrent })
+        let boundary = CustomerSummarySigningContext(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true })
+        XCTAssertThrowsError(try boundary.freeze(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data(repeating: 1, count: 512 * 1024 + 1))) { error in
+            XCTAssertEqual((error as? Problem)?.title, "Signature is too large. Clear it and sign again.")
+        }
+        let maximum = try boundary.freeze(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data(repeating: 1, count: 512 * 1024))
+        XCTAssertEqual(maximum.png.count, 512 * 1024)
+        XCTAssertThrowsError(try boundary.freeze(signerName: "Alex", signedAt: maximum.signedAt, png: Data(repeating: 1, count: 512 * 1024 + 1)))
+        XCTAssertEqual(try boundary.signature().idempotencyKey, maximum.idempotencyKey, "An oversized retry cannot erase a frozen attempt")
         let signature = try handoff.freeze(signerName: " Alex ", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
         XCTAssertEqual(try handoff.freeze(signerName: "Alex", signedAt: signature.signedAt, png: signature.png), signature)
         XCTAssertThrowsError(try handoff.freeze(signerName: "Alex", signedAt: signature.signedAt, png: Data([4])))
@@ -85,6 +93,55 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertThrowsError(try handoff.acceptUploadedMedia(media()))
         assetJSON["jobId"] = "00000000-0000-4000-8000-000000000099"
         XCTAssertThrowsError(try handoff.acceptUploadedMedia(media()))
+        let validReceipt = try decoded()
+        assetJSON["id"] = "00000000-0000-4000-8000-000000000020"; assetJSON["jobId"] = job
+        let validAsset = try media()
+        var uploadCount = 0; var attempts: [CustomerSummarySigningAttempt] = []
+        let coordinator = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true },
+            lookup: { .unsigned }, upload: { _ in uploadCount += 1; return validAsset }, submit: { value in
+                attempts.append(value)
+                if attempts.count == 1 { throw URLError(.networkConnectionLost) }
+                return validReceipt
+            })
+        await coordinator.checkStatus(); XCTAssertEqual(coordinator.phase, .unsigned)
+        await coordinator.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data(repeating: 1, count: 512 * 1024 + 1))
+        XCTAssertEqual(coordinator.phase, .unsigned); XCTAssertFalse(coordinator.hasFrozenSignature)
+        XCTAssertEqual(coordinator.errorMessage, "Signature is too large. Clear it and sign again.")
+        XCTAssertEqual(uploadCount, 0)
+        await coordinator.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
+        XCTAssertEqual(coordinator.phase, .unavailable); XCTAssertTrue(coordinator.hasFrozenSignature)
+        await coordinator.retryFrozen(); XCTAssertEqual(attempts.count, 1, "An uncertain result requires a fresh status check")
+        await coordinator.checkStatus(); XCTAssertEqual(coordinator.phase, .unsigned)
+        await coordinator.retryFrozen()
+        XCTAssertEqual(coordinator.phase, .signed); XCTAssertEqual(uploadCount, 1)
+        XCTAssertEqual(attempts.count, 2); XCTAssertEqual(attempts[0].idempotencyKey, attempts[1].idempotencyKey)
+        XCTAssertEqual(attempts[0].imageMediaId, attempts[1].imageMediaId)
+        var pending: CheckedContinuation<Void, Never>?
+        let retiredCoordinator = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true },
+            lookup: { await withCheckedContinuation { pending = $0 }; return .signed(validReceipt) },
+            upload: { _ in validAsset }, submit: { _ in validReceipt })
+        let check = Task { @MainActor in await retiredCoordinator.checkStatus() }
+        for _ in 0..<100 where pending == nil { await Task.yield() }
+        XCTAssertNotNil(pending); retiredCoordinator.retire(); pending?.resume(); await check.value
+        XCTAssertEqual(retiredCoordinator.phase, .idle); XCTAssertNil(retiredCoordinator.receipt)
+        var suspendedSubmission: CheckedContinuation<Void, Never>?
+        var suspendedAttempts: [CustomerSummarySigningAttempt] = []
+        let suspended = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true },
+            lookup: { .unsigned }, upload: { _ in validAsset }, submit: { value in
+                suspendedAttempts.append(value)
+                if suspendedAttempts.count == 1 { await withCheckedContinuation { suspendedSubmission = $0 } }
+                return validReceipt
+            })
+        await suspended.checkStatus()
+        let originalSubmission = Task { @MainActor in await suspended.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3])) }
+        for _ in 0..<100 where suspendedSubmission == nil { await Task.yield() }
+        XCTAssertNotNil(suspendedSubmission); suspended.deactivate()
+        await suspended.checkStatus(); XCTAssertEqual(suspended.phase, .unsigned)
+        suspendedSubmission?.resume(); await originalSubmission.value
+        XCTAssertEqual(suspended.phase, .unsigned, "A response from the previous activation must not publish")
+        await suspended.retryFrozen(); XCTAssertEqual(suspended.phase, .signed)
+        XCTAssertEqual(suspendedAttempts.count, 2)
+        XCTAssertEqual(suspendedAttempts[0].idempotencyKey, suspendedAttempts[1].idempotencyKey)
         handoffCurrent = false
         XCTAssertThrowsError(try handoff.attempt())
         handoff.retire(); handoffCurrent = true
