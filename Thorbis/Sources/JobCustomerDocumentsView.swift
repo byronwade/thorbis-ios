@@ -36,6 +36,7 @@ struct JobCustomerDocumentsView: View {
     @State private var book: CustomerJobDocumentID?
     @State private var openingID: String?
     @State private var diagnosticTrace = "not started"
+    @State private var diagnosticID = UUID().uuidString
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var error: String?
     @State private var documentSelectionRevision = UUID()
@@ -94,7 +95,7 @@ struct JobCustomerDocumentsView: View {
                     unavailableEstimates: canViewEstimates && estimates?.scope == scope ? estimates?.unavailableIDs ?? [] : [],
                     initial: initial, actionError: error, refresh: refresh,
                     reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
-                    signInvoice: { id in UserDefaults.standard.set(true, forKey: "isolated-invoice-parent-called"); diagnosticTrace = "sign button tapped"; print("TRACE invoice sign button"); Task { await openInvoice(id, decision: true, sign: true) } },
+                    signInvoice: { id in UserDefaults.standard.set(diagnosticID, forKey: "isolated-invoice-callback-owner"); UserDefaults.standard.set(true, forKey: "isolated-invoice-parent-called"); diagnosticTrace = "sign button tapped"; print("TRACE invoice sign button"); Task { await openInvoice(id, decision: true, sign: true) } },
                     payInvoice: { id in
                         #if DEBUG
                         if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-recheck-fails") {
@@ -106,9 +107,10 @@ struct JobCustomerDocumentsView: View {
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
                     canPayInvoice: session.can("invoice.payment.create", feature: "payments"),
                     onSelectionChanged: { documentSelectionRevision = UUID(); error = nil })
-                    .overlay(alignment: .top) { Text("TRACE: \(diagnosticTrace) · parent called: \(UserDefaults.standard.bool(forKey: "isolated-invoice-parent-called"))").font(.caption).accessibilityIdentifier("invoice-diagnostic-trace") }
+                    .overlay(alignment: .top) { Text("TRACE: \(diagnosticTrace) · owner: \(diagnosticID)").font(.caption).accessibilityIdentifier("invoice-diagnostic-trace") }
                     .disabled(unlocking || openingID != nil)
                     .thorbisDestination(item: Binding(get: { paper }, set: { next in
+                        UserDefaults.standard.set("setter: \(next == nil ? "nil" : "value") owner: \(diagnosticID)", forKey: "isolated-invoice-binding")
                         if paper != next { paperGeneration = UUID() }
                         paper = next
                     })) { destination in
