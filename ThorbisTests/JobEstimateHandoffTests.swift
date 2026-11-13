@@ -260,6 +260,61 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertFalse(model.complete); XCTAssertFalse(model.canReview)
         XCTAssertNotNil(model.error); XCTAssertTrue(model.selectedIDs.contains(a))
     }
+    func testCancelledLastPageDetailsRetryLoadsThePage() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON),
+            "/v1/jobs/\(jobID)/estimates": .init(200, membership([a], next: a)),
+            "/v1/estimates/\(a)": .init(200, record(a))
+        ])
+        await model.refresh(); model.setSelected(a, selected: true)
+        XCTAssertTrue(model.canLoadMoreEstimates)
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)/estimates": .init(200, membership([b])),
+            "/v1/estimates/\(b)": .init(200, record(b), gate: gate)
+        ])
+        let task = Task { @MainActor in await model.loadMoreEstimates() }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(b)" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/estimates/\(b)" })
+        task.cancel(); gate.release(); await task.value
+        XCTAssertFalse(model.complete)
+        XCTAssertTrue(model.canLoadMoreEstimates, "Load more must remain available to retry the last page")
+        XCTAssertTrue(model.selectedIDs.contains(a))
+        XCTAssertFalse(model.records.contains { $0.id == b })
+        URLProtocolFixture.setRoutes(["/v1/estimates/\(b)": .init(200, record(b))])
+        await model.loadMoreEstimates()
+        XCTAssertEqual(model.records.map(\.id), [a, b])
+        XCTAssertTrue(model.complete)
+        XCTAssertFalse(model.canLoadMoreEstimates)
+        XCTAssertTrue(model.selectedIDs.contains(a))
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path.hasSuffix("/estimates") == true },
+                       "Retrying a committed last page must not ask the pager for another cursor")
+    }
+    func testRefreshKeepsStaleEstimateWhenDetailIsTemporarilyUnavailable() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON),
+            "/v1/jobs/\(jobID)/estimates": .init(200, membership([a])),
+            "/v1/estimates/\(a)": .init(200, record(a))
+        ])
+        await model.refresh()
+        XCTAssertEqual(model.records.map(\.id), [a])
+        XCTAssertTrue(model.complete)
+        model.setSelected(a, selected: true)
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON),
+            "/v1/jobs/\(jobID)/estimates": .init(200, membership([a])),
+            "/v1/estimates/\(a)": .init(503, #"{"status":503,"title":"Unavailable"}"#)
+        ])
+        await model.refresh()
+        XCTAssertEqual(model.records.map(\.id), [a], "A retryable failure must keep the last scoped row")
+        XCTAssertFalse(model.complete)
+        XCTAssertTrue(model.selectedIDs.contains(a))
+        XCTAssertFalse(model.canReview, "A stale retained row cannot authorize approval")
+    }
     func testIssuedDetailsUsesTargetedMembershipAndRefuses403OrRemovedLink() async throws {
         let model = try await ready([])
         let membershipPath = "/v1/jobs/\(jobID)/estimates"

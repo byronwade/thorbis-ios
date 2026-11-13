@@ -296,6 +296,38 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.first?.cachePolicy, .reloadIgnoringLocalCacheData)
     }
 
+    func testPagedEstimateRefreshRetainsRetryableDetail() async throws {
+        let estimateID = id(11)
+        let firstClient = api([.init(200, estimate(11))])
+        let first = try XCTUnwrap(await JobDocumentsLoader.estimatesForPage(scope: scope(), api: firstClient, ids: [estimateID],
+            previous: nil, membershipFresh: true, membershipComplete: true, isCurrent: { true }))
+        XCTAssertEqual(first.records.map(\.id), [estimateID])
+        XCTAssertTrue(first.isComplete)
+        let retry = api([.init(503, problem(503))])
+        let second = try XCTUnwrap(await JobDocumentsLoader.estimatesForPage(scope: scope(), api: retry, ids: [estimateID],
+            previous: nil, membershipFresh: true, membershipComplete: true, retained: first.records, isCurrent: { true }))
+        XCTAssertEqual(second.records.map(\.id), [estimateID])
+        XCTAssertTrue(second.freshIDs.isEmpty)
+        XCTAssertTrue(second.unavailableIDs.isEmpty)
+        XCTAssertFalse(second.isComplete)
+    }
+
+    func testPagedEstimateIDsDeduplicateIgnoringCase() async throws {
+        let estimateID = id(11)
+        let mixed = estimateID.uppercased()
+        let upperBody = estimate(11).replacingOccurrences(of: "\"id\":\"\(estimateID)\"", with: "\"id\":\"\(mixed)\"")
+        let client = api([.init(200, upperBody), .init(200, estimate(11))])
+        let first = try XCTUnwrap(await JobDocumentsLoader.estimatesForPage(scope: scope(), api: client, ids: [mixed, estimateID],
+            previous: nil, membershipFresh: true, membershipComplete: true, isCurrent: { true }))
+        XCTAssertEqual(first.records.map(\.id), [mixed])
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        let skipped = api([])
+        let second = try XCTUnwrap(await JobDocumentsLoader.estimatesForPage(scope: scope(), api: skipped, ids: [mixed, estimateID],
+            previous: first, membershipFresh: true, membershipComplete: true, isCurrent: { true }))
+        XCTAssertEqual(second.records.map(\.id), [mixed])
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+    }
+
     func testSharedJobEstimatesShowOfflineCopiesWithoutMarkingCollectionComplete() async throws {
         let linksPath = "/v1/jobs/\(id(100))/estimates", estimatePath = "/v1/estimates/\(id(11))"
         let client = api([.init(200, page([link(11)])), .init(200, estimate(11))])

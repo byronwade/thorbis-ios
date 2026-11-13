@@ -93,6 +93,33 @@ struct Provenance { enum Source { case urlSession(cacheBypassed: Bool), savedCop
                                                                     previous: nil, membershipFresh: true, membershipComplete: true,
                                                                     isCurrent: { true })!
         precondition(!failedPage.isComplete && failedPage.unavailableIDs == ["1"], "A failed detail must keep the full set incomplete")
+        let retainedPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: APIClient(ids: ids, failure: "1"), ids: ["0", "1"],
+                                                                      previous: nil, membershipFresh: true, membershipComplete: true,
+                                                                      retained: [EstimateRecord(id: "1")], isCurrent: { true })!
+        precondition(retainedPage.records.map(\.id) == ["0", "1"] && !retainedPage.freshIDs.contains("1") &&
+                     retainedPage.unavailableIDs.isEmpty && !retainedPage.isComplete,
+                     "A retryable paged detail must keep the last scoped row as stale")
+        let mixedAPI = APIClient(ids: ids)
+        let mixedFirst = await JobDocumentsLoader.estimatesForPage(scope: scope, api: mixedAPI, ids: ["AB"],
+                                                                    previous: nil, membershipFresh: true, membershipComplete: false,
+                                                                    isCurrent: { true })!
+        let mixedSecond = await JobDocumentsLoader.estimatesForPage(scope: scope, api: mixedAPI, ids: ["AB", "ab"],
+                                                                     previous: mixedFirst, membershipFresh: true, membershipComplete: true,
+                                                                     isCurrent: { true })!
+        precondition(mixedAPI.started == ["AB"] && mixedSecond.records.map(\.id) == ["AB"],
+                     "A later membership ID that only differs by case must not refetch or duplicate")
+        let mixedOnceAPI = APIClient(ids: ids)
+        let mixedOnce = await JobDocumentsLoader.estimatesForPage(scope: scope, api: mixedOnceAPI, ids: ["AB", "ab"],
+                                                                   previous: nil, membershipFresh: true, membershipComplete: true,
+                                                                   isCurrent: { true })!
+        precondition(mixedOnceAPI.started == ["AB"] && mixedOnce.records.map(\.id) == ["AB"],
+                     "Paged IDs that differ only by case are one estimate")
+        let mixedRetainAPI = APIClient(ids: ids, failure: "ab")
+        let mixedKept = await JobDocumentsLoader.estimatesForPage(scope: scope, api: mixedRetainAPI, ids: ["ab"],
+                                                                   previous: nil, membershipFresh: true, membershipComplete: true,
+                                                                   retained: [EstimateRecord(id: "AB")], isCurrent: { true })!
+        precondition(mixedKept.records.map(\.id) == ["AB"] && !mixedKept.freshIDs.contains("AB") && !mixedKept.isComplete,
+                     "A retryable detail must retain a scoped row even when membership casing differs")
         let savedAPI = APIClient(ids: ids); savedAPI.savedID = "1"
         let savedPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: savedAPI, ids: ["0", "1"],
                                                                    previous: nil, membershipFresh: true, membershipComplete: true,

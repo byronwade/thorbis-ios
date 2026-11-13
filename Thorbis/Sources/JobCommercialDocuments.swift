@@ -303,7 +303,8 @@ enum JobDocumentsLoader {
              onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void) {
             self.ids = ids; self.scope = scope; self.api = api; self.retained = retained
             self.retainedByID = retained.reduce(into: [:]) { result, record in
-                if result[record.id] == nil, scope.contains(record, requestedID: record.id) { result[record.id] = record }
+                let key = record.id.lowercased()
+                if result[key] == nil, scope.contains(record, requestedID: record.id) { result[key] = record }
             }
             self.linksSaved = linksSaved; self.isCurrent = isCurrent
             self.includeRetained = includeRetained; self.onPartial = onPartial
@@ -337,7 +338,7 @@ enum JobDocumentsLoader {
             catch {
                 guard isCurrent(), !Task.isCancelled else { return }
                 let mayRetain = JobDocumentsLoader.canRetain(after: error)
-                let old = mayRetain ? retainedByID[id] : nil
+                let old = mayRetain ? retainedByID[id.lowercased()] : nil
                 slots[index] = .init(record: old, fresh: false, failed: true, rejected: !mayRetain)
                 publishPartial()
             }
@@ -355,7 +356,7 @@ enum JobDocumentsLoader {
                     if let record = slot.record {
                         rows.append(record); if slot.fresh { fresh.insert(record.id) }
                     } else { unavailable.append(ids[index]) }
-                } else if let old = retainedByID[ids[index]] {
+                } else if let old = retainedByID[ids[index].lowercased()] {
                     rows.append(old)
                 }
             }
@@ -372,13 +373,14 @@ enum JobDocumentsLoader {
     static func estimatesForPage(scope: JobDocumentScope, api: APIClient, ids: [String],
                                  previous: JobDocumentRead<EstimateRecord>?, membershipFresh: Bool,
                                  membershipComplete: Bool,
+                                 retained: [EstimateRecord] = [],
                                  isCurrent: @escaping @MainActor () -> Bool,
                                  onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void = { _ in }) async -> JobDocumentRead<EstimateRecord>? {
         guard isCurrent(), !Task.isCancelled else { return nil }
         let old = previous?.scope == scope ? previous : nil
-        let present = Set((old?.records.map(\.id) ?? []) + (old?.unavailableIDs ?? []))
-        let incoming = unique(ids).filter { !present.contains($0) }
-        let details = EstimateDetails(ids: incoming, scope: scope, api: api, retained: [],
+        let present = Set(((old?.records.map(\.id) ?? []) + (old?.unavailableIDs ?? [])).map { $0.lowercased() })
+        let incoming = unique(ids).filter { !present.contains($0.lowercased()) }
+        let details = EstimateDetails(ids: incoming, scope: scope, api: api, retained: retained,
                                       linksSaved: !membershipFresh, includeRetained: false,
                                       isCurrent: isCurrent, onPartial: { page in
             guard isCurrent(), !Task.isCancelled else { return }
@@ -537,7 +539,7 @@ enum JobDocumentsLoader {
 
     private static func unique(_ ids: [String]) -> [String] {
         var seen = Set<String>()
-        return ids.filter { seen.insert($0).inserted }
+        return ids.filter { seen.insert($0.lowercased()).inserted }
     }
 
     private static func denied(_ error: Error) -> Bool {

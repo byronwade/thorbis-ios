@@ -310,25 +310,30 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     private func loadPage(ticket: UUID) async throws {
         guard let pager = membershipPager, isCurrent, request == ticket else { throw CancellationError() }
-        try await pager.loadNext(isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }) { [weak self] cursor in
-            guard let self else { throw CancellationError() }
-            let current: @MainActor () -> Bool = { [weak self] in self?.isCurrent == true && self?.request == ticket }
-            let page: APIRead<JobEstimateLinkPage>
-            do {
-                page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, requireFresh: true, isCurrent: current)
-            } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
-                // A scoped saved page is readable but cannot authorize a signature.
-                page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, isCurrent: current)
+        // Membership is committed before details return. If the last page's details are cancelled,
+        // retry those IDs without asking the exhausted pager for another cursor.
+        if pager.canLoadMore {
+            try await pager.loadNext(isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }) { [weak self] cursor in
+                guard let self else { throw CancellationError() }
+                let current: @MainActor () -> Bool = { [weak self] in self?.isCurrent == true && self?.request == ticket }
+                let page: APIRead<JobEstimateLinkPage>
+                do {
+                    page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, requireFresh: true, isCurrent: current)
+                } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                    // A scoped saved page is readable but cannot authorize a signature.
+                    page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, isCurrent: current)
+                }
+                return .init(links: page.value.items, nextCursor: page.value.nextCursor,
+                             isAuthoritative: page.provenance.source == .urlSession(cacheBypassed: true))
             }
-            return .init(links: page.value.items, nextCursor: page.value.nextCursor,
-                         isAuthoritative: page.provenance.source == .urlSession(cacheBypassed: true))
+            guard isCurrent, request == ticket, !Task.isCancelled else { throw CancellationError() }
         }
-        guard isCurrent, request == ticket, !Task.isCancelled else { throw CancellationError() }
         var ids = pager.estimateIDs
         if let origin = scope.originEstimateID, !ids.contains(where: { $0.caseInsensitiveCompare(origin) == .orderedSame }) { ids.insert(origin, at: 0) }
         guard let read = await JobDocumentsLoader.estimatesForPage(scope: scope, api: api, ids: ids,
             previous: pageRead, membershipFresh: pager.pagesUsedOnlyFreshResponses,
             membershipComplete: pager.scanReachedEnd && pager.scanUsedOnlyFreshResponses,
+            retained: records,
             isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, onPartial: { [weak self] partial in
                 guard let self, self.isCurrent, self.request == ticket else { return }
                 self.records = partial.records; self.freshIDs = partial.freshIDs
