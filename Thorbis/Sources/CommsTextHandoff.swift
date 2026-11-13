@@ -99,7 +99,12 @@ extension View {
 final class InboxEmailPresenter: ObservableObject {
     static let shared = InboxEmailPresenter()
     #if DEBUG
-    private static let previewRecoveryNamespace = UUID().uuidString
+    private static let previewRecoveryNamespace: String = {
+        let args = ProcessInfo.processInfo.arguments
+        if let index = args.firstIndex(of: "--paper-preview-email-recovery-namespace"), args.indices.contains(index + 1),
+           UUID(uuidString: args[index + 1]) != nil { return args[index + 1] }
+        return UUID().uuidString
+    }()
     #endif
     struct Opening: Identifiable {
         let id = UUID()

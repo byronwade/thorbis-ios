@@ -633,6 +633,9 @@ final class KeychainCommsEmailRecoveryStore: CommsEmailRecoveryStoring {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: scope.account]
     }
     func load(scope: CommsEmailRecoveryScope) throws -> CommsEmailRecovery? {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-recovery-load-fails") { throw RecoveryError.keychain(errSecNotAvailable) }
+        #endif
         var item = query(scope); item[kSecReturnData as String] = true; item[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(item as CFDictionary, &result)
@@ -641,6 +644,9 @@ final class KeychainCommsEmailRecoveryStore: CommsEmailRecoveryStoring {
         return try JSONDecoder().decode(CommsEmailRecovery.self, from: data)
     }
     func save(_ value: CommsEmailRecovery, scope: CommsEmailRecoveryScope) throws {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-recovery-write-fails") { throw RecoveryError.keychain(errSecNotAvailable) }
+        #endif
         let identity = query(scope); let data = try JSONEncoder().encode(value)
         let status = SecItemUpdate(identity as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
@@ -651,6 +657,9 @@ final class KeychainCommsEmailRecoveryStore: CommsEmailRecoveryStoring {
         } else if status != errSecSuccess { throw RecoveryError.keychain(status) }
     }
     func remove(scope: CommsEmailRecoveryScope) throws {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-recovery-remove-fails") { throw RecoveryError.keychain(errSecNotAvailable) }
+        #endif
         let status = SecItemDelete(query(scope) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw RecoveryError.keychain(status) }
     }
