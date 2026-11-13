@@ -319,6 +319,7 @@ private struct CustomerInvoiceBookPage: View {
     let pay: () -> Void
     @StateObject private var model: InvoicePaymentCollectionModel
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var diagnosticSignTap = UserDefaults.standard.bool(forKey: "isolated-invoice-sign-tapped")
     @State private var showPayments = false
     @State private var choseInitialPaymentVisibility = false
 
@@ -395,7 +396,11 @@ private struct CustomerInvoiceBookPage: View {
             }
             if fresh, model.invoice != nil, amounts != nil, ["issued", "paid"].contains(invoice.status) {
                 if !signed && canSign {
-                    CustomerPresentationCommit(title: "Sign for the work", enabled: !model.isLoading, busy: false, type: type, action: sign)
+                    CustomerPresentationCommit(title: "Sign for the work", enabled: !model.isLoading, busy: false, type: type) {
+                        UserDefaults.standard.set(true, forKey: "isolated-invoice-sign-tapped")
+                        diagnosticSignTap = true
+                        sign()
+                    }
                         .padding(Theme.gutter)
                 } else if invoice.status == "issued", canPay, model.canRecordPayment, let amounts, amounts.due > 0 {
                     CustomerPresentationCommit(title: "Pay \(money(amounts.due, currency: invoice.currency))", enabled: true, busy: false, type: type, action: pay)
@@ -405,6 +410,7 @@ private struct CustomerInvoiceBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
+        .overlay(alignment: .top) { Text("CHILD TRACE: \(diagnosticSignTap ? "tapped" : "not tapped")").font(.caption).accessibilityIdentifier("invoice-child-trace").allowsHitTesting(false) }
         .task(id: original) { await model.load() }
         .onChange(of: model.historyComplete) { _, complete in
             guard complete, !choseInitialPaymentVisibility else { return }
