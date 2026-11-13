@@ -408,7 +408,8 @@ struct JobEstimateHandoffView: View {
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
         } else {
-            price = (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+            price = model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                ? "Refresh to check price" : (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
         }
         return "\(state), \(record.status.capitalized), \(price)"
     }
