@@ -5,6 +5,12 @@ private enum CustomerJobPaper: Hashable {
     case invoice(InvoiceRecord, signing: Bool)
 }
 
+/// Stable navigation owner for async rechecks and destination callbacks.
+@MainActor private final class CustomerJobPaperNavigation: ObservableObject {
+    @Published var paper: CustomerJobPaper?
+    @Published var generation = UUID()
+}
+
 /// Customer view's home. Lives inside one CustomerModeContainer: the job's estimates (select and
 /// approve one or several), its invoices with their payments, and the customer's own details.
 /// Browsing never exposes technician controls.
@@ -31,8 +37,15 @@ struct JobCustomerDocumentsView: View {
     @EnvironmentObject private var session: SessionController
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
-    @State private var paper: CustomerJobPaper?
-    @State private var paperGeneration = UUID()
+    @StateObject private var paperNavigation = CustomerJobPaperNavigation()
+    private var paper: CustomerJobPaper? {
+        get { paperNavigation.paper }
+        nonmutating set { paperNavigation.paper = newValue }
+    }
+    private var paperGeneration: UUID {
+        get { paperNavigation.generation }
+        nonmutating set { paperNavigation.generation = newValue }
+    }
     @State private var book: CustomerJobDocumentID?
     @State private var openingID: String?
     @State private var paymentModel: InvoicePaymentCollectionModel?
