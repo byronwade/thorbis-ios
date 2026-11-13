@@ -221,6 +221,15 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
                 }
                 return .init(status:200,payload:revision(id))
             }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/1/acceptance", id == Self.b,
+               flags.contains("--handoff-test-approved-receipt") {
+                let revisionID = flags.contains("--handoff-test-approved-receipt-wrong-revision")
+                    ? "00000000-0000-4000-8000-000000009199"
+                    : id.replacingOccurrences(of: "0081", with: "0091")
+                return .init(status:200,payload:["id":"00000000-0000-4000-8000-000000007101", "estimateId":id,
+                    "revisionId":revisionID, "revisionNumber":1, "contentHash":String(repeating:"b",count:64),
+                    "signerName":"Sample customer", "acceptedAt":now, "totalAmount":amount(id), "currency":"USD", "lines":lines(id)])
+            }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
             if method == "POST", path == "/v1/estimates/\(id)/action-tokens" { return .init(status:200,payload:["token":"sample-\(id)"]) }
             if method == "GET", path == "/v1/public/document-actions/sample-\(id)" { return .init(status:200,payload:action(id)) }
