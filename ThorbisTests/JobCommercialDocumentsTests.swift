@@ -111,12 +111,12 @@ final class JobCommercialDocumentsTests: XCTestCase {
         let membershipPath = "/v1/jobs/\(id(100))/estimates"
         SavedCopyStore.shared.waitForQueuedWrites()
         let membershipKey = SavedCopies.key(origin: "https://app.thorbis.com", path: membershipPath, query: [])
-        SavedCopyStore.shared.write(Data(page([link(11)]).utf8), scope: savedScope, key: membershipKey)
-        SavedCopyStore.shared.waitForQueuedWrites()
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: savedScope, key: membershipKey), "Online page must actually be saved for offline use")
         let detailKey = SavedCopies.key(origin: "https://app.thorbis.com", path: "/v1/estimates/\(id(11))", query: [])
         let detailFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("SavedCopies").appendingPathComponent(savedScope).appendingPathComponent("\(detailKey).json")
         try? FileManager.default.removeItem(at: detailFile)
+        XCTAssertFalse(SavedCopyStore.shared.exists(scope: savedScope, key: detailKey), "Exercise missing detail copy")
         client.knownOffline = true
         URLProtocolFixture.setRoutes([membershipPath: URLProtocolFixture.offline,
                                       "/v1/estimates/\(id(11))": URLProtocolFixture.offline])

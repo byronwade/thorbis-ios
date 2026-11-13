@@ -1142,8 +1142,8 @@ extension APIClient {
     func fieldEstimate(_ id: String, requireFresh: Bool = false) async throws -> EstimateRecord {
         try await send("GET", fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
     }
-    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false) async throws -> APIRead<EstimateRecord> {
-        try await sendWithProvenance(fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
+    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false, saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> APIRead<EstimateRecord> {
+        try await sendWithProvenance(fieldPath("/v1/estimates", id: id), requireFresh: requireFresh, saveIfCurrent: saveIfCurrent)
     }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
@@ -1168,7 +1168,7 @@ extension APIClient {
         try Task.checkCancellation()
         guard isCurrent(), origin != nil else { throw CancellationError() }
         let response: APIRead<JobEstimateLinkPage> = try await sendWithProvenance(
-            fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), cursor: cursor, requireFresh: requireFresh)
+            fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), cursor: cursor, requireFresh: requireFresh, saveIfCurrent: isCurrent)
         try Task.checkCancellation()
         guard isCurrent(), generation == requestGeneration, scopeRevision == savedCopyScopeRevision,
               origin == normalizedOrigin, response.provenance.generation == generation,

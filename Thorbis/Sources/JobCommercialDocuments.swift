@@ -201,7 +201,9 @@ final class JobDocumentCollections: ObservableObject {
                 if !healthy { self.estimatePageError = read.issue ?? "Some estimates need a refresh." }
             }) { cursor in
                 let response: APIRead<JobEstimateLinkPage>
-                do { response = try await api.fieldJobEstimateLinkPage(scope.jobID, cursor: cursor, requireFresh: true, isCurrent: current) }
+                do { response = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await api.fieldJobEstimateLinkPage(scope.jobID, cursor: cursor, isCurrent: current)
+                } }
                 catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
                     response = try await api.fieldJobEstimateLinkPage(scope.jobID, cursor: cursor, isCurrent: current)
                 }
@@ -402,11 +404,11 @@ enum JobDocumentsLoader {
             do {
                 let response: APIRead<EstimateRecord>
                 do {
-                    response = try await api.fieldEstimateWithProvenance(id, requireFresh: true)
+                    response = try await SavedCopies.$liveOnly.withValue(true) { try await api.fieldEstimateWithProvenance(id, saveIfCurrent: isCurrent) }
                 } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
                     // A previously saved record may still be shown, but never authorizes a decision.
                     guard isCurrent(), !Task.isCancelled else { return }
-                    response = try await api.fieldEstimateWithProvenance(id)
+                    response = try await api.fieldEstimateWithProvenance(id, saveIfCurrent: isCurrent)
                 }
                 let record = response.value
                 guard isCurrent(), !Task.isCancelled else { return }
