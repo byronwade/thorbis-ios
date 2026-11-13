@@ -264,6 +264,28 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(try firstReadCount(), 1, "Loading another page must reuse the first fresh validated revision")
     }
 
+    func testFailedRefreshShowsUnavailablePriceThenRecovers() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-failed-refresh"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
+        let initialPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [initialPrice], timeout: 45), .completed)
+        let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        visible(app, details); details.tap()
+        XCTAssertTrue(app.buttons["Fail sample refresh"].waitForExistence(timeout: 30))
+        app.buttons["Fail sample refresh"].tap()
+        XCTAssertTrue(app.staticTexts["Sample refresh failed"].waitForExistence(timeout: 30))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let unavailable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "Refresh to check price"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [unavailable], timeout: 30), .completed)
+        XCTAssertFalse((first.value as? String ?? "").contains("$190.00"))
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 30)); visible(app, retry); retry.tap()
+        let recovered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [recovered], timeout: 45), .completed)
+    }
+
     private func openSecondEstimateForValidation(_ flag: String, extraArgs: [String] = []) -> XCUIApplication {
         let app = open(["--paper-preview-handoff-hide-controls", flag] + extraArgs)
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
