@@ -35,7 +35,6 @@ extension XCUIApplication {
             if let workspace, drawerRow("workspace-\(workspace)").exists {
                 revealDrawerRow("workspace-\(workspace)")
                 drawerRow("workspace-\(workspace)").tap()
-                openDrawer(file: file, line: line)
             }
         }
         revealDrawerRow(id)
