@@ -35,8 +35,14 @@ checks but its summary check failed on an ambiguous repeated button label; commi
 dabcf622 and 9f463d40 add contextual accessibility labels and select the edited
 line in the test. Run 43379161770 failed the transport-retirement baseline as
 expected; commit 4892a225 closes the canvas when the API origin or request
-generation changes. Run 43380625802 exercises those four checks against 4892a225;
-its result must be checked separately, and it does not cover 9f463d40.
+generation changes. Run 43380625802 passed four focused iPhone UI tests against
+product commit 4892a225: direct estimate and invoice draft editing, opening a long
+collapsed invoice description, and retaining the parent draft after API-request
+retirement. Hosted commit `ad92740f289a8f0b4a3330756ac8e332887f0614` differs
+from 4892a225 only in temporary workflow selectors. The later 9f463d40 changes
+the long-summary test selector; the product source remains unchanged. This is not
+a full-scheme, origin-switch, permission-revocation, process-death, iPad,
+VoiceOver or large-Dynamic-Type qualification.
 
 A separate invoice editor test, run 43380735210, demonstrated that switching the
 API origin still permits the canvas to reopen under stale parent authority. The
