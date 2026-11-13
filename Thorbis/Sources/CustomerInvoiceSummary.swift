@@ -163,7 +163,7 @@ struct CustomerSummarySigningAttempt: Codable, Equatable, Sendable {
 }
 
 /// One unresolved submission per invoice and actor, even if the invoice later changes.
-struct CustomerSummaryPendingScope: Codable, Equatable {
+struct CustomerSummaryPendingScope: Codable, Hashable {
     let origin: String
     let actorID: String
     let organizationID: String
@@ -547,6 +547,77 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
     }
     func deactivate() { generation = UUID(); running = false; receipt = nil; errorMessage = nil; phase = .idle }
     func retire() { retired = true; generation = UUID(); running = false; receipt = nil; errorMessage = nil; hasFrozenSignature = false; context.retire(); phase = .idle }
+}
+
+/// A single customer handoff owns these coordinators across document navigation.
+struct CustomerSummaryHandoffKey: Hashable {
+    let scope: CustomerSummaryPendingScope
+    let revision: Int
+    let digest: String
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let requestGeneration: UUID
+    let scopeRevision: UUID
+
+    @MainActor init?(summary: CustomerInvoiceSummary, scope: CustomerSummaryPendingScope, authority: CustomerHandoffExitAuthority) {
+        guard let canonical = scope.canonical, let consent = summary.validatedConsent,
+              UUID(uuidString: authority.actor) == UUID(uuidString: canonical.actorID),
+              UUID(uuidString: authority.organization) == UUID(uuidString: canonical.organizationID),
+              authority.origin == canonical.origin,
+              UUID(uuidString: summary.organizationId) == UUID(uuidString: canonical.organizationID),
+              UUID(uuidString: summary.customerId) == UUID(uuidString: canonical.customerID),
+              summary.jobId.flatMap(UUID.init(uuidString:)) == UUID(uuidString: canonical.jobID),
+              UUID(uuidString: summary.invoiceId) == UUID(uuidString: canonical.invoiceID) else { return nil }
+        self.scope = canonical; revision = summary.linesRevision; digest = consent.digest
+        sessionGeneration = authority.sessionGeneration; authorityRevision = authority.authorityRevision
+        requestGeneration = authority.requestGeneration; scopeRevision = authority.scopeRevision
+    }
+}
+
+@MainActor
+final class CustomerSummaryHandoffRegistry: ObservableObject {
+    struct Activation {
+        let token: UUID
+        let coordinator: CustomerSummaryDurableCoordinator
+    }
+    private var entries: [CustomerSummaryHandoffKey: CustomerSummaryDurableCoordinator] = [:]
+    private var authorityChecks: [CustomerSummaryHandoffKey: @MainActor () -> Bool] = [:]
+    private var active: (key: CustomerSummaryHandoffKey, token: UUID)?
+    private var closed = false
+
+    /// `authorityCurrent` must recheck the captured actor, organization, permission, job
+    /// membership and API/session generations; the registry adds the active-destination guard.
+    func activate(key: CustomerSummaryHandoffKey, authorityCurrent: @escaping @MainActor () -> Bool,
+                  make: (@escaping @MainActor () -> Bool) -> CustomerSummaryDurableCoordinator) -> Activation? {
+        guard !closed, authorityCurrent() else { return nil }
+        if entries.keys.contains(where: { old in
+            old.scope.actorID != key.scope.actorID || old.scope.organizationID != key.scope.organizationID || old.scope.origin != key.scope.origin ||
+            old.sessionGeneration != key.sessionGeneration || old.authorityRevision != key.authorityRevision ||
+            old.requestGeneration != key.requestGeneration || old.scopeRevision != key.scopeRevision
+        }) {
+            entries.values.forEach { $0.retire() }; entries.removeAll(); authorityChecks.removeAll(); active = nil
+        }
+        if let active { entries[active.key]?.deactivate() }
+        let token = UUID(); active = (key, token); authorityChecks[key] = authorityCurrent
+        let coordinator: CustomerSummaryDurableCoordinator
+        if let existing = entries[key] { coordinator = existing }
+        else {
+            coordinator = make { [weak self] in
+                guard let self, !self.closed, self.active?.key == key else { return false }
+                return self.authorityChecks[key]?() == true
+            }
+            entries[key] = coordinator
+        }
+        return Activation(token: token, coordinator: coordinator)
+    }
+    func deactivate(_ token: UUID) {
+        guard let active, active.token == token else { return }
+        self.active = nil; entries[active.key]?.deactivate()
+    }
+    func retire() {
+        closed = true; active = nil
+        entries.values.forEach { $0.retire() }; entries.removeAll(); authorityChecks.removeAll()
+    }
 }
 
 @MainActor
