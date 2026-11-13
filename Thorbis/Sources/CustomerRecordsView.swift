@@ -282,7 +282,8 @@ struct CustomerRecordsView: View {
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if !dynamicTypeSize.isAccessibilitySize {
-                        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
                     Spacer(minLength: 8)
