@@ -188,7 +188,10 @@ final class CustomerSummarySigningContext {
     func freeze(signerName: String, signedAt: String, png: Data) throws -> CustomerSummaryFrozenSignature {
         try checkCurrent()
         let name = signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, name.count <= 120, !png.isEmpty, png.count <= 8 * 1024 * 1024,
+        guard png.count <= 512 * 1024 else {
+            throw Problem(title: "Signature is too large. Clear it and sign again.", status: nil, detail: nil)
+        }
+        guard !name.isEmpty, name.count <= 120, !png.isEmpty,
               ISO8601DateFormatter().date(from: signedAt) != nil else {
             throw Problem(title: "Enter your name and signature", status: nil, detail: nil)
         }
@@ -241,6 +244,7 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
     enum Phase: Equatable { case idle, checking, unsigned, submitting, signed, unavailable }
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var hasFrozenSignature = false
+    @Published private(set) var errorMessage: String?
     private(set) var receipt: CustomerInvoiceSummaryReceipt?
     private let summary: CustomerInvoiceSummary
     private let context: CustomerSummarySigningContext
@@ -264,7 +268,7 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
     }
     func checkStatus() async {
         guard !running, !retired, current() else { return }
-        running = true; let token = generation; phase = .checking; receipt = nil
+        running = true; let token = generation; phase = .checking; receipt = nil; errorMessage = nil
         defer { if generation == token { running = false } }
         do {
             let result = try await lookup()
@@ -279,11 +283,14 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
     }
     func sign(signerName: String, signedAt: String, png: Data) async {
         guard !running, phase == .unsigned, !retired, current() else { return }
+        errorMessage = nil
         do {
             let signature = try context.freeze(signerName: signerName, signedAt: signedAt, png: png)
             hasFrozenSignature = true
             await perform(signature)
-        } catch { if current(), !retired { phase = .unavailable } }
+        } catch {
+            if current(), !retired { errorMessage = (error as? Problem)?.title ?? "Check your signature and try again." }
+        }
     }
     func retryFrozen() async {
         guard !running, phase == .unsigned, !retired, current(), let signature = try? context.signature() else { return }
@@ -310,10 +317,10 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
     /// Suspend a departed destination without discarding an uncertain attempt. The next
     /// activation must perform a fresh status check before retrying those same terms.
     func deactivate() {
-        generation = UUID(); running = false; receipt = nil; phase = .idle
+        generation = UUID(); running = false; receipt = nil; errorMessage = nil; phase = .idle
     }
     func retire() {
-        retired = true; generation = UUID(); running = false; receipt = nil; hasFrozenSignature = false
+        retired = true; generation = UUID(); running = false; receipt = nil; hasFrozenSignature = false; errorMessage = nil
         context.retire(); phase = .idle
     }
 }

@@ -66,6 +66,14 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         receipt["signedAt"] = "2026-11-13T12:00:00Z"
         var handoffCurrent = true
         let handoff = CustomerSummarySigningContext(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { handoffCurrent })
+        let boundary = CustomerSummarySigningContext(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true })
+        XCTAssertThrowsError(try boundary.freeze(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data(repeating: 1, count: 512 * 1024 + 1))) { error in
+            XCTAssertEqual((error as? Problem)?.title, "Signature is too large. Clear it and sign again.")
+        }
+        let maximum = try boundary.freeze(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data(repeating: 1, count: 512 * 1024))
+        XCTAssertEqual(maximum.png.count, 512 * 1024)
+        XCTAssertThrowsError(try boundary.freeze(signerName: "Alex", signedAt: maximum.signedAt, png: Data(repeating: 1, count: 512 * 1024 + 1)))
+        XCTAssertEqual(try boundary.signature().idempotencyKey, maximum.idempotencyKey, "An oversized retry cannot erase a frozen attempt")
         let signature = try handoff.freeze(signerName: " Alex ", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
         XCTAssertEqual(try handoff.freeze(signerName: "Alex", signedAt: signature.signedAt, png: signature.png), signature)
         XCTAssertThrowsError(try handoff.freeze(signerName: "Alex", signedAt: signature.signedAt, png: Data([4])))
@@ -96,6 +104,10 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
                 return validReceipt
             })
         await coordinator.checkStatus(); XCTAssertEqual(coordinator.phase, .unsigned)
+        await coordinator.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data(repeating: 1, count: 512 * 1024 + 1))
+        XCTAssertEqual(coordinator.phase, .unsigned); XCTAssertFalse(coordinator.hasFrozenSignature)
+        XCTAssertEqual(coordinator.errorMessage, "Signature is too large. Clear it and sign again.")
+        XCTAssertEqual(uploadCount, 0)
         await coordinator.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
         XCTAssertEqual(coordinator.phase, .unavailable); XCTAssertTrue(coordinator.hasFrozenSignature)
         await coordinator.retryFrozen(); XCTAssertEqual(attempts.count, 1, "An uncertain result requires a fresh status check")
