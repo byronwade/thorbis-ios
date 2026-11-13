@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-11-12-find-work",
+            date: "2026-11-12",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Find work in the menu",
+                      detail: "Jobs and documents are easy to find, and tapping a section opens or closes it."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-12-job-and-inbox",
             date: "2026-11-12",
             highlights: [
