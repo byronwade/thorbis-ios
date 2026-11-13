@@ -21,6 +21,26 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Sign for the work"].exists)
     }
 
+    func testVerifiedDraftAndVoidInvoiceBooksUseSafeLines() {
+        for flag in ["--paper-preview-job-invoice-draft", "--paper-preview-job-invoice-void"] {
+            let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", flag])
+            XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+            XCTAssertTrue(text(flag.hasSuffix("draft") ? "Draft total" : "Voided", in: app).exists)
+            XCTAssertFalse(app.buttons["Sign for the work"].exists)
+            app.terminate()
+        }
+    }
+
+    func testStandaloneCustomerInvoiceWithoutSummaryDoesNotShowRawLines() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test"]
+        app.launch()
+        let unavailable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Invoice details aren't available")).firstMatch
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Sign for the work"].exists)
+    }
+
     func testMixedCurrencyInvoiceDoesNotShowMisleadingOverviewAmount() {
         continueAfterFailure = false
         let app = XCUIApplication()

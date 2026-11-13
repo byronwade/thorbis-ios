@@ -196,6 +196,9 @@ enum PaperPreview {
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-draft") {
             primary = changed(primary, ["status": "draft"])
         }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-void") {
+            primary = changed(primary, ["status": "void"])
+        }
         let original = primary
         if isJobDocumentsMoneyPreview {
             let discount = FieldLine(id: "00000000-0000-4000-8000-000000009104", description: "Member discount", quantity: 1,
@@ -1145,10 +1148,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 let paid = record.amountPaid
                 return ["kind": "customer_invoice_presentation", "presentationVersion": 1,
                         "presentationScopeId": "invoice:\(record.id):lines:\(record.linesRevision):customer:v1",
-                        "isSignedDocument": false, "issuedSnapshotId": "00000000-0000-4000-8000-000000000001",
+                        "isSignedDocument": false, "issuedSnapshotId": record.status == "draft" ? NSNull() : "00000000-0000-4000-8000-000000000001" as Any,
                         "organizationId": record.organizationId, "customerId": record.customerId, "invoiceId": record.id,
                         "jobId": record.jobId ?? "", "linesRevision": record.linesRevision, "status": record.status,
-                        "currency": "USD", "totalAmount": total, "amountPaid": paid, "balanceDue": total - paid,
+                        "currency": "USD", "totalAmount": total, "amountPaid": paid, "balanceDue": record.status == "void" ? 0 : total - paid,
                         "lines": [["id": "customer-safe-line", "description": "Customer safe service", "quantity": 1,
                                    "unitPrice": ["amount": total, "currency": "USD"]]]]
             }

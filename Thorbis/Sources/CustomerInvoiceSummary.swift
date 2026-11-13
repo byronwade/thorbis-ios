@@ -29,9 +29,14 @@ struct CustomerInvoiceSummary: Decodable, Sendable {
     /// Identity and arithmetic only. The caller must also prove current session,
     /// permission, request generation and a fresh server response before display.
     func matches(scope: JobDocumentScope, invoiceID: String, linesRevision expectedRevision: Int) -> Bool {
+        matches(organizationID: scope.organizationID, customerID: scope.customerID, jobID: scope.jobID,
+                invoiceID: invoiceID, linesRevision: expectedRevision)
+    }
+
+    func matches(organizationID: String, customerID: String, jobID: String?, invoiceID: String, linesRevision expectedRevision: Int) -> Bool {
         guard kind == "customer_invoice_presentation", presentationVersion == 1, !isSignedDocument,
-              organizationId == scope.organizationID, customerId == scope.customerID,
-              jobId == scope.jobID, invoiceId == invoiceID, linesRevision == expectedRevision,
+              organizationId == organizationID, customerId == customerID,
+              jobId == jobID, invoiceId == invoiceID, linesRevision == expectedRevision,
               expectedRevision > 0,
               presentationScopeId == "invoice:\(invoiceID):lines:\(expectedRevision):customer:v1",
               currency == "USD", ["draft", "issued", "paid", "void"].contains(status),
@@ -62,6 +67,12 @@ extension APIClient {
     /// Fetches the server's separate customer view, never a saved invoice copy.
     func customerInvoiceSummary(scope: JobDocumentScope, invoiceID: String, linesRevision: Int,
                                 currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerInvoiceSummary {
+        try await customerInvoiceSummary(organizationID: scope.organizationID, customerID: scope.customerID,
+            jobID: scope.jobID, invoiceID: invoiceID, linesRevision: linesRevision, currentAuthority: currentAuthority)
+    }
+
+    func customerInvoiceSummary(organizationID: String, customerID: String, jobID: String?, invoiceID: String,
+                                linesRevision: Int, currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerInvoiceSummary {
         let generation = requestGeneration
         let savedScope = savedCopyScopeRevision
         let origin = normalizedOrigin
@@ -74,7 +85,8 @@ extension APIClient {
         let path = try financialPath("/v1/invoices", id: invoiceID, suffix: "/customer-presentation")
         let summary: CustomerInvoiceSummary = try await send("GET", path, requireFresh: true)
         try check()
-        guard summary.matches(scope: scope, invoiceID: invoiceID, linesRevision: linesRevision) else {
+        guard summary.matches(organizationID: organizationID, customerID: customerID, jobID: jobID,
+                              invoiceID: invoiceID, linesRevision: linesRevision) else {
             throw Problem(title: "This invoice summary couldn't be verified", status: 409,
                           detail: "Ask your technician to refresh the invoice.")
         }

@@ -858,9 +858,9 @@ struct CustomerInvoicePresentation: View {
 
     private var type: CustomerType { CustomerType(sizeClass) }
     private var verifiedSummary: CustomerInvoiceSummary? {
-        guard currentAuthority(), let jobID = invoice.jobId, let summary, let authority = summaryAuthority,
+        guard currentAuthority(), let summary, let authority = summaryAuthority,
               authority.isCurrent(api: api, session: session), session.can("invoice.view", feature: "invoicing"),
-              summary.matches(scope: .init(jobID: jobID, organizationID: invoice.organizationId, customerID: invoice.customerId),
+              summary.matches(organizationID: invoice.organizationId, customerID: invoice.customerId, jobID: invoice.jobId,
                               invoiceID: invoice.id, linesRevision: invoice.linesRevision) else { return nil }
         return summary
     }
@@ -950,10 +950,9 @@ struct CustomerInvoicePresentation: View {
 
     private func loadCustomerSummary() async {
         let token = UUID(); summaryToken = token; summary = nil; summaryAuthority = nil; summaryLoading = false
-        guard let jobID = invoice.jobId, currentAuthority(),
+        guard currentAuthority(),
               let authority = CustomerHandoffExitAuthority.capture(api: api, session: session),
               authority.organization == invoice.organizationId, session.can("invoice.view", feature: "invoicing") else { return }
-        let scope = JobDocumentScope(jobID: jobID, organizationID: invoice.organizationId, customerID: invoice.customerId)
         func current() -> Bool {
             !Task.isCancelled && summaryToken == token && currentAuthority() &&
             authority.isCurrent(api: api, session: session) && session.can("invoice.view", feature: "invoicing")
@@ -962,8 +961,10 @@ struct CustomerInvoicePresentation: View {
         defer { if summaryToken == token { summaryLoading = false } }
         do {
             let latest = try await api.liveFieldInvoice(invoice.id)
-            guard current(), scope.contains(latest), latest.id == invoice.id, latest.linesRevision == invoice.linesRevision else { return }
-            let result = try await api.customerInvoiceSummary(scope: scope, invoiceID: invoice.id,
+            guard current(), latest.organizationId == invoice.organizationId, latest.customerId == invoice.customerId,
+                  latest.jobId == invoice.jobId, latest.id == invoice.id, latest.linesRevision == invoice.linesRevision else { return }
+            let result = try await api.customerInvoiceSummary(organizationID: invoice.organizationId,
+                customerID: invoice.customerId, jobID: invoice.jobId, invoiceID: invoice.id,
                 linesRevision: invoice.linesRevision, currentAuthority: current)
             guard current() else { return }
             summary = result; summaryAuthority = authority

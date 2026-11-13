@@ -29,6 +29,13 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertFalse(try decode(["status": "paid", "totalAmount": 0, "amountPaid": 0, "balanceDue": 0, "lines": []]).matches(scope: scope, invoiceID: "invoice-1", linesRevision: 2))
         XCTAssertFalse(try decode(["status": "issued", "amountPaid": 10000, "balanceDue": 0]).matches(scope: scope, invoiceID: "invoice-1", linesRevision: 2))
     }
+    func testStandaloneSummaryRequiresNoJobAndMatchingCustomer() throws {
+        let summary = try decode(["jobId": NSNull()])
+        XCTAssertTrue(summary.matches(organizationID: "org-1", customerID: "customer-1", jobID: nil, invoiceID: "invoice-1", linesRevision: 2))
+        XCTAssertFalse(summary.matches(organizationID: "org-1", customerID: "other", jobID: nil, invoiceID: "invoice-1", linesRevision: 2))
+        XCTAssertFalse(summary.matches(organizationID: "org-1", customerID: "customer-1", jobID: "job-1", invoiceID: "invoice-1", linesRevision: 2))
+    }
+
     func testSummaryReadRequiresFreshServerAndMatchingScope() async throws {
         let id = "00000000-0000-4000-8000-000000000101"
         let jobScope = JobDocumentScope(jobID: "job-1", organizationID: "org-1", customerID: "customer-1")
