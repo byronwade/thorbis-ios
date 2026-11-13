@@ -7,6 +7,28 @@ final class FieldAPITests: XCTestCase {
     private let customerID = "00000000-0000-4000-8000-000000000003"
     private let jobID = "00000000-0000-4000-8000-000000000001"
 
+    func testJobEstimateMembershipFetchesOneFreshPageOnly() async throws {
+        let linkID = "00000000-0000-4000-8000-000000000010"
+        let estimateID = "00000000-0000-4000-8000-000000000011"
+        let payload = "{\"items\":[{\"id\":\"\(linkID)\",\"jobId\":\"\(jobID)\",\"estimateId\":\"\(estimateID)\"}],\"nextCursor\":\"\(linkID)\"}"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")
+        let page = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true)
+        XCTAssertEqual(page.value.items.map(\.estimateId), [estimateID])
+        XCTAssertEqual(page.value.nextCursor, linkID)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(page.provenance.source, .urlSession(cacheBypassed: true))
+    }
+
+    func testJobEstimateMembershipRequestsOnlyChosenCursor() async throws {
+        let cursor = "00000000-0000-4000-8000-000000000010"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, requireFresh: true)
+        let url = try XCTUnwrap(URLProtocolFixture.recorded.first?.url)
+        XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "cursor", value: cursor)])
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
     func testJobMediaFirstPageDoesNotEagerlyFetchTheRest() async throws {
         let fixture = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":"next"}"#), .init(200, #"{"items":[]}"#)])
         let client = APIClient(session: fixture, baseURL: "https://app.thorbis.com")

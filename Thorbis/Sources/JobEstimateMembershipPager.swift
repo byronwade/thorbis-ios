@@ -27,8 +27,9 @@ final class JobEstimateMembershipPager {
     init(jobID: String) { self.jobID = jobID }
     /// An exhausted cursor is not a frozen snapshot: links can change between pages.
     /// Approval must independently revalidate exact selected memberships and terms.
-    var reachedEnd: Bool { started && exhausted }
-    var allPagesAuthoritative: Bool { reachedEnd && !sawUnverifiedPage }
+    /// These are historical scan facts, not proof of current authority or a server snapshot.
+    var scanReachedEnd: Bool { started && exhausted }
+    var scanUsedOnlyFreshResponses: Bool { scanReachedEnd && !sawUnverifiedPage }
     var canLoadMore: Bool { !exhausted && !inFlight }
 
     func loadNext(isCurrent: @MainActor () -> Bool,
@@ -41,18 +42,18 @@ final class JobEstimateMembershipPager {
         let page = try await fetch(requestCursor)
         try Task.checkCancellation()
         guard isCurrent() else { throw CancellationError() }
-        guard page.links.allSatisfy({ $0.jobId == jobID && !$0.id.isEmpty && !$0.estimateId.isEmpty }),
-              Set(page.links.map(\.id)).count == page.links.count,
-              page.links.allSatisfy({ !seenLinks.contains($0.id) }) else { throw InvalidPage() }
+        guard page.links.allSatisfy({ $0.jobId.lowercased() == jobID.lowercased() && !$0.id.isEmpty && !$0.estimateId.isEmpty }),
+              Set(page.links.map { $0.id.lowercased() }).count == page.links.count,
+              page.links.allSatisfy({ !seenLinks.contains($0.id.lowercased()) }) else { throw InvalidPage() }
         if let cursor = page.nextCursor {
-            guard !cursor.isEmpty, cursor != requestCursor, !seenCursors.contains(cursor), !page.links.isEmpty else { throw InvalidPage() }
+            guard !cursor.isEmpty, cursor.lowercased() != requestCursor?.lowercased(), !seenCursors.contains(cursor.lowercased()), !page.links.isEmpty else { throw InvalidPage() }
         }
         // Commit the page atomically only after every identity and cursor check succeeds.
         for link in page.links {
-            seenLinks.insert(link.id)
-            if seenEstimates.insert(link.estimateId).inserted { estimateIDs.append(link.estimateId) }
+            seenLinks.insert(link.id.lowercased())
+            if seenEstimates.insert(link.estimateId.lowercased()).inserted { estimateIDs.append(link.estimateId) }
         }
-        if let cursor = page.nextCursor { seenCursors.insert(cursor) }
+        if let cursor = page.nextCursor { seenCursors.insert(cursor.lowercased()) }
         nextCursor = page.nextCursor
         exhausted = page.nextCursor == nil
         sawUnverifiedPage = sawUnverifiedPage || !page.isAuthoritative
