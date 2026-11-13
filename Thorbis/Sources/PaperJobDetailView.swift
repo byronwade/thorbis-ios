@@ -233,6 +233,9 @@ struct JobDetailView: View {
                             if !typeSize.isAccessibilitySize { tabBar(job) }
                             if selectedTab == "Money" { moneyJumps(proxy: proxy) }
                         }
+                        // The shortcuts size to their capsules; stretch so Theme.card covers the sheet
+                        // when the chooser is outside the scroll view at accessibility sizes.
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Theme.card.padding(.horizontal, 1))
                     }
                     }
