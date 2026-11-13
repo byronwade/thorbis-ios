@@ -193,13 +193,14 @@ enum DeviceHandoff: Identifiable {
 extension View {
     /// Presents Calendar, Contacts and Mail hand-offs set on `request`. Calendar asks for
     /// add-only access first; a denial explains itself and offers Settings.
-    func deviceHandoffs(_ request: Binding<DeviceHandoff?>) -> some View {
-        modifier(DeviceHandoffPresenter(request: request))
+    func deviceHandoffs(_ request: Binding<DeviceHandoff?>, isCurrent: @escaping @MainActor () -> Bool = { true }) -> some View {
+        modifier(DeviceHandoffPresenter(request: request, isCurrent: isCurrent))
     }
 }
 
 private struct DeviceHandoffPresenter: ViewModifier {
     @Binding var request: DeviceHandoff?
+    let isCurrent: @MainActor () -> Bool
     @State private var presented: DeviceHandoff?
     @State private var calendarDenied = false
     @Environment(\.openURL) private var openURL
@@ -245,6 +246,7 @@ private struct DeviceHandoffPresenter: ViewModifier {
 
     @MainActor
     private func route(_ handoff: DeviceHandoff) async {
+        guard isCurrent() else { return }
         switch handoff {
         case .calendar:
             if await CalendarAccess.requestAddOnly() { presented = handoff } else { calendarDenied = true }
