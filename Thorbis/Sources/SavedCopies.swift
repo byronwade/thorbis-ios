@@ -179,9 +179,10 @@ extension APIClient {
     /// The job's estimate links for a signature's membership check: a copy saved on this phone
     /// (served when the read drops) must never stand in for the server's answer.
     func liveFieldJobEstimateLinks(_ jobID: String) async throws -> [JobEstimateLink] {
-        let links = try await fieldJobEstimateLinks(jobID)
-        try requireLive("/v1/jobs/\(jobID)/estimates")
-        return links
+        // The task-local live scope prevents saved-copy fallback on every page.
+        // A shared path marker may belong to a concurrent ordinary read and is not
+        // provenance for this request, so it must not reject this live result.
+        return try await SavedCopies.$liveOnly.withValue(true) { try await fieldJobEstimateLinks(jobID) }
     }
 
     private func requireLive(_ path: String) throws {
