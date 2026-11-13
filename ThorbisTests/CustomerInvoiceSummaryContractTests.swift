@@ -170,6 +170,15 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertNil(try store.load(scope: pendingScope))
         try store.insert(restored)
         XCTAssertThrowsError(try store.insert(restored), "An unresolved record cannot be overwritten")
+        let equivalent = CustomerSummaryPendingScope(origin: "https://APP.THORBIS.COM/", actorID: pendingScope.actorID.uppercased(), organizationID: organization.uppercased(), customerID: customer.uppercased(), jobID: job.uppercased(), invoiceID: invoice.uppercased())
+        XCTAssertTrue(restored.isValid(for: equivalent))
+        XCTAssertNotNil(try store.load(scope: equivalent))
+        let duplicateEquivalent = CustomerSummaryPendingAttempt(scope: equivalent, summary: summary, attempt: attempt)
+        XCTAssertThrowsError(try store.insert(duplicateEquivalent), "Equivalent spelling must not evade the pending guard")
+        for bad in ["https://app.thorbis.com.evil/", "https://user@app.thorbis.com", "https://app.thorbis.com/path", "http://app.thorbis.com"] {
+            let invalidOrigin = CustomerSummaryPendingScope(origin: bad, actorID: pendingScope.actorID, organizationID: organization, customerID: customer, jobID: job, invoiceID: invoice)
+            XCTAssertFalse(invalidOrigin.isValid); XCTAssertThrowsError(try store.load(scope: invalidOrigin))
+        }
         XCTAssertNotNil(try store.load(scope: pendingScope))
         let changedJob = CustomerSummaryPendingScope(origin: pendingScope.origin, actorID: pendingScope.actorID, organizationID: organization, customerID: customer, jobID: "00000000-0000-4000-8000-000000000099", invoiceID: invoice)
         XCTAssertThrowsError(try store.load(scope: changedJob), "Changed job metadata cannot hide an unresolved invoice attempt")
