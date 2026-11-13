@@ -746,6 +746,7 @@ struct BuilderLineRow: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
     @State private var descriptionOpening: LineDescriptionOpening?
 
     private var removeLineButton: some View {
@@ -773,10 +774,12 @@ struct BuilderLineRow: View {
 
     private func openDescription() {
         guard isEnabled, let actorID = session.user?.id,
-              let organizationID = session.activeOrganization?.id else { return }
+              let organizationID = session.activeOrganization?.id,
+              let origin = api.normalizedOrigin else { return }
         focus.wrappedValue = nil
         descriptionOpening = LineDescriptionOpening(actorID: actorID, organizationID: organizationID,
-                                                    generation: session.generation, authorityRevision: session.authorityRevision)
+                                                    generation: session.generation, authorityRevision: session.authorityRevision,
+                                                    origin: origin, requestGeneration: api.requestGeneration)
     }
 
     var body: some View {
@@ -792,7 +795,9 @@ struct BuilderLineRow: View {
                 if isEnabled, opening.actorID == session.user?.id,
                    opening.organizationID == session.activeOrganization?.id,
                    opening.generation == session.generation,
-                   opening.authorityRevision == session.authorityRevision {
+                   opening.authorityRevision == session.authorityRevision,
+                   opening.origin == api.normalizedOrigin,
+                   opening.requestGeneration == api.requestGeneration {
                     NavigationStack {
                         TextEditor(text: $description)
                             .font(Theme.font(16))
@@ -804,6 +809,14 @@ struct BuilderLineRow: View {
                             .navigationTitle("Description")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
+                                #if DEBUG
+                                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-line-retire-api") {
+                                    ThorbisToolbarItem(placement: .cancellationAction) {
+                                        Button("Retire requests") { api.invalidateRequests() }
+                                            .accessibilityIdentifier("line-canvas-test-retire-api")
+                                    }
+                                }
+                                #endif
                                 ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                                     Button("Done") { descriptionOpening = nil }
                                         .accessibilityIdentifier("line-description-canvas-done")
@@ -817,6 +830,8 @@ struct BuilderLineRow: View {
         .onChange(of: session.generation) { _, _ in descriptionOpening = nil }
         .onChange(of: session.activeOrganization?.id) { _, _ in descriptionOpening = nil }
         .onChange(of: session.authorityRevision) { _, _ in descriptionOpening = nil }
+        .onChange(of: api.normalizedOrigin) { _, _ in descriptionOpening = nil }
+        .onChange(of: api.requestGeneration) { _, _ in descriptionOpening = nil }
         .onChange(of: isEnabled) { _, enabled in if !enabled { descriptionOpening = nil } }
     }
 
@@ -1012,6 +1027,8 @@ private struct LineDescriptionOpening: Identifiable {
     let organizationID: String
     let generation: UUID
     let authorityRevision: UUID
+    let origin: String
+    let requestGeneration: UUID
 }
 
 struct OptionalIdentifier: ViewModifier {

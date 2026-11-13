@@ -7,6 +7,26 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testDescriptionCanvasRetiresWithAPIRequestsPreservingDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line", "--paper-preview-line-retire-api"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 30))
+        let inline = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(inline.waitForExistence(timeout: 20))
+        app.buttons["Edit full description"].tap()
+        let canvas = app.textViews["line-description-canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        canvas.tap()
+        canvas.typeText(" transport draft")
+        let retire = app.buttons["line-canvas-test-retire-api"]
+        XCTAssertTrue(retire.waitForExistence(timeout: 10))
+        retire.tap()
+        XCTAssertTrue(canvas.waitForNonExistence(timeout: 10), "The canvas must close when its API request generation retires")
+        XCTAssertTrue((inline.value as? String ?? "").contains("transport draft"), "Retiring requests must not discard the existing local draft")
+    }
+
     func testDescriptionCanvasWritesDirectlyIntoInvoiceDraft() {
         continueAfterFailure = false
         let app = XCUIApplication()
