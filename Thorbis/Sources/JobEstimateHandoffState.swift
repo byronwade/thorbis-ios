@@ -534,7 +534,9 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
 
     func overviewReceipt(for record: EstimateRecord) -> CustomerEstimateAcceptanceReceipt? {
-        guard record.status == "approved", let revision = revision(for: record.id),
+        guard record.status == "approved", detailsCurrent(record, authority: authorityRevision),
+              let revision = revisions[record.id],
+              (try? revision.validate(for: record, allowApprovedForReading: true)) != nil,
               let receipt = overviewReceipts[record.id],
               (try? receipt.validate(for: revision)) != nil else { return nil }
         return receipt
