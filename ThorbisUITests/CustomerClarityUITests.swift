@@ -7,11 +7,16 @@ final class CustomerClarityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-notes", "--paper-preview-scroll", "center"]
         app.launch()
+        XCTAssertTrue(app.staticTexts["Locations"].waitForExistence(timeout: 20), "The customer locations did not load")
+        let note = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Front entrance instructions")).firstMatch
+        XCTAssertTrue(note.waitForExistence(timeout: 20), "The long location note fixture did not load")
         let read = app.buttons["location-notes-more-00000000-0000-4000-8000-000000007001"]
-        for _ in 0..<15 where !read.isHittable { app.swipeUp() }
         XCTAssertTrue(read.waitForExistence(timeout: 20))
+        for _ in 0..<15 where !read.isHittable {
+            if read.frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
+        }
         XCTAssertTrue(read.isHittable)
-        XCTAssertGreaterThanOrEqual(read.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(read.frame.height, 43.99, "Allow subpixel measurement rounding of a 44-point target")
         read.tap()
         let full = app.staticTexts["location-notes-full"]
         XCTAssertTrue(full.waitForExistence(timeout: 10))
@@ -23,6 +28,63 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(actions.isHittable)
         actions.tap()
         XCTAssertTrue(app.buttons["Edit location"].waitForExistence(timeout: 5))
+    }
+
+    func testLongSiteNotesReaderAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-notes",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let read = app.buttons["location-notes-more-00000000-0000-4000-8000-000000007001"]
+        XCTAssertTrue(read.waitForExistence(timeout: 20))
+        for _ in 0..<15 where !read.isHittable { app.swipeUp() }
+        XCTAssertTrue(read.isHittable)
+        XCTAssertGreaterThanOrEqual(read.frame.height, 43.99)
+        read.tap()
+        let full = app.staticTexts["location-notes-full"]
+        XCTAssertTrue(full.waitForExistence(timeout: 10))
+        XCTAssertTrue(full.label.contains("Additional details for the visit"))
+        XCTAssertTrue(app.buttons["Done"].exists)
+    }
+
+    func testLocationNotesReaderRetiresWhenSessionExpires() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-notes",
+                               "--paper-preview-location-notes-expire", "--paper-preview-scroll", "center"]
+        app.launch()
+        let read = app.buttons["location-notes-more-00000000-0000-4000-8000-000000007001"]
+        XCTAssertTrue(read.waitForExistence(timeout: 20))
+        for _ in 0..<15 where !read.isHittable { app.swipeUp() }
+        XCTAssertTrue(read.isHittable)
+        read.tap()
+        let full = app.staticTexts["location-notes-full"]
+        XCTAssertTrue(full.waitForExistence(timeout: 10))
+        let expire = app.buttons["location-notes-expire-session"]
+        XCTAssertTrue(expire.waitForExistence(timeout: 5))
+        expire.tap()
+        XCTAssertTrue(full.waitForNonExistence(timeout: 10), "Site notes must not remain visible after session expiration")
+    }
+
+    func testLocationNotesReloadAfterAuthorityRefresh() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-notes",
+                               "--paper-preview-location-notes-revalidate", "--paper-preview-scroll", "center"]
+        app.launch()
+        let read = app.buttons["location-notes-more-00000000-0000-4000-8000-000000007001"]
+        XCTAssertTrue(read.waitForExistence(timeout: 20))
+        for _ in 0..<15 where !read.isHittable {
+            if read.frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
+        }
+        XCTAssertTrue(read.isHittable)
+        read.tap()
+        let full = app.staticTexts["location-notes-full"]
+        XCTAssertTrue(full.waitForExistence(timeout: 10))
+        app.buttons["location-notes-revalidate"].tap()
+        XCTAssertTrue(full.waitForNonExistence(timeout: 10), "Old reader closes when authority is refreshed")
+        XCTAssertTrue(read.waitForExistence(timeout: 20), "Notes reload for the still-authorized customer")
     }
 
     func testContactOffersDirectCallAndTextWithoutHidingOtherActions() {
@@ -95,7 +157,9 @@ final class CustomerClarityUITests: XCTestCase {
         let name = "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
         let label = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 30))
-        for _ in 0..<12 where !label.isHittable { app.swipeUp() }
+        for _ in 0..<12 where !label.isHittable {
+            if label.frame.midY < app.frame.midY { app.swipeDown() } else { app.swipeUp() }
+        }
         XCTAssertTrue(label.isHittable)
         XCTAssertGreaterThan(label.frame.height, 40)
         capture("Customer long location, dark")

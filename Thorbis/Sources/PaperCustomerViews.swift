@@ -247,6 +247,19 @@ struct CustomerRecordsScope: Equatable, Sendable {
     }
 }
 
+private struct CustomerLocationNoteAuthority: Equatable {
+    let scope: CustomerRecordsScope
+    let origin: String
+    let apiGeneration: UUID
+    let savedCopyRevision: UUID
+}
+
+private struct CustomerLocationNoteOpening: Identifiable {
+    let id = UUID()
+    let authority: CustomerLocationNoteAuthority
+    let location: ServiceLocationRecord
+}
+
 struct CustomerDetailView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
@@ -273,6 +286,8 @@ struct CustomerDetailView: View {
     @State private var isMutatingContact = false
     @State private var contactMutationError: String?
     @State private var locationSheet: CustomerLocationSheet?
+    @State private var locationNoteOpening: CustomerLocationNoteOpening?
+    @State private var locationNotesSource: CustomerLocationNoteAuthority?
     @State private var locationToRemove: ServiceLocationRecord?
     @State private var isRemovingLocation = false
     @State private var locationError: String?
@@ -284,6 +299,11 @@ struct CustomerDetailView: View {
     @State private var recordsPublishedScope: CustomerRecordsScope?
     @State private var recordsRequestedScope: CustomerRecordsScope?
     private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
+    private var locationNoteAuthority: CustomerLocationNoteAuthority? {
+        guard session.phase == .ready, let scope = recordsScope, let origin = api.normalizedOrigin else { return nil }
+        return CustomerLocationNoteAuthority(scope: scope, origin: origin, apiGeneration: api.requestGeneration,
+                                             savedCopyRevision: api.savedCopyScopeRevision)
+    }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
     /// Web parity: the customer's "Email job updates" switch. Nil until it loads (or on an older server).
@@ -381,7 +401,7 @@ struct CustomerDetailView: View {
         }
         .safeAreaInset(edge: .bottom) { if !typeSize.isAccessibilitySize { customerPrimaryActions } }
         .deviceHandoffs($handoff)
-        .task { await load() }
+        .task(id: locationNoteAuthority) { await load() }
         .task { await loadSmsConsent() }
         .task { await loadJobEmails() }
         .task(id: customer.id) { pricing = try? await api.memberPricing(customer.id) }
@@ -402,7 +422,7 @@ struct CustomerDetailView: View {
             if PaperPreview.enabled && PaperPreview.screen == "customer-money" { tab = "Money" }
             #endif
         }
-        .onDisappear { customerWindowAnchor.visible = false }
+        .onDisappear { customerWindowAnchor.visible = false; locationNoteOpening = nil }
         .onChange(of: tab, initial: true) { _, selectedTab in
             if selectedTab != "Overview" { Task { await loadRecords() } }
             if selectedTab == "Jobs" { Task { await loadJobRecords() } }
@@ -429,6 +449,45 @@ struct CustomerDetailView: View {
                 locationError = nil
             }
         } }
+        .sheet(item: $locationNoteOpening) { opening in SheetSurface {
+            if locationNoteIsCurrent(opening), let notes = opening.location.notes {
+                NavigationStack {
+                    ScrollView {
+                        Text(notes).font(Theme.font(16))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(Theme.gutter)
+                            .accessibilityIdentifier("location-notes-full")
+                    }
+                    .background(Theme.canvas)
+                    .navigationTitle("Site notes")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        #if DEBUG
+                        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-location-notes-expire") {
+                            ThorbisToolbarItem(placement: .topBarLeading) {
+                                Button("Expire session") { session.previewForce(.failed) }
+                                    .accessibilityIdentifier("location-notes-expire-session")
+                            }
+                        }
+                        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-location-notes-revalidate") {
+                            ThorbisToolbarItem(placement: .topBarLeading) {
+                                Button("Refresh access") { Task { await session.revalidate() } }
+                                    .accessibilityIdentifier("location-notes-revalidate")
+                            }
+                        }
+                        #endif
+                        ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { locationNoteOpening = nil } }
+                    }
+                }
+                .presentationDetents([.large])
+            }
+        } }
+        .onChange(of: recordsScope) { _, _ in locationNoteOpening = nil }
+        .onChange(of: session.phase) { _, _ in locationNoteOpening = nil }
+        .onChange(of: locations) { _, _ in locationNoteOpening = nil }
+        .onChange(of: api.requestGeneration) { _, _ in locationNoteOpening = nil }
+        .onChange(of: api.savedCopyScopeRevision) { _, _ in locationNoteOpening = nil }
         .thorbisConfirm(item: $locationToRemove,
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
@@ -942,7 +1001,7 @@ struct CustomerDetailView: View {
                                     .accessibilityElement(children: .combine)
                                     AddressLink(address: location.address, coordinates: location.coordinates)
                                         .labelStyle(.titleOnly).font(Theme.font(15)).tint(Theme.foreground)
-                                    if let notes = location.notes { Text(notes).font(Theme.font(15)).foregroundStyle(Theme.muted) }
+                                    if let notes = location.notes { locationNotes(notes, location: location) }
                                     if let parking = location.parking { detailRow("Parking", value: parking) }
                                     // A hazard on site reads in the warning tint, with its own glyph.
                                     if let dogs = location.dogOnSite { hazardRow("Dogs on site", value: dogs) }
@@ -968,6 +1027,40 @@ struct CustomerDetailView: View {
             }
             if let locationError { mutationError(locationError, id: "location-mutation-error") }
         }
+    }
+
+    @ViewBuilder private func locationNotes(_ notes: String, location: ServiceLocationRecord) -> some View {
+        let long = notes.count > 80 || notes.contains("\n")
+        let canOpen = locationNoteAuthority.map { authority in
+            locationNotesSource == authority && location.organizationId == authority.scope.organizationID
+                && location.customerId == authority.scope.customerID
+        } == true && locations.contains(location)
+        if canOpen { VStack(alignment: .leading, spacing: 2) {
+            Text("Site notes").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+            Text(notes).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .lineLimit(long ? 2 : nil).fixedSize(horizontal: false, vertical: true)
+            if long {
+                Button("Read all site notes") {
+                    guard let authority = locationNoteAuthority, locationNotesSource == authority,
+                          location.organizationId == authority.scope.organizationID, location.customerId == authority.scope.customerID,
+                          locations.contains(location) else { return }
+                    locationNoteOpening = CustomerLocationNoteOpening(authority: authority, location: location)
+                }
+                .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+                .frame(minWidth: 44, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Read all site notes for \(location.label)")
+                .accessibilityIdentifier("location-notes-more-\(location.id)")
+            }
+        } }
+    }
+
+    private func locationNoteIsCurrent(_ opening: CustomerLocationNoteOpening) -> Bool {
+        locationNoteAuthority == opening.authority && locationNotesSource == opening.authority
+            && opening.authority.scope.isCurrent(session: session)
+            && opening.location.customerId == opening.authority.scope.customerID
+            && opening.location.organizationId == opening.authority.scope.organizationID
+            && locations.contains(opening.location)
     }
 
     private func removeLocation(_ location: ServiceLocationRecord) async {
@@ -1333,6 +1426,7 @@ struct CustomerDetailView: View {
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
     private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
         guard currentAuthority() else { return }
+        let noteAuthority = locationNoteAuthority
         loadGeneration += 1
         let requestGeneration = loadGeneration
         let locationRequestGeneration = locationState.beginLoad()
@@ -1347,6 +1441,7 @@ struct CustomerDetailView: View {
             let loadedLocations = try await api.fieldLocations(customer.id)
             guard currentAuthority(), loadGeneration == requestGeneration else { return }
             if locationState.receive(loadedLocations, generation: locationRequestGeneration) {
+                locationNotesSource = noteAuthority == locationNoteAuthority ? noteAuthority : nil
                 locationError = nil
             }
             error = nil
