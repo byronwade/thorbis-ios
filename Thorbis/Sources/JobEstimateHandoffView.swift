@@ -470,7 +470,9 @@ struct JobEstimateHandoffView: View {
                 }
                 CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
             } else {
-                CustomerPresentationCommit(title: "Review selected (\(model.selectedIDs.count))", enabled: model.canReview, busy: model.loading, type: type) {
+                CustomerPresentationCommit(title: "Review selected (\(model.selectedIDs.count))",
+                                           compactTitle: "Review (\(model.selectedIDs.count))",
+                                           enabled: model.canReview, busy: model.loading, type: type) {
                     Task { await model.reviewSelected(); if !model.reviewed.isEmpty { reviewing = true } }
                 }
                 .accessibilityIdentifier("handoff-review-selected")
