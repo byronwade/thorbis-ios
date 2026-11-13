@@ -44,6 +44,7 @@ private struct CustomerHandoffEstimateDetails: View {
                         JobEstimateHandoffPreview.shared.rejectNextMembership()
                         Task { await model.refresh() }
                     }
+                    if model.overviewPricesNeedRefresh { Text("Sample refresh failed") }
                 }
                 #endif
                 if !current {
