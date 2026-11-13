@@ -48,6 +48,40 @@ final class JobEstimateHandoffSelectionTests: XCTestCase {
     }
 }
 
+final class CustomerHandoffEstimateBrowseTests: XCTestCase {
+    func testMovingFromDroppedCurrentEstimateReachesRemainingEstimates() {
+        var browse = CustomerHandoffEstimateBrowse(currentID: "gone", readableIDs: ["a", "b"])
+        XCTAssertTrue(browse.showsControls)
+        XCTAssertTrue(browse.canMovePrevious)
+        XCTAssertTrue(browse.canMoveNext)
+        browse.move(1)
+        XCTAssertEqual(browse.currentID, "a")
+        browse = CustomerHandoffEstimateBrowse(currentID: "gone", readableIDs: ["a", "b"])
+        browse.move(-1)
+        XCTAssertEqual(browse.currentID, "b")
+    }
+    func testControlsStayWhenOnlyOneReadableEstimateRemains() {
+        var browse = CustomerHandoffEstimateBrowse(currentID: "gone", readableIDs: ["b"])
+        XCTAssertTrue(browse.showsControls)
+        XCTAssertTrue(browse.canMoveNext)
+        browse.move(1)
+        XCTAssertEqual(browse.currentID, "b")
+        XCTAssertFalse(browse.showsControls)
+    }
+    func testAdjacentMoveDoesNotWrap() {
+        var browse = CustomerHandoffEstimateBrowse(currentID: "a", readableIDs: ["a", "b"])
+        XCTAssertTrue(browse.showsControls)
+        XCTAssertFalse(browse.canMovePrevious)
+        browse.move(-1)
+        XCTAssertEqual(browse.currentID, "a")
+        browse.move(1)
+        XCTAssertEqual(browse.currentID, "b")
+        XCTAssertFalse(browse.canMoveNext)
+        browse.move(1)
+        XCTAssertEqual(browse.currentID, "b")
+    }
+}
+
 @MainActor
 final class JobEstimateHandoffModelTests: XCTestCase {
     private let actor = "00000000-0000-4000-8000-000000000001"
@@ -759,5 +793,54 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertThrowsError(try context.freezeSignature(signerName: "Changed", png: Data([4]), signedAt: "2026-10-29T12:01:00Z"))
         XCTAssertEqual(model.contexts[reviewed.key]?.signature, original)
         XCTAssertEqual(context.signature?.clientAssetID, original.clientAssetID)
+    }
+    func testPackagedOverviewAsksToRefreshPriceAfterFailedReload() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), "/v1/jobs/\(jobID)/estimates": .init(200, membership([a])),
+            "/v1/estimates/\(a)": .init(200, try packageRecord())
+        ])
+        await model.refresh()
+        let packaged = try XCTUnwrap(model.records.first)
+        XCTAssertNil(model.overviewPricePlaceholder(for: packaged), "A packaged sent estimate waits to choose a package until prices need a refresh")
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(503, #"{"status":503,"title":"Unavailable"}"#)])
+        await model.refresh()
+        XCTAssertEqual(model.overviewPricePlaceholder(for: try XCTUnwrap(model.records.first)), "Refresh to check price")
+    }
+    func testApprovedPackageShowsCheckingPriceUntilReceiptExists() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), "/v1/jobs/\(jobID)/estimates": .init(200, membership([a])),
+            "/v1/estimates/\(a)": .init(200, try packageRecord(status: "approved"))
+        ])
+        await model.refresh()
+        XCTAssertEqual(model.overviewPricePlaceholder(for: try XCTUnwrap(model.records.first)), "Checking price…")
+    }
+    func testOverviewPriceRecordsFailureWhenApprovedReceiptRevisionChanges() async throws {
+        let model = try await ready([])
+        let estimatePath = "/v1/estimates/\(a)", membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let receiptPath = "\(estimatePath)/revisions/1/acceptance"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let receipt = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":19000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}]}"#
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        func routes(_ revisionBody: String, gate: URLProtocolFixture.Gate? = nil) -> [String: URLProtocolFixture.Reply] {
+            ["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+             "\(membershipPath)/\(a)": .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+             "\(estimatePath)/revisions/1": .init(200, revisionBody), receiptPath: .init(200, receipt, gate: gate)]
+        }
+        URLProtocolFixture.setRoutes(routes(revision(a, status: "approved"))); await model.refresh()
+        URLProtocolFixture.setRoutes(routes(revision(a, status: "approved"), gate: gate))
+        let task = Task { @MainActor in await model.loadOverviewPrices() }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == receiptPath }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == receiptPath })
+        URLProtocolFixture.setRoutes(routes(revision(a, status: "approved").replacingOccurrences(of: "Sample scope", with: "Changed scope")))
+        gate.release()
+        await task.value
+        XCTAssertTrue(model.overviewPriceFailures.contains(a))
+        let approved = try XCTUnwrap(model.records.first)
+        XCTAssertEqual(model.overviewPricePlaceholder(for: approved), "Price needs current terms")
+        XCTAssertNil(model.overviewReceipt(for: approved))
     }
 }

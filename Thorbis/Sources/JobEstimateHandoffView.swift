@@ -144,16 +144,18 @@ private struct CustomerHandoffEstimateBrowser: View {
     @State private var currentID: String
     @Environment(\.horizontalSizeClass) private var sizeClass
 
-    init(model: JobEstimateHandoffModel, initial: EstimateRecord) {
+    init(model: JobEstimateHandoffModel, initialID: String) {
         self.model = model
-        _currentID = State(initialValue: initial.id)
+        _currentID = State(initialValue: initialID)
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
     private var readable: [EstimateRecord] {
         model.records.filter { model.detailsCurrent($0, authority: model.session.authorityRevision) }
     }
-    private var index: Int? { readable.firstIndex { $0.id == currentID } }
+    private var browse: CustomerHandoffEstimateBrowse {
+        .init(currentID: currentID, readableIDs: readable.map(\.id))
+    }
 
     var body: some View {
         Group {
@@ -176,10 +178,10 @@ private struct CustomerHandoffEstimateBrowser: View {
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if let index, readable.count > 1 {
+            if browse.showsControls {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { browseControls(index: index) }
-                    VStack(spacing: 8) { browseControls(index: index) }
+                    HStack(spacing: 12) { browseControls }
+                    VStack(spacing: 8) { browseControls }
                 }
                 .padding(Theme.gutter)
                 .background(Theme.canvas)
@@ -187,20 +189,19 @@ private struct CustomerHandoffEstimateBrowser: View {
         }
     }
 
-    @ViewBuilder private func browseControls(index: Int) -> some View {
+    @ViewBuilder private var browseControls: some View {
         CustomerSecondaryButton(title: "Previous estimate", type: type) { move(-1) }
-            .disabled(index == 0)
+            .disabled(!browse.canMovePrevious)
             .accessibilityIdentifier("handoff-previous-estimate")
         CustomerSecondaryButton(title: "Next estimate", type: type) { move(1) }
-            .disabled(index + 1 >= readable.count)
+            .disabled(!browse.canMoveNext)
             .accessibilityIdentifier("handoff-next-estimate")
     }
 
     private func move(_ offset: Int) {
-        let current = readable
-        guard let index = current.firstIndex(where: { $0.id == currentID }),
-              current.indices.contains(index + offset) else { return }
-        currentID = current[index + offset].id
+        var next = browse
+        next.move(offset)
+        currentID = next.currentID
     }
 }
 
@@ -261,11 +262,9 @@ struct JobEstimateHandoffView: View {
         }
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
         .thorbisDestination(item: $detailsID) { id in
-            if let record = model.records.first(where: { $0.id == id }) {
-                CustomerHandoffEstimateBrowser(model: model, initial: record)
-                    .id(record.id)
-                    .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
-            }
+            CustomerHandoffEstimateBrowser(model: model, initialID: id)
+                .id(id)
+                .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
         }
     }
 
@@ -409,8 +408,8 @@ struct JobEstimateHandoffView: View {
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
         } else {
-            price = model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
-                ? "Refresh to check price" : (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+            price = model.overviewPricePlaceholder(for: record)
+                ?? ((record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package")
         }
         return "\(state), \(record.status.capitalized), \(price)"
     }
@@ -439,10 +438,8 @@ struct JobEstimateHandoffView: View {
             } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty {
-                Text(model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
-                     ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…")
-                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+            } else if let placeholder = model.overviewPricePlaceholder(for: record) {
+                Text(placeholder).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else if record.status == "approved" {
                 Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else {

@@ -3,6 +3,29 @@ import SwiftUI
 import UIKit
 import Combine
 
+/// Browse only the currently readable estimates. Dropping the opened id must not hide Previous/Next.
+struct CustomerHandoffEstimateBrowse {
+    var currentID: String
+    let readableIDs: [String]
+    var index: Int? { readableIDs.firstIndex(of: currentID) }
+    var showsControls: Bool { readableIDs.count > 1 || (index == nil && !readableIDs.isEmpty) }
+    var canMovePrevious: Bool { index != 0 && !readableIDs.isEmpty }
+    var canMoveNext: Bool {
+        guard let index else { return !readableIDs.isEmpty }
+        return index + 1 < readableIDs.count
+    }
+    mutating func move(_ offset: Int) {
+        guard !readableIDs.isEmpty else { return }
+        if let index {
+            let next = index + offset
+            guard readableIDs.indices.contains(next) else { return }
+            currentID = readableIDs[next]
+        } else {
+            currentID = offset > 0 ? readableIDs[0] : readableIDs[readableIDs.count - 1]
+        }
+    }
+}
+
 struct JobEstimateHandoffSelection {
     private(set) var selectedIDs: Set<String> = []
     private(set) var optionIDs: [String: String] = [:]
@@ -553,6 +576,20 @@ final class JobEstimateHandoffModel: ObservableObject {
         }
     }
 
+    /// Visible overview amount while a verified total is unavailable. Packaged estimates use the same states as a single total.
+    func overviewPricePlaceholder(for record: EstimateRecord) -> String? {
+        let priced = (record.options ?? []).isEmpty || record.status == "sent" || record.status == "approved"
+        if priced, overviewPricesNeedRefresh || !detailsCurrent(record, authority: authorityRevision) {
+            return "Refresh to check price"
+        }
+        if overviewPriceFailures.contains(record.id) { return "Price needs current terms" }
+        if (record.options ?? []).isEmpty { return "Checking price…" }
+        if record.status == "approved", overviewReceipt(for: record) == nil, revisions[record.id] == nil {
+            return "Checking price…"
+        }
+        return nil
+    }
+
     func overviewReceipt(for record: EstimateRecord) -> CustomerEstimateAcceptanceReceipt? {
         guard record.status == "approved", detailsCurrent(record, authority: authorityRevision),
               let revision = revisions[record.id],
@@ -569,7 +606,10 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard current() else { throw CancellationError() }
         // Recheck job membership and the live revision after the receipt request.
         let checked = try await issuedDetails(record, authority: authority)
-        guard current(), checked == revision else { throw CancellationError() }
+        guard current() else { throw CancellationError() }
+        guard checked == revision else {
+            throw Problem(title: "This estimate changed. Ask your technician to reopen it.", status: 409, detail: nil)
+        }
         return receipt
     }
     private func verifyDetailMembership(_ record: EstimateRecord, job: JobRecord,
