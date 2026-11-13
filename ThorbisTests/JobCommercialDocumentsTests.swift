@@ -276,6 +276,48 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path.hasSuffix(self.id(12)) == true })
     }
 
+    func testEstimatePageShowsSavedCopyWithoutEnablingCustomerDecision() async throws {
+        let estimateID = id(11), path = "/v1/estimates/\(id(11))"
+        let client = api([.init(200, estimate(11))])
+        client.savedCopyScope = "estimate-page-" + UUID().uuidString
+        _ = try await client.fieldEstimate(estimateID)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.knownOffline = true
+        let cached = try await client.fieldEstimateWithProvenance(estimateID)
+        if case .savedCopy = cached.provenance.source {} else { XCTFail("Precondition: saved estimate must be readable") }
+        URLProtocolFixture.setRoutes([path: URLProtocolFixture.offline])
+        let result = await JobDocumentsLoader.estimatesForPage(scope: scope(), api: client, ids: [estimateID],
+            previous: nil, membershipFresh: true, membershipComplete: true, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(read.records.map(\.id), [estimateID], "Offline data stays visible")
+        XCTAssertTrue(read.freshIDs.isEmpty)
+        XCTAssertFalse(read.isComplete, "A saved estimate must not authorize a decision")
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, [path])
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
+    func testSharedJobEstimatesShowOfflineCopiesWithoutMarkingCollectionComplete() async throws {
+        let linksPath = "/v1/jobs/\(id(100))/estimates", estimatePath = "/v1/estimates/\(id(11))"
+        let client = api([.init(200, page([link(11)])), .init(200, estimate(11))])
+        client.savedCopyScope = "shared-estimate-offline-" + UUID().uuidString
+        _ = try await client.fieldJobEstimateLinks(id(100))
+        _ = try await client.fieldEstimate(id(11))
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.knownOffline = true
+        let cachedLinks = try await client.fieldJobEstimateLinkPage(id(100), isCurrent: { true })
+        if case .savedCopy = cachedLinks.provenance.source {} else { XCTFail("Precondition: membership copy must be readable") }
+        let cachedEstimate = try await client.fieldEstimateWithProvenance(id(11))
+        if case .savedCopy = cachedEstimate.provenance.source {} else { XCTFail("Precondition: estimate copy must be readable") }
+        URLProtocolFixture.setRoutes([linksPath: URLProtocolFixture.offline, estimatePath: URLProtocolFixture.offline])
+        let result = await JobDocumentsLoader.estimates(scope: scope(), api: client, retaining: nil, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(read.records.map(\.id), [id(11)], "Saved estimates stay visible")
+        XCTAssertTrue(read.freshIDs.isEmpty)
+        XCTAssertFalse(read.isComplete, "Saved membership or detail cannot prove the current job collection")
+        XCTAssertEqual(Set(URLProtocolFixture.recorded.compactMap { $0.url?.path }), Set([linksPath, estimatePath]))
+        XCTAssertTrue(URLProtocolFixture.recorded.allSatisfy { $0.cachePolicy == .reloadIgnoringLocalCacheData })
+    }
+
     func testPartialEstimateReadStaysLocalWhileSharedSnapshotWaitsForCompletion() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let numbers = Array(11...16)

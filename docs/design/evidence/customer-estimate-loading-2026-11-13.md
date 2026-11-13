@@ -54,6 +54,26 @@ shared marker; it checks each response retains its own provenance. The native
 test is unbuilt and unrun, and does not directly schedule the loader's return
 interleaving. The host test exercises the loader with a stub, not URLSession.
 No claim of server or intermediary freshness, device concurrency coverage, or
-full customer approval safety follows from these tests. An ordinary URLSession
-response remains subject to its existing request cache policy; final customer
-decisions still require the separate fresh revision and membership checks.
+full customer approval safety follows from these tests.
+
+A second host regression exposed that a URLSession response whose local cache was
+not bypassed could still be marked fresh. It failed before the follow-up: the
+loader now first requests cache-bypassing estimate details, and only on a network
+error attempts the ordinary saved-copy path for display. A response is eligible
+for a customer decision only when its own provenance says URLSession bypassed
+the local cache. The host probe verifies a protocol-cache response remains
+visible but leaves the set incomplete. Native offline and concurrent tests are
+still unrun; `no-cache` does not establish intermediary or server freshness.
+
+A separate host regression found that the shared job collection could retain a
+saved estimate while still reporting `isComplete`. The loader now marks any
+nonfresh detail incomplete. It also first reads all membership pages under the
+existing task-local live-only scope and, only after a network failure, uses the
+ordinary offline read while marking membership and all rows nonfresh. This
+avoids relying on the shared path marker, which another request can clear. The
+host probe simulates a cleared marker, confirms a saved membership remains
+visible but incomplete, and confirms 403 does not invoke the offline fallback.
+The iOS URLProtocol test seeds and verifies readable saved membership and detail
+copies, then expects both to remain visible and incomplete after cache-bypassing
+network attempts fail. It is prepared but has not been built or run. The host
+tests exercise the production loader with a stub, not actual URLSession timing.

@@ -28,7 +28,8 @@ struct JobDocumentRead<Record> {
         self.isComplete = isComplete; self.isLoadingMore = loadingMore; self.unavailableIDs = unavailableIDs
     }
 }
-struct Problem: Error { let status: Int? }
+struct Problem: Error { let status: Int?; let title: String?; init(status: Int?, title: String? = nil) { self.status = status; self.title = title } }
+enum SavedCopies { @TaskLocal static var liveOnly = false }
 struct APIRead<Value> { let value: Value; let provenance: Provenance }
 struct Provenance { enum Source { case urlSession(cacheBypassed: Bool), savedCopy(Date) }; let source: Source }
 @MainActor final class APIClient {
@@ -41,9 +42,16 @@ struct Provenance { enum Source { case urlSession(cacheBypassed: Bool), savedCop
     var denied: String?
     var savedID: String?
     var markerClearedByAnotherRead = false
+    var protocolCachedID: String?
+    var savedMembership = false
+    var deniedMembership = false
+    var membershipReadCount = 0
     init(ids: [String], failure: String? = nil) { self.ids = ids; self.failure = failure }
     func fieldJobEstimateLinks(_ id: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
-        ids.map { .init(jobId: id, estimateId: $0) }
+        membershipReadCount += 1
+        if deniedMembership { throw Problem(status: 403) }
+        if savedMembership && SavedCopies.liveOnly { throw Problem(status: nil, title: "Network error") }
+        return ids.map { .init(jobId: id, estimateId: $0) }
     }
     func fieldEstimate(_ id: String) async throws -> EstimateRecord {
         active += 1; peak = max(peak, active); started.append(id)
@@ -54,9 +62,10 @@ struct Provenance { enum Source { case urlSession(cacheBypassed: Bool), savedCop
         if id == foreign { return .init(id: "foreign") }
         return .init(id: id)
     }
-    func fieldEstimateWithProvenance(_ id: String) async throws -> APIRead<EstimateRecord> {
+    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false) async throws -> APIRead<EstimateRecord> {
+        if requireFresh && (id == savedID || id == protocolCachedID) { throw Problem(status: nil, title: "Network error") }
         let record = try await fieldEstimate(id)
-        return .init(value: record, provenance: .init(source: id == savedID ? .savedCopy(Date()) : .urlSession(cacheBypassed: false)))
+        return .init(value: record, provenance: .init(source: id == savedID ? .savedCopy(Date()) : .urlSession(cacheBypassed: requireFresh)))
     }
     func savedCopyDate(_ path: String) -> Date? { !markerClearedByAnotherRead && path == savedID.map { "/v1/estimates/\($0)" } ? Date() : nil }
 }
@@ -89,10 +98,26 @@ struct Provenance { enum Source { case urlSession(cacheBypassed: Bool), savedCop
                                                                    previous: nil, membershipFresh: true, membershipComplete: true,
                                                                    isCurrent: { true })!
         precondition(!savedPage.isComplete && !savedPage.freshIDs.contains("1"), "Saved details cannot make the set complete")
+        let savedShared = await JobDocumentsLoader.estimates(scope: scope, api: savedAPI, retaining: nil, isCurrent: { true })!
+        precondition(!savedShared.isComplete && savedShared.records.contains { $0.id == "1" } && !savedShared.freshIDs.contains("1"),
+                     "A shared job collection must retain a saved row but mark the collection incomplete")
+        let cachedLinksAPI = APIClient(ids: ["1"]); cachedLinksAPI.savedMembership = true; cachedLinksAPI.markerClearedByAnotherRead = true
+        let cachedLinks = await JobDocumentsLoader.estimates(scope: scope, api: cachedLinksAPI, retaining: nil, isCurrent: { true })!
+        precondition(!cachedLinks.isComplete && cachedLinks.records.map(\.id) == ["1"] && cachedLinks.freshIDs.isEmpty,
+                     "A saved membership page must remain incomplete even if a concurrent network read cleared the path marker")
+        let deniedLinksAPI = APIClient(ids: ["1"]); deniedLinksAPI.deniedMembership = true
+        let deniedLinks = await JobDocumentsLoader.estimates(scope: scope, api: deniedLinksAPI, retaining: nil, isCurrent: { true })!
+        precondition(!deniedLinks.isComplete && deniedLinks.records.isEmpty && deniedLinksAPI.membershipReadCount == 1,
+                     "Denied membership must not retry using cached links")
         let racedAPI = APIClient(ids: ids); racedAPI.savedID = "1"; racedAPI.markerClearedByAnotherRead = true
         let racedPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: racedAPI, ids: ["1"],
             previous: nil, membershipFresh: true, membershipComplete: true, isCurrent: { true })!
         precondition(!racedPage.isComplete && !racedPage.freshIDs.contains("1"), "A concurrent fresh read must not turn a saved response into a fresh estimate")
+        let protocolAPI = APIClient(ids: ids); protocolAPI.protocolCachedID = "1"
+        let protocolPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: protocolAPI, ids: ["1"],
+            previous: nil, membershipFresh: true, membershipComplete: true, isCurrent: { true })!
+        precondition(protocolPage.records.count == 1 && !protocolPage.isComplete && protocolPage.freshIDs.isEmpty,
+                     "A protocol-cache response remains visible but cannot enable a customer decision")
         var pagePartials: [JobDocumentRead<EstimateRecord>] = []
         let partialPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: APIClient(ids: ids), ids: ids,
             previous: nil, membershipFresh: true, membershipComplete: false, isCurrent: { true },

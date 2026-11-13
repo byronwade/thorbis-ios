@@ -314,7 +314,14 @@ enum JobDocumentsLoader {
             guard isCurrent(), !Task.isCancelled else { return }
             let id = ids[index]
             do {
-                let response = try await api.fieldEstimateWithProvenance(id)
+                let response: APIRead<EstimateRecord>
+                do {
+                    response = try await api.fieldEstimateWithProvenance(id, requireFresh: true)
+                } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                    // A previously saved record may still be shown, but never authorizes a decision.
+                    guard isCurrent(), !Task.isCancelled else { return }
+                    response = try await api.fieldEstimateWithProvenance(id)
+                }
                 let record = response.value
                 guard isCurrent(), !Task.isCancelled else { return }
                 guard scope.contains(record, requestedID: id) else {
@@ -322,7 +329,7 @@ enum JobDocumentsLoader {
                     publishPartial(); return
                 }
                 let fresh: Bool
-                if case .urlSession = response.provenance.source { fresh = !linksSaved }
+                if case .urlSession(cacheBypassed: true) = response.provenance.source { fresh = !linksSaved }
                 else { fresh = false }
                 slots[index] = .init(record: record, fresh: fresh, failed: false, rejected: false)
                 publishPartial()
@@ -413,15 +420,20 @@ enum JobDocumentsLoader {
         var linksRead = false
         var linksSaved = false
         do {
-            let links = try await api.fieldJobEstimateLinks(scope.jobID, isCurrent: isCurrent)
-            guard isCurrent(), !Task.isCancelled else { return nil }
-            linksRead = true
-            // A list saved on this phone (no signal) shows the job's estimates, but it can't vouch for
-            // what belongs to the job now, so none of them is fresh enough to decide on.
-            if api.savedCopyDate("/v1/jobs/\(scope.jobID)/estimates") != nil {
+            let links: [JobEstimateLink]
+            do {
+                links = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await api.fieldJobEstimateLinks(scope.jobID, isCurrent: isCurrent)
+                }
+            } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                guard isCurrent(), !Task.isCancelled else { return nil }
+                // Offline membership is useful for reading but cannot authorize a complete set.
+                links = try await api.fieldJobEstimateLinks(scope.jobID, isCurrent: isCurrent)
                 linksSaved = true
                 complete = false
             }
+            guard isCurrent(), !Task.isCancelled else { return nil }
+            linksRead = true
             for link in links {
                 guard link.jobId == scope.jobID else { complete = false; continue }
                 ids.append(link.estimateId)
@@ -449,6 +461,7 @@ enum JobDocumentsLoader {
         for (index, slot) in details.slots.enumerated() {
             guard let slot else { return nil }
             if slot.failed { complete = false }
+            if !slot.fresh { complete = false }
             if slot.rejected { rejected.insert(orderedIDs[index]) }
             if let record = slot.record {
                 records.append(record)

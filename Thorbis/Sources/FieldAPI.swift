@@ -1142,8 +1142,8 @@ extension APIClient {
     func fieldEstimate(_ id: String, requireFresh: Bool = false) async throws -> EstimateRecord {
         try await send("GET", fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
     }
-    func fieldEstimateWithProvenance(_ id: String) async throws -> APIRead<EstimateRecord> {
-        try await sendWithProvenance(fieldPath("/v1/estimates", id: id))
+    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false) async throws -> APIRead<EstimateRecord> {
+        try await sendWithProvenance(fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
     }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
