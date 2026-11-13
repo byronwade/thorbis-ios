@@ -129,7 +129,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         for _ in 0..<24 {
             let footerIDs = ["handoff-review-selected", "handoff-previous-estimate", "handoff-next-estimate"]
             let footerTop = footerIDs.flatMap { app.buttons.matching(identifier: $0).allElementsBoundByIndex }
-                .filter { $0.exists && $0.isHittable }.map { $0.frame.minY }.min() ?? app.frame.maxY
+                .filter { $0.exists && $0.frame.intersects(app.frame) }.map { $0.frame.minY }.min() ?? app.frame.maxY
             let top = app.frame.minY + 105
             let point = element.frame.midY
             if element.isHittable && point > top && point < footerTop { return }
