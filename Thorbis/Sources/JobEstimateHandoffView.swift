@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Read-only issued terms; selection and approval stay in the handoff.
 private struct CustomerHandoffEstimateDetails: View {
@@ -160,15 +161,7 @@ private struct CustomerHandoffEstimateBrowser: View {
             if let record = readable.first(where: { $0.id == currentID }) {
                 CustomerHandoffEstimateDetails(model: model, record: record)
                     .id(record)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 50).onEnded { value in
-                            let horizontal = value.translation.width
-                            guard value.startLocation.x > 30,
-                                  abs(horizontal) > 70,
-                                  abs(horizontal) > abs(value.translation.height) * 2 else { return }
-                            move(horizontal < 0 ? 1 : -1)
-                        }
-                    )
+                    .gesture(CustomerHandoffBrowsePan(move: move))
             } else {
                 CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
                                      message: "Hand the device back to your technician to reopen this estimate.")
@@ -201,6 +194,67 @@ private struct CustomerHandoffEstimateBrowser: View {
         guard let index = current.firstIndex(where: { $0.id == currentID }),
               current.indices.contains(index + offset) else { return }
         currentID = current[index + offset].id
+    }
+}
+
+/// Interior paging leaves the stack's leading edge to UIKit back (`columnBackSwipe` / interactive pop).
+enum CustomerHandoffBrowseSwipe {
+    static let edge: CGFloat = 30
+    static let distance: CGFloat = 70
+
+    static func fromLeadingEdge(x: CGFloat, width: CGFloat, rightToLeft: Bool) -> Bool {
+        rightToLeft ? x >= width - edge : x <= edge
+    }
+
+    static func pageOffset(translation: CGSize, startX: CGFloat, width: CGFloat, rightToLeft: Bool) -> Int? {
+        guard !fromLeadingEdge(x: startX, width: width, rightToLeft: rightToLeft),
+              abs(translation.width) > distance,
+              abs(translation.width) > abs(translation.height) * 2 else { return nil }
+        return translation.width < 0 ? 1 : -1
+    }
+}
+
+/// Horizontal estimate paging that never begins on the destination's leading edge, including RTL.
+private struct CustomerHandoffBrowsePan: UIGestureRecognizerRepresentable {
+    let move: (Int) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator { Coordinator() }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let pan = UIPanGestureRecognizer()
+        pan.delegate = context.coordinator
+        pan.maximumNumberOfTouches = 1
+        return pan
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        guard recognizer.state == .ended, let view = recognizer.view else { return }
+        let translation = recognizer.translation(in: view)
+        let start = recognizer.location(in: view).x - translation.x
+        let rightToLeft = view.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        guard let offset = CustomerHandoffBrowseSwipe.pageOffset(
+            translation: CGSize(width: translation.x, height: translation.y),
+            startX: start, width: view.bounds.width, rightToLeft: rightToLeft
+        ) else { return }
+        move(offset)
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = recognizer as? UIPanGestureRecognizer, let view = pan.view else { return false }
+            let velocity = pan.velocity(in: view)
+            let start = pan.location(in: view).x - pan.translation(in: view).x
+            let rightToLeft = view.effectiveUserInterfaceLayoutDirection == .rightToLeft
+            guard !CustomerHandoffBrowseSwipe.fromLeadingEdge(x: start, width: view.bounds.width, rightToLeft: rightToLeft) else {
+                return false
+            }
+            return abs(velocity.x) > abs(velocity.y) * 2
+        }
+
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                               shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
+            other.view is UIScrollView && other is UIPanGestureRecognizer
+        }
     }
 }
 

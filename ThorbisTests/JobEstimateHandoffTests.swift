@@ -48,6 +48,31 @@ final class JobEstimateHandoffSelectionTests: XCTestCase {
     }
 }
 
+final class JobEstimateHandoffBrowseSwipeTests: XCTestCase {
+    private let width: CGFloat = 390
+    private let next = CGSize(width: -100, height: 0)
+    private let previous = CGSize(width: 100, height: 0)
+
+    func testInteriorPanPagesInBothLayoutDirections() {
+        XCTAssertEqual(CustomerHandoffBrowseSwipe.pageOffset(translation: next, startX: 80, width: width, rightToLeft: false), 1)
+        XCTAssertEqual(CustomerHandoffBrowseSwipe.pageOffset(translation: previous, startX: 80, width: width, rightToLeft: false), -1)
+        XCTAssertEqual(CustomerHandoffBrowseSwipe.pageOffset(translation: next, startX: 200, width: width, rightToLeft: true), 1)
+        XCTAssertEqual(CustomerHandoffBrowseSwipe.pageOffset(translation: previous, startX: 200, width: width, rightToLeft: true), -1)
+    }
+
+    func testLeadingEdgeDoesNotPageInLTROrRTL() {
+        XCTAssertNil(CustomerHandoffBrowseSwipe.pageOffset(translation: previous, startX: 10, width: width, rightToLeft: false))
+        XCTAssertNil(CustomerHandoffBrowseSwipe.pageOffset(translation: previous, startX: 30, width: width, rightToLeft: false))
+        XCTAssertNil(CustomerHandoffBrowseSwipe.pageOffset(translation: next, startX: 380, width: width, rightToLeft: true))
+        XCTAssertNil(CustomerHandoffBrowseSwipe.pageOffset(translation: next, startX: width - 30, width: width, rightToLeft: true))
+    }
+
+    func testVerticalOrShortPanDoesNotPage() {
+        XCTAssertNil(CustomerHandoffBrowseSwipe.pageOffset(translation: CGSize(width: -100, height: 80), startX: 80, width: width, rightToLeft: false))
+        XCTAssertNil(CustomerHandoffBrowseSwipe.pageOffset(translation: CGSize(width: -50, height: 0), startX: 80, width: width, rightToLeft: false))
+    }
+}
+
 @MainActor
 final class JobEstimateHandoffModelTests: XCTestCase {
     private let actor = "00000000-0000-4000-8000-000000000001"
