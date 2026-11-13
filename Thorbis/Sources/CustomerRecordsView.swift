@@ -278,13 +278,18 @@ struct CustomerRecordsView: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                 Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                Spacer(minLength: 8)
+                Text("Open job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: true, vertical: false).accessibilityHidden(true)
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                Spacer(minLength: 0)
-            }.frame(minHeight: 44)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }.buttonStyle(RowPressStyle())
         .accessibilityLabel("Job: \(title), \(incomplete ? "partial" : "\(count)")")
         .accessibilityHint("Opens the job")
+        .accessibilityIdentifier("customer-records-job-\(jobID)")
     }
 
     private func moneyLink(_ row: CustomerMoneyRow) -> some View {
