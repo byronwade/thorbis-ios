@@ -150,7 +150,7 @@ final class CustomerPresentationTests: XCTestCase {
         let lines = [charge, hiddenCharge, hiddenCredit]
         let projected = customerEstimateProjection(lines, currency: "USD")!
         let breakdown = CustomerDocumentAmounts(lines: projected, currency: "USD")!
-        XCTAssertEqual(projected.map(\.description), ["Work", "Materials"])
+        XCTAssertEqual(projected.map(\.description), ["Line Work", "Materials"])
         XCTAssertEqual(breakdown.credits, -1000)
         XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false),
                        [CustomerAmountRow(label: "Discounts and credits",
