@@ -13,6 +13,18 @@ release base, plus two passing iPad disclosure tests; a separate iPad test
 failed before reaching the disclosure. Actual VoiceOver, largest text and a
 permission-limited single-place UI were not verified. The candidate was
 cherry-picked onto release `281c5f7b` and reviewed independently; that review
-found no concrete feature or permission regression. The fresh build and tests
-on this exact release-based candidate are pending. This record does not claim
+found no concrete feature or permission regression. This record does not claim
 Paper parity or TestFlight delivery.
+
+On candidate `a6e37f0c` (the subsequent commit only added this record), a clean
+simulator test build succeeded using a locally cached Stripe Terminal 5.8.1
+binary; the tracked package configuration remains unchanged. The focused
+phone run passed 21 navigation and release-note unit tests and three of four
+drawer UI tests. The remaining case failed before reaching the disclosure when
+the simulator switched through another app while opening the drawer. Its
+isolated rerun passed. See `/private/tmp/thorbis-sidebar-local-build-1113.log`,
+`/private/tmp/thorbis-sidebar-current-test-1113.log` and
+`/private/tmp/thorbis-sidebar-current-retry-1113.log`. This does not establish
+the cause of the combined-run failure. A current-candidate iPad run, actual
+VoiceOver activation, largest text and single-place permission cases remain
+unverified.
