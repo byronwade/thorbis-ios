@@ -146,12 +146,24 @@ enum PaperPreview {
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-approved-unknown-total") {
             draft = changed(draft, ["status": "approved", "options": NSNull()])
         }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-empty-draft") {
+            draft = changed(draft, ["lines": []])
+        }
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-invalid-money") {
             let invalid = FieldLine(id: "00000000-0000-4000-8000-000000009299", description: "Unverifiable sample amount", quantity: 2,
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
             draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([invalid]))])
         }
         var main = changed(estimate, ["title": "Main drain repair", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-empty-issued") {
+            main = changed(main, ["lines": [], "options": NSNull()])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-zero-issued"),
+           let first = main.lines.first {
+            let zero = FieldLine(id: first.id, description: "No charge inspection", quantity: 1,
+                                 unitPrice: FieldMoney(amount: 0, currency: "USD"), source: first.source)
+            main = changed(main, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([zero])), "options": NSNull()])
+        }
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-review-states") {
             main = changed(main, ["status": "declined"])
             draft = changed(draft, ["status": "approved"])
@@ -190,6 +202,13 @@ enum PaperPreview {
                                      unitPrice: FieldMoney(amount: -4_000, currency: "USD"), source: nil)
             primary = changed(primary, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines + [discount])),
                                         "amountPaid": 15_000])
+        }
+        if isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-mixed-currency"),
+           var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines)) as? [[String: Any]],
+           !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+            price["currency"] = "EUR"
+            lines[0]["unitPrice"] = price
+            primary = changed(primary, ["lines": lines])
         }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
         return [primary,
@@ -1101,7 +1120,22 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return object
             }
             if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)/revisions/\($0.currentRevisionNumber ?? 0)" }) {
-                return reviewRevision(record)
+                var revision = reviewRevision(record)
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-empty-issued-mismatch") {
+                    revision["totalAmount"] = 25000
+                }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-option-total-mismatch"),
+                   var options = revision["options"] as? [[String: Any]], !options.isEmpty {
+                    options[0]["totalAmount"] = 1
+                    revision["options"] = options
+                }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-option-empty"),
+                   var options = revision["options"] as? [[String: Any]], !options.isEmpty {
+                    options[0]["lines"] = []
+                    options[0]["totalAmount"] = 0
+                    revision["options"] = options
+                }
+                return revision
             }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
                 var object = jsonObject(record) as! [String: Any]
