@@ -221,6 +221,9 @@ struct CustomerSummaryReplayProof {
 @MainActor
 protocol CustomerSummaryPendingStoring {
     func load(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt?
+    /// Internal recovery only: returns original terms to the authorized reconciliation flow,
+    /// never to the customer-facing current-document display.
+    func loadForRecovery(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt?
     /// Atomically insert; never overwrite another uncertain attempt.
     func insert(_ pending: CustomerSummaryPendingAttempt) throws
     /// Caller must also prove current authority before resolving a receipt.
@@ -241,13 +244,21 @@ final class KeychainCustomerSummaryPendingStore: CustomerSummaryPendingStoring {
         return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
     }
     func load(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt? {
+        guard let pending = try loadForRecovery(scope: scope) else { return nil }
+        guard pending.isValid(for: scope) else { throw StoreError.invalid }
+        return pending
+    }
+    func loadForRecovery(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt? {
+        guard let requested = scope.canonical else { throw StoreError.invalid }
         var item = try query(scope); item[kSecReturnData as String] = true; item[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(item as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else { throw StoreError.keychain(status) }
         let pending = try JSONDecoder().decode(CustomerSummaryPendingAttempt.self, from: data)
-        guard pending.isValid(for: scope) else { throw StoreError.invalid }
+        guard let original = pending.scope.canonical, pending.isValid(for: pending.scope),
+              original.origin == requested.origin, original.actorID == requested.actorID,
+              original.organizationID == requested.organizationID, original.invoiceID == requested.invoiceID else { throw StoreError.invalid }
         return pending
     }
     func insert(_ pending: CustomerSummaryPendingAttempt) throws {
@@ -260,8 +271,8 @@ final class KeychainCustomerSummaryPendingStore: CustomerSummaryPendingStoring {
         guard status == errSecSuccess else { throw StoreError.keychain(status) }
     }
     func complete(scope: CustomerSummaryPendingScope, proof: CustomerSummaryReplayProof, currentAuthority: @MainActor () -> Bool) throws {
-        guard currentAuthority(), let pending = try load(scope: scope),
-              proof.pending.isValid(for: scope), pending.attempt == proof.pending.attempt,
+        guard currentAuthority(), let pending = try loadForRecovery(scope: scope),
+              proof.pending.isValid(for: pending.scope), pending.attempt == proof.pending.attempt,
               pending.matches(proof.receipt), currentAuthority() else { throw StoreError.invalid }
         let status = SecItemDelete(try query(scope) as CFDictionary)
         guard status == errSecSuccess else { throw StoreError.keychain(status) }
