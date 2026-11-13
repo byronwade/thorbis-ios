@@ -8,6 +8,53 @@ final class JobDocumentsUITests: XCTestCase {
     private let estimateA = "00000000-0000-4000-8000-000000002218"
     private let addonA = "00000000-0000-4000-8000-000000002238"
 
+    func testOverviewPaymentShortcutAtLargestText() {
+        continueAfterFailure = false
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let collect = app.buttons["job-overview-collect"]
+        findOverviewElement(collect, in: app)
+        XCTAssertTrue(collect.exists)
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 10))
+        let scroll = app.scrollViews.firstMatch
+        for _ in 0..<20 {
+            let top = chooser.frame.maxY, bottom = app.frame.maxY - 12
+            if collect.frame.minY >= top && collect.frame.maxY <= bottom { break }
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: collect.frame.minY < top ? 0.72 : 0.48))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTAssertTrue(collect.isHittable)
+        XCTAssertGreaterThanOrEqual(collect.frame.minY, chooser.frame.maxY,
+                                    "The full action must be clear of the pinned section chooser")
+        XCTAssertLessThanOrEqual(collect.frame.maxY, app.frame.maxY - 12,
+                                 "The full action must fit inside the viewport")
+        XCTAssertGreaterThanOrEqual(collect.frame.height, 44)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Job payment shortcut largest text"; screenshot.lifetime = .keepAlways; add(screenshot)
+        collect.tap()
+        XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 15))
+        let identity = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertTrue(identity.label.contains("2209"), identity.label)
+    }
+
+    func testOverviewPaymentShortcutPrecedesJobDetails() {
+        continueAfterFailure = false
+        let app = preview()
+        let collect = app.buttons["job-overview-collect"]
+        findOverviewElement(collect, in: app)
+        XCTAssertTrue(collect.exists)
+        app.scrollClearOfFoot(collect)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Job overview payment shortcut"; screenshot.lifetime = .keepAlways; add(screenshot)
+        let moneyPanel = app.buttons["job-money-open"]
+        findOverviewElement(moneyPanel, in: app)
+        XCTAssertTrue(moneyPanel.exists)
+        XCTAssertLessThan(collect.frame.minY, moneyPanel.frame.minY,
+                          "The direct collection action must be before the financial panel")
+    }
+
     func testOverviewCollectsTheOnlyPayableInvoiceWithoutOpeningMoney() {
         continueAfterFailure = false
         let app = preview()

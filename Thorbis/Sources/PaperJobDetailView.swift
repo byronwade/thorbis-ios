@@ -1364,6 +1364,19 @@ struct JobDetailView: View {
     private func overviewContent(_ job: JobRecord) -> some View {
         // OnSite.dc.html sets its blocks 18pt apart; Job.dc.html 22.
         VStack(alignment: .leading, spacing: isOnSite ? 18 : 22) {
+            if let step = overviewDirectPaymentStep(job), case let .collect(invoiceID, _, _) = step {
+                Button { Task { await collectOverviewInvoice(step) } } label: {
+                    Label("Collect payment · \(jobInvoiceReference(invoiceID))", systemImage: "creditcard")
+                        .font(Theme.font(15, weight: .medium))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityLabel("Collect payment for invoice \(jobInvoiceReference(invoiceID))")
+                .accessibilityIdentifier("job-overview-collect")
+                .disabled(overviewPaymentRefreshing)
+            }
             if isOnSite {
                 toolkit(job).id("job-toolkit")
                 wrapUpPanel(job).id("job-wrap-up")
@@ -1645,21 +1658,6 @@ struct JobDetailView: View {
                 if estimates.isEmpty && bills.isEmpty {
                     if loading { SkeletonRows(count: 1, leading: false, inset: 16) }
                     else { JobPanelRow(title: "No estimates or invoices yet", titleSize: 15) }
-                }
-                if let step = overviewDirectPaymentStep(job), case let .collect(invoiceID, _, _) = step {
-                    Button {
-                        Task { await collectOverviewInvoice(step) }
-                    } label: {
-                        Label("Collect payment · \(jobInvoiceReference(invoiceID))", systemImage: "creditcard")
-                            .font(Theme.font(15, weight: .medium))
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityLabel("Collect payment for invoice \(jobInvoiceReference(invoiceID))")
-                    .accessibilityIdentifier("job-overview-collect")
-                    .disabled(overviewPaymentRefreshing)
                 }
                 if let balance = invoiceBalanceCents, balance > 0 {
                     // What is owed now, in the type colour; it opens Money.
