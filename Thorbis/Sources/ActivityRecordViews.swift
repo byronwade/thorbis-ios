@@ -89,6 +89,16 @@ struct JobNoteDetailView: View {
     }
 }
 
+#if DEBUG
+@MainActor final class MediaDetailRetryProbe: ObservableObject {
+    static let shared = MediaDetailRetryProbe()
+    @Published var status = "Ready"
+    var attempts = 0
+    var left = false
+    var opensAfterLeaving = 0
+}
+#endif
+
 private struct MediaDetailScope: Hashable {
     let actor: String
     let organization: String
@@ -109,6 +119,7 @@ struct JobMediaDetailView: View {
     @StateObject private var preview = DocumentPreviewController()
     @State private var asset: MediaAssetRecord?
     @State private var sourceScope: MediaDetailScope?
+    @State private var loadToken = UUID()
     @State private var error: String?
     @State private var loading = true
 
@@ -166,12 +177,42 @@ struct JobMediaDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: readScope) { await load() }
         .onChange(of: readScope) { _, current in
-            if sourceScope != current { preview.clear(); asset = nil; sourceScope = nil; error = nil }
+            if sourceScope != current {
+                loadToken = UUID(); preview.clear(); asset = nil; sourceScope = nil; error = nil
+            }
         }
-        .onDisappear { preview.clear() }
+        .onDisappear {
+            loadToken = UUID()
+            asset = nil
+            sourceScope = nil
+            error = nil
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave") {
+                MediaDetailRetryProbe.shared.left = true
+            }
+            #endif
+            preview.clear()
+        }
     }
 
     private func load() async {
+        #if DEBUG
+        let testingRetry = PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave")
+        let attempt: Int = {
+            guard testingRetry else { return 0 }
+            let probe = MediaDetailRetryProbe.shared
+            probe.attempts += 1
+            return probe.attempts
+        }()
+        defer {
+            if testingRetry, attempt == 2 {
+                let probe = MediaDetailRetryProbe.shared
+                probe.status = "Retry finished; preview opened after leaving: \(probe.opensAfterLeaving)"
+            }
+        }
+        #endif
+        let token = UUID()
+        loadToken = token
         preview.clear()
         asset = nil
         error = nil
@@ -179,9 +220,16 @@ struct JobMediaDetailView: View {
         sourceScope = scope
         loading = true
         do {
-            let assets = try await api.fieldMedia(jobID, isCurrent: { readScope == scope })
+            #if DEBUG
+            if testingRetry, attempt == 1 { throw URLError(.timedOut) }
+            if testingRetry, attempt == 2 {
+                MediaDetailRetryProbe.shared.status = "Retry started"
+                try? await Task.sleep(for: .seconds(4))
+            }
+            #endif
+            let assets = try await api.fieldMedia(jobID, isCurrent: { readScope == scope && loadToken == token })
             try Task.checkCancellation()
-            guard readScope == scope, sourceScope == scope else { return }
+            guard readScope == scope, sourceScope == scope, loadToken == token else { return }
             guard let match = assets.first(where: { $0.id == assetID && $0.jobId == scope.job &&
                 $0.organizationId == scope.organization && $0.uploadState == "stored" && !$0.archived }) else {
                 error = "This file is not on the job."
@@ -189,8 +237,11 @@ struct JobMediaDetailView: View {
                 return
             }
             asset = match
+            #if DEBUG
+            if testingRetry, MediaDetailRetryProbe.shared.left { MediaDetailRetryProbe.shared.opensAfterLeaving += 1 }
+            #endif
             preview.open {
-                guard readScope == scope, sourceScope == scope else { throw CancellationError() }
+                guard readScope == scope, sourceScope == scope, loadToken == token else { throw CancellationError() }
                 let file: URL
                 #if DEBUG
                 if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-success") {
@@ -204,7 +255,7 @@ struct JobMediaDetailView: View {
                 #else
                 file = try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename)
                 #endif
-                guard !Task.isCancelled, readScope == scope, sourceScope == scope else {
+                guard !Task.isCancelled, readScope == scope, sourceScope == scope, loadToken == token else {
                     try? FileManager.default.removeItem(at: file)
                     throw CancellationError()
                 }
@@ -212,10 +263,10 @@ struct JobMediaDetailView: View {
             }
         } catch is CancellationError {
         } catch {
-            guard readScope == scope, sourceScope == scope else { return }
+            guard readScope == scope, sourceScope == scope, loadToken == token else { return }
             self.error = error.localizedDescription
         }
-        if readScope == scope, sourceScope == scope { loading = false }
+        if readScope == scope, sourceScope == scope, loadToken == token { loading = false }
     }
 }
 

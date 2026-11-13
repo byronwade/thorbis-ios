@@ -60,6 +60,7 @@ struct RootView: View {
     @State private var workspace = false
     @State private var createJob = false
     #if DEBUG
+    @ObservedObject private var mediaDetailRetryProbe = MediaDetailRetryProbe.shared
     @State private var previewInvoiceEditor = false
     @State private var previewInvoiceDetail = false
     @State private var previewEstimateRevision = false
@@ -78,6 +79,11 @@ struct RootView: View {
         #if DEBUG
         .modifier(PreviewLandscape())
         .modifier(PreviewWindowWidth())
+        .overlay(alignment: .bottom) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave") {
+                Text(mediaDetailRetryProbe.status).accessibilityIdentifier("media-detail-retry-probe")
+            }
+        }
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
