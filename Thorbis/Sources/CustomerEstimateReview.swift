@@ -15,17 +15,19 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let totalAmount: Int
     let currency: String
 
-    func validate(for expected: EstimateRecord) throws {
+    func validate(for expected: EstimateRecord, allowApprovedForReading: Bool = false) throws {
         guard UUID(uuidString: id) != nil,
               estimateId == expected.id, organizationId == expected.organizationId,
               customerId == expected.customerId, locationId == expected.locationId,
-              revisionNumber == expected.currentRevisionNumber, status == "issued"
+              revisionNumber == expected.currentRevisionNumber,
+              (status == "issued" && expected.status == "sent" ||
+               allowApprovedForReading && status == "approved" && expected.status == "approved")
         else { throw customerReviewUnavailable() }
     }
 
     /// Retained reader content must still match the record now backing its destination.
     func matchesDetails(for record: EstimateRecord) -> Bool {
-        (try? validate(for: record)) != nil
+        (try? validate(for: record, allowApprovedForReading: true)) != nil
     }
 
     fileprivate func validate(action: PublicEstimateAction, paperHash: String) throws {
@@ -102,7 +104,7 @@ extension APIClient {
         // Issued terms are read for a live customer decision, never from a saved copy.
         let revision: CustomerIssuedEstimateRevision = try await send("GET", path, requireFresh: true)
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
-        try revision.validate(for: expected)
+        try revision.validate(for: expected, allowApprovedForReading: allowApprovedForReading)
         return revision
     }
 

@@ -109,7 +109,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private func revision(_ id: String) -> [String: Any] {
         let number = changedFirstRevision && id == Self.a ? 2 : 1
         return ["id": id.replacingOccurrences(of: "0081", with: "0091"), "estimateId": id, "organizationId": org, "customerId": PaperPreview.customerID,
-         "revisionNumber": number, "status": "issued", "title": title(id), "lines": lines(id), "options": options(id), "totalAmount": amount(id), "currency": "USD"]
+         "revisionNumber": number, "status": status(id) == "approved" ? "approved" : "issued", "title": title(id), "lines": lines(id), "options": options(id), "totalAmount": amount(id), "currency": "USD"]
     }
     private func job() -> [String: Any] {
         ["id": PaperPreview.jobID, "organizationId": org, "customerId": PaperPreview.customerID, "title": "Sample service visit", "status": "in_progress", "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z", "allowedTransitions": ["completed", "paused"]]

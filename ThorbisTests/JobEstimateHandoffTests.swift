@@ -59,8 +59,8 @@ final class JobEstimateHandoffModelTests: XCTestCase {
     private func record(_ id: String, status: String = "sent") -> String {
         #"{"id":"\#(id)","organizationId":"\#(org)","customerId":"\#(customer)","createdByUserId":"\#(actor)","status":"\#(status)","currentRevisionNumber":1,"title":"Sample scope","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}],"createdAt":"2026-10-29T00:00:00Z","updatedAt":"2026-10-29T00:00:00Z"}"#
     }
-    private func revision(_ id: String) -> String {
-        #"{"id":"00000000-0000-4000-8000-000000000099","estimateId":"\#(id)","organizationId":"\#(org)","customerId":"\#(customer)","revisionNumber":1,"status":"issued","title":"Sample scope","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}],"totalAmount":19000,"currency":"USD"}"#
+    private func revision(_ id: String, status: String = "issued") -> String {
+        #"{"id":"00000000-0000-4000-8000-000000000099","estimateId":"\#(id)","organizationId":"\#(org)","customerId":"\#(customer)","revisionNumber":1,"status":"\#(status)","title":"Sample scope","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}],"totalAmount":19000,"currency":"USD"}"#
     }
     private var jobJSON: String { #"{"id":"\#(jobID)","organizationId":"\#(org)","customerId":"\#(customer)","title":"Sample visit","status":"in_progress","createdAt":"2026-10-29T00:00:00Z","updatedAt":"2026-10-29T00:00:00Z"}"# }
     private func ready(_ responses: [URLProtocolFixture.Reply], job: String? = nil) async throws -> JobEstimateHandoffModel {
@@ -275,7 +275,7 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         URLProtocolFixture.setRoutes([
             "/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
             singlePath: .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
-            "\(estimatePath)/revisions/1": .init(200, revision(a))
+            "\(estimatePath)/revisions/1": .init(200, revision(a, status: "approved"))
         ])
         await model.refresh()
         let approved = try XCTUnwrap(model.records.first)
