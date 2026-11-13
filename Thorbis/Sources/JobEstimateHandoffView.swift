@@ -382,6 +382,8 @@ struct JobEstimateHandoffView: View {
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("handoff-card-\(record.id)")
     }
 
     private func selectionValue(_ record: EstimateRecord) -> String {
