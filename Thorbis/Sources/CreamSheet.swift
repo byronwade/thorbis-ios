@@ -235,7 +235,7 @@ func compactMoney(_ cents: Int, currency: String = "USD") -> String {
 
 // MARK: - The sidebar's list (phone drawer and iPad column)
 
-private enum SidebarPreferenceStore {
+@MainActor private enum SidebarPreferenceStore {
     static let work: UserDefaults = {
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
