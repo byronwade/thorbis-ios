@@ -75,6 +75,27 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertEqual(body["consentDigest"] as? String, digest)
         XCTAssertEqual(body["idempotencyKey"] as? String, "00000000-0000-4000-8000-000000000021")
         XCTAssertEqual(body["consent"] as? Bool, true)
+        let signedJSON = String(decoding: try JSONSerialization.data(withJSONObject: ["status": "signed", "receipt": receipt]), as: UTF8.self)
+        var wrongReceipt = receipt; wrongReceipt["jobId"] = "00000000-0000-4000-8000-000000000099"
+        let wrongJSON = String(decoding: try JSONSerialization.data(withJSONObject: ["status": "signed", "receipt": wrongReceipt]), as: UTF8.self)
+        let lookup = APIClient(session: URLProtocolFixture.session([.init(200, signedJSON), .init(200, "{\"status\":\"unsigned\"}"), .init(404, "{}"), .init(200, wrongJSON), .init(403, "{}"), .init(200, "{\"status\":\"unknown\"}")]), baseURL: "https://app.thorbis.com")
+        guard case .signed = try await lookup.currentCustomerSummaryAuthorization(summary, currentAuthority: { true }) else { return XCTFail("Expected matching signed receipt") }
+        let lookupURL = try XCTUnwrap(URLProtocolFixture.recorded.last?.url)
+        XCTAssertEqual(URLComponents(url: lookupURL, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, digest)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+        guard case .unsigned = try await lookup.currentCustomerSummaryAuthorization(summary, currentAuthority: { true }) else { return XCTFail("Expected explicit unsigned") }
+        do { _ = try await lookup.currentCustomerSummaryAuthorization(summary, currentAuthority: { true }); XCTFail("404 cannot mean unsigned") } catch { }
+        do { _ = try await lookup.currentCustomerSummaryAuthorization(summary, currentAuthority: { true }); XCTFail("Foreign receipt cannot be accepted") } catch { }
+        do { _ = try await lookup.currentCustomerSummaryAuthorization(summary, currentAuthority: { true }); XCTFail("Permission denial cannot mean unsigned") } catch { }
+        do { _ = try await lookup.currentCustomerSummaryAuthorization(summary, currentAuthority: { true }); XCTFail("Unknown states cannot mean unsigned") } catch { }
+        let lookupGate = URLProtocolFixture.Gate(); defer { lookupGate.release() }
+        let gatedLookup = APIClient(session: URLProtocolFixture.session([.init(200, "{\"status\":\"unsigned\"}", gate: lookupGate)]), baseURL: "https://app.thorbis.com")
+        var lookupActive = true
+        let lookupTask = Task { @MainActor in try await gatedLookup.currentCustomerSummaryAuthorization(summary, currentAuthority: { lookupActive }) }
+        for _ in 0..<1500 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        lookupActive = false; lookupGate.release()
+        do { _ = try await lookupTask.value; XCTFail("Retired authority cannot establish unsigned state") } catch is CancellationError { } catch { XCTFail("Expected cancellation, got \(error)") }
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let gatedAPI = APIClient(session: URLProtocolFixture.session([.init(201, receiptJSON, gate: gate)]), baseURL: "https://app.thorbis.com")
         var active = true
