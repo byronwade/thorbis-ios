@@ -120,7 +120,7 @@ final class InboxEmailPresenter: ObservableObject {
         identity = (actorID, organizationID, origin, generation); self.current = current
     }
     func unbind() { identity = nil; current = nil; opening = nil }
-    func open(_ mail: MailDraft) {
+    func open(_ mail: MailDraft, context: String) {
         guard let identity, current?() == true else { unbind(); return }
         // Do not replace an unsaved composer through another entry point.
         #if DEBUG
@@ -130,7 +130,7 @@ final class InboxEmailPresenter: ObservableObject {
         #endif
         guard opening == nil,
               let scope = CommsEmailRecoveryScope(actorID: identity.actorID, organizationID: identity.organizationID,
-                                                  origin: identity.origin, initial: mail, namespace: namespace) else { return }
+                                                  origin: identity.origin, context: context, namespace: namespace) else { return }
         opening = Opening(actorID: identity.actorID, organizationID: identity.organizationID,
                           sessionGeneration: identity.generation, recoveryScope: scope, mail: mail)
     }
@@ -145,10 +145,12 @@ final class InboxEmailPresenter: ObservableObject {
 }
 
 struct InboxEmailAction {
-    @MainActor func callAsFunction(_ mail: MailDraft) { InboxEmailPresenter.shared.open(mail) }
-    @MainActor func callAsFunction(_ url: URL) {
+    @MainActor func callAsFunction(_ mail: MailDraft, context: String? = nil) {
+        InboxEmailPresenter.shared.open(mail, context: context ?? "recipient:\(mail.recipient.lowercased())")
+    }
+    @MainActor func callAsFunction(_ url: URL, context: String? = nil) {
         guard let mail = MailDraft(mailtoURL: url) else { return }
-        InboxEmailPresenter.shared.open(mail)
+        callAsFunction(mail, context: context)
     }
 }
 

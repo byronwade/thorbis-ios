@@ -696,7 +696,7 @@ struct JobDetailView: View {
                 handoff = JobCalendarDraft.make(job: job, customerName: store.customers.first { $0.id == job.customerId }?.name, locations: customerLocations).map(DeviceHandoff.calendar)
             }
         case .email:
-            return ThorbisMenuItem("Email customer", icon: "envelope") { if let mail = customerEmail(job) { inboxEmail(mail) } }
+            return ThorbisMenuItem("Email customer", icon: "envelope") { if let mail = customerEmail(job) { inboxEmail(mail, context: "job:\(job.id)") } }
         case .assign:
             return ThorbisMenuItem(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", icon: "person.crop.circle.badge.plus") { showAssign = true }
         case .billWithoutEstimate:
@@ -1411,6 +1411,7 @@ struct JobDetailView: View {
                                    preference: JobContacts.preference(current ? customerRecord : nil),
                                    loaded: current && contactsLoaded, failed: current && contactsFailed,
                                    customerID: job.customerId,
+                                   jobID: job.id,
                                    customerName: linkedCustomer(job)?.name) { await loadContacts(job) }
                 let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
                 JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,

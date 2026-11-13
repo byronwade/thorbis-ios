@@ -595,11 +595,11 @@ enum CommsInboxScope {
 /// Device-only recovery for an in-progress email, isolated by workspace and original recipient context.
 struct CommsEmailRecoveryScope: Equatable {
     let account: String
-    init?(actorID: String, organizationID: String, origin: String, initial: MailDraft, namespace: String? = nil) {
+    @MainActor init?(actorID: String, organizationID: String, origin: String, context: String, namespace: String? = nil) {
         guard let actor = UUID(uuidString: actorID), let organization = UUID(uuidString: organizationID),
-              let canonicalOrigin = APIClient.normalizedOrigin(origin), canonicalOrigin == origin,
+              let canonicalOrigin = APIClient.normalizedOrigin(origin), canonicalOrigin == origin, !context.isEmpty,
               let encoded = try? JSONEncoder().encode([canonicalOrigin, actor.uuidString.lowercased(), organization.uuidString.lowercased(),
-                                                        initial.recipients.joined(separator: ","), initial.subject ?? "", namespace ?? ""]) else { return nil }
+                                                        context.lowercased(), namespace ?? ""]) else { return nil }
         account = SHA256.hash(data: encoded).map { String(format: "%02x", $0) }.joined()
     }
 }

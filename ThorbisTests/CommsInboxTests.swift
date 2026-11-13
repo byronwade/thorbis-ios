@@ -10,18 +10,18 @@ final class CommsInboxTests: XCTestCase {
         presenter.bind(actorID: "00000000-0000-4000-8000-000000000001", organizationID: "00000000-0000-4000-8000-000000000002", origin: "https://app.thorbis.com", generation: firstGeneration, current: { current })
         let first = try XCTUnwrap(MailDraft(recipient: "first@example.com"))
         let second = try XCTUnwrap(MailDraft(recipient: "second@example.com"))
-        presenter.open(first)
+        presenter.open(first, context: "customer:one")
         let original = try XCTUnwrap(presenter.opening)
-        presenter.open(second)
+        presenter.open(second, context: "customer:two")
         XCTAssertEqual(presenter.opening?.id, original.id, "A second action cannot replace an unsaved composer")
         XCTAssertEqual(presenter.opening?.mail.recipient, "first@example.com")
         current = false
         XCTAssertFalse(presenter.isCurrent(original), "A sheet cannot display under retired authority")
-        presenter.open(second)
+        presenter.open(second, context: "customer:two")
         XCTAssertNil(presenter.opening, "A stale session cannot open or retain an email")
         current = true
         presenter.bind(actorID: "00000000-0000-4000-8000-000000000003", organizationID: "00000000-0000-4000-8000-000000000004", origin: "https://app.thorbis.com", generation: UUID(), current: { current })
-        presenter.open(second)
+        presenter.open(second, context: "customer:two")
         let newer = try XCTUnwrap(presenter.opening)
         presenter.close(original.id)
         XCTAssertEqual(presenter.opening?.id, newer.id, "An old sheet callback cannot close a new scope")
@@ -48,19 +48,21 @@ final class CommsInboxTests: XCTestCase {
         let initial = try XCTUnwrap(MailDraft(recipient: "customer@example.com", subject: "Visit"))
         let namespace = UUID().uuidString
         func scope(_ actor: String, _ origin: String) throws -> CommsEmailRecoveryScope {
-            try XCTUnwrap(CommsEmailRecoveryScope(actorID: actor, organizationID: org, origin: origin, initial: initial, namespace: namespace))
+            try XCTUnwrap(CommsEmailRecoveryScope(actorID: actor, organizationID: org, origin: origin, context: "job:one", namespace: namespace))
         }
         let owner = try scope(actor, "https://app.thorbis.com")
         let wrongActor = try scope(otherActor, "https://app.thorbis.com")
         let wrongOrigin = try scope(actor, "https://other.thorbis.com")
+        let wrongJob = try XCTUnwrap(CommsEmailRecoveryScope(actorID: actor, organizationID: org,
+            origin: "https://app.thorbis.com", context: "job:two", namespace: namespace))
         XCTAssertFalse(owner.account.contains("customer@example.com"))
-        XCTAssertNotEqual(owner, wrongActor); XCTAssertNotEqual(owner, wrongOrigin)
+        XCTAssertNotEqual(owner, wrongActor); XCTAssertNotEqual(owner, wrongOrigin); XCTAssertNotEqual(owner, wrongJob)
         let store = KeychainCommsEmailRecoveryStore.shared
         defer { try? store.remove(scope: owner) }
         var draft = CommsMailDraft(mail: initial); draft.cc = "copy@example.com"; draft.bcc = "private@example.com"; draft.body = "Private details"
         try store.save(CommsEmailRecovery(draft), scope: owner)
         XCTAssertEqual(try store.load(scope: owner), CommsEmailRecovery(draft))
-        XCTAssertNil(try store.load(scope: wrongActor)); XCTAssertNil(try store.load(scope: wrongOrigin))
+        XCTAssertNil(try store.load(scope: wrongActor)); XCTAssertNil(try store.load(scope: wrongOrigin)); XCTAssertNil(try store.load(scope: wrongJob))
         try store.remove(scope: owner)
         XCTAssertNil(try store.load(scope: owner))
     }

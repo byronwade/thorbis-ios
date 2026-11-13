@@ -498,7 +498,7 @@ struct CustomerDetailView: View {
             PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
             PaperLabeledCircle(symbol: "message", title: "Text") { inboxText(text, name: customer.name, openURL: openURL) }
         }
-        if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { inboxEmail(mail) } }
+        if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { inboxEmail(mail, context: "customer:\(customer.id)") } }
         if let directionsURL {
             PaperLabeledCircle(symbol: "arrow.triangle.turn.up.right.diamond", title: "Directions",
                                accessibilityLabel: "Directions in Maps") { openURL(directionsURL) }
@@ -581,7 +581,7 @@ struct CustomerDetailView: View {
                         detailLine("Phone") { ContactActions(phone: phone, email: nil) }
                     }
                     if let email = record.email, !email.isEmpty, !CustomerFacts.email(email, isIn: contacts.compactMap(\.email)) {
-                        detailLine("Email") { ContactActions(phone: nil, email: email) }
+                        detailLine("Email") { ContactActions(phone: nil, email: email, emailContext: "customer:\(customer.id)") }
                     }
                     if let industry = record.industry { detailLine("Industry") { Text(industry) } }
                     if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
@@ -699,7 +699,7 @@ struct CustomerDetailView: View {
             if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { inboxText(text, name: contact.name, openURL: openURL) }) }
         }
         if let mail = MailDraft(recipient: contact.email) {
-            items.append(ThorbisMenuItem("Email", icon: "envelope") { inboxEmail(mail) })
+            items.append(ThorbisMenuItem("Email", icon: "envelope") { inboxEmail(mail, context: "customer:\(customer.id):contact:\(contact.id)") })
         }
         items.append(ThorbisMenuItem("Save to Contacts", icon: "person.crop.circle.badge.plus") {
             handoff = .contact(ContactCardDraft.make(contact: contact, customerName: record?.name ?? customer.name, address: record?.address))
