@@ -72,21 +72,37 @@ extension APIClient {
         struct Empty: Encodable {}
         let list: FinancingApplicationList = try await send(
             "POST", financialPath("/v1/invoices", id: invoiceID, suffix: "/financing-applications/refresh"), body: Empty())
+        guard list.applications.allSatisfy({ financingInvoiceMatches($0.invoiceId, invoiceID) }) else {
+            throw Problem(title: "Financing history couldn't be verified", status: nil, detail: nil)
+        }
         return list.applications
+    }
+
+    private func financingInvoiceMatches(_ actual: String, _ expected: String) -> Bool {
+        guard let actualID = UUID(uuidString: actual), let expectedID = UUID(uuidString: expected) else { return false }
+        return actualID == expectedID
     }
 
     func cancelFinancingApplication(invoiceID: String, applicationID: String) async throws -> FinancingApplication {
         struct Empty: Encodable {}
         guard UUID(uuidString: applicationID) != nil else { throw URLError(.badURL) }
-        return try await send("POST", financialPath("/v1/invoices", id: invoiceID, suffix: "/financing-applications/\(applicationID.lowercased())/cancel"),
-                              body: Empty())
+        let result: FinancingApplication = try await send("POST", financialPath("/v1/invoices", id: invoiceID, suffix: "/financing-applications/\(applicationID.lowercased())/cancel"), body: Empty())
+        guard financingInvoiceMatches(result.invoiceId, invoiceID), UUID(uuidString: result.id) == UUID(uuidString: applicationID) else {
+            throw Problem(title: "Financing result couldn't be verified", status: nil, detail: nil)
+        }
+        return result
     }
 
     /// The lender texts the application to `phone`, or to the customer's mobile on file.
     func sendFinancingApplication(invoiceID: String, idempotencyKey: String, phone: String?) async throws -> FinancingApplication {
         struct Body: Encodable { let idempotencyKey: String; let phone: String? }
-        return try await send("POST", financialPath("/v1/invoices", id: invoiceID, suffix: "/financing-applications"),
+        let result: FinancingApplication = try await send("POST", financialPath("/v1/invoices", id: invoiceID, suffix: "/financing-applications"),
                               body: Body(idempotencyKey: idempotencyKey, phone: phone))
+        guard financingInvoiceMatches(result.invoiceId, invoiceID) else {
+            // The provider may already have accepted the request: preserve the caller's retry key.
+            throw Problem(title: "Financing result couldn't be verified", status: nil, detail: nil)
+        }
+        return result
     }
 }
 
