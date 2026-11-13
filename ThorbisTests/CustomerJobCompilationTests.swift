@@ -90,7 +90,7 @@ final class CustomerJobCompilationTests: XCTestCase {
         SavedCopyStore.shared.waitForQueuedWrites()
         client.invalidateRequests()
         client.knownOffline = true
-        URLProtocolFixture.setRoutes(["/v1/jobs": .offline])
+        URLProtocolFixture.setRoutes(["/v1/jobs": URLProtocolFixture.offline])
         let saved = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
         XCTAssertEqual(saved.estimates, live.estimates)
         XCTAssertEqual(saved.invoices, live.invoices)
