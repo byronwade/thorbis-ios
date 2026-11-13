@@ -463,6 +463,7 @@ struct JobCustomerDocumentsView: View {
                 try await Task.sleep(for: .seconds(15))
             }
             #endif
+            guard isCurrentOpen() else { return }
             let invoice = try await api.liveFieldInvoice(id)
             guard isCurrentOpen() else { return }
             guard invoice.id == id, scope.contains(invoice) else {
