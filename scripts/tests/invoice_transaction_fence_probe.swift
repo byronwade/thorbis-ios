@@ -45,6 +45,38 @@ import SQLite3
    var result: [Bool] = []; for await value in group { result.append(value) }; return result
   }
   precondition(competing.filter { $0 }.count == 1)
+  let recoveryDomain = InvoiceFenceDomain(origin: key.origin, organizationID: key.organizationID, invoiceID: UUID().uuidString.lowercased())
+  let actor = UUID().uuidString.lowercased(), customer = UUID().uuidString.lowercased(), job = UUID().uuidString.lowercased()
+  let identity = InvoiceIdleCaptureIdentity(domain: recoveryDomain, actorID: actor, customerID: customer, jobID: job)
+  let firstCapture = try a.capture(identity: identity, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data("first".utf8))
+  let reopened = try InvoiceTransactionFence(path: path)
+  let recovery = try reopened.recoverIdle(identity: identity)
+  precondition(recovery?.owner == owner && recovery?.version == firstCapture && recovery?.sequence == 1 && recovery?.bytes == Data("first".utf8))
+  do { _ = try reopened.loadIdle(domain: recoveryDomain, owner: owner); preconditionFailure("identity bypass") } catch { }
+  let secondCapture = try b.capture(identity: identity, owner: owner, expectedVersion: firstCapture, sequence: 2, bytes: Data("second".utf8))
+  do { _ = try a.capture(identity: identity, owner: owner, expectedVersion: secondCapture, sequence: 1, bytes: Data("stale".utf8)); preconditionFailure("older sequence accepted") } catch { }
+  let newest = try reopened.recoverIdle(identity: identity)
+  precondition(newest?.sequence == 2 && newest?.bytes == Data("second".utf8))
+  let raceCaptureDomain = InvoiceFenceDomain(origin: key.origin, organizationID: key.organizationID, invoiceID: UUID().uuidString.lowercased())
+  let raceIdentity = InvoiceIdleCaptureIdentity(domain: raceCaptureDomain, actorID: actor, customerID: customer, jobID: job)
+  let raceVersion = try a.capture(identity: raceIdentity, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data("start".utf8))
+  let captureResults = await withTaskGroup(of: Bool.self, returning: [Bool].self) { group in
+   group.addTask { (try? a.capture(identity: raceIdentity, owner: owner, expectedVersion: raceVersion, sequence: 2, bytes: Data("second".utf8))) != nil }
+   group.addTask { (try? b.capture(identity: raceIdentity, owner: owner, expectedVersion: raceVersion, sequence: 3, bytes: Data("third".utf8))) != nil }
+   var result: [Bool] = []; for await value in group { result.append(value) }; return result
+  }
+  precondition(captureResults.filter { $0 }.count == 1)
+  var raceRecovery = try reopened.recoverIdle(identity: raceIdentity)!
+  if raceRecovery.sequence == 2 {
+   _ = try a.capture(identity: raceIdentity, owner: owner, expectedVersion: raceRecovery.version, sequence: 3, bytes: Data("third".utf8))
+   raceRecovery = try reopened.recoverIdle(identity: raceIdentity)!
+  }
+  precondition(raceRecovery.sequence == 3 && raceRecovery.bytes == Data("third".utf8))
+  let wrongIdentity = InvoiceIdleCaptureIdentity(domain: recoveryDomain, actorID: UUID().uuidString.lowercased(), customerID: customer, jobID: job)
+  do { _ = try reopened.recoverIdle(identity: wrongIdentity); preconditionFailure("wrong identity disclosed") } catch { }
+  do { _ = try a.save(domain: recoveryDomain, owner: owner, expectedVersion: secondCapture, bytes: Data("bypass".utf8)); preconditionFailure("unsequenced overwrite") } catch { }
+  _ = try a.begin(domain: recoveryDomain, owner: owner, expectedVersion: secondCapture, kind: .directUnknown, command: Data("unknown direct".utf8))
+  do { _ = try reopened.recoverIdle(identity: identity); preconditionFailure("uncertain draft disclosed") } catch { }
   let failureKey = InvoiceFenceDomain(origin: key.origin, organizationID: key.organizationID, invoiceID: UUID().uuidString.lowercased())
   var db: OpaquePointer?
   precondition(sqlite3_open(path, &db) == SQLITE_OK)

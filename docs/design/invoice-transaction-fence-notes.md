@@ -1,0 +1,9 @@
+# Invoice transaction fence experiment
+
+This experiment is disconnected from the app and is not approved for financial writes. All cooperating clients must use the same SQLite database and the same transactions; other databases, direct requests, and unrecorded legacy attempts are not fenced.
+
+The ordered capture primitive stores an owner token, actor/customer/job claims, monotonic capture sequence, version and each raw snapshot in transactions keyed by canonical origin, organization and invoice. `recoverIdle` compares stored claims and returns the owner, version, sequence and bytes only while no marker is pending. These claims are not authentication: the caller must independently reauthorize the current identity and invoice before any disclosure. A previously returned draft is not revoked by a later marker or authority change. The raw owner token is not a credential.
+
+The caller must serialize capture, keep the editor alive until the latest sequence is durably acknowledged, and present an explicit failure if it cannot. A newer capture that loses compare-and-swap must revalidate scope and retry against the current version; an older sequence must never overwrite a newer one. A failed or ambiguous SQLite commit does not prove whether the capture or marker persisted. There is no writer, retry protocol, completion acknowledgement, automatic marker clearing, command-to-snapshot binding or network binding in this experiment. A direct request with an unknown outcome remains separate and cannot be treated as settled.
+
+Host tests use separate SQLite connections, but do not prove termination/power-failure durability, application/extension participation, encrypted storage, or protection of database, WAL and SHM files on iOS. Owner-token recovery, migration, retention, live authority, stale handles and protected storage must be independently qualified before integration.
