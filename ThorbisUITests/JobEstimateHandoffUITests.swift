@@ -231,6 +231,15 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(app.textFields["Your full name"].exists)
     }
 
+    func testUnverifiedPackagePriceIsHidden() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-empty-option"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(second.waitForExistence(timeout: 30)); visible(app, second); selectEstimate(app, second)
+        XCTAssertTrue(app.staticTexts["Empty package"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["$250.00"].exists, "Unverified package totals must not be presented as issued prices")
+    }
+
     func testUnverifiedApprovedAmountIsHidden() {
         let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-empty-base", "--handoff-test-second-approved"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
