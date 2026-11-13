@@ -162,6 +162,32 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.buttons["\(prefix)-invoices"].exists)
     }
 
+    func testWorkDisclosureAndJobsAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "office",
+                               "--paper-preview-menu-suite", UUID().uuidString,
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let group = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(group.waitForExistence(timeout: 20))
+        XCTAssertTrue(group.isHittable)
+        XCTAssertGreaterThanOrEqual(group.frame.height, 44)
+        XCTAssertEqual(group.value as? String, "Expanded")
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Collapsed")
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Expanded")
+        let jobs = app.buttons["\(prefix)-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 10))
+        if !app.usesTabletLayout && !jobs.isHittable { app.revealDrawerRow("jobs") }
+        XCTAssertTrue(jobs.isHittable)
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 15))
+    }
+
     func testWorkPreferenceSurvivesRelaunchAndJobsCanBeOpened() throws {
         guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer persistence") }
         continueAfterFailure = false
