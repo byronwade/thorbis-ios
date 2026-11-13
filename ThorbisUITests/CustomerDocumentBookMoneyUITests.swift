@@ -14,6 +14,24 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.waitForExistence(timeout: 15))
     }
 
+    func testVerifiedSummaryHandsBackToCorrectInvoicePayment() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+        XCTAssertFalse(collecting.label.contains("INV-2240"), collecting.label)
+    }
+
+    func testVerifiedSummaryRefusesPaymentWhenRecheckFails() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-job-invoice-signed", "--paper-preview-payment-recheck-fails"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        XCTAssertTrue(app.staticTexts["Payment isn't ready. Ask your technician to check this invoice."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+    }
+
     func testInvoiceBookWithoutSummaryDoesNotShowRawDescriptions() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description"])
         XCTAssertTrue(text("Invoice details aren't available", in: app).waitForExistence(timeout: 15))
