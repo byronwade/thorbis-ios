@@ -89,10 +89,15 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func status(_ id: String) -> String {
         if id == Self.c, flags.contains("--paper-preview-handoff-third-sent"), approved[id] == nil { return "sent" }
-        if approved[id] != nil || id == Self.c || (id == Self.a && flags.contains("--paper-preview-handoff-mixed")) { return "approved" }
+        if approved[id] != nil || id == Self.c || (id == Self.a && flags.contains("--paper-preview-handoff-mixed")) || (id == Self.b && flags.contains("--handoff-test-second-approved")) { return "approved" }
         return id == Self.d ? "draft" : "sent"
     }
     private func options(_ id: String) -> [[String: Any]] {
+        if id == Self.b, flags.contains("--handoff-test-empty-option") {
+            return [["id": "00000000-0000-4000-8000-000000008202", "title": "Empty package", "description": "",
+                     "lines": [["id": "sample-option", "description": "Unverified package", "quantity": 1,
+                                "unitPrice": ["amount": 25000, "currency": "USD"]]], "totalAmount": 25000, "currency": "USD"]]
+        }
         guard id == Self.a, flags.contains("--paper-preview-handoff-options") else { return [] }
         let scope: [[String: Any]] = [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 25000, "currency": "USD"]]]
         let description = flags.contains("--paper-preview-handoff-long-description")
@@ -111,8 +116,27 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func revision(_ id: String) -> [String: Any] {
         let number = changedFirstRevision && id == Self.a ? 2 : 1
-        return ["id": id.replacingOccurrences(of: "0081", with: "0091"), "estimateId": id, "organizationId": org, "customerId": PaperPreview.customerID,
+        var value: [String: Any] = ["id": id.replacingOccurrences(of: "0081", with: "0091"), "estimateId": id, "organizationId": org, "customerId": PaperPreview.customerID,
          "revisionNumber": number, "status": status(id) == "approved" ? "approved" : "issued", "title": title(id), "lines": lines(id), "options": options(id), "totalAmount": amount(id), "currency": "USD"]
+        if id == Self.b {
+            if flags.contains("--handoff-test-empty-base") { value["lines"] = []; value["totalAmount"] = 0 }
+            if flags.contains("--handoff-test-empty-option") {
+                value["options"] = [["id": "00000000-0000-4000-8000-000000008202", "title": "Empty package",
+                                     "description": "", "lines": [], "totalAmount": 0, "currency": "USD"]]
+            }
+            if flags.contains("--handoff-test-non-usd") {
+                value["currency"] = "EUR"
+                value["lines"] = [["id": id, "description": "Non-USD sample", "quantity": 1,
+                                    "unitPrice": ["amount": amount(id), "currency": "EUR"]]]
+            }
+            if flags.contains("--handoff-test-mismatch") { value["totalAmount"] = amount(id) + 1 }
+            if flags.contains("--handoff-test-zero-line") {
+                value["lines"] = [["id": id, "description": "Included sample service", "quantity": 1,
+                                    "unitPrice": ["amount": 0, "currency": "USD"]]]
+                value["totalAmount"] = 0
+            }
+        }
+        return value
     }
     private func job() -> [String: Any] {
         ["id": PaperPreview.jobID, "organizationId": org, "customerId": PaperPreview.customerID, "title": "Sample service visit", "status": "in_progress", "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z", "allowedTransitions": ["completed", "paused"]]
