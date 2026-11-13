@@ -2,6 +2,56 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoRollupUITests: XCTestCase {
+    func testCustomerDocumentsKeepJobIdentityAndUnavailableFilesClosed() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup"]
+        app.launch()
+        let pending = app.buttons["customer-document-00000000-0000-4000-8000-000000031779"]
+        for _ in 0..<25 where !pending.exists { app.swipeUp() }
+        XCTAssertTrue(pending.waitForExistence(timeout: 20))
+        XCTAssertFalse(pending.isEnabled)
+        XCTAssertTrue(pending.label.contains("File is not ready yet"))
+        let failed = app.buttons["customer-document-00000000-0000-4000-8000-000000031780"]
+        XCTAssertTrue(failed.waitForExistence(timeout: 10))
+        XCTAssertFalse(failed.isEnabled)
+        XCTAssertTrue(failed.label.contains("File is not ready yet"))
+        let other = app.buttons["customer-document-00000000-0000-4000-8000-000000031778"]
+        for _ in 0..<25 where !other.isHittable { app.swipeUp() }
+        XCTAssertTrue(other.waitForExistence(timeout: 20)); XCTAssertTrue(other.isHittable)
+        other.tap()
+        XCTAssertTrue(app.navigationBars["File"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Drain report"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Service report"].exists)
+    }
+    func testCustomerDocumentOpensItsJobFile() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup"]
+        app.launch()
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        for _ in 0..<25 where !file.isHittable { app.swipeUp() }
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        XCTAssertTrue(file.isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Customer document link"; shot.lifetime = .keepAlways; add(shot)
+        file.tap()
+        XCTAssertTrue(app.navigationBars["File"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Service report"].waitForExistence(timeout: 10))
+    }
+    func testCustomerDocumentOpensAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        for _ in 0..<25 where !file.isHittable { app.swipeUp() }
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        XCTAssertTrue(file.isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Customer document link largest text"; shot.lifetime = .keepAlways; add(shot)
+        file.tap()
+        XCTAssertTrue(app.navigationBars["File"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Service report"].waitForExistence(timeout: 10))
+    }
     func testLongJobTitleWrapsAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()

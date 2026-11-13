@@ -1629,6 +1629,26 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/media", PaperPreview.isCustomerRecordsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-document-rollup") {
+                guard id.hasSuffix("2214") || id.hasSuffix("2201") else { return ["items": []] }
+                let first = id.hasSuffix("2214")
+                let file: [String: Any] = ["id": first ? "00000000-0000-4000-8000-000000031777" : "00000000-0000-4000-8000-000000031778", "organizationId": org, "jobId": id,
+                    "uploaderUserId": actor, "kind": "document", "mime": "application/pdf", "sizeBytes": 128,
+                    "originalFilename": first ? "Service report.pdf" : "Drain report.pdf", "contentHash": "preview", "storageKey": "preview/report.pdf",
+                    "uploadState": "stored", "tags": [String](), "caption": first ? "Service report" : "Drain report", "archived": false,
+                    "createdAt": now, "updatedAt": now]
+                if !first { return ["items": [file]] }
+                var pending = file
+                pending["id"] = "00000000-0000-4000-8000-000000031779"
+                pending["caption"] = "Uploading report"
+                pending["uploadState"] = "pending"
+                var failed = file
+                failed["id"] = "00000000-0000-4000-8000-000000031780"
+                failed["caption"] = "Failed report"
+                failed["uploadState"] = "failed"
+                return ["items": [file, pending, failed]]
+            }
+            if path == "/v1/jobs/\(id)/media", PaperPreview.isCustomerRecordsPreview,
                (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-photo-rollup") ||
                 ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")) {
                 let mixed = ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")
