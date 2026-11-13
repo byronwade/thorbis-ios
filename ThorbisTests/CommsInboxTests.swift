@@ -39,8 +39,8 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertEqual(draft.bcc, "private@example.com")
         XCTAssertEqual(draft.subject, "Job & estimate")
         XCTAssertEqual(draft.body, "First\nSecond & final")
-        XCTAssertNil(MailDraft(mailtoURL: XCTUnwrap(URL(string: "mailto:first@example.com?x-extra=secret"))))
-        XCTAssertNil(MailDraft(mailtoURL: XCTUnwrap(URL(string: "mailto:first@example.com?subject=one&subject=two"))))
+        XCTAssertNil(MailDraft(mailtoURL: try XCTUnwrap(URL(string: "mailto:first@example.com?x-extra=secret"))))
+        XCTAssertNil(MailDraft(mailtoURL: try XCTUnwrap(URL(string: "mailto:first@example.com?subject=one&subject=two"))))
     }
 
     private func call(_ id: String, status: String = "completed", number: String? = "+15550100100", name: String? = nil,
