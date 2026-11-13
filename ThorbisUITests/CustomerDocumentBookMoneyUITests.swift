@@ -172,6 +172,15 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Sign summary"].waitForExistence(timeout: 5))
     }
 
+    func testJobLinkedFallbackDoesNotOfferSigningWhenInvoiceMembershipReadFails() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-job-linked-invoice", "--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-invoice-membership-unavailable"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Customer safe service"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["Sign summary"].waitForExistence(timeout: 5))
+    }
+
     func testStandaloneLongSummaryOpensReadingDrawer() {
         continueAfterFailure = false
         let app = XCUIApplication()

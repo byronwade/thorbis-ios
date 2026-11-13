@@ -942,6 +942,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-membership-unavailable"),
+                  url.path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+            status = 503
+            payload = ["status": 503, "title": "Sample invoice membership unavailable"]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-review-pending") {
