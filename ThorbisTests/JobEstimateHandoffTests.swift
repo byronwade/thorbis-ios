@@ -342,6 +342,11 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         let receipt = try await model.approvedReceipt(record, revision: revision, authority: authority)
         XCTAssertEqual(receipt?.signerName, "Alex")
         XCTAssertEqual(receipt?.lines.first?.description, "Repair")
+        var changed = routes(200, valid)
+        changed[estimatePath] = .init(200, record(a, status: "approved").replacingOccurrences(of: "\"currentRevisionNumber\":1", with: "\"currentRevisionNumber\":2"))
+        URLProtocolFixture.setRoutes(changed)
+        do { _ = try await model.approvedReceipt(record, revision: revision, authority: authority); XCTFail("A superseded revision must not be presented as current") }
+        catch { }
         URLProtocolFixture.setRoutes(routes(404, #"{"status":404,"title":"Not found"}"#))
         let absent = try await model.approvedReceipt(record, revision: revision, authority: authority)
         XCTAssertNil(absent)
