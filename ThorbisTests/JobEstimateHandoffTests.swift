@@ -286,6 +286,43 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertFalse(model.selectedIDs.contains(a))
         XCTAssertFalse(model.canReview)
     }
+    func testReceiptValidatesFoldedMaterialsAndExplicitCreditsWithoutOverflow() throws {
+        var value = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(revision(a, status: "approved").utf8)) as? [String: Any])
+        let lines: [[String: Any]] = [
+            ["id": "line", "description": "Repair", "quantity": 1, "unitPrice": ["amount": 19000, "currency": "USD"]],
+            ["id": "hidden", "description": "Internal part", "quantity": 2, "unitPrice": ["amount": 1000, "currency": "USD"], "showToCustomer": false],
+            ["id": "credit", "description": "Courtesy credit", "quantity": 1, "unitPrice": ["amount": -1000, "currency": "USD"]]
+        ]
+        value["lines"] = lines; value["totalAmount"] = 20000
+        let issued = try JSONDecoder().decode(CustomerIssuedEstimateRevision.self, from: JSONSerialization.data(withJSONObject: value))
+        let json = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":20000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}},{"id":"credit","description":"Courtesy credit","quantity":1,"unitPrice":{"amount":-1000,"currency":"USD"}},{"id":"hidden","description":"Materials","quantity":1,"unitPrice":{"amount":2000,"currency":"USD"}}]}"#
+        let receipt = try JSONDecoder().decode(CustomerEstimateAcceptanceReceipt.self, from: Data(json.utf8))
+        XCTAssertNoThrow(try receipt.validate(for: issued))
+        XCTAssertEqual(CustomerDocumentAmounts(lines: receipt.lines, currency: "USD")?.credits, -1000)
+        XCTAssertFalse(receipt.lines.contains { $0.description == "Internal part" })
+        let overflow = FieldLine(id: "bad", description: "Bad", quantity: Int.max,
+                                 unitPrice: FieldMoney(amount: 2, currency: "USD"), source: nil)
+        XCTAssertNil(CustomerDocumentAmounts(lines: [overflow], currency: "USD"))
+    }
+    func testReceiptIsDiscardedWhenAuthorityChangesDuringRead() async throws {
+        let model = try await ready([])
+        let estimatePath = "/v1/estimates/\(a)", membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let receiptPath = "\(estimatePath)/revisions/1/acceptance"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let receipt = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":19000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}]}"#
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+            "\(membershipPath)/\(a)": .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+            "\(estimatePath)/revisions/1": .init(200, revision(a, status: "approved")), receiptPath: .init(200, receipt, gate: gate)])
+        await model.refresh()
+        let record = try XCTUnwrap(model.records.first), authority = model.session.authorityRevision
+        let issued = try await model.issuedDetails(record, authority: authority)
+        let task = Task { @MainActor in try await model.approvedReceipt(record, revision: issued, authority: authority) }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == receiptPath }) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == receiptPath })
+        model.api.invalidateRequests(); gate.release()
+        do { _ = try await task.value; XCTFail("Retired authority must not expose a receipt") } catch { }
+    }
     func testApprovedReceiptRequiresCurrentJobAndDistinguishesMissingFromDenied() async throws {
         let model = try await ready([])
         let estimatePath = "/v1/estimates/\(a)"
