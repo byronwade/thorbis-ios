@@ -368,22 +368,22 @@ struct JobCustomerDocumentsView: View {
             authority.isCurrent(api: api, session: session) && invoices?.scope == scope &&
             invoices?.freshIDs.contains(record.id) == true && invoices?.records.contains(record) == true
         }
-        await withTaskGroup(of: Void.self) { group in
-            var iterator = records.makeIterator()
-            func add(_ record: InvoiceRecord) {
-                group.addTask { @MainActor in
-                    do {
-                        let summary = try await api.customerInvoiceSummary(scope: scope, invoiceID: record.id,
-                            linesRevision: record.linesRevision, currentAuthority: { current(record) })
-                        guard current(record) else { return }
-                        invoiceOverview[record.id] = .init(record: record, summary: summary, authority: authority)
-                    } catch { }
-                }
-            }
-            for _ in 0..<3 { if let record = iterator.next() { add(record) } }
-            while await group.next() != nil {
-                if Task.isCancelled || invoiceOverviewToken != token { group.cancelAll(); break }
-                if let record = iterator.next() { add(record) }
+        func fetch(_ record: InvoiceRecord?) async -> (InvoiceRecord, CustomerInvoiceSummary)? {
+            guard let record, current(record) else { return nil }
+            do {
+                let summary = try await api.customerInvoiceSummary(scope: scope, invoiceID: record.id,
+                    linesRevision: record.linesRevision, currentAuthority: { current(record) })
+                return current(record) ? (record, summary) : nil
+            } catch { return nil }
+        }
+        for start in stride(from: 0, to: records.count, by: 3) {
+            guard !Task.isCancelled, invoiceOverviewToken == token else { return }
+            async let first = fetch(records[start])
+            async let second = fetch(start + 1 < records.count ? records[start + 1] : nil)
+            async let third = fetch(start + 2 < records.count ? records[start + 2] : nil)
+            for result in await [first, second, third] {
+                guard let (record, summary) = result, current(record) else { continue }
+                invoiceOverview[record.id] = .init(record: record, summary: summary, authority: authority)
             }
         }
     }
