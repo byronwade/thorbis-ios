@@ -139,7 +139,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     func response(_ request: URLRequest) -> Response? { lock.withLock {
         guard let url = request.url else { return .init(status: 400, payload: [:]) }
         let path = url.path, method = request.httpMethod ?? "GET"
-        requests.append(["method": method, "path": path])
+        requests.append(["method": method, "path": path, "query": url.query ?? ""])
         let input = data(request)
         let body = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] ?? [:]
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))

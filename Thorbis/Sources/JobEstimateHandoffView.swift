@@ -147,6 +147,7 @@ struct JobEstimateHandoffView: View {
     @State private var reviewing = false
     @State private var checkpointID: String?
     @State private var detailsID: String?
+    @State private var footerHeight: CGFloat = 0
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -156,10 +157,13 @@ struct JobEstimateHandoffView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         if reviewing { selectedReview } else { overview }
                     }
-                    .padding(Theme.gutter).frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
+                    .padding(Theme.gutter).padding(.bottom, footerHeight)
+                    .frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("job-estimate-handoff")
-                .safeAreaInset(edge: .bottom) { footer }
+                .safeAreaInset(edge: .bottom) {
+                    footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                }
             } else {
                 VStack(spacing: 20) {
                     Text("Hand the device back to your technician").font(Theme.customerFont(type.heading, weight: .medium))
@@ -444,6 +448,13 @@ struct JobEstimateHandoffView: View {
     @ViewBuilder private var footer: some View {
         if reviewing || !model.complete || !model.eligibleIDs.isEmpty {
         VStack(spacing: 8) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-paging-diagnostic") {
+                Text("Paging diagnostic").font(.system(size: 1))
+                    .accessibilityIdentifier("handoff-paging-diagnostic")
+                    .accessibilityValue("count=\(model.records.count); loading=\(model.loading); complete=\(model.complete); more=\(model.canLoadMoreEstimates); error=\(model.error ?? "none"); requests=\(JobEstimateHandoffPreview.shared.receipt)")
+            }
+            #endif
             if reviewing {
                 if let next = nextPending(after: nil) {
                     CustomerPresentationCommit(title: "Continue to signatures", enabled: true, busy: false, type: type) { checkpointID = next }

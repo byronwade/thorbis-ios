@@ -124,7 +124,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed, "Each real selection must stick before the next tap")
     }
     func testLongEstimateListKeepsSelectionsFromBothEnds() {
-        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls"])
+        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls", "--paper-preview-handoff-paging-diagnostic"])
         let door = thorbisShowCustomerDoor(app)
         XCTAssertTrue(door.waitForExistence(timeout: 45)); door.tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
@@ -149,7 +149,19 @@ final class JobEstimateHandoffUITests: XCTestCase {
                            "The previous page must finish before requesting another")
             for _ in 0..<30 where !more.isHittable { list.swipeUp() }
             XCTAssertTrue(more.isHittable && more.isEnabled, "The next page action must be visible and enabled")
+            let review = app.buttons["handoff-review-selected"]
+            for _ in 0..<8 where more.frame.maxY > review.frame.minY { list.swipeUp() }
+            XCTAssertLessThanOrEqual(more.frame.maxY, review.frame.minY, "The full Load more control must be clear of the fixed review bar")
             more.tap()
+            if suffix == "082028" {
+                let diagnostic = app.staticTexts["handoff-paging-diagnostic"]
+                let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    (diagnostic.value as? String)?.contains("count=30;") == true
+                }, object: diagnostic)
+                _ = XCTWaiter.wait(for: [loaded], timeout: 5)
+                print("PAGING DIAGNOSTIC: \(diagnostic.value ?? "missing")")
+                print("PAGING HIERARCHY: \(app.debugDescription)")
+            }
             let nextPageEnd = app.buttons["handoff-select-00000000-0000-4000-8000-000000\(suffix)"]
             for _ in 0..<30 where !nextPageEnd.isHittable { list.swipeUp() }
             let markerReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -166,6 +178,21 @@ final class JobEstimateHandoffUITests: XCTestCase {
         for _ in 0..<60 where !first.isHittable { list.swipeDown() }
         XCTAssertTrue(first.isHittable)
         XCTAssertTrue((first.value as? String)?.hasPrefix("Selected,") == true)
+    }
+    func testLoadMoreIsClearOfReviewBarAtLargestText() {
+        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls",
+                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let door = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 45)); door.tap()
+        let list = app.scrollViews["job-estimate-handoff"], more = app.buttons["handoff-load-more-estimates"]
+        let review = app.buttons["handoff-review-selected"]
+        for _ in 0..<50 where !more.exists || !more.isHittable || more.frame.maxY > review.frame.minY { list.swipeUp() }
+        XCTAssertTrue(more.exists && more.isHittable && more.isEnabled)
+        XCTAssertLessThanOrEqual(more.frame.maxY, review.frame.minY, "Load more must be fully above the fixed review bar at accessibility sizes")
+        more.tap()
+        let nextPage = app.buttons["handoff-select-00000000-0000-4000-8000-000000082018"]
+        for _ in 0..<50 where !nextPage.isHittable { list.swipeUp() }
+        XCTAssertTrue(nextPage.isHittable, "The unobscured action must actually load the next page")
     }
     func testSelectedReviewFoldsHiddenMaterialsWithoutExposingTheirDescription() {
         let app = open(["--paper-preview-handoff-hidden-material", "--paper-preview-handoff-hide-controls"])
