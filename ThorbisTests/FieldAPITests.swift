@@ -76,6 +76,12 @@ final class FieldAPITests: XCTestCase {
         catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
     }
 
+    func testJobEstimateMembershipAcceptsEquivalentOriginCapitalization() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#)]), baseURL: "https://APP.THORBIS.COM")
+        let page = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
+        XCTAssertEqual(page.value.items.count, 0)
+    }
+
     func testJobMediaFirstPageDoesNotEagerlyFetchTheRest() async throws {
         let fixture = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":"next"}"#), .init(200, #"{"items":[]}"#)])
         let client = APIClient(session: fixture, baseURL: "https://app.thorbis.com")

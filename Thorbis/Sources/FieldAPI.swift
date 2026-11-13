@@ -1165,7 +1165,7 @@ extension APIClient {
         guard isCurrent(), generation == requestGeneration, scopeRevision == savedCopyScopeRevision,
               origin == normalizedOrigin, response.provenance.generation == generation,
               response.provenance.savedCopyScopeRevision == scopeRevision,
-              response.provenance.origin == origin else { throw CancellationError() }
+              APIClient.normalizedOrigin(response.provenance.origin) == origin else { throw CancellationError() }
         return response
     }
     /// Links an existing estimate to a job without changing the job's origin.
