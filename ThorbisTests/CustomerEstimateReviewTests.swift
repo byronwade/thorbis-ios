@@ -28,6 +28,8 @@ final class CustomerEstimateReviewTests: XCTestCase {
         valid["lines"] = [["id": "line-1", "description": "No charge visit", "quantity": 1,
                            "unitPrice": ["amount": 0, "currency": "USD"]]]
         valid["totalAmount"] = 0
+        valid["options"] = [["id": "option-1", "title": "No charge", "description": "Included",
+                             "lines": valid["lines"]!, "totalAmount": 0, "currency": "USD"]]
         XCTAssertNoThrow(try decodedRevision(valid).validate(for: localEstimate()))
     }
 
