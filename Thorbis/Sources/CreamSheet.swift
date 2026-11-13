@@ -235,6 +235,19 @@ func compactMoney(_ cents: Int, currency: String = "USD") -> String {
 
 // MARK: - The sidebar's list (phone drawer and iPad column)
 
+@MainActor private enum SidebarPreferenceStore {
+    static let work: UserDefaults = {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if PaperPreview.enabled, let index = args.firstIndex(of: "--paper-preview-menu-suite"),
+           args.indices.contains(index + 1), let uuid = UUID(uuidString: args[index + 1]) {
+            return UserDefaults(suiteName: "thorbis.preview.menu.\(uuid.uuidString)") ?? .standard
+        }
+        #endif
+        return .standard
+    }()
+}
+
 /// The grouped places: a 12 Medium heading per section, then rows. A row is the place's mark in its
 /// quiet hue (filled when it is the place), the word in body (lifted to ink when here) and a count in
 /// tabular figures at the trailing edge. The place showing sits on the selected fill.
@@ -244,6 +257,7 @@ struct PlacesList: View {
     @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
     @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
     @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
+    @AppStorage("thorbis.sidebar.workCollapsed", store: SidebarPreferenceStore.work) private var workCollapsed = false
     @State private var workspaceExpansion: [PlaceSection: Bool] = [:]
     let sections: DrawerSections
     let title: (MenuItem) -> String
@@ -323,24 +337,39 @@ struct PlacesList: View {
                 if group.items.count == 1, let item = group.items.first {
                     place(item)
                 } else if let first = group.items.first {
-                    let expanded = workspaceExpansion[group.section] ?? group.expanded
+                    let expanded = group.section == .work ? !workCollapsed : (workspaceExpansion[group.section] ?? group.expanded)
                     let workspaceID = "\(idPrefix)-workspace-\(group.section.rawValue.lowercased())"
-                    HStack(spacing: 0) {
-                        PlaceRow(title: group.section.rawValue, symbol: first.symbol, tint: first.sidebarTint,
-                                 here: false, count: nil, id: workspaceID) { openPlace(first) }
-                            .accessibilityHint("Opens \(title(first))")
-                        Button { workspaceExpansion[group.section] = !expanded } label: {
+                    let currentItem = group.items.first(where: isCurrent)
+                    Button { toggleWorkspace(group.section, expanded: expanded) } label: {
+                        HStack(alignment: .center, spacing: 12) {
+                            PlaceRowIcon(symbol: first.symbol, tint: first.sidebarTint, filled: false)
+                            Text(group.section.rawValue)
+                                .font(Theme.font(15, weight: .medium))
+                                .foregroundStyle(Theme.subtle)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if !expanded, let currentItem {
+                                Text(title(currentItem))
+                                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                                    .lineLimit(1)
+                            }
+                            Spacer(minLength: 8)
                             Image(systemName: expanded ? "chevron.down" : "chevron.right")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(Theme.muted)
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
                         }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityLabel("\(expanded ? "Collapse" : "Expand") \(group.section.rawValue)")
-                        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-                        .accessibilityIdentifier("\(workspaceID)-disclosure")
+                        .padding(.horizontal, 12).padding(.vertical, 4)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(group.section.rawValue)
+                    .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+                    .accessibilityHint(expanded ? "Hides places" :
+                                       (currentItem.map { "Shows places. Current place: \(title($0))" } ?? "Shows places"))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { toggleWorkspace(group.section, expanded: expanded) }
+                    .accessibilityIdentifier(workspaceID)
                     if expanded {
                         ForEach(group.items) { item in place(item).padding(.leading, 16) }
                     }
@@ -367,7 +396,7 @@ struct PlacesList: View {
             }
         }
         .onChange(of: sections.places.first(where: isCurrent)) { _, place in
-            if let place { workspaceExpansion[place.placeSection] = true }
+            if let place, place.placeSection != .work { workspaceExpansion[place.placeSection] = true }
         }
         .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
         .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
@@ -376,6 +405,11 @@ struct PlacesList: View {
             guard expected != nil else { return }
             await recordFavorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
         }
+    }
+
+    private func toggleWorkspace(_ section: PlaceSection, expanded: Bool) {
+        if section == .work { workCollapsed = expanded }
+        else { workspaceExpansion[section] = !expanded }
     }
 
     private func place(_ item: MenuItem, prefix: String? = nil) -> some View {

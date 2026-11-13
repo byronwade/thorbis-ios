@@ -1508,6 +1508,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             case "owner": capabilities += ["organization.settings.edit", "organization.members.manage"]
             default: break
             }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-sidebar-job-view-only") {
+                capabilities = ["job.view"]
+            }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
                     "resources": [], "views": []] as [String: Any]
