@@ -285,8 +285,8 @@ final class APIClient: ObservableObject {
         return try decodeResponse(response)
     }
 
-    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil) async throws -> APIRead<T> {
-        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor)
+    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil, requireFresh: Bool = false) async throws -> APIRead<T> {
+        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor, requireFresh: requireFresh)
         return APIRead(value: try decodeResponse(response), provenance: response.provenance)
     }
 

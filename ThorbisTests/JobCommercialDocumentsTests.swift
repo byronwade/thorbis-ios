@@ -262,10 +262,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testEstimateMembershipDeduplicatesAndRejectsAnotherJobForSameCustomer() async throws {
-        let client = api([
-            .init(200, page([link(11), link(11), link(12, job: 101)])),
-            .init(200, estimate(10)), .init(200, estimate(11))
-        ])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(11), link(12, job: 101)])),
+            "/v1/estimates/\(id(10))": .init(200, estimate(10)),
+            "/v1/estimates/\(id(11))": .init(200, estimate(11))
+        ]), baseURL: "https://app.thorbis.com")
         let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: client, retaining: nil, isCurrent: { true })
         let read = try XCTUnwrap(result)
         XCTAssertEqual(read.records.map(\.id), [id(10), id(11)])
@@ -276,13 +277,130 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path.hasSuffix(self.id(12)) == true })
     }
 
+    func testEstimatePageShowsSavedCopyWithoutEnablingCustomerDecision() async throws {
+        let estimateID = id(11), path = "/v1/estimates/\(id(11))"
+        let client = api([.init(200, estimate(11))])
+        client.savedCopyScope = "estimate-page-" + UUID().uuidString
+        _ = try await client.fieldEstimate(estimateID)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.knownOffline = true
+        let cached = try await client.fieldEstimateWithProvenance(estimateID)
+        if case .savedCopy = cached.provenance.source {} else { XCTFail("Precondition: saved estimate must be readable") }
+        URLProtocolFixture.setRoutes([path: URLProtocolFixture.offline])
+        let result = await JobDocumentsLoader.estimatesForPage(scope: scope(), api: client, ids: [estimateID],
+            previous: nil, membershipFresh: true, membershipComplete: true, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(read.records.map(\.id), [estimateID], "Offline data stays visible")
+        XCTAssertTrue(read.freshIDs.isEmpty)
+        XCTAssertFalse(read.isComplete, "A saved estimate must not authorize a decision")
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, [path])
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
+    func testSharedJobEstimatesShowOfflineCopiesWithoutMarkingCollectionComplete() async throws {
+        let linksPath = "/v1/jobs/\(id(100))/estimates", estimatePath = "/v1/estimates/\(id(11))"
+        let client = api([.init(200, page([link(11)])), .init(200, estimate(11))])
+        client.savedCopyScope = "shared-estimate-offline-" + UUID().uuidString
+        _ = try await client.fieldJobEstimateLinks(id(100))
+        _ = try await client.fieldEstimate(id(11))
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.knownOffline = true
+        let cachedLinks = try await client.fieldJobEstimateLinkPage(id(100), isCurrent: { true })
+        if case .savedCopy = cachedLinks.provenance.source {} else { XCTFail("Precondition: membership copy must be readable") }
+        let cachedEstimate = try await client.fieldEstimateWithProvenance(id(11))
+        if case .savedCopy = cachedEstimate.provenance.source {} else { XCTFail("Precondition: estimate copy must be readable") }
+        URLProtocolFixture.setRoutes([linksPath: URLProtocolFixture.offline, estimatePath: URLProtocolFixture.offline])
+        let result = await JobDocumentsLoader.estimates(scope: scope(), api: client, retaining: nil, isCurrent: { true })
+        let read = try XCTUnwrap(result)
+        XCTAssertEqual(read.records.map(\.id), [id(11)], "Saved estimates stay visible")
+        XCTAssertTrue(read.freshIDs.isEmpty)
+        XCTAssertFalse(read.isComplete, "Saved membership or detail cannot prove the current job collection")
+        XCTAssertEqual(Set(URLProtocolFixture.recorded.compactMap { $0.url?.path }), Set([linksPath, estimatePath]))
+        XCTAssertTrue(URLProtocolFixture.recorded.allSatisfy { $0.cachePolicy == .reloadIgnoringLocalCacheData })
+    }
+
+    func testPartialEstimateReadStaysLocalWhileSharedSnapshotWaitsForCompletion() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let numbers = Array(11...16)
+        var routes = ["/v1/jobs/\(id(100))/estimates": URLProtocolFixture.Reply(200, page(numbers.map { link($0) }))]
+        for number in numbers {
+            routes["/v1/estimates/\(id(number))"] = .init(200, estimate(number), gate: number == 16 ? gate : nil)
+        }
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let documents = JobDocumentCollections()
+        var partials: [JobDocumentRead<EstimateRecord>] = []
+        let pending = Task { @MainActor in
+            await documents.loadEstimates(scope: scope(), api: client, onPartial: { partials.append($0) }, isCurrent: { true })
+        }
+        for _ in 0..<300 where partials.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        let partial = try XCTUnwrap(partials.first)
+        XCTAssertFalse(partial.isComplete)
+        XCTAssertTrue(partial.isLoadingMore)
+        XCTAssertNil(partial.issue)
+        XCTAssertLessThan(partial.records.count, numbers.count)
+        XCTAssertNil(documents.estimates, "Other job screens must not mistake a healthy partial for a failed collection")
+        gate.release()
+        let published = await pending.value
+        XCTAssertTrue(published)
+        XCTAssertEqual(documents.estimates?.records.map(\.id), numbers.map(id))
+        XCTAssertTrue(documents.estimates?.isComplete == true)
+    }
+
+    func testCancelledPartialEstimateReadCannotPublishSharedCollection() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let numbers = Array(11...16)
+        var routes = ["/v1/jobs/\(id(100))/estimates": URLProtocolFixture.Reply(200, page(numbers.map { link($0) }))]
+        for number in numbers {
+            routes["/v1/estimates/\(id(number))"] = .init(200, estimate(number), gate: number == 16 ? gate : nil)
+        }
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let documents = JobDocumentCollections()
+        var partialCount = 0
+        let pending = Task { @MainActor in
+            await documents.loadEstimates(scope: scope(), api: client, onPartial: { _ in partialCount += 1 }, isCurrent: { true })
+        }
+        for _ in 0..<300 where partialCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertGreaterThan(partialCount, 0)
+        pending.cancel(); gate.release()
+        let published = await pending.value
+        XCTAssertFalse(published)
+        XCTAssertNil(documents.estimates)
+    }
+
+    func testSupersededPartialCannotReplaceNewerCompleteEstimateList() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let numbers = Array(11...16)
+        var routes = ["/v1/jobs/\(id(100))/estimates": URLProtocolFixture.Reply(200, page(numbers.map { link($0) }))]
+        for number in numbers {
+            routes["/v1/estimates/\(id(number))"] = .init(200, estimate(number), gate: number == 16 ? gate : nil)
+        }
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let documents = JobDocumentCollections()
+        var partialCount = 0
+        let older = Task { @MainActor in
+            await documents.loadEstimates(scope: scope(), api: client, onPartial: { _ in partialCount += 1 }, isCurrent: { true })
+        }
+        for _ in 0..<300 where partialCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertGreaterThan(partialCount, 0)
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(id(100))/estimates": .init(200, page([]))])
+        let newer = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
+        XCTAssertTrue(newer)
+        gate.release()
+        let obsolete = await older.value
+        XCTAssertFalse(obsolete)
+        XCTAssertTrue(documents.estimates?.isComplete == true)
+        XCTAssertEqual(documents.estimates?.records.count, 0)
+    }
+
     func testOneFailedEstimateKeepsOtherSuccessesAndSameJobPreviousRow() async throws {
-        let first = api([.init(200, page([link(11), link(12)])),
-                         .init(200, estimate(10)), .init(200, estimate(11)), .init(200, estimate(12))])
+        let membership = "/v1/jobs/\(id(100))/estimates"
+        let path10 = "/v1/estimates/\(id(10))", path11 = "/v1/estimates/\(id(11))", path12 = "/v1/estimates/\(id(12))"
+        let first = APIClient(session: URLProtocolFixture.session(routes: [membership: .init(200, page([link(11), link(12)])),
+            path10: .init(200, estimate(10)), path11: .init(200, estimate(11)), path12: .init(200, estimate(12))]), baseURL: "https://app.thorbis.com")
         let previous = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: first, retaining: nil, isCurrent: { true })
-        let second = api([.init(200, page([link(11), link(12)])), .init(200, estimate(10)),
-                          .init(503, problem(503)), .init(200, estimate(12))])
-        let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: second, retaining: previous, isCurrent: { true })
+        URLProtocolFixture.setRoutes([membership: .init(200, page([link(11), link(12)])),
+                                      path10: .init(200, estimate(10)), path11: .init(503, problem(503)), path12: .init(200, estimate(12))])
+        let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: first, retaining: previous, isCurrent: { true })
         let read = try XCTUnwrap(result)
         XCTAssertEqual(Set(read.records.map(\.id)), Set([id(10), id(11), id(12)]))
         XCTAssertEqual(read.freshIDs, Set([id(10), id(12)]))
@@ -290,8 +408,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testInitiallyUnavailableLinkedEstimateKeepsItsOwnVisibleReference() async throws {
-        let client = api([.init(200, page([link(11), link(12, job: 101)])),
-                          .init(200, estimate(10)), .init(503, problem(503))])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(12, job: 101)])),
+            "/v1/estimates/\(id(10))": .init(200, estimate(10)),
+            "/v1/estimates/\(id(11))": .init(503, problem(503))
+        ]), baseURL: "https://app.thorbis.com")
         let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: client, retaining: nil, isCurrent: { true })
         let read = try XCTUnwrap(result)
         XCTAssertEqual(read.records.map(\.id), [id(10)])
@@ -466,7 +587,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testMarkingEstimateReadStaleKeepsKnownRowsAndUnavailableReferences() async throws {
-        let client = api([.init(200, page([link(11), link(12)])), .init(200, estimate(11)), .init(503, problem(503))])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(12)])),
+            "/v1/estimates/\(id(11))": .init(200, estimate(11)),
+            "/v1/estimates/\(id(12))": .init(503, problem(503))
+        ]), baseURL: "https://app.thorbis.com")
         let documents = JobDocumentCollections()
         let loaded = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
         XCTAssertTrue(loaded)
@@ -480,7 +605,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testApprovalResultOnlyReplacesTheMatchingLinkedEstimateAndIsNotFresh() async throws {
-        let client = api([.init(200, page([link(11), link(12)])), .init(200, estimate(11)), .init(200, estimate(12))])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(12)])),
+            "/v1/estimates/\(id(11))": .init(200, estimate(11)),
+            "/v1/estimates/\(id(12))": .init(200, estimate(12))
+        ]), baseURL: "https://app.thorbis.com")
         let documents = JobDocumentCollections()
         let loaded = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
         XCTAssertTrue(loaded)

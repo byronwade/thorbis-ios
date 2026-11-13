@@ -989,6 +989,11 @@ private struct FieldPage<T: Decodable>: Decodable {
     let nextCursor: String?
 }
 
+struct JobEstimateLinkPage: Decodable {
+    let items: [JobEstimateLink]
+    let nextCursor: String?
+}
+
 struct JobMediaPage: Decodable {
     let items: [MediaAssetRecord]
     let nextCursor: String?
@@ -1137,12 +1142,39 @@ extension APIClient {
     func fieldEstimate(_ id: String, requireFresh: Bool = false) async throws -> EstimateRecord {
         try await send("GET", fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
     }
+    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false) async throws -> APIRead<EstimateRecord> {
+        try await sendWithProvenance(fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
+    }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
     }
     /// Estimates related to a job (`GET /v1/jobs/{id}/estimates`), as link records.
     func fieldJobEstimateLinks(_ jobID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
         try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), isCurrent: isCurrent)
+    }
+    /// One uncached job/estimate association; never use a saved copy for issued terms.
+    func liveFieldJobEstimateLink(_ jobID: String, estimateID: String) async throws -> JobEstimateLink {
+        guard UUID(uuidString: estimateID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: estimateID) }
+        return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/estimates/\(estimateID)"), requireFresh: true)
+    }
+    /// Reads exactly one job-scoped membership page. A saved copy is for reading only;
+    /// only the returned provenance describes this specific response's source.
+    func fieldJobEstimateLinkPage(_ jobID: String, cursor: String? = nil,
+                                  requireFresh: Bool = false,
+                                  isCurrent: @MainActor () -> Bool) async throws -> APIRead<JobEstimateLinkPage> {
+        let generation = requestGeneration
+        let scopeRevision = savedCopyScopeRevision
+        let origin = normalizedOrigin
+        try Task.checkCancellation()
+        guard isCurrent(), origin != nil else { throw CancellationError() }
+        let response: APIRead<JobEstimateLinkPage> = try await sendWithProvenance(
+            fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), cursor: cursor, requireFresh: requireFresh)
+        try Task.checkCancellation()
+        guard isCurrent(), generation == requestGeneration, scopeRevision == savedCopyScopeRevision,
+              origin == normalizedOrigin, response.provenance.generation == generation,
+              response.provenance.savedCopyScopeRevision == scopeRevision,
+              APIClient.normalizedOrigin(response.provenance.origin) == origin else { throw CancellationError() }
+        return response
     }
     /// Links an existing estimate to a job without changing the job's origin.
     func linkFieldEstimate(jobID: String, estimateID: String) async throws -> JobEstimateLink {

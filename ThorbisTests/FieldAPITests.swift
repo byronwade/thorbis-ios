@@ -7,6 +7,103 @@ final class FieldAPITests: XCTestCase {
     private let customerID = "00000000-0000-4000-8000-000000000003"
     private let jobID = "00000000-0000-4000-8000-000000000001"
 
+    func testConcurrentEstimateReadsRetainTheirOwnProvenance() async throws {
+        let id = "00000000-0000-4000-8000-000000000008"
+        let path = "/v1/estimates/\(id)"
+        let payload = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"sent","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, payload), .init(200, payload, gate: gate), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "estimate-provenance-" + UUID().uuidString
+        _ = try await client.fieldEstimate(id)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        let live = Task { @MainActor in try await client.fieldEstimateWithProvenance(id) }
+        for _ in 0..<300 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        let cached = try await client.fieldEstimateWithProvenance(id)
+        if case .savedCopy = cached.provenance.source {} else { XCTFail("Offline read must identify its saved source") }
+        XCTAssertNotNil(client.savedCopyDate(path))
+        gate.release()
+        let fresh = try await live.value
+        if case .urlSession = fresh.provenance.source {} else { XCTFail("Successful concurrent request must identify its network source") }
+        XCTAssertNil(client.savedCopyDate(path), "The network response clears the shared path marker")
+        if case .savedCopy = cached.provenance.source {} else { XCTFail("A later request must not change the saved response provenance") }
+    }
+
+    func testJobEstimateMembershipFetchesOneFreshPageOnly() async throws {
+        let linkID = "00000000-0000-4000-8000-000000000010"
+        let estimateID = "00000000-0000-4000-8000-000000000011"
+        let payload = "{\"items\":[{\"id\":\"\(linkID)\",\"jobId\":\"\(jobID)\",\"estimateId\":\"\(estimateID)\"}],\"nextCursor\":\"\(linkID)\"}"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")
+        let page = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
+        XCTAssertEqual(page.value.items.map(\.estimateId), [estimateID])
+        XCTAssertEqual(page.value.nextCursor, linkID)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(page.provenance.source, .urlSession(cacheBypassed: true))
+    }
+
+    func testJobEstimateMembershipRequestsOnlyChosenCursor() async throws {
+        let cursor = "00000000-0000-4000-8000-000000000010"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, requireFresh: true, isCurrent: { true })
+        let url = try XCTUnwrap(URLProtocolFixture.recorded.first?.url)
+        XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "cursor", value: cursor)])
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
+    func testJobEstimateMembershipSavedPagesRemainCursorScoped() async throws {
+        let cursor = "00000000-0000-4000-8000-000000000010"
+        let first = "{\"items\":[],\"nextCursor\":\"\(cursor)\"}"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, first), .init(200, #"{"items":[]}"#), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "membership-page-" + UUID().uuidString
+        _ = try await client.fieldJobEstimateLinkPage(jobID, isCurrent: { true })
+        _ = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, isCurrent: { true })
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.knownOffline = true
+        let cachedFirst = try await client.fieldJobEstimateLinkPage(jobID, isCurrent: { true })
+        let cachedNext = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, isCurrent: { true })
+        XCTAssertEqual(cachedFirst.value.nextCursor, cursor)
+        XCTAssertNil(cachedNext.value.nextCursor)
+        if case .savedCopy = cachedFirst.provenance.source {} else { XCTFail("First page must identify saved copy") }
+        if case .savedCopy = cachedNext.provenance.source {} else { XCTFail("Next page must identify saved copy") }
+        do {
+            _ = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
+            XCTFail("Fresh membership must not use saved copies")
+        } catch {}
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+    }
+
+    func testJobEstimateMembershipDoesNotHideDeniedAccess() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(403, #"{"title":"Forbidden","status":403}"#)]), baseURL: "https://app.thorbis.com")
+        do {
+            _ = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
+            XCTFail("Denied access must fail")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 403)
+        }
+    }
+
+    func testJobEstimateMembershipDiscardsPageWhenAuthorityRetires() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#, gate: gate)]), baseURL: "https://app.thorbis.com")
+        var current = true
+        let task = Task { @MainActor in
+            try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { current })
+        }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        guard !URLProtocolFixture.recorded.isEmpty else { gate.release(); XCTFail("Page did not start"); return }
+        current = false
+        gate.release()
+        do { _ = try await task.value; XCTFail("Retired authority must not receive the page") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+
+    func testJobEstimateMembershipAcceptsEquivalentOriginCapitalization() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#)]), baseURL: "https://APP.THORBIS.COM")
+        let page = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
+        XCTAssertEqual(page.value.items.count, 0)
+    }
+
     func testLiveJobEstimateMembershipBypassesCacheOnEveryPage() async throws {
         let cursor = "00000000-0000-4000-8000-000000000010"
         let first = "{\"items\":[],\"nextCursor\":\"\(cursor)\"}"
@@ -251,6 +348,19 @@ final class FieldAPITests: XCTestCase {
         let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
         XCTAssertEqual(request.header("Cache-Control"), "no-cache")
         XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
+    func testLiveSingleEstimateMembershipUsesExactPathAndBypassesCache() async throws {
+        let job = "00000000-0000-4000-8000-000000000004"
+        let estimate = "00000000-0000-4000-8000-000000000008"
+        let reply = #"{"id":"00000000-0000-4000-8000-000000000009","jobId":"00000000-0000-4000-8000-000000000004","estimateId":"00000000-0000-4000-8000-000000000008","linkedAt":"2026-10-26T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        let link = try await client.liveFieldJobEstimateLink(job, estimateID: estimate)
+        XCTAssertEqual(link.jobId, job); XCTAssertEqual(link.estimateId, estimate)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
+        XCTAssertEqual(request.url?.path, "/v1/jobs/\(job)/estimates/\(estimate)")
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
     }
 
     func testLiveInvoiceReadBypassesURLCache() async throws {
