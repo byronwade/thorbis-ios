@@ -8,6 +8,22 @@ final class JobDocumentsUITests: XCTestCase {
     private let estimateA = "00000000-0000-4000-8000-000000002218"
     private let addonA = "00000000-0000-4000-8000-000000002238"
 
+    func testOverviewPaymentShortcutPrecedesJobDetails() {
+        continueAfterFailure = false
+        let app = preview()
+        let collect = app.buttons["job-overview-collect"]
+        findOverviewElement(collect, in: app)
+        XCTAssertTrue(collect.exists)
+        app.scrollClearOfFoot(collect)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Job overview payment shortcut"; screenshot.lifetime = .keepAlways; add(screenshot)
+        let moneyPanel = app.buttons["job-money-open"]
+        findOverviewElement(moneyPanel, in: app)
+        XCTAssertTrue(moneyPanel.exists)
+        XCTAssertLessThan(collect.frame.minY, moneyPanel.frame.minY,
+                          "The direct collection action must be before the financial panel")
+    }
+
     func testOverviewCollectsTheOnlyPayableInvoiceWithoutOpeningMoney() {
         continueAfterFailure = false
         let app = preview()
