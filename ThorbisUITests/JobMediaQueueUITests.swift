@@ -50,6 +50,19 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
     }
 
+    func testDetailClosesLoadedPreviewAfterJobAccessRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-success"]
+        app.launch()
+        let file = app.descendants(matching: .any)["media-detail-file-preview"]
+        XCTAssertTrue(file.waitForExistence(timeout: 25))
+        app.buttons["Revoke test job access"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: file)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
     func testDetailRejectsMediaFromAnotherJob() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-job"]

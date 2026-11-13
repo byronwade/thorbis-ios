@@ -1,4 +1,7 @@
 import SwiftUI
+#if DEBUG
+import UIKit
+#endif
 
 /// The time shown on an opened note. An unreadable value stays as the server sent it.
 enum ActivityRecordLabel {
@@ -147,6 +150,7 @@ struct JobMediaDetailView: View {
                     }
                     if let url = preview.url {
                         NativeDocumentPreview(url: url)
+                            .accessibilityIdentifier("media-detail-file-preview")
                             .frame(minHeight: 420)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     }
@@ -187,7 +191,19 @@ struct JobMediaDetailView: View {
             asset = match
             preview.open {
                 guard readScope == scope, sourceScope == scope else { throw CancellationError() }
-                let file = try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename)
+                let file: URL
+                #if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-success") {
+                    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+                    let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 100, height: 100)).pdfData { $0.beginPage() }
+                    try pdf.write(to: path)
+                    file = path
+                } else {
+                    file = try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename)
+                }
+                #else
+                file = try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename)
+                #endif
                 guard !Task.isCancelled, readScope == scope, sourceScope == scope else {
                     try? FileManager.default.removeItem(at: file)
                     throw CancellationError()
