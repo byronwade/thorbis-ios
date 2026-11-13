@@ -798,6 +798,7 @@ struct CustomerSummarySigningControls: View {
     @State private var signing = false
     @State private var name = ""
     @State private var strokes: [[CGPoint]] = []
+    @FocusState private var nameFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -820,6 +821,8 @@ struct CustomerSummarySigningControls: View {
                 } else if signing {
                     Text(consent.consentText).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
                     TextField("Your full name", text: $name).textContentType(.name)
+                        .focused($nameFocused).submitLabel(.done)
+                        .onSubmit { nameFocused = false }
                         .font(Theme.customerFont(type.body)).padding(16)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
                         .accessibilityLabel("Your full name")
@@ -1086,8 +1089,22 @@ struct CustomerInvoicePresentation: View {
             guard current() else { return }
             summary = result; summaryAuthority = authority
             if canSign, ["issued", "paid"].contains(result.status), result.validatedConsent != nil,
-               let signing = signingRegistry.activate(summary: result, api: api, session: session, authority: authority,
-                   handoffCurrent: currentAuthority) {
+               let jobID = result.jobId {
+                // A standalone presentation can be the fallback from a failed job handoff.
+                // Prove both the job/customer tuple and invoice membership with live reads
+                // before offering a customer signature; saved lists cannot authorize it.
+                let job = try await api.liveFieldJob(jobID)
+                guard current(), job.id == jobID, job.organizationId == result.organizationId,
+                      job.customerId == result.customerId else { return }
+                let invoices = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await api.fieldJobInvoices(jobID, isCurrent: current)
+                }
+                guard current(), invoices.contains(where: {
+                    $0.id == result.invoiceId && $0.jobId == jobID &&
+                    $0.organizationId == result.organizationId && $0.customerId == result.customerId &&
+                    $0.linesRevision == result.linesRevision
+                }), let signing = signingRegistry.activate(summary: result, api: api, session: session,
+                    authority: authority, handoffCurrent: currentAuthority) else { return }
                 signingActivation = signing
                 await signing.coordinator.inspect()
             }

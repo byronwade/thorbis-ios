@@ -1522,6 +1522,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-missing-invoice-membership") { return ["items": []] }
             if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
         }
@@ -1778,7 +1779,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         for job in jobs() {
             guard let id = job["id"] as? String else { continue }
-            if path == "/v1/jobs/\(id)" { return job }
+            if path == "/v1/jobs/\(id)" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-changed-invoice-job"), id == PaperPreview.jobID {
+                    var changed = job
+                    changed["customerId"] = "00000000-0000-4000-8000-000000000413"
+                    return changed
+                }
+                return job
+            }
             if path == "/v1/jobs/\(id)/notes" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }

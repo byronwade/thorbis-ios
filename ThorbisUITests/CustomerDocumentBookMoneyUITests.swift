@@ -125,17 +125,17 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
     }
 
-    func testStandaloneCustomerCanSignVerifiedSummary() {
+    func testJobLinkedFallbackCanSignVerifiedSummary() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-job-linked-invoice", "--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing"]
         app.launch()
         let sign = app.buttons["Sign summary"]
         XCTAssertTrue(sign.waitForExistence(timeout: 20))
         for _ in 0..<6 where !sign.isHittable { app.swipeUp() }
         XCTAssertTrue(sign.isHittable); sign.tap()
         let name = app.textFields["Your full name"]
-        XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("Alex")
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("Alex\n")
         let pad = app.descendants(matching: .any)["customer-summary-signature-pad"]
         XCTAssertTrue(pad.waitForExistence(timeout: 10))
         for _ in 0..<6 where !pad.isHittable { app.swipeUp() }
@@ -147,6 +147,24 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let signed = app.staticTexts["customer-summary-signed"]
         XCTAssertTrue(signed.waitForExistence(timeout: 20)); XCTAssertTrue(signed.label.contains("Alex"))
         XCTAssertTrue(app.buttons["Done"].exists)
+    }
+
+    func testJobLinkedFallbackDoesNotOfferSigningWhenInvoiceMembershipIsMissing() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-job-linked-invoice", "--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-missing-invoice-membership"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Customer safe service"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["Sign summary"].waitForExistence(timeout: 5))
+    }
+
+    func testJobLinkedFallbackDoesNotOfferSigningWhenJobCustomerChanged() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-job-linked-invoice", "--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-changed-invoice-job"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Customer safe service"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.buttons["Sign summary"].waitForExistence(timeout: 5))
     }
 
     func testStandaloneLongSummaryOpensReadingDrawer() {
