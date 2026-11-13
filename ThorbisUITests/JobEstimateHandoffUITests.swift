@@ -238,6 +238,32 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"].staticTexts["$320.00"].exists)
     }
 
+    func testLoadingNextPageReusesVerifiedPrices() throws {
+        let app = open(["--paper-preview-handoff-hide-controls", "--paper-preview-handoff-many-estimates"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 45))
+        let firstPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPrice], timeout: 45), .completed)
+        let path = "/v1/estimates/00000000-0000-4000-8000-000000008101/revisions/1"
+        func firstReadCount() throws -> Int {
+            let proof = try receipt(app)
+            let requests = try XCTUnwrap(proof["requests"] as? [[String: String]])
+            return requests.filter { $0["method"] == "GET" && $0["path"] == path }.count
+        }
+        XCTAssertEqual(try firstReadCount(), 1)
+        let more = app.buttons["handoff-load-more-estimates"]
+        let list = app.scrollViews["job-estimate-handoff"]
+        for _ in 0..<30 where !more.isHittable { list.swipeUp() }
+        XCTAssertTrue(more.isHittable); more.tap()
+        let next = app.buttons["handoff-select-00000000-0000-4000-8000-000000082018"]
+        for _ in 0..<30 where !next.isHittable { list.swipeUp() }
+        XCTAssertTrue(next.waitForExistence(timeout: 45))
+        let nextPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: next)
+        XCTAssertEqual(XCTWaiter.wait(for: [nextPrice], timeout: 45), .completed)
+        XCTAssertEqual(try firstReadCount(), 1, "Loading another page must reuse the first fresh validated revision")
+    }
+
     private func openSecondEstimateForValidation(_ flag: String, extraArgs: [String] = []) -> XCUIApplication {
         let app = open(["--paper-preview-handoff-hide-controls", flag] + extraArgs)
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
