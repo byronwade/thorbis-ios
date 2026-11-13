@@ -120,6 +120,8 @@ struct JobMediaDetailView: View {
     @State private var asset: MediaAssetRecord?
     @State private var sourceScope: MediaDetailScope?
     @State private var loadToken = UUID()
+    @State private var isVisible = false
+    @State private var appearanceID = UUID()
     @State private var error: String?
     @State private var loading = true
 
@@ -149,7 +151,20 @@ struct JobMediaDetailView: View {
                 } else if readScope == sourceScope {
                     if loading || preview.loading { SkeletonRows(count: 3, inset: 0) }
                     if let message = error ?? preview.error {
-                        ErrorBanner(message: message) { await load() }
+                        let scheduledAppearance = appearanceID
+                        ErrorBanner(message: message) {
+                            #if DEBUG
+                            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-start-after-leave") {
+                                MediaDetailRetryProbe.shared.status = "Retry queued"
+                                try? await Task.sleep(for: .seconds(4))
+                                await load(expectedAppearance: scheduledAppearance)
+                                let probe = MediaDetailRetryProbe.shared
+                                probe.status = "Delayed start finished; preview opened after leaving: \(probe.opensAfterLeaving)"
+                                return
+                            }
+                            #endif
+                            await load(expectedAppearance: scheduledAppearance)
+                        }
                     }
                     if let asset {
                         Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
@@ -175,6 +190,7 @@ struct JobMediaDetailView: View {
         .background(Theme.canvas)
         .navigationTitle(readScope == sourceScope && asset?.kind == "photo" ? "Photo" : "File")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { appearanceID = UUID(); isVisible = true }
         .task(id: readScope) { await load() }
         .onChange(of: readScope) { _, current in
             if sourceScope != current {
@@ -182,6 +198,8 @@ struct JobMediaDetailView: View {
             }
         }
         .onDisappear {
+            isVisible = false
+            appearanceID = UUID()
             loadToken = UUID()
             asset = nil
             sourceScope = nil
@@ -195,7 +213,8 @@ struct JobMediaDetailView: View {
         }
     }
 
-    private func load() async {
+    private func load(expectedAppearance: UUID? = nil) async {
+        guard isVisible, expectedAppearance.map({ $0 == appearanceID }) ?? true else { return }
         #if DEBUG
         let testingRetry = PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave")
         let attempt: Int = {

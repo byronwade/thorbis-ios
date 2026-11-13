@@ -79,6 +79,22 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertEqual(probe.label, "Retry finished; preview opened after leaving: 0")
     }
 
+    func testDetailRetryStartingAfterLeavingCannotOpenPreview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-retry-leave", "--paper-preview-media-detail-start-after-leave"]
+        app.launch()
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 25)); retry.tap()
+        let probe = app.staticTexts["media-detail-retry-probe"]
+        let queued = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Retry queued"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [queued], timeout: 10), .completed)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", "Delayed start finished"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 20), .completed)
+        XCTAssertEqual(probe.label, "Delayed start finished; preview opened after leaving: 0")
+    }
+
     func testDetailRejectsMediaFromAnotherJob() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-job"]
