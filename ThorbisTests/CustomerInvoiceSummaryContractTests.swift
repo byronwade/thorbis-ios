@@ -3,6 +3,15 @@ import CryptoKit
 @testable import Thorbis
 
 @MainActor
+private final class FailingSummaryPendingStore: CustomerSummaryPendingStoring {
+    enum Failure: Error { case write }
+    func load(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt? { nil }
+    func loadForRecovery(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt? { nil }
+    func insert(_ pending: CustomerSummaryPendingAttempt) throws { throw Failure.write }
+    func complete(scope: CustomerSummaryPendingScope, proof: CustomerSummaryReplayProof, currentAuthority: @MainActor () -> Bool) throws { XCTFail("Unexpected completion") }
+}
+
+@MainActor
 final class CustomerInvoiceSummaryContractTests: XCTestCase {
     private let scope = JobDocumentScope(jobID: "job-1", organizationID: "org-1", customerID: "customer-1")
     private func decode(_ changes: [String: Any] = [:]) throws -> CustomerInvoiceSummary {
@@ -195,6 +204,82 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertNotNil(try store.load(scope: pendingScope))
         try store.complete(scope: pendingScope, proof: proof, currentAuthority: { true })
         XCTAssertNil(try store.load(scope: pendingScope))
+        // Losing the first POST and recreating the handoff cannot generate a second key.
+        assetJSON["id"] = "00000000-0000-4000-8000-000000000020"; assetJSON["jobId"] = job; assetJSON["uploaderUserId"] = pendingScope.actorID
+        let durableAsset = try media()
+        let failedAPI = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        var lookupCalls = 0
+        let firstOwner = CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: store, current: { true },
+            lookup: { lookupCalls += 1; return .unsigned }, upload: { _ in durableAsset }, replay: { pending in
+                XCTAssertNotNil(try store.load(scope: pendingScope), "Pending terms must be saved before POST")
+                return try await failedAPI.replayCustomerSummaryPending(pending, scope: pendingScope, currentAuthority: { true })
+            })
+        await firstOwner.inspect(); XCTAssertEqual(firstOwner.phase, .ready)
+        await firstOwner.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
+        XCTAssertEqual(firstOwner.phase, .needsRecovery); XCTAssertNotNil(try store.load(scope: pendingScope))
+        let firstBody = try XCTUnwrap(URLProtocolFixture.recorded.first?.body)
+        firstOwner.retire()
+        let recoveredAPI = APIClient(session: URLProtocolFixture.session([.init(201, replayPayload)]), baseURL: "https://app.thorbis.com")
+        let nextOwner = CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: store, current: { true },
+            lookup: { lookupCalls += 1; return .unsigned }, upload: { _ in durableAsset }, replay: { pending in
+                try await recoveredAPI.replayCustomerSummaryPending(pending, scope: pendingScope, currentAuthority: { true })
+            })
+        await nextOwner.inspect(); XCTAssertEqual(nextOwner.phase, .needsRecovery); XCTAssertEqual(lookupCalls, 1)
+        await nextOwner.recover(); XCTAssertEqual(nextOwner.phase, .signed); XCTAssertNil(try store.load(scope: pendingScope))
+        let replayBody = try XCTUnwrap(URLProtocolFixture.recorded.first?.body)
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: firstBody) as? NSDictionary, try JSONSerialization.jsonObject(with: replayBody) as? NSDictionary)
+        var attemptedAssets: [String] = []
+        let uploadAPI = APIClient(session: URLProtocolFixture.session([.init(201, replayPayload)]), baseURL: "https://app.thorbis.com")
+        let uploadOwner = CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: store, current: { true },
+            lookup: { .unsigned }, upload: { signature in
+                attemptedAssets.append(signature.clientAssetID)
+                if attemptedAssets.count == 1 { throw URLError(.networkConnectionLost) }
+                return durableAsset
+            }, replay: { pending in try await uploadAPI.replayCustomerSummaryPending(pending, scope: pendingScope, currentAuthority: { true }) })
+        await uploadOwner.inspect()
+        await uploadOwner.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
+        XCTAssertEqual(uploadOwner.phase, .ready); XCTAssertTrue(uploadOwner.hasFrozenSignature)
+        XCTAssertNil(try store.load(scope: pendingScope), "No financial POST starts before upload is confirmed")
+        await uploadOwner.retryCapture(); XCTAssertEqual(uploadOwner.phase, .signed)
+        XCTAssertEqual(attemptedAssets.count, 2); XCTAssertEqual(attemptedAssets[0], attemptedAssets[1])
+        // A receipt for the old revision is resolved, but never displayed as the new revision's signature.
+        try store.insert(restored)
+        var changedFields = fields; changedFields["linesRevision"] = 3
+        changedFields["presentationScopeId"] = "invoice:\(invoice):lines:3:customer:v1"
+        changedFields["summaryConsent"] = ["digest": "sha256:" + String(repeating: "b", count: 64), "consentVersion": version, "consentText": text]
+        let changedSummary = try decode(changedFields)
+        let oldAPI = APIClient(session: URLProtocolFixture.session([.init(201, replayPayload)]), baseURL: "https://app.thorbis.com")
+        let changedOwner = CustomerSummaryDurableCoordinator(summary: changedSummary, scope: pendingScope, store: store, current: { true },
+            lookup: { .unsigned }, upload: { _ in durableAsset }, replay: { pending in try await oldAPI.replayCustomerSummaryPending(pending, scope: pendingScope, currentAuthority: { true }) })
+        await changedOwner.inspect(); XCTAssertEqual(changedOwner.phase, .needsRecovery)
+        await changedOwner.recover(); XCTAssertEqual(changedOwner.phase, .previousResolved)
+        XCTAssertNil(changedOwner.receipt); XCTAssertNil(try store.load(scope: pendingScope))
+        var shouldNotPost = false
+        let failingOwner = CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: FailingSummaryPendingStore(), current: { true },
+            lookup: { .unsigned }, upload: { _ in durableAsset }, replay: { _ in shouldNotPost = true; throw URLError(.cannotConnectToHost) })
+        await failingOwner.inspect(); await failingOwner.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
+        XCTAssertEqual(failingOwner.phase, .unavailable); XCTAssertFalse(shouldNotPost, "Storage failure must block POST")
+        var waitingLookup: CheckedContinuation<CustomerSummaryAuthorizationState, Never>?
+        let racingOwner = CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: store, current: { true },
+            lookup: { await withCheckedContinuation { waitingLookup = $0 } }, upload: { _ in durableAsset }, replay: { _ in throw URLError(.notConnectedToInternet) })
+        let race = Task { @MainActor in await racingOwner.inspect() }
+        for _ in 0..<100 where waitingLookup == nil { await Task.yield() }
+        XCTAssertNotNil(waitingLookup); try store.insert(restored)
+        waitingLookup?.resume(returning: .unsigned); await race.value
+        XCTAssertEqual(racingOwner.phase, .needsRecovery, "A pending write racing an unsigned lookup must block new signing")
+        let newJobID = "00000000-0000-4000-8000-000000000099"
+        let currentScope = CustomerSummaryPendingScope(origin: pendingScope.origin, actorID: pendingScope.actorID,
+            organizationID: organization, customerID: customer, jobID: newJobID, invoiceID: invoice)
+        var newJobFields = fields; newJobFields["jobId"] = newJobID
+        let newJobSummary = try decode(newJobFields)
+        let changedLinkAPI2 = APIClient(session: URLProtocolFixture.session([.init(404, "{}")]), baseURL: "https://app.thorbis.com")
+        let changedLinkOwner = CustomerSummaryDurableCoordinator(summary: newJobSummary, scope: currentScope, store: store, current: { true },
+            lookup: { XCTFail("Old pending attempt must block current unsigned lookup"); return .unsigned }, upload: { _ in durableAsset },
+            replay: { pending in try await changedLinkAPI2.replayCustomerSummaryPending(pending, scope: pending.scope, currentAuthority: { true }) })
+        await changedLinkOwner.inspect(); XCTAssertEqual(changedLinkOwner.phase, .needsRecovery)
+        await changedLinkOwner.recover(); XCTAssertEqual(changedLinkOwner.phase, .needsRecovery)
+        XCTAssertNil(changedLinkOwner.receipt); XCTAssertNotNil(try store.loadForRecovery(scope: currentScope))
+        try store.complete(scope: pendingScope, proof: proof, currentAuthority: { true })
         let receiptJSON = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
         let api = APIClient(session: URLProtocolFixture.session([.init(201, receiptJSON), .init(201, receiptJSON)]), baseURL: "https://app.thorbis.com")
         _ = try await api.authorizeCustomerInvoiceSummary(summary, attempt: attempt, currentAuthority: { true })
