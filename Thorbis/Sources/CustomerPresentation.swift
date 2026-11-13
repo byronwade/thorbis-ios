@@ -788,6 +788,15 @@ struct CustomerEstimatePresentation: View {
 
 /// "Show to customer" for an invoice: what was done, what it cost, what is due, then sign or
 /// hand back to pay. Payment itself stays with the technician's collect screen.
+private struct CustomerInvoicePresentationLoadID: Hashable {
+    let invoice: InvoiceRecord
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let apiGeneration: UUID
+    let scopeRevision: UUID
+    let retry: UUID
+}
+
 struct CustomerInvoicePresentation: View {
     private let openedInvoice: InvoiceRecord
     let customerName: String
@@ -802,6 +811,7 @@ struct CustomerInvoicePresentation: View {
     let currentAuthority: () -> Bool
 
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var offer = FinancingOffer.off
@@ -811,6 +821,11 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
+    @State private var summary: CustomerInvoiceSummary?
+    @State private var summaryAuthority: CustomerHandoffExitAuthority?
+    @State private var summaryToken = UUID()
+    @State private var summaryRetry = UUID()
+    @State private var summaryLoading = false
     @State private var isMember = false
     /// The invoice as re-read after the lender funded it while this screen was open.
     @State private var reloadedInvoice: InvoiceRecord?
@@ -838,12 +853,35 @@ struct CustomerInvoicePresentation: View {
         self.onDone = onDone
         self.currentAuthority = currentAuthority
         _name = State(initialValue: customerName)
-        _signing = State(initialValue: initiallySigning)
+        _signing = State(initialValue: false)
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
-    private var total: Int { paperLinesTotal(invoice.lines) ?? 0 }
-    private var due: Int { max(total - invoice.amountPaid, 0) }
+    private var verifiedSummary: CustomerInvoiceSummary? {
+        guard currentAuthority(), let summary, let authority = summaryAuthority,
+              authority.isCurrent(api: api, session: session), session.can("invoice.view", feature: "invoicing"),
+              summary.matches(organizationID: invoice.organizationId, customerID: invoice.customerId, jobID: invoice.jobId,
+                              invoiceID: invoice.id, linesRevision: invoice.linesRevision) else { return nil }
+        return summary
+    }
+    private var summaryLines: [FieldLine] {
+        verifiedSummary?.lines.map { FieldLine(id: $0.id, description: $0.description, quantity: $0.quantity, unitPrice: $0.unitPrice, source: nil) } ?? []
+    }
+    private var readingAccess: DocumentDescriptionAccess? {
+        guard verifiedSummary != nil, let authority = summaryAuthority else { return nil }
+        let identity: DocumentDescriptionIdentity
+        if let jobID = invoice.jobId {
+            let scope = JobDocumentScope(jobID: jobID, organizationID: invoice.organizationId, customerID: invoice.customerId)
+            identity = .invoice(scope: scope, record: invoice)
+        } else {
+            identity = .standaloneInvoice(record: invoice)
+        }
+        return .init(identity: identity, organizationID: invoice.organizationId, capability: "invoice.view", feature: "invoicing",
+                     sourceGeneration: authority.sessionGeneration, fresh: true, active: currentAuthority(),
+                     scopeValid: authority.isCurrent(api: api, session: session))
+    }
+    private var total: Int { verifiedSummary?.totalAmount ?? 0 }
+    private var due: Int { verifiedSummary?.balanceDue ?? 0 }
     private var dueText: String { money(due, currency: invoice.currency) }
     private var authorized: Bool {
         signedBy != nil || (invoice.customerAuthorization.map { $0.linesRevision == invoice.linesRevision } ?? false)
@@ -853,7 +891,10 @@ struct CustomerInvoicePresentation: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if let sent { sentScreen(sent) } else if signing { signScreen } else if payChoice != nil { payScreen } else { invoiceScreen }
+                    if verifiedSummary == nil {
+                        if summaryLoading { CustomerSkeleton(caption: "Opening your invoice…", heading: false) }
+                        else { CustomerProblemBanner(message: "Invoice details aren't available. Hand the device back to your technician.", actionTitle: "Try again") { summaryRetry = UUID() } }
+                    } else if let sent { sentScreen(sent) } else if payChoice != nil { payScreen } else { invoiceScreen }
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
                 .frame(maxWidth: type.regular ? 760 : .infinity, alignment: .leading)
@@ -866,8 +907,13 @@ struct CustomerInvoicePresentation: View {
         .foregroundStyle(Theme.foreground)
         .animation(.easeOut(duration: 0.2), value: payChoice)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
-        .task { await loadFinancing() }
-        .task { isMember = await api.customerIsMember(invoice.customerId) }
+        .task(id: CustomerInvoicePresentationLoadID(invoice: invoice, sessionGeneration: session.generation,
+            authorityRevision: session.authorityRevision, apiGeneration: api.requestGeneration,
+            scopeRevision: api.savedCopyScopeRevision, retry: summaryRetry)) {
+                await loadCustomerSummary()
+                if verifiedSummary != nil { await loadFinancing() }
+            }
+        .onDisappear { summaryToken = UUID(); summary = nil; summaryAuthority = nil }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -884,7 +930,7 @@ struct CustomerInvoicePresentation: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Invoice for \(customerName)").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-                Text(due == 0 ? "Paid in full" : "Amount due").font(Theme.customerFont(type.heading + 4, weight: .medium))
+                Text(verifiedSummary?.status == "void" ? "Voided" : verifiedSummary?.status == "draft" ? "Draft total" : verifiedSummary?.status == "paid" ? "Paid in full" : due == 0 ? "No balance due" : "Amount due").font(Theme.customerFont(type.heading + 4, weight: .medium))
                     .accessibilityAddTraits(.isHeader)
                 if due > 0 {
                     Text(dueText).font(Theme.customerMonoFont(type.total + 8, weight: .medium))
@@ -896,12 +942,13 @@ struct CustomerInvoicePresentation: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            CustomerLinesCard(lines: invoice.lines, currency: invoice.currency, type: type, rows: amountRows)
+            Text("Customer summary · not the signed invoice").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+            CustomerLinesCard(lines: summaryLines, currency: invoice.currency, type: type, rows: amountRows, readingAccess: readingAccess)
             if let signedBy {
-                Label("Signed by \(signedBy)", systemImage: "signature")
+                Label("Invoice signed by \(signedBy)", systemImage: "signature")
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
             } else if let signature = invoice.customerAuthorization, signature.linesRevision == invoice.linesRevision {
-                Label("Signed by \(signature.signerName)", systemImage: "signature")
+                Label("Invoice signed by \(signature.signerName)", systemImage: "signature")
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
             }
         }
@@ -910,9 +957,32 @@ struct CustomerInvoicePresentation: View {
     /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest; savings sit
     /// above them as their own labelled row (CP-06).
     private var amountRows: [CustomerAmountRow] {
-        customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
-            + (CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
-                .map { customerAmountRows($0, currency: invoice.currency) } ?? [])
+        guard let summary = verifiedSummary,
+              let amounts = CustomerDocumentAmounts(lines: summaryLines, currency: summary.currency, amountPaid: summary.amountPaid) else { return [] }
+        return customerAmountRows(amounts, currency: summary.currency, invoice: summary.status != "void")
+    }
+
+    private func loadCustomerSummary() async {
+        let token = UUID(); summaryToken = token; summary = nil; summaryAuthority = nil; summaryLoading = false
+        guard currentAuthority(),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              authority.organization == invoice.organizationId, session.can("invoice.view", feature: "invoicing") else { return }
+        func current() -> Bool {
+            !Task.isCancelled && summaryToken == token && currentAuthority() &&
+            authority.isCurrent(api: api, session: session) && session.can("invoice.view", feature: "invoicing")
+        }
+        summaryLoading = true
+        defer { if summaryToken == token { summaryLoading = false } }
+        do {
+            let latest = try await api.liveFieldInvoice(invoice.id)
+            guard current(), latest.organizationId == invoice.organizationId, latest.customerId == invoice.customerId,
+                  latest.jobId == invoice.jobId, latest.id == invoice.id, latest.linesRevision == invoice.linesRevision else { return }
+            let result = try await api.customerInvoiceSummary(organizationID: invoice.organizationId,
+                customerID: invoice.customerId, jobID: invoice.jobId, invoiceID: invoice.id,
+                linesRevision: invoice.linesRevision, currentAuthority: current)
+            guard current() else { return }
+            summary = result; summaryAuthority = authority
+        } catch { }
     }
 
     // MARK: Choose how to pay (CP-15, CP-16)
@@ -1069,7 +1139,9 @@ struct CustomerInvoicePresentation: View {
 
     @ViewBuilder private var bottomBar: some View {
         VStack(spacing: 10) {
-            if sent != nil {
+            if verifiedSummary == nil {
+                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
+            } else if sent != nil {
                 CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
             } else if let choice = payChoice {
                 let phone = typedPhone
@@ -1087,17 +1159,11 @@ struct CustomerInvoicePresentation: View {
                     Text("Enter a US mobile number to continue.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 }
                 CustomerSecondaryButton(title: "Back", type: type) { payChoice = nil; otherPhone = nil; error = nil }
-            } else if signing {
-                let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes))
-                CustomerPresentationCommit(title: "Sign for \(money(total, currency: invoice.currency))", enabled: reason == nil, busy: busy, type: type) {
-                    Task { await sign() }
-                }
-                if let reason { Text(reason).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
-                CustomerSecondaryButton(title: "Back", type: type) { signing = false; error = nil }
-            } else if canSign && !authorized && invoice.jobId != nil {
-                CustomerPresentationCommit(title: "Sign for the work", enabled: true, busy: false, type: type) { signing = true }
-                CustomerSecondaryButton(title: "Done", type: type) { onDone() }
-            } else if due > 0, dueExample != nil || onPay != nil {
+            } else if canSign && !authorized && invoice.jobId != nil && ["issued", "paid"].contains(verifiedSummary?.status ?? "") {
+                Text("Signing this customer summary isn't available yet. Ask your technician for help.")
+                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
+            } else if verifiedSummary?.status == "issued", due > 0, dueExample != nil || onPay != nil {
                 CustomerPresentationCommit(title: "Pay \(dueText)", enabled: true, busy: false, type: type) { pay() }
                 CustomerSecondaryButton(title: "Done", type: type) { onDone() }
             } else {
@@ -1120,7 +1186,7 @@ struct CustomerInvoicePresentation: View {
     }
 
     private func loadFinancing() async {
-        guard financing, currentAuthority() else { return }
+        guard financing, currentAuthority(), verifiedSummary?.status == "issued" || verifiedSummary?.status == "paid" else { return }
         if due > 0 {
             offer = await api.financingOffer(amounts: [due])
             guard currentAuthority() else { return }

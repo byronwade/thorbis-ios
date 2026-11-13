@@ -5,6 +5,103 @@ enum CustomerJobPaper: Hashable {
     case invoice(InvoiceRecord, signing: Bool)
 }
 
+private struct CustomerInvoiceOverviewKey: Hashable {
+    let records: [InvoiceRecord]
+    let freshIDs: [String]
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let apiGeneration: UUID
+    let savedScopeRevision: UUID
+}
+
+struct CustomerInvoiceOverviewEntry {
+    let record: InvoiceRecord
+    let summary: CustomerInvoiceSummary
+    let authority: CustomerHandoffExitAuthority
+}
+
+/// Bounded overview fetches live off the view, using the same structured task-group
+/// pattern as the estimate handoff. Results are always scoped to one load token.
+@MainActor
+final class CustomerInvoiceOverviewLoader: ObservableObject {
+    @Published private(set) var entries: [String: CustomerInvoiceOverviewEntry] = [:]
+    @Published private(set) var loadedCount = 0
+    @Published private(set) var loading = false
+    @Published private(set) var failedIDs: Set<String> = []
+    private var candidates: [InvoiceRecord] = []
+    private var retryOffset = 0
+    var canLoadMore: Bool { loadedCount < candidates.count }
+    private var token = UUID()
+    private var current: (@MainActor (InvoiceRecord) -> Bool)?
+    private var api: APIClient?
+    private var scope: JobDocumentScope?
+    private var authority: CustomerHandoffExitAuthority?
+
+    func retire() { token = UUID(); entries = [:]; loadedCount = 0; loading = false; failedIDs = []; candidates = []; retryOffset = 0; current = nil; api = nil; scope = nil; authority = nil }
+
+    func load(records: [InvoiceRecord], api: APIClient, scope: JobDocumentScope,
+              authority: CustomerHandoffExitAuthority, current: @escaping @MainActor (InvoiceRecord) -> Bool) async {
+        retire()
+        self.api = api; self.scope = scope; self.authority = authority; self.current = current
+        candidates = records
+        await loadMore()
+    }
+
+    func loadMore() async {
+        guard !loading, canLoadMore, api != nil, scope != nil, authority != nil else { return }
+        let end = min(loadedCount + 20, candidates.count)
+        let batch = Array(candidates[loadedCount..<end])
+        loadedCount = end
+        await fetchBatch(batch)
+    }
+
+    func retryFailed() async {
+        guard !loading, !candidates.isEmpty else { return }
+        var batch: [InvoiceRecord] = []
+        for offset in 0..<candidates.count {
+            let index = (retryOffset + offset) % candidates.count
+            let record = candidates[index]
+            guard failedIDs.contains(record.id) else { continue }
+            batch.append(record)
+            if batch.count == 20 {
+                retryOffset = (index + 1) % candidates.count
+                break
+            }
+        }
+        guard !batch.isEmpty else { return }
+        await fetchBatch(batch)
+    }
+
+    private func fetchBatch(_ batch: [InvoiceRecord]) async {
+        let generation = token
+        loading = true
+        failedIDs.formUnion(batch.map(\.id))
+        defer { if token == generation { loading = false } }
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = batch.makeIterator()
+            for _ in 0..<3 {
+                if let record = iterator.next() { group.addTask { await self.fetch(record, generation: generation) } }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled, token == generation else { group.cancelAll(); break }
+                if let record = iterator.next() { group.addTask { await self.fetch(record, generation: generation) } }
+            }
+        }
+    }
+
+    private func fetch(_ record: InvoiceRecord, generation: UUID) async {
+        func valid() -> Bool { !Task.isCancelled && token == generation && current?(record) == true }
+        guard valid(), let api, let scope, let authority else { return }
+        do {
+            let summary = try await api.customerInvoiceSummary(scope: scope, invoiceID: record.id,
+                linesRevision: record.linesRevision, currentAuthority: valid)
+            guard valid() else { return }
+            entries[record.id] = .init(record: record, summary: summary, authority: authority)
+            failedIDs.remove(record.id)
+        } catch { }
+    }
+}
+
 /// Stable navigation owner for async rechecks and destination callbacks.
 @MainActor final class CustomerJobPaperNavigation: ObservableObject {
     @Published var paper: CustomerJobPaper?
@@ -54,6 +151,7 @@ struct JobCustomerDocumentsView: View {
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     @StateObject private var paperNavigation = CustomerJobPaperNavigation()
@@ -89,6 +187,7 @@ struct JobCustomerDocumentsView: View {
     @State private var approving = false
     @State private var editingDetails = false
     @State private var started = false
+    @StateObject private var invoiceOverview = CustomerInvoiceOverviewLoader()
 
     private var currentWorkspace: Bool { sourceGeneration == session.generation && session.user != nil && session.activeOrganization?.id == scope.organizationID }
     private var canViewEstimates: Bool { session.can("estimate.view", feature: "estimates") }
@@ -127,7 +226,8 @@ struct JobCustomerDocumentsView: View {
         }
         .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
-            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: beginHandBack)
+            CustomerCommitButton(title: dynamicTypeSize.isAccessibilitySize ? "Hand back" : "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: beginHandBack)
+                .accessibilityLabel("Hand back to the technician")
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
         }
         .thorbisDestination(item: Binding(get: { book }, set: { book = $0 })) { initial in
@@ -311,15 +411,77 @@ struct JobCustomerDocumentsView: View {
             customerSectionLabel("Invoices", count: invoices?.records.count ?? 0)
             if let invoices {
                 if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
+                if !invoiceOverview.failedIDs.isEmpty && !invoiceOverview.loading {
+                    Button {
+                        #if DEBUG
+                        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-amount-fails-once") {
+                            PaperPreviewProtocol.restoreDocumentHistory()
+                        }
+                        #endif
+                        Task { await invoiceOverview.retryFailed() }
+                    } label: {
+                        Label("Retry amounts", systemImage: "arrow.clockwise")
+                            .font(Theme.customerFont(17, weight: .medium)).frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target)
+                            .padding(.vertical, 8).background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Retry unavailable invoice amounts")
+                    .accessibilityHint("Try loading invoice amounts again")
+                    .frame(minHeight: CustomerModeStyle.target)
+                }
+                if invoiceOverview.canLoadMore {
+                    Button {
+                        Task { await invoiceOverview.loadMore() }
+                    } label: {
+                        Label(invoiceOverview.loading ? "Loading amounts…" : "More amounts", systemImage: "plus")
+                            .font(Theme.customerFont(17, weight: .medium)).frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target)
+                            .padding(.vertical, 8).background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(invoiceOverview.loading ? "Loading invoice amounts" : "Show more invoice amounts")
+                    .disabled(invoiceOverview.loading)
+                    .frame(minHeight: CustomerModeStyle.target)
+                }
                 ForEach(invoices.records) { invoice in
                     Button { Task { await openInvoice(invoice.id) } } label: {
-                        JobDocumentRow(invoice: invoice, fresh: invoices.freshIDs.contains(invoice.id), customerFacing: true)
+                        JobDocumentRow(invoice: invoice, fresh: invoices.freshIDs.contains(invoice.id), customerFacing: true,
+                                       customerSummary: overviewSummary(for: invoice))
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityIdentifier("customer-invoice-\(invoice.id)")
                     .disabled(openingID != nil || !invoices.freshIDs.contains(invoice.id))
                 }
             } else { SkeletonRows(count: 2, leading: false, inset: 0) }
+        }
+        .task(id: invoiceOverviewKey) { await loadInvoiceOverview() }
+        .onDisappear { invoiceOverview.retire() }
+    }
+
+    private var invoiceOverviewKey: CustomerInvoiceOverviewKey {
+        .init(records: invoices?.records ?? [], freshIDs: (invoices?.freshIDs ?? []).sorted(),
+              sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+              apiGeneration: api.requestGeneration, savedScopeRevision: api.savedCopyScopeRevision)
+    }
+
+    private func overviewSummary(for invoice: InvoiceRecord) -> CustomerInvoiceSummary? {
+        guard currentWorkspace, canViewInvoices, let entry = invoiceOverview.entries[invoice.id], entry.record == invoice,
+              invoices?.scope == scope, invoices?.freshIDs.contains(invoice.id) == true,
+              entry.authority.isCurrent(api: api, session: session),
+              entry.summary.matches(scope: scope, invoiceID: invoice.id, linesRevision: invoice.linesRevision) else { return nil }
+        return entry.summary
+    }
+
+    /// Bound the eager work in long jobs; the remaining rows open directly for a fresh check.
+    private func loadInvoiceOverview() async {
+        guard currentWorkspace, canViewInvoices, invoices?.scope == scope,
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            invoiceOverview.retire(); return
+        }
+        let records = (invoices?.records ?? []).filter { scope.contains($0) && invoices?.freshIDs.contains($0.id) == true }
+        await invoiceOverview.load(records: records, api: api, scope: scope, authority: authority) { record in
+            currentWorkspace && canViewInvoices && authority.isCurrent(api: api, session: session) &&
+            invoices?.scope == scope && invoices?.freshIDs.contains(record.id) == true &&
+            invoices?.records.contains(record) == true
         }
     }
 
@@ -344,7 +506,6 @@ struct JobCustomerDocumentsView: View {
                 CustomerJobReadOnlyPaper(estimate: estimate, handBack: beginHandBack)
             }
         case .invoice(let invoice, let signing):
-            if ["issued", "paid"].contains(invoice.status) {
                 CustomerInvoicePresentation(invoice: invoice, customerName: customerName,
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
@@ -359,9 +520,7 @@ struct JobCustomerDocumentsView: View {
                         paperGeneration = UUID(); paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
                     }, onDone: beginHandBack)
-            } else {
-                CustomerJobReadOnlyPaper(invoice: invoice, handBack: beginHandBack)
-            }
+                    .id(presentation)
         }
     }
 
@@ -579,10 +738,9 @@ private struct CustomerJobReadOnlyPaper: View {
                                 estimateLines(option.lines, currency: option.currency, type: type, expectedTotal: option.totalAmount)
                             }
                         } else { estimateLines(estimate.lines, currency: estimate.lines.first?.unitPrice.currency ?? "USD", type: type) }
-                    } else if let invoice {
-                        Text("Invoice").font(Theme.customerFont(type.heading, weight: .medium))
-                        CustomerStatusWord(status: invoice.status, type: type)
-                        lines(invoice.lines, currency: invoice.currency, type: type)
+                    } else if invoice != nil {
+                        Text("Invoice details aren't available. Hand the device back to your technician.")
+                            .font(Theme.customerFont(type.body))
                     }
                 }
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)

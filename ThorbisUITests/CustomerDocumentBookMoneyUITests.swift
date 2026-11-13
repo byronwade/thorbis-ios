@@ -2,6 +2,186 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testInvoiceBookShowsOnlyVerifiedCustomerSummary() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice"])
+        XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+        XCTAssertFalse(text("Water heater", in: app).exists)
+    }
+
+    func testVerifiedSignedInvoiceKeepsPaymentAction() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-job-invoice-signed"])
+        XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.waitForExistence(timeout: 15))
+    }
+
+    func testUnsignedInvoiceWithoutEditStillAllowsPayment() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-deny-document-edit", "--paper-preview-owner-auth", "approved"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+    }
+
+    func testVerifiedSummaryHandsBackToCorrectInvoicePayment() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+        XCTAssertFalse(collecting.label.contains("INV-2240"), collecting.label)
+    }
+
+    func testVerifiedSummaryRefusesPaymentWhenRecheckFails() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-job-invoice-signed", "--paper-preview-payment-recheck-fails"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        XCTAssertTrue(app.staticTexts["Payment isn't ready. Ask your technician to check this invoice."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+    }
+
+    func testInvoiceBookWithoutSummaryDoesNotShowRawDescriptions() {
+        let app = openPrimary(extra: ["--paper-preview-long-document-description"])
+        XCTAssertTrue(text("Invoice details aren't available", in: app).waitForExistence(timeout: 15))
+        XCTAssertFalse(text("Invoice first paragraph", in: app).exists)
+        XCTAssertFalse(app.buttons["Sign for the work"].exists)
+    }
+
+    func testVerifiedDraftAndVoidInvoiceBooksUseSafeLines() {
+        for flag in ["--paper-preview-job-invoice-draft", "--paper-preview-job-invoice-void"] {
+            let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", flag])
+            XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+            XCTAssertTrue(text(flag.hasSuffix("draft") ? "Draft total" : "Voided", in: app).exists)
+            XCTAssertFalse(app.buttons["Sign for the work"].exists)
+            app.terminate()
+        }
+    }
+
+    func testStandaloneCustomerInvoiceUsesVerifiedSummaryAndCanHandBack() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-customer-safe-invoice"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Customer safe service"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Customer summary · not the signed invoice"].exists)
+        XCTAssertTrue(app.buttons["Done"].exists)
+        XCTAssertFalse(app.buttons["Sign for the work"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
+    }
+
+    func testStandaloneLongSummaryOpensReadingDrawer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-customer-safe-invoice", "--paper-preview-customer-summary-long"]
+        app.launch()
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final summary detail: leave the work area clean.")).firstMatch.exists)
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        app.navigationBars["Description"].buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Customer summary · not the signed invoice"].waitForExistence(timeout: 10))
+    }
+
+    func testLargeTextSummaryReaderClosesWhenSessionEnds() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-customer-summary-long", "--paper-preview-description-expire-session", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let more = pages(app).buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 15)); reveal(more, in: app); more.tap()
+        let reader = app.navigationBars["Description"]
+        XCTAssertTrue(reader.waitForExistence(timeout: 10))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Customer summary reader at largest text"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final summary detail: leave the work area clean.")).firstMatch.exists)
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: reader)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 25), .completed)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final summary detail: leave the work area clean.")).firstMatch.exists)
+    }
+
+    func testStandaloneCustomerInvoiceWithoutSummaryDoesNotShowRawLines() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test"]
+        app.launch()
+        let unavailable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Invoice details aren't available")).firstMatch
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Sign for the work"].exists)
+    }
+
+    func testOverviewOnlyShowsAmountFromVerifiedSummary() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-customer-safe-invoice"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        thorbisRevealInCustomerView(invoice, in: app); XCTAssertTrue(invoice.exists)
+        let verified = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "$340.00"), object: invoice)
+        XCTAssertEqual(XCTWaiter.wait(for: [verified], timeout: 15), .completed)
+    }
+
+    func testOverviewRetriesUnavailableInvoiceAmount() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-customer-safe-invoice", "--paper-preview-overview-amount-fails-once"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let retry = app.buttons["Retry unavailable invoice amounts"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 15)); thorbisRevealInCustomerView(retry, in: app)
+        XCTAssertTrue(retry.isHittable); retry.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        let verified = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "$340.00"), object: invoice)
+        XCTAssertEqual(XCTWaiter.wait(for: [verified], timeout: 15), .completed)
+        XCTAssertFalse(retry.exists)
+    }
+
+    func testOverviewBatchControlsAtNormalAndLargestText() {
+        continueAfterFailure = false
+        for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-customer-safe-invoice", "--paper-preview-overview-amount-fails-once", "--paper-preview-overview-many-invoices", "--paper-preview-long-document-description", "-UIPreferredContentSizeCategoryName", size]
+            app.launch()
+            XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+            let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+            let retry = app.buttons["Retry unavailable invoice amounts"]
+            XCTAssertTrue(retry.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(retry, in: app)
+            let top = app.navigationBars["Customer view"]
+            let footer = app.buttons["Hand back to the technician"]
+            for _ in 0..<4 where retry.frame.minY < top.frame.maxY { app.scrollViews["customer-job-documents-list"].swipeDown() }
+            XCTAssertTrue(retry.isHittable)
+            XCTAssertGreaterThanOrEqual(retry.frame.minY, top.frame.maxY)
+            XCTAssertLessThanOrEqual(retry.frame.maxY, footer.frame.minY)
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Invoice overview retry \(size)"; shot.lifetime = .keepAlways; add(shot)
+            retry.tap()
+            let more = app.buttons["Show more invoice amounts"]
+            XCTAssertTrue(more.waitForExistence(timeout: 20))
+            if !more.isHittable { app.scrollViews["customer-job-documents-list"].swipeDown() }
+            thorbisRevealInCustomerView(more, in: app)
+            for _ in 0..<4 where more.frame.minY < top.frame.maxY { app.scrollViews["customer-job-documents-list"].swipeDown() }
+            XCTAssertTrue(more.isHittable)
+            XCTAssertGreaterThanOrEqual(more.frame.minY, top.frame.maxY)
+            XCTAssertLessThanOrEqual(more.frame.maxY, footer.frame.minY)
+            let moreShot = XCTAttachment(screenshot: app.screenshot()); moreShot.name = "Invoice overview more \(size)"; moreShot.lifetime = .keepAlways; add(moreShot)
+            more.tap()
+            let laterInvoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000003000"]
+            let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "$340.00"), object: laterInvoice)
+            XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 20), .completed)
+            app.terminate()
+        }
+    }
+
+    func testOverviewWithNoSummaryDoesNotExposeRawAmount() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        thorbisRevealInCustomerView(invoice, in: app); XCTAssertTrue(invoice.exists)
+        XCTAssertTrue(invoice.label.contains("Open to check amount"))
+        XCTAssertFalse(invoice.label.contains("$340.00"))
+    }
+
     func testMixedCurrencyInvoiceDoesNotShowMisleadingOverviewAmount() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -207,6 +387,33 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         retry.tap()
         assertText("Card", in: app)
         assertMoneyRow("Paid", "$340.00", in: app)
+    }
+
+    func testPaymentMismatchDisablesPayUntilFreshBalanceAndKeepsInvoice() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-primary-payment-arrives", "--paper-preview-deny-document-edit", "--paper-preview-owner-auth", "approved"])
+        assertText("Payments are still updating", in: app)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.exists)
+        let refresh = pages(app).buttons["Refresh payments"]
+        reveal(refresh, in: app); XCTAssertTrue(refresh.isHittable); refresh.tap()
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $240.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+    }
+
+    func testPaymentArrivingBetweenReadsRefreshesSummaryAndHistory() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-payment-arrives"])
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        assertText("Payments are still updating", in: app)
+        let refresh = pages(app).buttons["Refresh payments"]
+        reveal(refresh, in: app); XCTAssertTrue(refresh.isHittable); refresh.tap()
+        let cleared = NSPredicate(format: "exists == false")
+        expectation(for: cleared, evaluatedWith: refresh)
+        waitForExpectations(timeout: 15)
+        assertMoneyRow("Paid", "$340.00", in: app)
+        assertText("Paid in full", in: app)
     }
 
     func testCollapsedHistoryStaysCollapsedAfterRefresh() {
