@@ -13,19 +13,19 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-13-find-work",
+            date: "2026-11-13",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Find work in the menu",
+                      detail: "Jobs and documents are easy to find, and tapping a section opens or closes it."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-12-job-document-shortcuts",
             date: "2026-11-12",
             highlights: [
                 .init(symbol: "arrow.up.arrow.down", title: "Move between job documents",
                       detail: "Switch between estimates and invoices while scrolling through a job's documents."),
-            ]
-        ),
-        ReleaseNote(
-            id: "2026-11-12-find-work",
-            date: "2026-11-12",
-            highlights: [
-                .init(symbol: "sidebar.left", title: "Find work in the menu",
-                      detail: "Jobs and documents are easy to find, and tapping a section opens or closes it."),
             ]
         ),
         ReleaseNote(
