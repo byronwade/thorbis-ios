@@ -3,6 +3,46 @@ import XCTest
 
 @MainActor
 final class CommsInboxTests: XCTestCase {
+    func testEmailOpeningKeepsExistingDraftAndRetiresStaleIdentity() throws {
+        let presenter = InboxEmailPresenter()
+        var current = true
+        let firstGeneration = UUID()
+        presenter.bind(actorID: "actor-a", organizationID: "org-a", generation: firstGeneration, current: { current })
+        let first = try XCTUnwrap(MailDraft(recipient: "first@example.com"))
+        let second = try XCTUnwrap(MailDraft(recipient: "second@example.com"))
+        presenter.open(first)
+        let original = try XCTUnwrap(presenter.opening)
+        presenter.open(second)
+        XCTAssertEqual(presenter.opening?.id, original.id, "A second action cannot replace an unsaved composer")
+        XCTAssertEqual(presenter.opening?.mail.recipient, "first@example.com")
+        current = false
+        XCTAssertFalse(presenter.isCurrent(original), "A sheet cannot display under retired authority")
+        presenter.open(second)
+        XCTAssertNil(presenter.opening, "A stale session cannot open or retain an email")
+        current = true
+        presenter.bind(actorID: "actor-b", organizationID: "org-b", generation: UUID(), current: { current })
+        presenter.open(second)
+        let newer = try XCTUnwrap(presenter.opening)
+        presenter.close(original.id)
+        XCTAssertEqual(presenter.opening?.id, newer.id, "An old sheet callback cannot close a new scope")
+        presenter.unbind()
+        XCTAssertNil(presenter.opening)
+    }
+
+    func testMailtoSeedPreservesAllFieldsAndRejectsUnsupportedHeaders() throws {
+        let original = try XCTUnwrap(MailDraft(recipients: ["first@example.com", "second@example.com"],
+            cc: ["copy@example.com"], bcc: ["private@example.com"], subject: "Job & estimate", body: "First\nSecond & final"))
+        let roundTrip = try XCTUnwrap(MailDraft(mailtoURL: XCTUnwrap(original.mailtoURL)))
+        let draft = CommsMailDraft(mail: roundTrip)
+        XCTAssertEqual(draft.to, "first@example.com, second@example.com")
+        XCTAssertEqual(draft.cc, "copy@example.com")
+        XCTAssertEqual(draft.bcc, "private@example.com")
+        XCTAssertEqual(draft.subject, "Job & estimate")
+        XCTAssertEqual(draft.body, "First\nSecond & final")
+        XCTAssertNil(MailDraft(mailtoURL: XCTUnwrap(URL(string: "mailto:first@example.com?x-extra=secret"))))
+        XCTAssertNil(MailDraft(mailtoURL: XCTUnwrap(URL(string: "mailto:first@example.com?subject=one&subject=two"))))
+    }
+
     private func call(_ id: String, status: String = "completed", number: String? = "+15550100100", name: String? = nil,
                       at: String = "2026-11-05T15:00:00Z", duration: Int? = 192, voicemail: Bool? = nil,
                       summary: String? = nil) throws -> BookingCallRecord {

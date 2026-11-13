@@ -921,6 +921,14 @@ struct CommsMailDraft: Identifiable {
         self.subject = subject
     }
 
+    init(mail: MailDraft) {
+        to = mail.recipients.joined(separator: ", ")
+        cc = mail.cc.joined(separator: ", ")
+        bcc = mail.bcc.joined(separator: ", ")
+        subject = mail.subject ?? ""
+        body = mail.body ?? ""
+    }
+
     init(message: CommsLocalMessage, threadID: String) {
         self.threadID = threadID
         messageID = message.id

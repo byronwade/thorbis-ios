@@ -139,6 +139,23 @@ struct MailDraft: Equatable {
         self.body = body
     }
 
+    init?(mailtoURL: URL) {
+        guard mailtoURL.scheme?.lowercased() == "mailto",
+              let components = URLComponents(url: mailtoURL, resolvingAgainstBaseURL: false) else { return nil }
+        let query = components.queryItems ?? []
+        let allowed = Set(["to", "cc", "bcc", "subject", "body"])
+        guard query.allSatisfy({ allowed.contains($0.name.lowercased()) }),
+              query.filter({ $0.name.lowercased() == "subject" }).count <= 1,
+              query.filter({ $0.name.lowercased() == "body" }).count <= 1 else { return nil }
+        func addresses(_ name: String) -> [String] {
+            query.filter { $0.name.lowercased() == name }.flatMap { ($0.value ?? "").split(separator: ",").map(String.init) }
+        }
+        let path = components.path.split(separator: ",").map(String.init)
+        self.init(recipients: path + addresses("to"), cc: addresses("cc"), bcc: addresses("bcc"),
+                  subject: query.first { $0.name.lowercased() == "subject" }?.value,
+                  body: query.first { $0.name.lowercased() == "body" }?.value)
+    }
+
     /// Another mail app can open the same draft when the system composer is unavailable.
     var mailtoURL: URL? {
         var components = URLComponents()

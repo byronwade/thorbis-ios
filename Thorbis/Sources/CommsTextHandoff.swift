@@ -106,21 +106,37 @@ final class InboxEmailPresenter: ObservableObject {
         let mail: MailDraft
     }
     @Published var opening: Opening?
-    fileprivate var identity: (actorID: String, organizationID: String, generation: UUID)?
+    private var identity: (actorID: String, organizationID: String, generation: UUID)?
+    private var current: (@MainActor () -> Bool)?
 
+    func bind(actorID: String, organizationID: String, generation: UUID, current: @escaping @MainActor () -> Bool) {
+        if let opening, opening.actorID != actorID || opening.organizationID != organizationID || opening.sessionGeneration != generation {
+            self.opening = nil
+        }
+        identity = (actorID, organizationID, generation); self.current = current
+    }
+    func unbind() { identity = nil; current = nil; opening = nil }
     func open(_ mail: MailDraft) {
-        guard let identity else { return }
+        guard let identity, current?() == true else { unbind(); return }
+        // Do not replace an unsaved composer through another entry point.
+        guard opening == nil else { return }
         opening = Opening(actorID: identity.actorID, organizationID: identity.organizationID,
                           sessionGeneration: identity.generation, mail: mail)
     }
+    func isCurrent(_ opening: Opening) -> Bool {
+        self.opening?.id == opening.id && current?() == true && identity?.actorID == opening.actorID &&
+            identity?.organizationID == opening.organizationID && identity?.generation == opening.sessionGeneration
+    }
+    func close(_ id: UUID) {
+        if opening?.id == id { opening = nil }
+    }
+
 }
 
 struct InboxEmailAction {
     @MainActor func callAsFunction(_ mail: MailDraft) { InboxEmailPresenter.shared.open(mail) }
     @MainActor func callAsFunction(_ url: URL) {
-        guard url.scheme?.lowercased() == "mailto",
-              let address = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path,
-              let mail = MailDraft(recipient: address) else { return }
+        guard let mail = MailDraft(mailtoURL: url) else { return }
         InboxEmailPresenter.shared.open(mail)
     }
 }
@@ -139,23 +155,25 @@ private struct InboxEmailPresenterModifier: ViewModifier {
             .onChange(of: session.generation) { _, _ in bind() }
             .onChange(of: session.user?.id) { _, _ in bind() }
             .onChange(of: session.activeOrganization?.id) { _, _ in bind() }
-            .onDisappear { presenter.identity = nil; presenter.opening = nil }
+            .onDisappear { presenter.unbind() }
             .sheet(item: $presenter.opening) { opening in
-                CommsMailSheet(draft: CommsMailDraft(to: opening.mail.recipients.joined(separator: ", "), subject: opening.mail.subject ?? ""),
-                               store: CommsLocalStore.shared(actorID: opening.actorID, organizationID: opening.organizationID),
-                               onSaved: { _ in presenter.opening = nil }, onClose: { presenter.opening = nil })
+                if presenter.isCurrent(opening) {
+                    CommsMailSheet(draft: CommsMailDraft(mail: opening.mail),
+                                   store: CommsLocalStore.shared(actorID: opening.actorID, organizationID: opening.organizationID),
+                                   onSaved: { _ in presenter.close(opening.id) }, onClose: { presenter.close(opening.id) })
+                }
             }
     }
 
     private func bind() {
         guard let actor = session.user?.id, let org = session.activeOrganization?.id else {
-            presenter.identity = nil; presenter.opening = nil; return
+            presenter.unbind(); return
         }
-        if let opening = presenter.opening,
-           opening.actorID != actor || opening.organizationID != org || opening.sessionGeneration != session.generation {
-            presenter.opening = nil
-        }
-        presenter.identity = (actor, org, session.generation)
+        let generation = session.generation
+        presenter.bind(actorID: actor, organizationID: org, generation: generation, current: { [weak session] in
+            guard let session else { return false }
+            return session.user?.id == actor && session.activeOrganization?.id == org && session.generation == generation
+        })
     }
 }
 
