@@ -1656,13 +1656,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                    "contentType": "image/png", "byteSize": 73, "storageKey": key, "createdAt": now]]]
             }
             if path == "/v1/jobs/\(id)/media", PaperPreview.screen == "job-media" {
-                let first: [String: Any] = [
+                var first: [String: Any] = [
                     "id": "00000000-0000-4000-8000-000000009301", "organizationId": org, "jobId": id,
                     "uploaderUserId": actor, "kind": "photo", "mime": "image/jpeg", "sizeBytes": 120_000,
                     "originalFilename": "outdoor-unit.jpg", "contentHash": "preview", "storageKey": "preview/outdoor-unit.jpg",
                     "uploadState": "stored", "tags": ["Before"], "caption": "Outdoor unit", "archived": false,
                     "createdAt": now, "updatedAt": now
                 ]
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-wrong-job") {
+                    first["jobId"] = "00000000-0000-4000-8000-000000009999"
+                }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-wrong-org") {
+                    first["organizationId"] = "00000000-0000-4000-8000-000000009998"
+                }
                 // Media redesign screenshots: a visit's worth of sample photos (thumbnails are drawn
                 // as labelled SAMPLE tiles in DEBUG), three stages and two documents.
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-grid") {

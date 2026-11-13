@@ -38,6 +38,79 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(done.waitForNonExistence(timeout: 5), file: file, line: line)
     }
 
+    func testDetailHidesPreviouslyVisibleAssetAfterJobAccessRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test"]
+        app.launch()
+        let title = app.staticTexts["Outdoor unit"]
+        XCTAssertTrue(title.waitForExistence(timeout: 25))
+        app.buttons["Revoke test job access"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: title)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+    }
+
+    func testDetailClosesLoadedPreviewAfterJobAccessRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-success"]
+        app.launch()
+        let file = app.descendants(matching: .any)["media-detail-file-preview"]
+        XCTAssertTrue(file.waitForExistence(timeout: 25))
+        app.buttons["Revoke test job access"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: file)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
+    func testDetailRetryCannotOpenPreviewAfterLeaving() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-retry-leave"]
+        app.launch()
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 25)); retry.tap()
+        let probe = app.staticTexts["media-detail-retry-probe"]
+        let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Retry started"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 10), .completed)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", "Retry finished"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 15), .completed)
+        XCTAssertEqual(probe.label, "Retry finished; preview opened after leaving: 0")
+    }
+
+    func testDetailRetryStartingAfterLeavingCannotOpenPreview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-retry-leave", "--paper-preview-media-detail-start-after-leave"]
+        app.launch()
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 25)); retry.tap()
+        let probe = app.staticTexts["media-detail-retry-probe"]
+        let queued = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Retry queued"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [queued], timeout: 10), .completed)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", "Delayed start finished"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 20), .completed)
+        XCTAssertEqual(probe.label, "Delayed start finished; preview opened after leaving: 0")
+    }
+
+    func testDetailRejectsMediaFromAnotherJob() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-job"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["This file is not on the job."].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
+    func testDetailRejectsMediaFromAnotherOrganization() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-org"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["This file is not on the job."].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
     func testLaterFilteredPhotosAndDocumentsRemainReachable() {
         continueAfterFailure = false
         let app = XCUIApplication()

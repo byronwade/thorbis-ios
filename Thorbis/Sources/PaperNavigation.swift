@@ -60,6 +60,7 @@ struct RootView: View {
     @State private var workspace = false
     @State private var createJob = false
     #if DEBUG
+    @ObservedObject private var mediaDetailRetryProbe = MediaDetailRetryProbe.shared
     @State private var previewInvoiceEditor = false
     @State private var previewInvoiceDetail = false
     @State private var previewEstimateRevision = false
@@ -78,6 +79,11 @@ struct RootView: View {
         #if DEBUG
         .modifier(PreviewLandscape())
         .modifier(PreviewWindowWidth())
+        .overlay(alignment: .bottom) {
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave") {
+                Text(mediaDetailRetryProbe.status).accessibilityIdentifier("media-detail-retry-probe")
+            }
+        }
         #endif
         // Widgets, the Control Center control and Spotlight read today's jobs from here.
         .modifier(GlanceSnapshotWriter())
@@ -868,6 +874,9 @@ struct RootView: View {
             if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                 primaryTab = .jobs
                 jobsPath.append(job)
+                if PaperPreview.screen == "job-media", ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-test") {
+                    jobsPath.append(PaperRoute.media(jobID: job.id, assetID: "00000000-0000-4000-8000-000000009301"))
+                }
                 if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
                 // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }

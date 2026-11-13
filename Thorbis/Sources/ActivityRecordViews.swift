@@ -1,4 +1,7 @@
 import SwiftUI
+#if DEBUG
+import UIKit
+#endif
 
 /// The time shown on an opened note. An unreadable value stays as the server sent it.
 enum ActivityRecordLabel {
@@ -86,64 +89,203 @@ struct JobNoteDetailView: View {
     }
 }
 
+#if DEBUG
+@MainActor final class MediaDetailRetryProbe: ObservableObject {
+    static let shared = MediaDetailRetryProbe()
+    @Published var status = "Ready"
+    var attempts = 0
+    var left = false
+    var opensAfterLeaving = 0
+}
+#endif
+
+private struct MediaDetailScope: Hashable {
+    let actor: String
+    let organization: String
+    let job: String
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let policy: Int
+    let requestGeneration: UUID
+    let savedCopyRevision: UUID
+    let origin: String
+}
+
 struct JobMediaDetailView: View {
     let jobID: String
     let assetID: String
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @StateObject private var preview = DocumentPreviewController()
     @State private var asset: MediaAssetRecord?
+    @State private var sourceScope: MediaDetailScope?
+    @State private var loadToken = UUID()
+    @State private var isVisible = false
+    @State private var appearanceID = UUID()
     @State private var error: String?
     @State private var loading = true
+
+    private var readScope: MediaDetailScope? {
+        guard session.can("job.view", feature: "jobs"), let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let policy = session.policyVersion,
+              let origin = api.normalizedOrigin else { return nil }
+        return MediaDetailScope(actor: actor, organization: organization, job: jobID,
+                                sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                                policy: policy, requestGeneration: api.requestGeneration,
+                                savedCopyRevision: api.savedCopyScopeRevision, origin: origin)
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if loading || preview.loading { SkeletonRows(count: 3, inset: 0) }
-                if let message = error ?? preview.error {
-                    ErrorBanner(message: message) { await load() }
+                #if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-test") {
+                    Button("Revoke test job access") {
+                        Task { PaperPreviewProtocol.revokeJobMediaView(); await session.revalidate() }
+                    }
                 }
-                if let asset {
-                    Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
-                        .font(Theme.font(17, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                    Text(asset.kind == "photo" ? "Photo" : "Document")
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.muted)
-                }
-                if let url = preview.url {
-                    NativeDocumentPreview(url: url)
-                        .frame(minHeight: 420)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                #endif
+                if readScope == nil {
+                    Text("This file is unavailable. Check your job access.")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                } else if readScope == sourceScope {
+                    if loading || preview.loading { SkeletonRows(count: 3, inset: 0) }
+                    if let message = error ?? preview.error {
+                        let scheduledAppearance = appearanceID
+                        ErrorBanner(message: message) {
+                            #if DEBUG
+                            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-start-after-leave") {
+                                MediaDetailRetryProbe.shared.status = "Retry queued"
+                                try? await Task.sleep(for: .seconds(4))
+                                await load(expectedAppearance: scheduledAppearance)
+                                let probe = MediaDetailRetryProbe.shared
+                                probe.status = "Delayed start finished; preview opened after leaving: \(probe.opensAfterLeaving)"
+                                return
+                            }
+                            #endif
+                            await load(expectedAppearance: scheduledAppearance)
+                        }
+                    }
+                    if let asset {
+                        Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                            .font(Theme.font(17, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Text(asset.kind == "photo" ? "Photo" : "Document")
+                            .font(Theme.font(13))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    if let url = preview.url {
+                        NativeDocumentPreview(url: url)
+                            .accessibilityIdentifier("media-detail-file-preview")
+                            .frame(minHeight: 420)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                } else {
+                    SkeletonRows(count: 3, inset: 0)
                 }
             }
             .padding(.horizontal, Theme.gutter)
             .padding(.vertical, 16)
         }
         .background(Theme.canvas)
-        .navigationTitle(asset?.kind == "photo" ? "Photo" : "File")
+        .navigationTitle(readScope == sourceScope && asset?.kind == "photo" ? "Photo" : "File")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
-        .onDisappear { preview.clear() }
+        .onAppear { appearanceID = UUID(); isVisible = true }
+        .task(id: readScope) { await load() }
+        .onChange(of: readScope) { _, current in
+            if sourceScope != current {
+                loadToken = UUID(); preview.clear(); asset = nil; sourceScope = nil; error = nil
+            }
+        }
+        .onDisappear {
+            isVisible = false
+            appearanceID = UUID()
+            loadToken = UUID()
+            asset = nil
+            sourceScope = nil
+            error = nil
+            #if DEBUG
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave") {
+                MediaDetailRetryProbe.shared.left = true
+            }
+            #endif
+            preview.clear()
+        }
     }
 
-    private func load() async {
-        loading = asset == nil
+    private func load(expectedAppearance: UUID? = nil) async {
+        guard isVisible, expectedAppearance.map({ $0 == appearanceID }) ?? true else { return }
+        #if DEBUG
+        let testingRetry = PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-retry-leave")
+        let attempt: Int = {
+            guard testingRetry else { return 0 }
+            let probe = MediaDetailRetryProbe.shared
+            probe.attempts += 1
+            return probe.attempts
+        }()
+        defer {
+            if testingRetry, attempt == 2 {
+                let probe = MediaDetailRetryProbe.shared
+                probe.status = "Retry finished; preview opened after leaving: \(probe.opensAfterLeaving)"
+            }
+        }
+        #endif
+        let token = UUID()
+        loadToken = token
+        preview.clear()
+        asset = nil
+        error = nil
+        guard let scope = readScope else { sourceScope = nil; loading = false; return }
+        sourceScope = scope
+        loading = true
         do {
-            let assets = try await api.fieldMedia(jobID)
-            let match = assets.first { $0.id == assetID && !$0.archived }
-            asset = match
-            guard let match else {
+            #if DEBUG
+            if testingRetry, attempt == 1 { throw URLError(.timedOut) }
+            if testingRetry, attempt == 2 {
+                MediaDetailRetryProbe.shared.status = "Retry started"
+                try? await Task.sleep(for: .seconds(4))
+            }
+            #endif
+            let assets = try await api.fieldMedia(jobID, isCurrent: { readScope == scope && loadToken == token })
+            try Task.checkCancellation()
+            guard readScope == scope, sourceScope == scope, loadToken == token else { return }
+            guard let match = assets.first(where: { $0.id == assetID && $0.jobId == scope.job &&
+                $0.organizationId == scope.organization && $0.uploadState == "stored" && !$0.archived }) else {
                 error = "This file is not on the job."
                 loading = false
                 return
             }
-            error = nil
-            preview.open { try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename) }
+            asset = match
+            #if DEBUG
+            if testingRetry, MediaDetailRetryProbe.shared.left { MediaDetailRetryProbe.shared.opensAfterLeaving += 1 }
+            #endif
+            preview.open {
+                guard readScope == scope, sourceScope == scope, loadToken == token else { throw CancellationError() }
+                let file: URL
+                #if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-success") {
+                    let path = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".pdf")
+                    let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 100, height: 100)).pdfData { $0.beginPage() }
+                    try pdf.write(to: path)
+                    file = path
+                } else {
+                    file = try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename)
+                }
+                #else
+                file = try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename)
+                #endif
+                guard !Task.isCancelled, readScope == scope, sourceScope == scope, loadToken == token else {
+                    try? FileManager.default.removeItem(at: file)
+                    throw CancellationError()
+                }
+                return file
+            }
         } catch is CancellationError {
         } catch {
+            guard readScope == scope, sourceScope == scope, loadToken == token else { return }
             self.error = error.localizedDescription
         }
-        loading = false
+        if readScope == scope, sourceScope == scope, loadToken == token { loading = false }
     }
 }
 
