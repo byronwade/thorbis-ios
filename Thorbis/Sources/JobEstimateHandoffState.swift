@@ -172,6 +172,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     @Published private(set) var overviewPriceFailures: Set<String> = []
     @Published private(set) var overviewPriceGeneration = UUID()
     private var overviewPriceReady = false
+    @Published private(set) var overviewPricesNeedRefresh = false
     @Published private var overviewReceipts: [String: CustomerEstimateAcceptanceReceipt] = [:]
     private var overviewRequests: [String: UUID] = [:]
     private var request = UUID()
@@ -287,7 +288,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard isCurrent, !loading else { if !isCurrent { retire() }; return }
         retryingPage = false
         let ticket = UUID(); request = ticket; loading = true; error = nil
-        overviewPriceReady = false; revisions = [:]; overviewReceipts = [:]; overviewPriceFailures = []; overviewPriceGeneration = UUID()
+        overviewPriceReady = false; overviewPricesNeedRefresh = false; revisions = [:]; overviewReceipts = [:]; overviewPriceFailures = []; overviewPriceGeneration = UUID()
         defer { if request == ticket { loading = false } }
         do {
             let fresh = try await api.liveFieldJob(scope.jobID)
@@ -297,10 +298,10 @@ final class JobEstimateHandoffModel: ObservableObject {
             pageRead = nil; complete = false; canLoadMoreEstimates = false
             try await loadPage(ticket: ticket)
         } catch is CancellationError {
-            if isCurrent, request == ticket { complete = false; error = "Couldn't finish loading estimates. Your previous selections are still here." }
+            if isCurrent, request == ticket { complete = false; overviewPricesNeedRefresh = true; error = "Couldn't finish loading estimates. Your previous selections are still here." }
         } catch {
             guard isCurrent, request == ticket else { return }
-            complete = false; self.error = "Couldn't refresh all estimates. Your previous selections are still here."
+            complete = false; overviewPricesNeedRefresh = true; self.error = "Couldn't refresh all estimates. Your previous selections are still here."
         }
     }
     func loadMoreEstimates() async {
@@ -358,7 +359,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
             self.revisions = retainedRevisions; self.overviewReceipts = retainedReceipts
             self.overviewPriceFailures = []
-            self.overviewPriceReady = true
+            self.overviewPriceReady = true; self.overviewPricesNeedRefresh = false
             self.overviewPriceGeneration = UUID()
         }) { [weak self] cursor in
             guard let self else { throw CancellationError() }
@@ -663,7 +664,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         retired = true; request = UUID(); loading = false
         membershipPager = nil; pageRead = nil; canLoadMoreEstimates = false
         records = []; freshIDs = []; unavailableIDs = []; reviewed = []; revisions = [:]
-        overviewPriceReady = false; overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
+        overviewPriceReady = false; overviewPricesNeedRefresh = false; overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
         jobTitle = ""; customerName = ""; lastSignerName = nil; error = nil
         for context in contexts.values { context.retire() }
         contexts = [:]
