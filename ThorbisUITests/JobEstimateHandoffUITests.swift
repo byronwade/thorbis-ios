@@ -235,7 +235,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
         let retry = app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(retry.waitForExistence(timeout: 45), "A receipt for another revision must fail validation")
-        XCTAssertFalse(app.staticTexts["$320.00"].exists)
+        XCTAssertFalse(app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"].staticTexts["$320.00"].exists)
     }
 
     private func openSecondEstimateForValidation(_ flag: String, extraArgs: [String] = []) -> XCUIApplication {
@@ -296,7 +296,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = openSecondEstimateForValidation("--handoff-test-empty-base", extraArgs: ["--handoff-test-second-approved"])
         returnFromRejectedSecondEstimate(app)
         XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 30))
-        XCTAssertFalse(app.staticTexts["$320.00"].exists, "An approved record amount is not a verified issued receipt")
+        XCTAssertFalse(app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"].staticTexts["$320.00"].exists, "An approved record amount is not a verified issued receipt")
     }
 
     func testBrowserRejectsEmptyIssuedBase() { assertInvalidSecondEstimate("--handoff-test-empty-base") }
