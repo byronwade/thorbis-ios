@@ -202,6 +202,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
                       let option = options(id).first(where: { $0["id"] as? String == optionID }) else {
                     return .init(status: 404, payload: ["status": 404, "title": "Not found"])
                 }
+                if flags.contains("--paper-preview-handoff-remove-link-after-receipt") { removedFirst = true }
                 return .init(status: 200, payload: ["id": acceptance["id"]!, "estimateId": id,
                     "revisionId": flags.contains("--paper-preview-handoff-wrong-receipt") ? "00000000-0000-4000-8000-000000009999" : id.replacingOccurrences(of: "0081", with: "0091"), "revisionNumber": 1,
                     "contentHash": String(repeating: "a", count: 64), "optionId": optionID,

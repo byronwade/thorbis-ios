@@ -359,21 +359,23 @@ private struct CustomerEstimateBookPage: View {
         guard current() else { return }
         loading = true
         defer { if loadToken == token { loading = false } }
-        do {
-            if estimate.status == "approved" {
-                let job = try await api.liveFieldJob(scope.jobID)
+        func verifyMembership() async throws {
+            let job = try await api.liveFieldJob(scope.jobID)
+            guard current() else { throw CancellationError() }
+            guard job.id == scope.jobID, job.organizationId == scope.organizationID,
+                  job.customerId == scope.customerID else {
+                throw Problem(title: "This job changed", status: 409, detail: nil)
+            }
+            if job.estimateId != estimate.id {
+                let link = try await api.liveFieldJobEstimateLink(scope.jobID, estimateID: estimate.id)
                 guard current() else { throw CancellationError() }
-                guard job.id == scope.jobID, job.organizationId == scope.organizationID,
-                      job.customerId == scope.customerID else {
-                    throw Problem(title: "This job changed", status: 409, detail: nil)
-                }
-                if job.estimateId != estimate.id {
-                    let link = try await api.liveFieldJobEstimateLink(scope.jobID, estimateID: estimate.id)
-                    guard current(), link.jobId == scope.jobID, link.estimateId == estimate.id else {
-                        throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
-                    }
+                guard link.jobId == scope.jobID, link.estimateId == estimate.id else {
+                    throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
                 }
             }
+        }
+        do {
+            if estimate.status == "approved" { try await verifyMembership() }
             let revision = try await api.customerIssuedEstimateRevision(for: estimate,
                 allowApprovedForReading: estimate.status == "approved", currentAuthority: current)
             if estimate.status == "approved" {
@@ -381,6 +383,7 @@ private struct CustomerEstimateBookPage: View {
                     if current() { error = "The signed estimate isn't available. Hand the device back to your technician." }
                     return
                 }
+                try await verifyMembership()
                 guard current() else { return }
                 receipt = signed; receiptAuthority = authority
             }
