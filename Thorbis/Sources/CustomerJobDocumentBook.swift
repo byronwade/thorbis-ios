@@ -371,7 +371,7 @@ private struct CustomerInvoiceBookPage: View {
                         SkeletonRows(count: 2, leading: false, inset: 0)
                             .accessibilityLabel("Loading your payments")
                     } else if !model.historyComplete {
-                        CustomerProblemBanner(message: "Payments couldn't be loaded. The invoice's paid amount is shown above.",
+                        CustomerProblemBanner(message: "Payments couldn't be loaded. Try again to see payment history.",
                                               actionTitle: "Try again") {
                             #if DEBUG
                             if PaperPreview.isJobDocumentsPreview { PaperPreviewProtocol.restoreDocumentHistory() }

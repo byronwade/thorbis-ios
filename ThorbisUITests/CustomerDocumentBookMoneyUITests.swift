@@ -195,6 +195,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
         XCTAssertTrue(app.staticTexts["Deposit invoice"].waitForExistence(timeout: 10))
         assertText("Payments couldn't be loaded", in: app)
+        assertText("Try again to see payment history", in: app)
+        XCTAssertFalse(text("The invoice's paid amount is shown above", in: app).exists)
         assertText("No balance due", in: app)
         XCTAssertFalse(text("Paid in full", in: app).exists)
         assertMoneyRow("Paid", "$340.00", in: app)
