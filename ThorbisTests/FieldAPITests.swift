@@ -12,7 +12,7 @@ final class FieldAPITests: XCTestCase {
         let estimateID = "00000000-0000-4000-8000-000000000011"
         let payload = "{\"items\":[{\"id\":\"\(linkID)\",\"jobId\":\"\(jobID)\",\"estimateId\":\"\(estimateID)\"}],\"nextCursor\":\"\(linkID)\"}"
         let client = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")
-        let page = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true)
+        let page = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
         XCTAssertEqual(page.value.items.map(\.estimateId), [estimateID])
         XCTAssertEqual(page.value.nextCursor, linkID)
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
@@ -23,10 +23,57 @@ final class FieldAPITests: XCTestCase {
     func testJobEstimateMembershipRequestsOnlyChosenCursor() async throws {
         let cursor = "00000000-0000-4000-8000-000000000010"
         let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
-        _ = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, requireFresh: true)
+        _ = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, requireFresh: true, isCurrent: { true })
         let url = try XCTUnwrap(URLProtocolFixture.recorded.first?.url)
         XCTAssertEqual(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "cursor", value: cursor)])
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+    }
+
+    func testJobEstimateMembershipSavedPagesRemainCursorScoped() async throws {
+        let cursor = "00000000-0000-4000-8000-000000000010"
+        let first = "{\"items\":[],\"nextCursor\":\"\(cursor)\"}"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, first), .init(200, #"{"items":[]}"#), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "membership-page-" + UUID().uuidString
+        _ = try await client.fieldJobEstimateLinkPage(jobID, isCurrent: { true })
+        _ = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, isCurrent: { true })
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.knownOffline = true
+        let cachedFirst = try await client.fieldJobEstimateLinkPage(jobID, isCurrent: { true })
+        let cachedNext = try await client.fieldJobEstimateLinkPage(jobID, cursor: cursor, isCurrent: { true })
+        XCTAssertEqual(cachedFirst.value.nextCursor, cursor)
+        XCTAssertNil(cachedNext.value.nextCursor)
+        if case .savedCopy = cachedFirst.provenance.source {} else { XCTFail("First page must identify saved copy") }
+        if case .savedCopy = cachedNext.provenance.source {} else { XCTFail("Next page must identify saved copy") }
+        do {
+            _ = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
+            XCTFail("Fresh membership must not use saved copies")
+        } catch {}
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+    }
+
+    func testJobEstimateMembershipDoesNotHideDeniedAccess() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(403, #"{"title":"Forbidden","status":403}"#)]), baseURL: "https://app.thorbis.com")
+        do {
+            _ = try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { true })
+            XCTFail("Denied access must fail")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.status, 403)
+        }
+    }
+
+    func testJobEstimateMembershipDiscardsPageWhenAuthorityRetires() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#, gate: gate)]), baseURL: "https://app.thorbis.com")
+        var current = true
+        let task = Task { @MainActor in
+            try await client.fieldJobEstimateLinkPage(jobID, requireFresh: true, isCurrent: { current })
+        }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
+        guard !URLProtocolFixture.recorded.isEmpty else { gate.release(); XCTFail("Page did not start"); return }
+        current = false
+        gate.release()
+        do { _ = try await task.value; XCTFail("Retired authority must not receive the page") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
     }
 
     func testJobMediaFirstPageDoesNotEagerlyFetchTheRest() async throws {

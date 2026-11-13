@@ -1153,7 +1153,7 @@ extension APIClient {
     /// only the returned provenance describes this specific response's source.
     func fieldJobEstimateLinkPage(_ jobID: String, cursor: String? = nil,
                                   requireFresh: Bool = false,
-                                  isCurrent: @MainActor () -> Bool = { true }) async throws -> APIRead<JobEstimateLinkPage> {
+                                  isCurrent: @MainActor () -> Bool) async throws -> APIRead<JobEstimateLinkPage> {
         let generation = requestGeneration
         let scopeRevision = savedCopyScopeRevision
         let origin = normalizedOrigin
