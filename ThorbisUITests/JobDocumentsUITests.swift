@@ -289,6 +289,38 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(identity.label.contains("INV-2240"), identity.label)
     }
 
+    func testMoneyShortcutsWorkAcrossManyJobEstimates() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-many-estimates"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let invoices = app.buttons["job-money-jump-invoices"]
+        XCTAssertTrue(invoices.waitForExistence(timeout: 15))
+        let last = app.buttons["job-estimate-00000000-0000-4000-8000-000000100013"]
+        for _ in 0..<15 where !last.isHittable { app.swipeUp() }
+        XCTAssertTrue(last.isHittable, "The synthetic job exposes the last of its many estimates")
+        XCTAssertTrue(invoices.isHittable)
+        XCTAssertGreaterThanOrEqual(invoices.frame.height, 44)
+        invoices.tap()
+        let invoice = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10)); XCTAssertTrue(invoice.isHittable)
+        XCTAssertGreaterThanOrEqual(invoice.frame.minY, invoices.frame.maxY)
+        let estimates = app.buttons["job-money-jump-estimates"]
+        XCTAssertTrue(estimates.isHittable); estimates.tap()
+        let first = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(first.isHittable)
+        XCTAssertGreaterThanOrEqual(first.frame.minY, estimates.frame.maxY)
+    }
+
+    func testMoneyShortcutsDoNotExposeDeniedDocuments() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-no-customer-handoff"])
+        thorbisStableButton(app, "job-section-money").tap()
+        XCTAssertFalse(app.buttons["job-money-jump-estimates"].exists)
+        XCTAssertFalse(app.buttons["job-money-jump-invoices"].exists)
+        XCTAssertFalse(app.buttons["job-estimate-\(estimateA)"].exists)
+        XCTAssertFalse(app.buttons["job-invoice-\(invoiceA)"].exists)
+    }
+
     func testMoneySectionJumpsReachInvoicesAndEstimates() {
         continueAfterFailure = false
         let app = preview()

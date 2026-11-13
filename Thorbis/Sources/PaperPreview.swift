@@ -165,8 +165,15 @@ enum PaperPreview {
             options.append(second)
             main = changed(estimate, ["title": "Main drain repair", "options": options])
         }
-        return [main, draft,
-                changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()])]
+        var records = [main, draft]
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-many-estimates") {
+            for number in 0..<14 {
+                records.append(changed(main, ["id": String(format: "00000000-0000-4000-8000-%012d", 100000 + number),
+                                             "title": "Additional estimate \(number + 1)"]))
+            }
+        }
+        records.append(changed(estimate, ["id": "00000000-0000-4000-8000-000000002239", "title": "Other job estimate", "options": NSNull()]))
+        return records
     }
     static var jobDocumentInvoices: [InvoiceRecord] {
         var primary = issuedInvoice
@@ -1069,7 +1076,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let estimates = PaperPreview.jobDocumentEstimates
             let invoices = PaperPreview.jobDocumentInvoices
             if path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
-                return ["items": estimates.prefix(2).enumerated().map { index, estimate in
+                let linked = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-many-estimates") ? Array(estimates.dropLast()) : Array(estimates.prefix(2))
+                return ["items": linked.enumerated().map { index, estimate in
                     ["id": "00000000-0000-4000-8000-0000000093\(String(format: "%02d", index))",
                      "jobId": PaperPreview.jobID, "estimateId": estimate.id, "linkedAt": now]
                 }]
