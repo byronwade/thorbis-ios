@@ -134,6 +134,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let details = app.scrollViews["handoff-estimate-details"]
         XCTAssertTrue(details.waitForExistence(timeout: 30))
         XCTAssertTrue(app.navigationBars["EST-8101"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30), "The current estimate must finish loading before swiping")
         details.swipeLeft()
         XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 10),
                       "Swiping should open the next estimate for this job")
