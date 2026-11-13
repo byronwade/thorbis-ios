@@ -456,6 +456,7 @@ private struct CustomerModePreviewControlsStack: ViewModifier {
     @EnvironmentObject private var session: SessionController
     @State private var replaced = false
     @State private var releasedSigningLookup = false
+    @State private var signingLookupHeld = false
     func body(content: Content) -> some View {
         VStack(spacing: 0) {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
@@ -466,12 +467,20 @@ private struct CustomerModePreviewControlsStack: ViewModifier {
             if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-first-signing-lookup") {
                 Button(releasedSigningLookup ? "Delayed signing lookup released" : "Release delayed signing lookup") {
                     PaperPreviewProtocol.releaseHeldSigningLookup(); releasedSigningLookup = true
-                }
+                }.disabled(!signingLookupHeld || releasedSigningLookup)
             }
             if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
             else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }
             else if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-documents-status-change") { PaperPreviewConnectionMenu() }
             content
+        }
+        .task {
+            guard PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-first-signing-lookup") else { return }
+            while !Task.isCancelled && !PaperPreviewProtocol.hasHeldSigningLookup {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            if !Task.isCancelled { signingLookupHeld = true }
         }
     }
 }

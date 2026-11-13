@@ -795,6 +795,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
         scenario.lock.withLock { scenario.summaryReceipts = [:]; scenario.summaryLostOnce = false; scenario.signingLookupHeldOnce = false; scenario.heldSigningLookup = nil; scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
+    static var hasHeldSigningLookup: Bool { scenario.lock.withLock { scenario.heldSigningLookup != nil } }
     static func releaseHeldSigningLookup() {
         let release = scenario.lock.withLock { let result = scenario.heldSigningLookup; scenario.heldSigningLookup = nil; return result }
         release?()

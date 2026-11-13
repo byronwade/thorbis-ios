@@ -52,6 +52,10 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-hold-first-signing-lookup"])
         let page = pages(app)
         XCTAssertTrue(page.descendants(matching: .any)["Checking your invoice summary"].waitForExistence(timeout: 15))
+        let release = app.buttons["Release delayed signing lookup"]
+        XCTAssertTrue(release.waitForExistence(timeout: 10))
+        let held = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: release)
+        XCTAssertEqual(XCTWaiter.wait(for: [held], timeout: 10), .completed, "The first lookup must reach the gate before navigation")
         XCTAssertFalse(page.buttons["Sign summary"].exists)
         app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
         XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
