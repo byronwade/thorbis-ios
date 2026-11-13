@@ -7,18 +7,30 @@ import SQLite3
   let d = InvoiceFenceDomain(origin: "https://thorbis.com", organizationID: "00000000-0000-4000-8000-000000000001", invoiceID: "00000000-0000-4000-8000-000000000002")
   let id = InvoiceIdleCaptureIdentity(domain: d, actorID: "00000000-0000-4000-8000-000000000003", customerID: "00000000-0000-4000-8000-000000000004", jobID: nil)
   let owner = UUID(), first = try InvoiceTransactionFence(path: path)
-  _ = try first.capture(identity: id, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data([9]))
+  do { _ = try first.capture(identity: id, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data([9])); fatalError("unguarded capture allowed") } catch InvoiceFenceError.pending { }
+  // Seed an already-acknowledged legacy snapshot; direct captures must now use an intent.
+  var seed: OpaquePointer?; precondition(sqlite3_open(path, &seed) == SQLITE_OK)
+  let seedSQL = "INSERT INTO heads VALUES (\'https://thorbis.com\',\'00000000-0000-4000-8000-000000000001\',\'00000000-0000-4000-8000-000000000002\',\'\(owner.uuidString.lowercased())\',1,0,NULL); INSERT INTO capture_heads VALUES (\'https://thorbis.com\',\'00000000-0000-4000-8000-000000000001\',\'00000000-0000-4000-8000-000000000002\',\'00000000-0000-4000-8000-000000000003\',\'00000000-0000-4000-8000-000000000004\',\'\',1); INSERT INTO snapshots VALUES (\'https://thorbis.com\',\'00000000-0000-4000-8000-000000000001\',\'00000000-0000-4000-8000-000000000002\',1,X\'09\');"
+  precondition(sqlite3_exec(seed, seedSQL, nil, nil, nil) == SQLITE_OK); sqlite3_close(seed)
   let intent = try first.registerCaptureIntent(identity: id, owner: owner, expectedVersion: 1, sequence: 2, bytes: Data([1]))
   let second = try InvoiceTransactionFence(path: path)
+  let staged = try second.inspectUnresolvedCapture(identity: id)
+  precondition(staged?.phase == .registered && staged?.bytes == Data([1]) && staged?.previousVersion == 1)
+  let wrong = InvoiceIdleCaptureIdentity(domain: d, actorID: "00000000-0000-4000-8000-000000000099", customerID: id.customerID, jobID: nil)
+  do { _ = try second.inspectUnresolvedCapture(identity: wrong); fatalError("wrong actor inspected") } catch InvoiceFenceError.conflict { }
   func blocked(_ body: () throws -> Void) throws {
     do { try body(); fatalError("unresolved capture allowed operation") }
     catch InvoiceFenceError.pending { }
   }
+  try blocked { _ = try second.registerCaptureIntent(identity: id, owner: owner, expectedVersion: 1, sequence: 2, bytes: Data([2])) }
   try blocked { _ = try second.capture(identity: id, owner: owner, expectedVersion: 1, sequence: 2, bytes: Data([2])) }
   try blocked { _ = try second.save(domain: d, owner: owner, expectedVersion: 1, bytes: Data([2])) }
   try blocked { _ = try second.recoverIdle(identity: id) }
   try blocked { _ = try second.begin(domain: d, owner: owner, expectedVersion: 2, kind: .directUnknown, command: Data([2])) }
   try first.commitCaptureIntent(intent)
+  let committed = try second.inspectUnresolvedCapture(identity: id)
+  precondition(committed?.phase == .committed && committed?.bytes == Data([1]) && committed?.previousVersion == 1)
+  try blocked { _ = try second.registerCaptureIntent(identity: id, owner: owner, expectedVersion: 2, sequence: 3, bytes: Data([3])) }
   try blocked { _ = try second.capture(identity: id, owner: owner, expectedVersion: 2, sequence: 3, bytes: Data([3])) }
   try blocked { _ = try second.recoverIdle(identity: id) }
   var db: OpaquePointer?; precondition(sqlite3_open(path, &db) == SQLITE_OK); defer { sqlite3_close(db) }

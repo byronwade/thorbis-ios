@@ -24,7 +24,9 @@ import Darwin
    let path = "/private/tmp/invoice-intent-crash-\(UUID().uuidString).sqlite"
    let p = try spawn(path, phase); p.waitUntilExit(); precondition(p.terminationReason == .uncaughtSignal)
    let f = try InvoiceTransactionFence(path: path)
-   do { _ = try f.capture(identity: identity, owner: owner, expectedVersion: phase == "commit-kill" ? 1 : nil, sequence: 2, bytes: Data([43])); fatalError("crash left fence open") } catch InvoiceFenceError.pending { }
+   let evidence = try f.inspectUnresolvedCapture(identity: identity)
+   precondition(evidence?.phase == (phase == "commit-kill" ? .committed : .registered) && evidence?.bytes == Data([42]))
+   do { _ = try f.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: phase == "commit-kill" ? 1 : nil, sequence: 2, bytes: Data([43])); fatalError("crash left fence open") } catch InvoiceFenceError.pending { }
    do { _ = try f.recoverIdle(identity: identity); fatalError("uncertain recovery allowed") } catch InvoiceFenceError.pending { }
   }
   let path = "/private/tmp/invoice-intent-race-\(UUID().uuidString).sqlite"

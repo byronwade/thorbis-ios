@@ -39,6 +39,16 @@ struct InvoiceIdleCaptureRecovery: Sendable {
 
 struct InvoiceCaptureIntent { let identity: InvoiceIdleCaptureIdentity; let owner: UUID; let expectedVersion: Int64?; let sequence: Int64; let bytes: Data; let token: String }
 
+enum InvoiceUnresolvedPhase { case registered, committed }
+struct InvoiceUnresolvedCapture {
+    let phase: InvoiceUnresolvedPhase
+    let owner: UUID
+    let previousVersion: Int64?
+    let sequence: Int64
+    /// Ciphertext only; live authority and key access must be checked before disclosure.
+    let bytes: Data
+}
+
 enum InvoiceFencePending: Int32, Sendable { case keyed = 1, directUnknown = 2 }
 enum InvoiceFenceError: Error { case invalid, conflict, pending, database(Int32) }
 
@@ -117,33 +127,9 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             return (String(cString: owner), sqlite3_column_int64(s, 1), sqlite3_column_int(s, 2))
         }
     }
+    /// Legacy writes are disabled in this held prototype: they cannot register a durable intent.
     func save(domain: InvoiceFenceDomain, owner: UUID, expectedVersion: Int64?, bytes: Data) throws -> Int64 {
-        guard !bytes.isEmpty, bytes.count <= Int(Int32.max) else { throw InvoiceFenceError.invalid }
-        return try transaction(domain) { db in
-            guard try captureHead(db, domain) == nil else { throw InvoiceFenceError.conflict }
-            let current = try head(db, domain), ownerID = owner.uuidString.lowercased()
-            if let current {
-                guard current.2 == 0 else { throw InvoiceFenceError.pending }
-                guard current.0 == ownerID, current.1 == expectedVersion, current.1 < Int64.max else { throw InvoiceFenceError.conflict }
-            } else if expectedVersion != nil { throw InvoiceFenceError.conflict }
-            let version = (current?.1 ?? 0) + 1
-            if current == nil {
-                try statement(db, "INSERT INTO heads(origin,org,invoice,owner,version) VALUES(?,?,?,?,?)") { s in
-                    try keys(s, domain); try bind(s, 4, ownerID); sqlite3_bind_int64(s, 5, version)
-                    let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
-                }
-            } else {
-                try statement(db, "UPDATE heads SET version=? WHERE origin=? AND org=? AND invoice=?") { s in
-                    sqlite3_bind_int64(s, 1, version); try bind(s, 2, domain.origin); try bind(s, 3, domain.organizationID); try bind(s, 4, domain.invoiceID)
-                    let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
-                }
-            }
-            try statement(db, "INSERT INTO snapshots(origin,org,invoice,version,draft) VALUES(?,?,?,?,?)") { s in
-                try keys(s, domain); sqlite3_bind_int64(s, 4, version); try bind(s, 5, bytes)
-                let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
-            }
-            return version
-        }
+        throw InvoiceFenceError.pending
     }
     private func captureHead(_ db: OpaquePointer, _ domain: InvoiceFenceDomain) throws -> (String, String, String, Int64)? {
         try statement(db, "SELECT actor,customer,job,sequence FROM capture_heads WHERE origin=? AND org=? AND invoice=?") { s in
@@ -156,12 +142,9 @@ final class InvoiceTransactionFence: @unchecked Sendable {
         }
     }
     /// No authorization is performed here; identity must be freshly verified by the caller.
+    /// Direct capture is disabled until every caller uses the durable intent protocol.
     func capture(identity: InvoiceIdleCaptureIdentity, owner: UUID, expectedVersion: Int64?, sequence: Int64, bytes: Data) throws -> Int64 {
-        guard identity.valid, sequence > 0, !bytes.isEmpty, bytes.count <= Int(Int32.max) else { throw InvoiceFenceError.invalid }
-        let domain = identity.domain
-        return try transaction(domain) { db in
-            try captureInTransaction(db, identity: identity, owner: owner, expectedVersion: expectedVersion, sequence: sequence, bytes: bytes)
-        }
+        throw InvoiceFenceError.pending
     }
     private func captureInTransaction(_ db: OpaquePointer, identity: InvoiceIdleCaptureIdentity, owner: UUID, expectedVersion: Int64?, sequence: Int64, bytes: Data) throws -> Int64 {
         let domain = identity.domain, ownerID = owner.uuidString.lowercased()
@@ -230,6 +213,21 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             _ = try captureInTransaction(db, identity: intent.identity, owner: intent.owner, expectedVersion: intent.expectedVersion, sequence: intent.sequence, bytes: intent.bytes)
             try statement(db, "UPDATE capture_intents SET committed=1 WHERE origin=? AND org=? AND invoice=? AND token=?") { s in
                 try keys(s, intent.identity.domain); try bind(s, 4, intent.token); let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
+            }
+        }
+    }
+    /// Inspect only encrypted evidence. Identity comparison is not authorization.
+    func inspectUnresolvedCapture(identity: InvoiceIdleCaptureIdentity) throws -> InvoiceUnresolvedCapture? {
+        guard identity.valid else { throw InvoiceFenceError.invalid }
+        return try transaction(identity.domain, allowIntent: true) { db in
+            try statement(db, "SELECT owner,actor,customer,job,expected,sequence,draft,committed FROM capture_intents WHERE origin=? AND org=? AND invoice=?") { s in
+                try keys(s, identity.domain)
+                let code = sqlite3_step(s); if code == SQLITE_DONE { return nil }
+                guard code == SQLITE_ROW, let ownerText = sqlite3_column_text(s, 0), let actor = sqlite3_column_text(s, 1), let customer = sqlite3_column_text(s, 2), let job = sqlite3_column_text(s, 3), let data = sqlite3_column_blob(s, 6), let owner = UUID(uuidString: String(cString: ownerText)) else { throw InvoiceFenceError.database(code) }
+                guard String(cString: actor) == identity.actorID, String(cString: customer) == identity.customerID, String(cString: job) == (identity.jobID ?? "") else { throw InvoiceFenceError.conflict }
+                let phaseCode = sqlite3_column_int(s, 7); guard phaseCode == 0 || phaseCode == 1 else { throw InvoiceFenceError.conflict }
+                let expected: Int64? = sqlite3_column_type(s, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(s, 4)
+                return InvoiceUnresolvedCapture(phase: phaseCode == 0 ? .registered : .committed, owner: owner, previousVersion: expected, sequence: sqlite3_column_int64(s, 5), bytes: Data(bytes: data, count: Int(sqlite3_column_bytes(s, 6))))
             }
         }
     }
