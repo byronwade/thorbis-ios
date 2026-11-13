@@ -29,6 +29,7 @@ final class CustomerInvoiceOverviewLoader: ObservableObject {
     @Published private(set) var loading = false
     @Published private(set) var failedIDs: Set<String> = []
     private var candidates: [InvoiceRecord] = []
+    private var retryOffset = 0
     var canLoadMore: Bool { loadedCount < candidates.count }
     private var token = UUID()
     private var current: (@MainActor (InvoiceRecord) -> Bool)?
@@ -36,7 +37,7 @@ final class CustomerInvoiceOverviewLoader: ObservableObject {
     private var scope: JobDocumentScope?
     private var authority: CustomerHandoffExitAuthority?
 
-    func retire() { token = UUID(); entries = [:]; loadedCount = 0; loading = false; failedIDs = []; candidates = []; current = nil; api = nil; scope = nil; authority = nil }
+    func retire() { token = UUID(); entries = [:]; loadedCount = 0; loading = false; failedIDs = []; candidates = []; retryOffset = 0; current = nil; api = nil; scope = nil; authority = nil }
 
     func load(records: [InvoiceRecord], api: APIClient, scope: JobDocumentScope,
               authority: CustomerHandoffExitAuthority, current: @escaping @MainActor (InvoiceRecord) -> Bool) async {
@@ -55,8 +56,18 @@ final class CustomerInvoiceOverviewLoader: ObservableObject {
     }
 
     func retryFailed() async {
-        guard !loading else { return }
-        let batch = Array(candidates.filter { failedIDs.contains($0.id) }.prefix(20))
+        guard !loading, !candidates.isEmpty else { return }
+        var batch: [InvoiceRecord] = []
+        for offset in 0..<candidates.count {
+            let index = (retryOffset + offset) % candidates.count
+            let record = candidates[index]
+            guard failedIDs.contains(record.id) else { continue }
+            batch.append(record)
+            if batch.count == 20 {
+                retryOffset = (index + 1) % candidates.count
+                break
+            }
+        }
         guard !batch.isEmpty else { return }
         await fetchBatch(batch)
     }

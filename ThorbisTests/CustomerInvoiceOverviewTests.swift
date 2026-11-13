@@ -65,5 +65,35 @@ final class CustomerInvoiceOverviewTests: XCTestCase {
         XCTAssertTrue(loader.entries.isEmpty, "Retired responses must never repopulate the overview")
         XCTAssertTrue(loader.failedIDs.isEmpty, "Retirement must clear retry state")
         XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "A retired batch must not start more requests")
+
+        // Persistent first-page failures must not starve later recoverable failures.
+        var failures = routes
+        for record in records.prefix(25) {
+            failures["/v1/invoices/\(record.id)/customer-presentation"] = .init(503, "{}")
+        }
+        URLProtocolFixture.setRoutes(failures)
+        await loader.load(records: Array(records.prefix(40)), api: api, scope: scope, authority: authority, current: { _ in true })
+        await loader.loadMore()
+        XCTAssertEqual(loader.failedIDs.count, 25)
+        for record in records[20..<25] {
+            let path = "/v1/invoices/\(record.id)/customer-presentation"
+            failures[path] = routes[path]
+        }
+        URLProtocolFixture.setRoutes(failures)
+        await loader.retryFailed()
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 20, "One retry must remain bounded")
+        await loader.retryFailed()
+        XCTAssertEqual(loader.failedIDs.count, 20, "The second retry must reach later recoverable failures")
+        for record in records[20..<25] { XCTAssertNotNil(loader.entries[record.id]) }
+
+        let retryGate = URLProtocolFixture.Gate(); defer { retryGate.release() }
+        URLProtocolFixture.setRoutes(failures.mapValues { .init($0.status, $0.body, gate: retryGate) })
+        let retryTask = Task { @MainActor in await loader.retryFailed() }
+        for _ in 0..<1500 where URLProtocolFixture.recorded.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        loader.retire(); retryGate.release(); await retryTask.value
+        XCTAssertTrue(loader.entries.isEmpty)
+        XCTAssertTrue(loader.failedIDs.isEmpty)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "Retired retry must not start more requests")
     }
 }
