@@ -543,7 +543,6 @@ final class JobEstimateHandoffModel: ObservableObject {
                 if let receipt { overviewReceipts[record.id] = receipt }
                 else { overviewReceipts[record.id] = nil; overviewPriceFailures.insert(record.id) }
             }
-        } catch is CancellationError {
         } catch {
             guard !Task.isCancelled, generation == overviewPriceGeneration, overviewRequests[record.id] == ticket,
                   detailsCurrent(record, authority: authorityRevision) else { return }
@@ -562,6 +561,16 @@ final class JobEstimateHandoffModel: ObservableObject {
         return receipt
     }
 
+    func unverifiedOverviewPriceCopy(for record: EstimateRecord) -> String {
+        if overviewPricesNeedRefresh || !detailsCurrent(record, authority: authorityRevision) {
+            return "Refresh to check price"
+        }
+        if overviewPriceFailures.contains(record.id) {
+            return "Price needs current terms"
+        }
+        return "Checking price…"
+    }
+
     func approvedReceipt(_ record: EstimateRecord, revision: CustomerIssuedEstimateRevision, authority: UUID) async throws -> CustomerEstimateAcceptanceReceipt? {
         func current() -> Bool { detailsCurrent(record, authority: authority) && !Task.isCancelled }
         guard current(), record.status == "approved" else { throw CancellationError() }
@@ -569,7 +578,10 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard current() else { throw CancellationError() }
         // Recheck job membership and the live revision after the receipt request.
         let checked = try await issuedDetails(record, authority: authority)
-        guard current(), checked == revision else { throw CancellationError() }
+        guard current() else { throw CancellationError() }
+        guard checked == revision else {
+            throw Problem(title: "This estimate changed. Ask your technician to reopen it.", status: 409, detail: nil)
+        }
         return receipt
     }
     private func verifyDetailMembership(_ record: EstimateRecord, job: JobRecord,

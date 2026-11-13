@@ -467,6 +467,61 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertTrue(model.overviewPriceFailures.isEmpty)
     }
 
+    func testOverviewPriceCopyDistinguishesCheckingFromFailedTerms() async throws {
+        let model = try await ready([])
+        let membershipPath = "/v1/jobs/\(jobID)/estimates", estimatePath = "/v1/estimates/\(a)"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+                                      estimatePath: .init(200, record(a))])
+        await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first)
+        XCTAssertEqual(model.unverifiedOverviewPriceCopy(for: estimate), "Checking price…")
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(200, jobJSON), "\(membershipPath)/\(a)": .init(200, link),
+                                      estimatePath: .init(200, record(a)),
+                                      "\(estimatePath)/revisions/1": .init(500, #"{"status":500,"title":"Unavailable"}"#)])
+        await model.loadOverviewPrices()
+        XCTAssertTrue(model.overviewPriceFailures.contains(estimate.id))
+        XCTAssertNil(model.revision(for: estimate.id))
+        XCTAssertEqual(model.unverifiedOverviewPriceCopy(for: estimate), "Price needs current terms")
+    }
+
+    func testApprovedReceiptMismatchOnOverviewRecordsRetry() async throws {
+        let model = try await ready([])
+        let membershipPath = "/v1/jobs/\(jobID)/estimates", estimatePath = "/v1/estimates/\(a)"
+        let receiptPath = "\(estimatePath)/revisions/1/acceptance"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let receipt = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":19000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}]}"#
+        let changedRevision = revision(a, status: "approved").replacingOccurrences(
+            of: "00000000-0000-4000-8000-000000000099", with: "00000000-0000-4000-8000-000000000098")
+        func routes(revisionBody: String, gate: URLProtocolFixture.Gate? = nil) -> [String: URLProtocolFixture.Reply] {
+            ["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+             "\(membershipPath)/\(a)": .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+             "\(estimatePath)/revisions/1": .init(200, revisionBody), receiptPath: .init(200, receipt, gate: gate)]
+        }
+        URLProtocolFixture.setRoutes(routes(revisionBody: revision(a, status: "approved")))
+        await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first)
+        XCTAssertEqual(model.unverifiedOverviewPriceCopy(for: estimate), "Checking price…")
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        URLProtocolFixture.setRoutes(routes(revisionBody: revision(a, status: "approved"), gate: gate))
+        let task = Task { @MainActor in await model.loadOverviewPrices() }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == receiptPath }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == receiptPath }, "The receipt must be in flight before issued terms change")
+        URLProtocolFixture.setRoutes(routes(revisionBody: changedRevision))
+        gate.release(); await task.value
+        XCTAssertTrue(model.isCurrent)
+        XCTAssertNil(model.revision(for: estimate.id))
+        XCTAssertNil(model.overviewReceipt(for: estimate))
+        XCTAssertTrue(model.overviewPriceFailures.contains(estimate.id), "A still-current terms mismatch must offer retry")
+        XCTAssertEqual(model.unverifiedOverviewPriceCopy(for: estimate), "Price needs current terms")
+        URLProtocolFixture.setRoutes(routes(revisionBody: revision(a, status: "approved")))
+        await model.retryOverviewPrice(estimate)
+        XCTAssertEqual(model.overviewReceipt(for: estimate)?.totalAmount, 19000)
+        XCTAssertFalse(model.overviewPriceFailures.contains(estimate.id))
+    }
+
     func testReceiptIsDiscardedWhenAuthorityChangesDuringRead() async throws {
         let model = try await ready([])
         let estimatePath = "/v1/estimates/\(a)", membershipPath = "/v1/jobs/\(jobID)/estimates"

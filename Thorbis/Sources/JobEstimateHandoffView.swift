@@ -367,7 +367,7 @@ struct JobEstimateHandoffView: View {
                                         if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
                                             Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
                                         } else {
-                                            Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                                            Text(model.unverifiedOverviewPriceCopy(for: record)).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                                         }
                                     }
                                 }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
@@ -401,16 +401,18 @@ struct JobEstimateHandoffView: View {
             if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
                 price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
             } else {
-                price = "\(option.title), price needs current terms"
+                price = "\(option.title), \(model.unverifiedOverviewPriceCopy(for: record))"
             }
         } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
             price = money(revision.totalAmount, currency: revision.currency)
         } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
+        } else if (record.options ?? []).isEmpty {
+            price = model.unverifiedOverviewPriceCopy(for: record)
         } else {
             price = model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
-                ? "Refresh to check price" : (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+                ? "Refresh to check price" : "Choose a package"
         }
         return "\(state), \(record.status.capitalized), \(price)"
     }
@@ -440,8 +442,7 @@ struct JobEstimateHandoffView: View {
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty {
-                Text(model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
-                     ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…")
+                Text(model.unverifiedOverviewPriceCopy(for: record))
                     .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else if record.status == "approved" {
                 Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
