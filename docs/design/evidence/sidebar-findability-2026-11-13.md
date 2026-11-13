@@ -30,8 +30,10 @@ focused iPad UI tests passed, including opening the web-aligned sidebar and
 toggling the Work section: `/private/tmp/thorbis-sidebar-ipad-current-1113.log`.
 The focused phone test launched with the largest accessibility text category
 and passed its disclosure and Jobs navigation assertions:
-`/private/tmp/thorbis-sidebar-large-test-1113.log`. Actual VoiceOver activation
-and single-place permission cases remain unverified.
+`/private/tmp/thorbis-sidebar-large-test-1113.log`. A phone UI fixture granting
+only job viewing passed a direct Jobs navigation check and verified the other
+Work destinations were absent: `/private/tmp/thorbis-sidebar-single-place-1113.log`.
+Actual VoiceOver activation remains unverified.
 
 The five phone UI cases, including the largest-text test, subsequently passed
 together on the same release-based code:
