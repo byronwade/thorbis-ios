@@ -280,6 +280,76 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         await changedLinkOwner.recover(); XCTAssertEqual(changedLinkOwner.phase, .needsRecovery)
         XCTAssertNil(changedLinkOwner.receipt); XCTAssertNotNil(try store.loadForRecovery(scope: currentScope))
         try store.complete(scope: pendingScope, proof: proof, currentAuthority: { true })
+        // A stale onDisappear must not retire a newly reopened destination.
+        let authority = CustomerHandoffExitAuthority(actor: pendingScope.actorID, organization: organization, origin: pendingScope.origin,
+            sessionGeneration: UUID(), authorityRevision: UUID(), requestGeneration: UUID(), scopeRevision: UUID())
+        let key = try XCTUnwrap(CustomerSummaryHandoffKey(summary: summary, scope: pendingScope, authority: authority))
+        let registry = CustomerSummaryHandoffRegistry()
+        var live = true; var checks = 0; var delayedLookup: CheckedContinuation<CustomerSummaryAuthorizationState, Never>?
+        func make(_ current: @escaping @MainActor () -> Bool) -> CustomerSummaryDurableCoordinator {
+            CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: store, current: current,
+                lookup: { checks += 1; if checks == 1 { return await withCheckedContinuation { delayedLookup = $0 } }; return .unsigned },
+                upload: { _ in durableAsset }, replay: { _ in throw URLError(.notConnectedToInternet) })
+        }
+        let firstActivation = try XCTUnwrap(registry.activate(key: key, authorityCurrent: { live }, make: make))
+        let oldLookup = Task { @MainActor in await firstActivation.coordinator.inspect() }
+        for _ in 0..<100 where delayedLookup == nil { await Task.yield() }
+        XCTAssertNotNil(delayedLookup)
+        let secondActivation = try XCTUnwrap(registry.activate(key: key, authorityCurrent: { live }, make: make))
+        XCTAssertTrue(firstActivation.coordinator === secondActivation.coordinator)
+        await secondActivation.coordinator.inspect(); XCTAssertEqual(secondActivation.coordinator.phase, .ready)
+        registry.deactivate(firstActivation.token)
+        delayedLookup?.resume(returning: .unsigned); await oldLookup.value
+        XCTAssertEqual(secondActivation.coordinator.phase, .ready)
+        live = false; await secondActivation.coordinator.inspect()
+        XCTAssertEqual(secondActivation.coordinator.phase, .unavailable, "Revoked authority must hide signing state")
+        registry.deactivate(secondActivation.token); registry.retire()
+        XCTAssertNil(registry.activate(key: key, authorityCurrent: { true }, make: make))
+        // Leaving during upload must not advance to POST, and reopening retries the same capture.
+        var uploadWait: CheckedContinuation<Void, Never>?; var assetIDs: [String] = []
+        let uploadRegistry = CustomerSummaryHandoffRegistry()
+        let uploadAPI2 = APIClient(session: URLProtocolFixture.session([.init(201, replayPayload)]), baseURL: "https://app.thorbis.com")
+        func makeUploading(_ current: @escaping @MainActor () -> Bool) -> CustomerSummaryDurableCoordinator {
+            CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: store, current: current, lookup: { .unsigned },
+                upload: { signature in
+                    assetIDs.append(signature.clientAssetID)
+                    if assetIDs.count == 1 { await withCheckedContinuation { uploadWait = $0 } }
+                    return durableAsset
+                }, replay: { pending in try await uploadAPI2.replayCustomerSummaryPending(pending, scope: pendingScope, currentAuthority: current) })
+        }
+        let uploadFirst = try XCTUnwrap(uploadRegistry.activate(key: key, authorityCurrent: { true }, make: makeUploading))
+        await uploadFirst.coordinator.inspect()
+        let uploadTask = Task { @MainActor in await uploadFirst.coordinator.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3])) }
+        for _ in 0..<100 where uploadWait == nil { await Task.yield() }
+        XCTAssertNotNil(uploadWait); uploadRegistry.deactivate(uploadFirst.token)
+        let uploadSecond = try XCTUnwrap(uploadRegistry.activate(key: key, authorityCurrent: { true }, make: makeUploading))
+        await uploadSecond.coordinator.inspect(); uploadWait?.resume(); await uploadTask.value
+        XCTAssertEqual(uploadSecond.coordinator.phase, .ready); XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+        await uploadSecond.coordinator.retryCapture()
+        XCTAssertEqual(uploadSecond.coordinator.phase, .signed); XCTAssertEqual(assetIDs.count, 2); XCTAssertEqual(assetIDs[0], assetIDs[1])
+        uploadRegistry.retire()
+        // An in-flight POST persists across navigation and can only be recovered with the original key.
+        let postGate = URLProtocolFixture.Gate(); defer { postGate.release() }
+        let postAPI = APIClient(session: URLProtocolFixture.session([.init(201, replayPayload, gate: postGate), .init(201, replayPayload)]), baseURL: "https://app.thorbis.com")
+        let postRegistry = CustomerSummaryHandoffRegistry()
+        func makePosting(_ current: @escaping @MainActor () -> Bool) -> CustomerSummaryDurableCoordinator {
+            CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: store, current: current, lookup: { .unsigned },
+                upload: { _ in durableAsset }, replay: { pending in try await postAPI.replayCustomerSummaryPending(pending, scope: pendingScope, currentAuthority: current) })
+        }
+        let postFirst = try XCTUnwrap(postRegistry.activate(key: key, authorityCurrent: { true }, make: makePosting))
+        await postFirst.coordinator.inspect()
+        let postTask = Task { @MainActor in await postFirst.coordinator.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3])) }
+        for _ in 0..<1500 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1); postRegistry.deactivate(postFirst.token)
+        let postSecond = try XCTUnwrap(postRegistry.activate(key: key, authorityCurrent: { true }, make: makePosting))
+        await postSecond.coordinator.inspect(); XCTAssertEqual(postSecond.coordinator.phase, .needsRecovery)
+        postGate.release(); await postTask.value
+        XCTAssertNotNil(try store.load(scope: pendingScope)); XCTAssertEqual(postSecond.coordinator.phase, .needsRecovery)
+        await postSecond.coordinator.recover(); XCTAssertEqual(postSecond.coordinator.phase, .signed); XCTAssertNil(try store.load(scope: pendingScope))
+        let postBodies = try URLProtocolFixture.recorded.map { try XCTUnwrap($0.body) }
+        XCTAssertEqual(postBodies.count, 2)
+        if postBodies.count == 2 { XCTAssertEqual(try JSONSerialization.jsonObject(with: postBodies[0]) as? NSDictionary, try JSONSerialization.jsonObject(with: postBodies[1]) as? NSDictionary) }
+        postRegistry.retire()
         let receiptJSON = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
         let api = APIClient(session: URLProtocolFixture.session([.init(201, receiptJSON), .init(201, receiptJSON)]), baseURL: "https://app.thorbis.com")
         _ = try await api.authorizeCustomerInvoiceSummary(summary, attempt: attempt, currentAuthority: { true })

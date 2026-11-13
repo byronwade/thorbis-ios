@@ -163,7 +163,7 @@ struct CustomerSummarySigningAttempt: Codable, Equatable, Sendable {
 }
 
 /// One unresolved submission per invoice and actor, even if the invoice later changes.
-struct CustomerSummaryPendingScope: Codable, Equatable {
+struct CustomerSummaryPendingScope: Codable, Hashable {
     let origin: String
     let actorID: String
     let organizationID: String
@@ -449,10 +449,12 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
 @MainActor
 final class CustomerSummaryDurableCoordinator: ObservableObject {
     enum Phase: Equatable { case idle, checking, ready, preparing, needsRecovery, recovering, signed, previousResolved, unavailable }
-    @Published private(set) var phase: Phase = .idle
+    @Published private var phaseState: Phase = .idle
+    var phase: Phase { current() && !retired ? phaseState : .unavailable }
     @Published private(set) var hasFrozenSignature = false
     @Published private(set) var errorMessage: String?
-    private(set) var receipt: CustomerInvoiceSummaryReceipt?
+    private var storedReceipt: CustomerInvoiceSummaryReceipt?
+    var receipt: CustomerInvoiceSummaryReceipt? { current() && !retired ? storedReceipt : nil }
     private let summary: CustomerInvoiceSummary
     private let context: CustomerSummarySigningContext
     private let scope: CustomerSummaryPendingScope
@@ -475,30 +477,30 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
     private func valid(_ token: UUID) -> Bool { !Task.isCancelled && !retired && generation == token && current() }
     func inspect() async {
         guard !running, !retired, current() else { return }
-        running = true; let token = generation; phase = .checking; receipt = nil; errorMessage = nil
+        running = true; let token = generation; phaseState = .checking; storedReceipt = nil; errorMessage = nil
         defer { if generation == token { running = false } }
         do {
             guard let canonical = scope.canonical, summary.validatedConsent != nil,
                   UUID(uuidString: summary.organizationId) == UUID(uuidString: canonical.organizationID),
                   UUID(uuidString: summary.customerId) == UUID(uuidString: canonical.customerID),
                   summary.jobId.flatMap(UUID.init(uuidString:)) == UUID(uuidString: canonical.jobID),
-                  UUID(uuidString: summary.invoiceId) == UUID(uuidString: canonical.invoiceID) else { phase = .unavailable; return }
-            if try store.loadForRecovery(scope: scope) != nil { phase = .needsRecovery; return }
+                  UUID(uuidString: summary.invoiceId) == UUID(uuidString: canonical.invoiceID) else { phaseState = .unavailable; return }
+            if try store.loadForRecovery(scope: scope) != nil { phaseState = .needsRecovery; return }
             let status = try await lookup()
             guard valid(token) else { return }
             // Another activation may have persisted an attempt while the lookup was in flight.
-            if try store.loadForRecovery(scope: scope) != nil { phase = .needsRecovery; return }
+            if try store.loadForRecovery(scope: scope) != nil { phaseState = .needsRecovery; return }
             switch status {
-            case .unsigned: phase = .ready
+            case .unsigned: phaseState = .ready
             case .signed(let value):
-                guard value.matches(summary: summary, signerName: value.signerName, signedAt: value.signedAt) else { phase = .unavailable; return }
-                receipt = value; phase = .signed
+                guard value.matches(summary: summary, signerName: value.signerName, signedAt: value.signedAt) else { phaseState = .unavailable; return }
+                storedReceipt = value; phaseState = .signed
             }
-        } catch { if valid(token) { phase = .unavailable } }
+        } catch { if valid(token) { phaseState = .unavailable } }
     }
     /// Capture and upload retain their original bytes and client asset ID through retries.
     func sign(signerName: String, signedAt: String, png: Data) async {
-        guard !running, !retired, current(), phase == .ready else { return }
+        guard !running, !retired, current(), phaseState == .ready else { return }
         errorMessage = nil
         do {
             let signature = try context.freeze(signerName: signerName, signedAt: signedAt, png: png)
@@ -507,12 +509,12 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
         } catch { if current(), !retired { errorMessage = (error as? Problem)?.title ?? "Check your signature and try again." } }
     }
     func retryCapture() async {
-        guard !running, !retired, current(), phase == .ready, let signature = try? context.signature() else { return }
+        guard !running, !retired, current(), phaseState == .ready, let signature = try? context.signature() else { return }
         await prepare(signature)
     }
     private func prepare(_ signature: CustomerSummaryFrozenSignature) async {
-        guard !running, !retired, current(), phase == .ready else { return }
-        running = true; let token = generation; phase = .preparing
+        guard !running, !retired, current(), phaseState == .ready else { return }
+        running = true; let token = generation; phaseState = .preparing
         defer { if generation == token { running = false } }
         do {
             if (try? context.attempt()) == nil {
@@ -522,42 +524,113 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
             }
             guard valid(token) else { return }
             let attempt = try context.attempt()
-            running = false; phase = .ready
+            running = false; phaseState = .ready
             await stageAndSubmit(attempt)
         } catch {
-            if valid(token) { running = false; phase = .ready; errorMessage = "The signature couldn't be uploaded. Try again." }
+            if valid(token) { running = false; phaseState = .ready; errorMessage = "The signature couldn't be uploaded. Try again." }
         }
     }
     /// Keychain insertion must finish before any financial POST is sent.
     private func stageAndSubmit(_ attempt: CustomerSummarySigningAttempt) async {
-        guard !running, !retired, current(), phase == .ready else { return }
+        guard !running, !retired, current(), phaseState == .ready else { return }
         let pending = CustomerSummaryPendingAttempt(scope: scope, summary: summary, attempt: attempt)
-        guard pending.isValid(for: scope) else { phase = .unavailable; return }
-        do { try store.insert(pending) } catch { phase = .unavailable; return }
+        guard pending.isValid(for: scope) else { phaseState = .unavailable; return }
+        do { try store.insert(pending) } catch { phaseState = .unavailable; return }
         guard current(), !retired else { return }
-        phase = .needsRecovery
+        phaseState = .needsRecovery
         await recover()
     }
     /// Replay the same actor-bound key, even if a fresh lookup says unsigned. Never issue a new key.
     func recover() async {
-        guard !running, !retired, current(), phase == .needsRecovery else { return }
-        running = true; let token = generation; phase = .recovering
+        guard !running, !retired, current(), phaseState == .needsRecovery else { return }
+        running = true; let token = generation; phaseState = .recovering
         defer { if generation == token { running = false } }
         do {
-            guard let pending = try store.loadForRecovery(scope: scope) else { phase = .unavailable; return }
+            guard let pending = try store.loadForRecovery(scope: scope) else { phaseState = .unavailable; return }
             let proof = try await replay(pending)
             guard valid(token), pending.matches(proof.receipt) else { return }
             try store.complete(scope: scope, proof: proof, currentAuthority: { self.valid(token) })
             guard valid(token) else { return }
             if proof.receipt.matches(summary: summary, signerName: pending.attempt.signerName, signedAt: pending.attempt.signedAt) {
-                receipt = proof.receipt; phase = .signed
+                storedReceipt = proof.receipt; phaseState = .signed
             } else {
-                receipt = nil; phase = .previousResolved
+                storedReceipt = nil; phaseState = .previousResolved
             }
-        } catch { if valid(token) { phase = .needsRecovery } }
+        } catch { if valid(token) { phaseState = .needsRecovery } }
     }
-    func deactivate() { generation = UUID(); running = false; receipt = nil; errorMessage = nil; phase = .idle }
-    func retire() { retired = true; generation = UUID(); running = false; receipt = nil; errorMessage = nil; hasFrozenSignature = false; context.retire(); phase = .idle }
+    func deactivate() { generation = UUID(); running = false; storedReceipt = nil; errorMessage = nil; phaseState = .idle }
+    func retire() { retired = true; generation = UUID(); running = false; storedReceipt = nil; errorMessage = nil; hasFrozenSignature = false; context.retire(); phaseState = .idle }
+}
+
+/// A single customer handoff owns these coordinators across document navigation.
+struct CustomerSummaryHandoffKey: Hashable {
+    let scope: CustomerSummaryPendingScope
+    let revision: Int
+    let digest: String
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let requestGeneration: UUID
+    let scopeRevision: UUID
+
+    @MainActor init?(summary: CustomerInvoiceSummary, scope: CustomerSummaryPendingScope, authority: CustomerHandoffExitAuthority) {
+        guard let canonical = scope.canonical, let consent = summary.validatedConsent,
+              UUID(uuidString: authority.actor) == UUID(uuidString: canonical.actorID),
+              UUID(uuidString: authority.organization) == UUID(uuidString: canonical.organizationID),
+              authority.origin == canonical.origin,
+              UUID(uuidString: summary.organizationId) == UUID(uuidString: canonical.organizationID),
+              UUID(uuidString: summary.customerId) == UUID(uuidString: canonical.customerID),
+              summary.jobId.flatMap(UUID.init(uuidString:)) == UUID(uuidString: canonical.jobID),
+              UUID(uuidString: summary.invoiceId) == UUID(uuidString: canonical.invoiceID) else { return nil }
+        self.scope = canonical; revision = summary.linesRevision; digest = consent.digest
+        sessionGeneration = authority.sessionGeneration; authorityRevision = authority.authorityRevision
+        requestGeneration = authority.requestGeneration; scopeRevision = authority.scopeRevision
+    }
+}
+
+@MainActor
+final class CustomerSummaryHandoffRegistry: ObservableObject {
+    struct Activation {
+        let token: UUID
+        let coordinator: CustomerSummaryDurableCoordinator
+    }
+    private var entries: [CustomerSummaryHandoffKey: CustomerSummaryDurableCoordinator] = [:]
+    private var authorityChecks: [CustomerSummaryHandoffKey: @MainActor () -> Bool] = [:]
+    private var active: (key: CustomerSummaryHandoffKey, token: UUID)?
+    private var closed = false
+
+    /// `authorityCurrent` must recheck the captured actor, organization, permission, job
+    /// membership and API/session generations; the registry adds the active-destination guard.
+    func activate(key: CustomerSummaryHandoffKey, authorityCurrent: @escaping @MainActor () -> Bool,
+                  make: (@escaping @MainActor () -> Bool) -> CustomerSummaryDurableCoordinator) -> Activation? {
+        guard !closed, authorityCurrent() else { return nil }
+        if entries.keys.contains(where: { old in
+            old.scope.actorID != key.scope.actorID || old.scope.organizationID != key.scope.organizationID || old.scope.origin != key.scope.origin ||
+            old.sessionGeneration != key.sessionGeneration || old.authorityRevision != key.authorityRevision ||
+            old.requestGeneration != key.requestGeneration || old.scopeRevision != key.scopeRevision
+        }) {
+            entries.values.forEach { $0.retire() }; entries.removeAll(); authorityChecks.removeAll(); active = nil
+        }
+        if let active { entries[active.key]?.deactivate() }
+        let token = UUID(); active = (key, token); authorityChecks[key] = authorityCurrent
+        let coordinator: CustomerSummaryDurableCoordinator
+        if let existing = entries[key] { coordinator = existing }
+        else {
+            coordinator = make { [weak self] in
+                guard let self, !self.closed, self.active?.key == key else { return false }
+                return self.authorityChecks[key]?() == true
+            }
+            entries[key] = coordinator
+        }
+        return Activation(token: token, coordinator: coordinator)
+    }
+    func deactivate(_ token: UUID) {
+        guard let active, active.token == token else { return }
+        self.active = nil; entries[active.key]?.deactivate()
+    }
+    func retire() {
+        closed = true; active = nil
+        entries.values.forEach { $0.retire() }; entries.removeAll(); authorityChecks.removeAll()
+    }
 }
 
 @MainActor
