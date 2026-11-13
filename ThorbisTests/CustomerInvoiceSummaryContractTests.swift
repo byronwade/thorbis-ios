@@ -85,6 +85,33 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertThrowsError(try handoff.acceptUploadedMedia(media()))
         assetJSON["jobId"] = "00000000-0000-4000-8000-000000000099"
         XCTAssertThrowsError(try handoff.acceptUploadedMedia(media()))
+        let validReceipt = try decoded()
+        assetJSON["id"] = "00000000-0000-4000-8000-000000000020"; assetJSON["jobId"] = job
+        let validAsset = try media()
+        var uploadCount = 0; var attempts: [CustomerSummarySigningAttempt] = []
+        let coordinator = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true },
+            lookup: { .unsigned }, upload: { _ in uploadCount += 1; return validAsset }, submit: { value in
+                attempts.append(value)
+                if attempts.count == 1 { throw URLError(.networkConnectionLost) }
+                return validReceipt
+            })
+        await coordinator.checkStatus(); XCTAssertEqual(coordinator.phase, .unsigned)
+        await coordinator.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
+        XCTAssertEqual(coordinator.phase, .unavailable); XCTAssertTrue(coordinator.hasFrozenSignature)
+        await coordinator.retryFrozen(); XCTAssertEqual(attempts.count, 1, "An uncertain result requires a fresh status check")
+        await coordinator.checkStatus(); XCTAssertEqual(coordinator.phase, .unsigned)
+        await coordinator.retryFrozen()
+        XCTAssertEqual(coordinator.phase, .signed); XCTAssertEqual(uploadCount, 1)
+        XCTAssertEqual(attempts.count, 2); XCTAssertEqual(attempts[0].idempotencyKey, attempts[1].idempotencyKey)
+        XCTAssertEqual(attempts[0].imageMediaId, attempts[1].imageMediaId)
+        var pending: CheckedContinuation<Void, Never>?
+        let retiredCoordinator = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true },
+            lookup: { await withCheckedContinuation { pending = $0 }; return .signed(validReceipt) },
+            upload: { _ in validAsset }, submit: { _ in validReceipt })
+        let check = Task { @MainActor in await retiredCoordinator.checkStatus() }
+        for _ in 0..<100 where pending == nil { await Task.yield() }
+        XCTAssertNotNil(pending); retiredCoordinator.retire(); pending?.resume(); await check.value
+        XCTAssertEqual(retiredCoordinator.phase, .idle); XCTAssertNil(retiredCoordinator.receipt)
         handoffCurrent = false
         XCTAssertThrowsError(try handoff.attempt())
         handoff.retire(); handoffCurrent = true
