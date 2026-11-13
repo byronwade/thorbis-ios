@@ -812,4 +812,14 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(spoken?.contains("$190.00") == true, "Integrated selection must expose price and status to VoiceOver")
         capture(app, "All current-job estimates together")
     }
+
+    func testTechnicianCanPrepareNewEstimateFromPagedJob() {
+        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(app.buttons["job-estimate-00000000-0000-4000-8000-000000008101"].waitForExistence(timeout: 45))
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["job-load-more-estimates"].exists, "The job remains paged before creation is requested")
+        add.tap()
+        XCTAssertTrue(app.staticTexts["New estimate"].waitForExistence(timeout: 45), "Creation opens only after the scoped complete read")
+    }
 }

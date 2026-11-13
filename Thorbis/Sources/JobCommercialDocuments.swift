@@ -101,10 +101,20 @@ final class JobInvoicePaymentLoads {
 final class JobDocumentCollections: ObservableObject {
     @Published private(set) var estimates: JobDocumentRead<EstimateRecord>?
     @Published private(set) var invoices: JobDocumentRead<InvoiceRecord>?
+    @Published private(set) var canLoadMoreEstimates = false
+    @Published private(set) var loadingEstimatePage = false
+    @Published private(set) var estimatePageError: String?
+    @Published private(set) var estimatePageNeedsRefresh = false
+    private var estimatePager: JobEstimateMembershipPager?
+    private var estimatePagerScope: JobDocumentScope?
+    private var estimatePageCommitted = false
     private var estimateRequest = UUID()
     private var invoiceRequest = UUID()
+    func isLoadingEstimates(for scope: JobDocumentScope?) -> Bool {
+        loadingEstimatePage && estimatePagerScope == scope
+    }
 
-    func clearEstimates() { estimateRequest = UUID(); estimates = nil }
+    func clearEstimates() { estimateRequest = UUID(); estimates = nil; estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false }
     func clearInvoices() { invoiceRequest = UUID(); invoices = nil }
     func reset() { clearEstimates(); clearInvoices() }
     func replaceInvoice(_ invoice: InvoiceRecord) { invoices = invoices?.replacing(invoice) }
@@ -113,6 +123,7 @@ final class JobDocumentCollections: ObservableObject {
     func markEstimatesStale(scope: JobDocumentScope, updated: EstimateRecord? = nil, requestedID: String? = nil) {
         guard let read = estimates, read.scope == scope else { return }
         estimateRequest = UUID()
+        estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false
         var records = read.records
         if let updated, let requestedID, scope.contains(updated, requestedID: requestedID),
            let index = records.firstIndex(where: { $0.id == requestedID }) {
@@ -127,6 +138,7 @@ final class JobDocumentCollections: ObservableObject {
                        onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void = { _ in },
                        isCurrent: @escaping @MainActor () -> Bool) async -> Bool {
         guard isCurrent(), !Task.isCancelled else { return false }
+        estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false
         let request = UUID()
         estimateRequest = request
         let current: @MainActor () -> Bool = { self.estimateRequest == request && isCurrent() }
@@ -137,6 +149,76 @@ final class JobDocumentCollections: ObservableObject {
               current(), !Task.isCancelled else { return false }
         estimates = read
         return true
+    }
+
+    /// The job sheet reads one membership page at a time. A partial scan is never
+    /// a complete set for creation, totals, or customer authorization.
+    @discardableResult
+    func loadFirstEstimatePage(scope: JobDocumentScope, api: APIClient,
+                               retainExisting: Bool = false,
+                               isCurrent: @escaping @MainActor () -> Bool) async -> Bool {
+        guard isCurrent(), !Task.isCancelled else { return false }
+        estimateRequest = UUID()
+        estimatePager = JobEstimateMembershipPager(jobID: scope.jobID); estimatePagerScope = scope
+        canLoadMoreEstimates = true; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false
+        // Retain only this job's old rows as read-only until the new first page commits.
+        let retained = retainExisting && estimates?.scope == scope ? estimates : nil
+        estimatePageCommitted = false
+        estimates = retained.map { .init(scope: scope, records: $0.records, freshIDs: [], isComplete: false,
+                                         unavailableIDs: $0.unavailableIDs, kind: "estimates") }
+        return await loadNextEstimatePage(scope: scope, api: api, isCurrent: isCurrent)
+    }
+
+    @discardableResult
+    func loadNextEstimatePage(scope: JobDocumentScope, api: APIClient,
+                              isCurrent: @escaping @MainActor () -> Bool) async -> Bool {
+        guard isCurrent(), !Task.isCancelled, !loadingEstimatePage, canLoadMoreEstimates, !estimatePageNeedsRefresh,
+              estimatePagerScope == scope, let pager = estimatePager else { return false }
+        let request = estimateRequest
+        let current: @MainActor () -> Bool = { self.estimateRequest == request && self.estimatePagerScope == scope && isCurrent() }
+        loadingEstimatePage = true; estimatePageError = nil
+        defer { if estimateRequest == request { loadingEstimatePage = false } }
+        var prepared: JobDocumentRead<EstimateRecord>?
+        do {
+            try await pager.loadNext(isCurrent: current, beforeCommit: { candidate in
+                var ids = candidate.estimateIDs
+                if let origin = scope.originEstimateID, !ids.contains(where: { $0.caseInsensitiveCompare(origin) == .orderedSame }) { ids.insert(origin, at: 0) }
+                guard let read = await JobDocumentsLoader.estimatesForPage(scope: scope, api: api, ids: ids,
+                    previous: self.estimatePageCommitted ? self.estimates : nil, membershipFresh: candidate.pagesUsedOnlyFreshResponses,
+                    membershipComplete: candidate.scanReachedEnd && candidate.pagesUsedOnlyFreshResponses,
+                    retainingOnFailure: self.estimatePageCommitted ? [] : (self.estimates?.records ?? []),
+                    isCurrent: current), current(), !Task.isCancelled else { throw CancellationError() }
+                prepared = read
+            }, onCommit: { candidate in
+                guard let read = prepared else { return }
+                let more = !candidate.scanReachedEnd
+                let healthy = candidate.pagesUsedOnlyFreshResponses && read.unavailableIDs.isEmpty && read.records.allSatisfy { read.freshIDs.contains($0.id) }
+                self.estimates = .init(scope: scope, records: read.records, freshIDs: read.freshIDs,
+                    isComplete: read.isComplete, unavailableIDs: read.unavailableIDs, kind: "estimates", pendingPage: more && healthy)
+                self.canLoadMoreEstimates = more
+                self.estimatePageCommitted = true
+                self.estimatePageNeedsRefresh = !healthy
+                if !healthy { self.estimatePageError = read.issue ?? "Some estimates need a refresh." }
+            }) { cursor in
+                let response: APIRead<JobEstimateLinkPage>
+                do { response = try await api.fieldJobEstimateLinkPage(scope.jobID, cursor: cursor, requireFresh: true, isCurrent: current) }
+                catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                    response = try await api.fieldJobEstimateLinkPage(scope.jobID, cursor: cursor, isCurrent: current)
+                }
+                return .init(links: response.value.items, nextCursor: response.value.nextCursor,
+                             isAuthoritative: response.provenance.source == .urlSession(cacheBypassed: true))
+            }
+            return true
+        } catch {
+            if estimateRequest == request && !isCurrent() { clearEstimates(); return false }
+            if current() {
+                if let problem = error as? Problem, problem.status == 401 || problem.status == 403 {
+                    estimates = nil; estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false
+                }
+                estimatePageError = "Couldn't load estimates. Try again."
+            }
+            return false
+        }
     }
 
     @discardableResult
@@ -180,6 +262,10 @@ struct JobDocumentScope: Equatable {
 enum JobEstimateCreation {
     static func canOpen(canCreate: Bool, canView: Bool, estimatesComplete: Bool) -> Bool {
         canCreate && (!canView || estimatesComplete)
+    }
+    static func currentComplete(scope: JobDocumentScope?, readScope: JobDocumentScope?, complete: Bool, authorityCurrent: Bool) -> Bool {
+        guard let scope, let readScope else { return false }
+        return scope == readScope && complete && authorityCurrent
     }
 }
 
@@ -237,14 +323,14 @@ struct JobDocumentRead<Record> {
     let unavailableIDs: [String]
 
     fileprivate init(scope: JobDocumentScope, records: [Record], freshIDs: Set<String>, isComplete: Bool,
-                     unavailableIDs: [String] = [], kind: String, loadingMore: Bool = false) {
+                     unavailableIDs: [String] = [], kind: String, loadingMore: Bool = false, pendingPage: Bool = false) {
         self.scope = scope
         self.records = records
         self.freshIDs = freshIDs
         self.isComplete = isComplete
         self.isLoadingMore = loadingMore
         self.unavailableIDs = unavailableIDs
-        issue = isComplete || loadingMore ? nil : "Couldn't load all \(kind) for this job. Some records may need a refresh."
+        issue = isComplete || loadingMore || pendingPage ? nil : "Couldn't load all \(kind) for this job. Some records may need a refresh."
     }
 }
 
@@ -372,13 +458,14 @@ enum JobDocumentsLoader {
     static func estimatesForPage(scope: JobDocumentScope, api: APIClient, ids: [String],
                                  previous: JobDocumentRead<EstimateRecord>?, membershipFresh: Bool,
                                  membershipComplete: Bool,
+                                 retainingOnFailure: [EstimateRecord] = [],
                                  isCurrent: @escaping @MainActor () -> Bool,
                                  onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void = { _ in }) async -> JobDocumentRead<EstimateRecord>? {
         guard isCurrent(), !Task.isCancelled else { return nil }
         let old = previous?.scope == scope ? previous : nil
         let present = Set((old?.records.map(\.id) ?? []) + (old?.unavailableIDs ?? []))
         let incoming = unique(ids).filter { !present.contains($0) }
-        let details = EstimateDetails(ids: incoming, scope: scope, api: api, retained: [],
+        let details = EstimateDetails(ids: incoming, scope: scope, api: api, retained: retainingOnFailure,
                                       linksSaved: !membershipFresh, includeRetained: false,
                                       isCurrent: isCurrent, onPartial: { page in
             guard isCurrent(), !Task.isCancelled else { return }
