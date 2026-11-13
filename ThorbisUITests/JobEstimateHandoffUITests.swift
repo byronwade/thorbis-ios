@@ -186,6 +186,21 @@ final class JobEstimateHandoffUITests: XCTestCase {
         thorbisStableButton(app, "handoff-submit-approval").tap()
         XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15))
     }
+    func testCustomerCanReadApprovedAndSentEstimatesForTheSameJob() {
+        let app = open(["--paper-preview-handoff-mixed", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
+        thorbisShowCustomerDoor(app).tap()
+        let approved = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(approved.waitForExistence(timeout: 45))
+        visible(app, approved); approved.tap()
+        XCTAssertTrue(app.otherElements["handoff-estimate-details"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
+        let sent = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(sent.waitForExistence(timeout: 10))
+        visible(app, sent); sent.tap()
+        XCTAssertTrue(app.buttons["Review selected (1)"].exists)
+    }
     func testCustomerCanReadEstimateBeforeSelectingIt() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
