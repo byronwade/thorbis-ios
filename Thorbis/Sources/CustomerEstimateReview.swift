@@ -16,7 +16,8 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let currency: String
 
     func validate(for expected: EstimateRecord, allowApprovedForReading: Bool = false) throws {
-        guard UUID(uuidString: id) != nil,
+        guard !lines.isEmpty, (options ?? []).allSatisfy({ !$0.lines.isEmpty }),
+              UUID(uuidString: id) != nil,
               estimateId == expected.id, organizationId == expected.organizationId,
               customerId == expected.customerId, locationId == expected.locationId,
               revisionNumber == expected.currentRevisionNumber,
