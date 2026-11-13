@@ -39,5 +39,16 @@ final class CustomerInvoiceOverviewTests: XCTestCase {
         gate.release(); await task.value
         XCTAssertEqual(URLProtocolFixture.recorded.count, 20)
         XCTAssertEqual(loader.entries.count, 20)
+
+        // Leaving the screen retires its generation before delayed replies are released.
+        let retiredGate = URLProtocolFixture.Gate(); defer { retiredGate.release() }
+        let delayed = routes.mapValues { URLProtocolFixture.Reply($0.status, $0.body, gate: retiredGate) }
+        URLProtocolFixture.setRoutes(delayed)
+        let oldTask = Task { @MainActor in await loader.load(records: records, api: api, scope: scope, authority: authority, current: { _ in true }) }
+        for _ in 0..<1500 where URLProtocolFixture.recorded.count < 3 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        loader.retire(); retiredGate.release(); await oldTask.value
+        XCTAssertTrue(loader.entries.isEmpty, "Retired responses must never repopulate the overview")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "A retired batch must not start more requests")
     }
 }
