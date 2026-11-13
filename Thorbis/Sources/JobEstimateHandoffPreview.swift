@@ -94,11 +94,18 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func options(_ id: String) -> [[String: Any]] {
         guard id == Self.a, flags.contains("--paper-preview-handoff-options") else { return [] }
-        let scope: [[String: Any]] = [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 25000, "currency": "USD"]]]
+        let scope: [[String: Any]] = flags.contains("--paper-preview-handoff-receipt")
+            ? [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 20000, "currency": "USD"]],
+               ["id": "private-material", "description": "Private internal material", "quantity": 1, "unitPrice": ["amount": 5000, "currency": "USD"], "showToCustomer": false]]
+            : [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 25000, "currency": "USD"]]]
         let description = flags.contains("--paper-preview-handoff-long-description")
             ? "This package includes a complete inspection and preparation before installation.\n\nFinal package detail: test all equipment and explain the finished work."
             : "One package within this estimate"
-        return [["id": "00000000-0000-4000-8000-000000008201", "title": "Sample package", "description": description, "lines": scope, "totalAmount": 25000, "currency": "USD"]]
+        var result: [[String: Any]] = [["id": "00000000-0000-4000-8000-000000008201", "title": "Sample package", "description": description, "lines": scope, "totalAmount": 25000, "currency": "USD"]]
+        if flags.contains("--paper-preview-handoff-receipt") {
+            result.append(["id": "00000000-0000-4000-8000-000000008202", "title": "Other package", "description": "Not selected", "lines": [["id": "other-line", "description": "Unselected package scope", "quantity": 1, "unitPrice": ["amount": 30000, "currency": "USD"]]], "totalAmount": 30000, "currency": "USD"])
+        }
+        return result
     }
     private func estimate(_ id: String) -> [String: Any] {
         var value: [String: Any] = ["id": id, "organizationId": org, "customerId": PaperPreview.customerID, "createdByUserId": PaperPreview.actorID, "status": status(id), "currentRevisionNumber": (changedRevision && id == Self.b) || (changedFirstRevision && id == Self.a) ? 2 : 1, "title": title(id), "lines": lines(id), "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
@@ -189,6 +196,21 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
             }
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }
             if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" { return .init(status:200,payload:revision(id)) }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/1/acceptance" {
+                guard flags.contains("--paper-preview-handoff-receipt"), let acceptance = acceptances[id],
+                      let optionID = acceptance["optionId"] as? String,
+                      let option = options(id).first(where: { $0["id"] as? String == optionID }) else {
+                    return .init(status: 404, payload: ["status": 404, "title": "Not found"])
+                }
+                if flags.contains("--paper-preview-handoff-remove-link-after-receipt") { removedFirst = true }
+                return .init(status: 200, payload: ["id": acceptance["id"]!, "estimateId": id,
+                    "revisionId": flags.contains("--paper-preview-handoff-wrong-receipt") ? "00000000-0000-4000-8000-000000009999" : id.replacingOccurrences(of: "0081", with: "0091"), "revisionNumber": 1,
+                    "contentHash": String(repeating: "a", count: 64), "optionId": optionID,
+                    "optionTitle": option["title"]!, "signerName": acceptance["signerName"]!,
+                    "acceptedAt": now, "totalAmount": option["totalAmount"]!, "currency": "USD", "lines": [
+                        ["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 20000, "currency": "USD"]],
+                        ["id": "private-material", "description": "Materials", "quantity": 1, "unitPrice": ["amount": 5000, "currency": "USD"]]]])
+            }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
             if method == "POST", path == "/v1/estimates/\(id)/action-tokens" { return .init(status:200,payload:["token":"sample-\(id)"]) }
             if method == "GET", path == "/v1/public/document-actions/sample-\(id)" { return .init(status:200,payload:action(id)) }

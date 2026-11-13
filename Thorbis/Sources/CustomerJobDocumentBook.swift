@@ -190,7 +190,7 @@ struct CustomerJobDocumentBook: View {
                 let effectiveRecord = record
                 let effectiveFresh = freshEstimates.contains(value)
                 #endif
-                CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id,
+                CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id, activation: selection.activation,
                     refresh: refresh, review: { reviewEstimate(value) })
             } else {
                 ScrollView {
@@ -213,6 +213,13 @@ struct CustomerJobDocumentBook: View {
 private struct CustomerEstimateBookLoadID: Hashable {
     let estimate: EstimateRecord
     let fresh: Bool
+    let active: Bool
+    let activation: UUID
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let apiGeneration: UUID
+    let scopeRevision: UUID
+    let retry: UUID
 }
 
 private struct CustomerEstimateBookPage: View {
@@ -221,10 +228,17 @@ private struct CustomerEstimateBookPage: View {
     let estimate: EstimateRecord
     let fresh: Bool
     let active: Bool
+    let activation: UUID
     let refresh: () async -> Void
     let review: () -> Void
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var receipt: CustomerEstimateAcceptanceReceipt?
+    @State private var receiptAuthority: CustomerHandoffExitAuthority?
+    @State private var receiptActivation: UUID?
+    @State private var retry = UUID()
+    @State private var loadToken = UUID()
     @State private var issued: CustomerIssuedEstimateRevision?
     @State private var loading = false
     @State private var error: String?
@@ -257,15 +271,36 @@ private struct CustomerEstimateBookPage: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if fresh { CustomerStatusWord(status: estimate.status, type: type) }
-                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
+                    if estimate.status != "approved" || (readingAccess.permits(session) &&
+                        receiptActivation == activation && receiptAuthority?.isCurrent(api: api, session: session) == true &&
+                        issued?.matchesDetails(for: estimate) == true) {
+                        Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        if fresh { CustomerStatusWord(status: estimate.status, type: type) }
+                        else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
+                    }
                     if !fresh {
                         Text("This copy needs a refresh before you can decide.").font(Theme.customerFont(type.body))
                     } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
-                    if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() } }
-                    if estimate.status != "sent" || issued != nil {
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-receipt-return") {
+                        Button("Remove sample link") { JobEstimateHandoffPreview.shared.removeFirst() }
+                    }
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-receipt-retirement") {
+                        Button("Retire receipt authority") { api.invalidateRequests() }
+                    }
+                    #endif
+                    if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { retry = UUID() } }
+                    if estimate.status == "approved" {
+                        if fresh, readingAccess.permits(session), let issued, let receipt, let receiptAuthority,
+                           receiptActivation == activation, receiptAuthority.isCurrent(api: api, session: session), issued.matchesDetails(for: estimate), (try? receipt.validate(for: issued)) != nil {
+                            if let title = receipt.optionTitle {
+                                Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                            }
+                            estimateLines(receipt.lines, currency: receipt.currency, expectedTotal: receipt.totalAmount,
+                                          requireUSDCurrency: true, descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
+                        }
+                    } else if estimate.status != "sent" || issued != nil {
                         if !issuedStructureValid {
                             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                                 .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
@@ -298,7 +333,9 @@ private struct CustomerEstimateBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
-        .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh)) { await load() }
+        .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh, active: active, activation: activation,
+            sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+            apiGeneration: api.requestGeneration, scopeRevision: api.savedCopyScopeRevision, retry: retry)) { await load() }
     }
 
     @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String?, expectedTotal: Int?,
@@ -315,17 +352,55 @@ private struct CustomerEstimateBookPage: View {
     }
 
     private func load() async {
-        guard fresh, estimate.status == "sent" else { return }
-        loading = true; error = nil; issued = nil
-        defer { loading = false }
+        let token = UUID(); loadToken = token
+        receipt = nil; receiptAuthority = nil; receiptActivation = nil; issued = nil; error = nil; loading = false
+        guard fresh, active, scope.contains(estimate, requestedID: estimate.id),
+              estimate.status == "sent" || estimate.status == "approved",
+              sourceGeneration == session.generation,
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        let current: @MainActor () -> Bool = {
+            !Task.isCancelled && loadToken == token && authority.isCurrent(api: api, session: session) &&
+            session.can("estimate.view", feature: "estimates")
+        }
+        guard current() else { return }
+        loading = true
+        defer { if loadToken == token { loading = false } }
+        func verifyMembership() async throws {
+            let job = try await api.liveFieldJob(scope.jobID)
+            guard current() else { throw CancellationError() }
+            guard job.id == scope.jobID, job.organizationId == scope.organizationID,
+                  job.customerId == scope.customerID else {
+                throw Problem(title: "This job changed", status: 409, detail: nil)
+            }
+            if job.estimateId != estimate.id {
+                let link = try await api.liveFieldJobEstimateLink(scope.jobID, estimateID: estimate.id)
+                guard current() else { throw CancellationError() }
+                guard link.jobId == scope.jobID, link.estimateId == estimate.id else {
+                    throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
+                }
+            }
+        }
         do {
-            let revision = try await api.customerIssuedEstimateRevision(for: estimate)
-            try Task.checkCancellation()
+            if estimate.status == "approved" { try await verifyMembership() }
+            let revision = try await api.customerIssuedEstimateRevision(for: estimate,
+                allowApprovedForReading: estimate.status == "approved", currentAuthority: current)
+            if estimate.status == "approved" {
+                guard let signed = try await api.customerEstimateAcceptanceReceipt(for: revision, currentAuthority: current) else {
+                    if current() { error = "The signed estimate isn't available. Hand the device back to your technician." }
+                    return
+                }
+                try await verifyMembership()
+                guard current() else { return }
+                receipt = signed; receiptAuthority = authority; receiptActivation = activation
+            }
+            guard current() else { return }
             issued = revision
         } catch is CancellationError {
         } catch is CustomerIssuedEstimateAmountsUnavailable {
-            self.error = "These amounts couldn't be verified. Hand the device back to your technician."
-        } catch { self.error = error.customerSentence(.openEstimate) }
+            if current() { self.error = "These amounts couldn't be verified. Hand the device back to your technician." }
+        } catch {
+            if current() { self.error = error.customerSentence(.openEstimate) }
+        }
     }
 }
 
