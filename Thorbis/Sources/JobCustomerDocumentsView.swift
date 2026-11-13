@@ -5,6 +5,21 @@ enum CustomerJobPaper: Hashable {
     case invoice(InvoiceRecord, signing: Bool)
 }
 
+private struct CustomerInvoiceOverviewKey: Hashable {
+    let records: [InvoiceRecord]
+    let freshIDs: [String]
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let apiGeneration: UUID
+    let savedScopeRevision: UUID
+}
+
+private struct CustomerInvoiceOverviewEntry {
+    let record: InvoiceRecord
+    let summary: CustomerInvoiceSummary
+    let authority: CustomerHandoffExitAuthority
+}
+
 /// Stable navigation owner for async rechecks and destination callbacks.
 @MainActor final class CustomerJobPaperNavigation: ObservableObject {
     @Published var paper: CustomerJobPaper?
@@ -89,6 +104,8 @@ struct JobCustomerDocumentsView: View {
     @State private var approving = false
     @State private var editingDetails = false
     @State private var started = false
+    @State private var invoiceOverview: [String: CustomerInvoiceOverviewEntry] = [:]
+    @State private var invoiceOverviewToken = UUID()
 
     private var currentWorkspace: Bool { sourceGeneration == session.generation && session.user != nil && session.activeOrganization?.id == scope.organizationID }
     private var canViewEstimates: Bool { session.can("estimate.view", feature: "estimates") }
@@ -313,13 +330,61 @@ struct JobCustomerDocumentsView: View {
                 if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
                 ForEach(invoices.records) { invoice in
                     Button { Task { await openInvoice(invoice.id) } } label: {
-                        JobDocumentRow(invoice: invoice, fresh: invoices.freshIDs.contains(invoice.id), customerFacing: true)
+                        JobDocumentRow(invoice: invoice, fresh: invoices.freshIDs.contains(invoice.id), customerFacing: true,
+                                       customerSummary: overviewSummary(for: invoice))
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityIdentifier("customer-invoice-\(invoice.id)")
                     .disabled(openingID != nil || !invoices.freshIDs.contains(invoice.id))
                 }
             } else { SkeletonRows(count: 2, leading: false, inset: 0) }
+        }
+        .task(id: invoiceOverviewKey) { await loadInvoiceOverview() }
+        .onDisappear { invoiceOverviewToken = UUID(); invoiceOverview = [:] }
+    }
+
+    private var invoiceOverviewKey: CustomerInvoiceOverviewKey {
+        .init(records: invoices?.records ?? [], freshIDs: (invoices?.freshIDs ?? []).sorted(),
+              sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+              apiGeneration: api.requestGeneration, savedScopeRevision: api.savedCopyScopeRevision)
+    }
+
+    private func overviewSummary(for invoice: InvoiceRecord) -> CustomerInvoiceSummary? {
+        guard currentWorkspace, canViewInvoices, let entry = invoiceOverview[invoice.id], entry.record == invoice,
+              invoices?.scope == scope, invoices?.freshIDs.contains(invoice.id) == true,
+              entry.authority.isCurrent(api: api, session: session),
+              entry.summary.matches(scope: scope, invoiceID: invoice.id, linesRevision: invoice.linesRevision) else { return nil }
+        return entry.summary
+    }
+
+    /// Bound the eager work in long jobs; the remaining rows open directly for a fresh check.
+    private func loadInvoiceOverview() async {
+        let token = UUID(); invoiceOverviewToken = token; invoiceOverview = [:]
+        guard currentWorkspace, canViewInvoices, invoices?.scope == scope,
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        let records = Array((invoices?.records ?? []).filter { scope.contains($0) && invoices?.freshIDs.contains($0.id) == true }.prefix(20))
+        func current(_ record: InvoiceRecord) -> Bool {
+            !Task.isCancelled && invoiceOverviewToken == token && currentWorkspace && canViewInvoices &&
+            authority.isCurrent(api: api, session: session) && invoices?.scope == scope &&
+            invoices?.freshIDs.contains(record.id) == true && invoices?.records.contains(record) == true
+        }
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = records.makeIterator()
+            func add(_ record: InvoiceRecord) {
+                group.addTask { @MainActor in
+                    do {
+                        let summary = try await api.customerInvoiceSummary(scope: scope, invoiceID: record.id,
+                            linesRevision: record.linesRevision, currentAuthority: { current(record) })
+                        guard current(record) else { return }
+                        invoiceOverview[record.id] = .init(record: record, summary: summary, authority: authority)
+                    } catch { }
+                }
+            }
+            for _ in 0..<3 { if let record = iterator.next() { add(record) } }
+            while await group.next() != nil {
+                if Task.isCancelled || invoiceOverviewToken != token { group.cancelAll(); break }
+                if let record = iterator.next() { add(record) }
+            }
         }
     }
 

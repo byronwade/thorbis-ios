@@ -41,6 +41,30 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Sign for the work"].exists)
     }
 
+    func testOverviewOnlyShowsAmountFromVerifiedSummary() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-customer-safe-invoice"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        let verified = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "$340.00"), object: invoice)
+        XCTAssertEqual(XCTWaiter.wait(for: [verified], timeout: 15), .completed)
+    }
+
+    func testOverviewWithNoSummaryDoesNotExposeRawAmount() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        XCTAssertTrue(invoice.label.contains("Open to check amount"))
+        XCTAssertFalse(invoice.label.contains("$340.00"))
+    }
+
     func testMixedCurrencyInvoiceDoesNotShowMisleadingOverviewAmount() {
         continueAfterFailure = false
         let app = XCUIApplication()

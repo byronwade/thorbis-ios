@@ -189,21 +189,18 @@ extension JobDocumentRow {
         self.symbol = "doc.text"
     }
 
-    init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false, invoiceReference: String? = nil) {
+    init(invoice: InvoiceRecord, fresh: Bool, customerFacing: Bool = false, invoiceReference: String? = nil,
+         customerSummary: CustomerInvoiceSummary? = nil) {
         reference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
         title = invoice.origin == "estimate_deposit" ? "Deposit" : "Invoice"
-        status = invoice.status
+        status = customerFacing ? customerSummary?.status ?? invoice.status : invoice.status
         if customerFacing {
-            if let verified = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) {
-                amount = money(verified.total, currency: invoice.currency)
-                if invoice.status == "issued", verified.total >= invoice.amountPaid {
-                    detail = "\(money(verified.due, currency: invoice.currency))\u{00A0}due"
-                } else {
-                    detail = nil
-                }
+            if let summary = customerSummary {
+                amount = money(summary.totalAmount, currency: summary.currency)
+                detail = summary.status == "issued" ? "\(money(summary.balanceDue, currency: summary.currency))\u{00A0}due" : nil
             } else {
                 amount = nil
-                detail = "Amount needs verification"
+                detail = "Open to check amount"
             }
         } else {
             amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }
@@ -213,7 +210,7 @@ extension JobDocumentRow {
                 detail = nil
             }
         }
-        self.fresh = fresh
+        self.fresh = fresh && (!customerFacing || customerSummary != nil)
         self.customerFacing = customerFacing
         self.symbol = "doc.plaintext"
     }
