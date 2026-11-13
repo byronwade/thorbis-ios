@@ -112,6 +112,24 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         for _ in 0..<100 where pending == nil { await Task.yield() }
         XCTAssertNotNil(pending); retiredCoordinator.retire(); pending?.resume(); await check.value
         XCTAssertEqual(retiredCoordinator.phase, .idle); XCTAssertNil(retiredCoordinator.receipt)
+        var suspendedSubmission: CheckedContinuation<Void, Never>?
+        var suspendedAttempts: [CustomerSummarySigningAttempt] = []
+        let suspended = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { true },
+            lookup: { .unsigned }, upload: { _ in validAsset }, submit: { value in
+                suspendedAttempts.append(value)
+                if suspendedAttempts.count == 1 { await withCheckedContinuation { suspendedSubmission = $0 } }
+                return validReceipt
+            })
+        await suspended.checkStatus()
+        let originalSubmission = Task { @MainActor in await suspended.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3])) }
+        for _ in 0..<100 where suspendedSubmission == nil { await Task.yield() }
+        XCTAssertNotNil(suspendedSubmission); suspended.deactivate()
+        await suspended.checkStatus(); XCTAssertEqual(suspended.phase, .unsigned)
+        suspendedSubmission?.resume(); await originalSubmission.value
+        XCTAssertEqual(suspended.phase, .unsigned, "A response from the previous activation must not publish")
+        await suspended.retryFrozen(); XCTAssertEqual(suspended.phase, .signed)
+        XCTAssertEqual(suspendedAttempts.count, 2)
+        XCTAssertEqual(suspendedAttempts[0].idempotencyKey, suspendedAttempts[1].idempotencyKey)
         handoffCurrent = false
         XCTAssertThrowsError(try handoff.attempt())
         handoff.retire(); handoffCurrent = true

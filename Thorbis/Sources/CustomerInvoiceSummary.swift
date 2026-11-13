@@ -307,6 +307,11 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
             receipt = value; phase = .signed
         } catch { if valid(token) { phase = .unavailable } }
     }
+    /// Suspend a departed destination without discarding an uncertain attempt. The next
+    /// activation must perform a fresh status check before retrying those same terms.
+    func deactivate() {
+        generation = UUID(); running = false; receipt = nil; phase = .idle
+    }
     func retire() {
         retired = true; generation = UUID(); running = false; receipt = nil; hasFrozenSignature = false
         context.retire(); phase = .idle
