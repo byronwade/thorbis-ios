@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// A server-produced customer presentation. It is not a signed invoice.
 struct CustomerInvoiceSummary: Decodable, Sendable {
@@ -156,6 +157,75 @@ struct CustomerSummarySigningAttempt: Encodable, Sendable {
         self.signerName = signerName; self.signedAt = signedAt
         self.imageMediaId = imageMediaId; self.idempotencyKey = idempotencyKey
     }
+}
+
+/// Owned by the handoff, not a transient screen, while a signing outcome is uncertain.
+struct CustomerSummaryFrozenSignature: Equatable {
+    let signerName: String
+    let signedAt: String
+    let png: Data
+    let clientAssetID: String
+    let idempotencyKey: String
+}
+
+@MainActor
+final class CustomerSummarySigningContext {
+    private let summary: CustomerInvoiceSummary
+    private let current: @MainActor () -> Bool
+    private let actorID: String
+    private var frozen: CustomerSummaryFrozenSignature?
+    private var uploadedMediaID: String?
+    private var retired = false
+
+    init(summary: CustomerInvoiceSummary, actorID: String, current: @escaping @MainActor () -> Bool) {
+        self.summary = summary; self.actorID = actorID; self.current = current
+    }
+    private func checkCurrent() throws {
+        try Task.checkCancellation()
+        guard !retired, current(), UUID(uuidString: actorID) != nil, summary.validatedConsent != nil else { throw CancellationError() }
+    }
+    func freeze(signerName: String, signedAt: String, png: Data) throws -> CustomerSummaryFrozenSignature {
+        try checkCurrent()
+        let name = signerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 120, !png.isEmpty, png.count <= 8 * 1024 * 1024,
+              ISO8601DateFormatter().date(from: signedAt) != nil else {
+            throw Problem(title: "Enter your name and signature", status: nil, detail: nil)
+        }
+        if let frozen {
+            guard frozen.signerName == name, frozen.signedAt == signedAt, frozen.png == png else {
+                throw Problem(title: "Check the previous signature first", status: 409, detail: "The original summary and signature must be retained.")
+            }
+            return frozen
+        }
+        let value = CustomerSummaryFrozenSignature(signerName: name, signedAt: signedAt, png: png,
+            clientAssetID: UUID().uuidString.lowercased(), idempotencyKey: UUID().uuidString.lowercased())
+        frozen = value
+        return value
+    }
+    func acceptUploadedMedia(_ asset: MediaAssetRecord) throws {
+        try checkCurrent()
+        guard let frozen, UUID(uuidString: asset.id) != nil,
+              asset.organizationId == summary.organizationId, asset.jobId == summary.jobId, asset.uploaderUserId == actorID,
+              asset.kind == "photo", asset.mime == "image/png", asset.tags.contains("signature"), asset.uploadState == "stored", !asset.archived,
+              asset.sizeBytes == frozen.png.count,
+              asset.contentHash == SHA256.hash(data: frozen.png).map({ String(format: "%02x", $0) }).joined() else {
+            throw Problem(title: "Signature image couldn't be verified", status: 409, detail: nil)
+        }
+        guard uploadedMediaID == nil || uploadedMediaID == asset.id else {
+            throw Problem(title: "Check the previous signature first", status: 409, detail: nil)
+        }
+        uploadedMediaID = asset.id
+    }
+    func attempt() throws -> CustomerSummarySigningAttempt {
+        try checkCurrent()
+        guard let frozen, let uploadedMediaID,
+              let attempt = CustomerSummarySigningAttempt(summary: summary, signerName: frozen.signerName,
+                signedAt: frozen.signedAt, imageMediaId: uploadedMediaID, idempotencyKey: frozen.idempotencyKey) else {
+            throw Problem(title: "Signature isn't ready", status: nil, detail: nil)
+        }
+        return attempt
+    }
+    func retire() { retired = true; frozen = nil; uploadedMediaID = nil }
 }
 
 @MainActor
