@@ -425,6 +425,82 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
     }
 }
 
+/// Own this for the whole customer handoff. A persisted attempt blocks all new signing,
+/// including when an unsigned lookup races a prior in-flight POST.
+@MainActor
+final class CustomerSummaryDurableCoordinator: ObservableObject {
+    enum Phase: Equatable { case idle, checking, ready, needsRecovery, recovering, signed, previousResolved, unavailable }
+    @Published private(set) var phase: Phase = .idle
+    private(set) var receipt: CustomerInvoiceSummaryReceipt?
+    private let summary: CustomerInvoiceSummary
+    private let scope: CustomerSummaryPendingScope
+    private let store: any CustomerSummaryPendingStoring
+    private let current: @MainActor () -> Bool
+    private let lookup: @MainActor () async throws -> CustomerSummaryAuthorizationState
+    private let replay: @MainActor (CustomerSummaryPendingAttempt) async throws -> CustomerSummaryReplayProof
+    private var generation = UUID()
+    private var running = false
+    private var retired = false
+
+    init(summary: CustomerInvoiceSummary, scope: CustomerSummaryPendingScope, store: any CustomerSummaryPendingStoring,
+         current: @escaping @MainActor () -> Bool, lookup: @escaping @MainActor () async throws -> CustomerSummaryAuthorizationState,
+         replay: @escaping @MainActor (CustomerSummaryPendingAttempt) async throws -> CustomerSummaryReplayProof) {
+        self.summary = summary; self.scope = scope; self.store = store; self.current = current; self.lookup = lookup; self.replay = replay
+    }
+    private func valid(_ token: UUID) -> Bool { !Task.isCancelled && !retired && generation == token && current() }
+    func inspect() async {
+        guard !running, !retired, current() else { return }
+        running = true; let token = generation; phase = .checking; receipt = nil
+        defer { if generation == token { running = false } }
+        do {
+            guard summary.validatedConsent != nil, summary.organizationId == scope.organizationID,
+                  summary.customerId == scope.customerID, summary.jobId == scope.jobID, summary.invoiceId == scope.invoiceID else { phase = .unavailable; return }
+            if try store.load(scope: scope) != nil { phase = .needsRecovery; return }
+            let status = try await lookup()
+            guard valid(token) else { return }
+            // Another activation may have persisted an attempt while the lookup was in flight.
+            if try store.load(scope: scope) != nil { phase = .needsRecovery; return }
+            switch status {
+            case .unsigned: phase = .ready
+            case .signed(let value):
+                guard value.matches(summary: summary, signerName: value.signerName, signedAt: value.signedAt) else { phase = .unavailable; return }
+                receipt = value; phase = .signed
+            }
+        } catch { if valid(token) { phase = .unavailable } }
+    }
+    /// Call only after explicit customer consent and a confirmed signature-media upload.
+    /// Keychain insertion must finish before any financial POST is sent.
+    func stageAndSubmit(_ attempt: CustomerSummarySigningAttempt) async {
+        guard !running, !retired, current(), phase == .ready else { return }
+        let pending = CustomerSummaryPendingAttempt(scope: scope, summary: summary, attempt: attempt)
+        guard pending.isValid(for: scope) else { phase = .unavailable; return }
+        do { try store.insert(pending) } catch { phase = .unavailable; return }
+        guard current(), !retired else { return }
+        phase = .needsRecovery
+        await recover()
+    }
+    /// Replay the same actor-bound key, even if a fresh lookup says unsigned. Never issue a new key.
+    func recover() async {
+        guard !running, !retired, current(), phase == .needsRecovery else { return }
+        running = true; let token = generation; phase = .recovering
+        defer { if generation == token { running = false } }
+        do {
+            guard let pending = try store.load(scope: scope) else { phase = .unavailable; return }
+            let proof = try await replay(pending)
+            guard valid(token), pending.matches(proof.receipt) else { return }
+            try store.complete(scope: scope, proof: proof, currentAuthority: { self.valid(token) })
+            guard valid(token) else { return }
+            if proof.receipt.matches(summary: summary, signerName: pending.attempt.signerName, signedAt: pending.attempt.signedAt) {
+                receipt = proof.receipt; phase = .signed
+            } else {
+                receipt = nil; phase = .previousResolved
+            }
+        } catch { if valid(token) { phase = .needsRecovery } }
+    }
+    func deactivate() { generation = UUID(); running = false; receipt = nil; phase = .idle }
+    func retire() { retired = true; generation = UUID(); running = false; receipt = nil; phase = .idle }
+}
+
 @MainActor
 extension APIClient {
     /// Replays a previously persisted request, including old terms, under the same actor.
