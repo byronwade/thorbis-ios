@@ -77,3 +77,10 @@ The iOS URLProtocol test seeds and verifies readable saved membership and detail
 copies, then expects both to remain visible and incomplete after cache-bypassing
 network attempts fail. It is prepared but has not been built or run. The host
 tests exercise the production loader with a stub, not actual URLSession timing.
+
+The hosted PR #479 run for head `d9ce8fed` failed during Swift compilation,
+before any tests ran: an unqualified `error` assignment inside `catch` bound to
+the immutable caught error instead of the model property. The follow-up uses
+`self.error`. Swift parsing and the loader and page-adapter host probes pass;
+this is not a native compilation or test result. The failed run remains at
+https://github.com/byronwade/thorbis-ios/actions/runs/43368975045.

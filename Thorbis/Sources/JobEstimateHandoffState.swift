@@ -305,7 +305,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         }
         catch {
             guard isCurrent, request == ticket else { return }
-            complete = false; error = "Couldn't load more estimates. Your selections are still here."
+            complete = false; self.error = "Couldn't load more estimates. Your selections are still here."
         }
     }
     private func loadPage(ticket: UUID) async throws {
