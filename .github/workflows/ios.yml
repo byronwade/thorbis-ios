@@ -49,6 +49,17 @@ jobs:
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
             -resultBundlePath "${{ runner.temp }}/ThorbisTests.xcresult" \
             -parallel-testing-enabled NO \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testCustomerSwipesBetweenJobEstimateDetailsWithoutChangingSelection \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testCustomerCanBrowseJobEstimatesUsingAccessibleControls \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testEstimateBrowseKeepsLongDescriptionReadOnlyAndEdgeBackWorks \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testEstimateBrowsingDoesNotShowPriorTermsWhenNextReadFails \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testEstimateBrowsingRetiresAfterSessionEndsOnSecondEstimate \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testDetailsReaderClosesWhenEstimateLeavesJob \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testDetailsReaderClosesWhenSameEstimateGetsNewRevision \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testPreselectionDetailsAndDescriptionCloseOnSessionLoss \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testTwoSameTitleEstimatesApproveIndependentlyInOneProtectedHandoff \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testLongEstimateTitleAndStatusAtNormalText \
+            -only-testing:ThorbisUITests/JobEstimateHandoffUITests/testLongEstimateTitleAndStatusAtLargestText \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
             DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= test
       - name: Save test evidence
