@@ -14,6 +14,60 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.waitForExistence(timeout: 15))
     }
 
+    func testCustomerSignsSummaryAndPaysTheSelectedJobInvoice() {
+        continueAfterFailure = false
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-owner-auth", "approved"])
+        XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+        let sign = pages(app).buttons["Sign summary"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 15)); reveal(sign, in: app); sign.tap()
+        let name = pages(app).textFields["Your full name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); reveal(name, in: app); name.tap(); name.typeText("Alex")
+        let pad = pages(app).descendants(matching: .any)["customer-summary-signature-pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 10)); reveal(pad, in: app)
+        pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
+        XCTAssertEqual(pad.value as? String, "Signature entered")
+        let submit = pages(app).buttons["Sign summary"]
+        reveal(submit, in: app); XCTAssertTrue(submit.isEnabled); submit.tap()
+        let signed = pages(app).staticTexts["customer-summary-signed"]
+        XCTAssertTrue(signed.waitForExistence(timeout: 20)); XCTAssertTrue(signed.label.contains("Alex"))
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15)); XCTAssertTrue(collecting.label.contains("INV-2209"))
+    }
+
+    func testLostSummaryResponseSurvivesSwitchingDocuments() {
+        continueAfterFailure = false
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-summary-signing-lost-once"])
+        let sign = pages(app).buttons["Sign summary"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 15)); reveal(sign, in: app); sign.tap()
+        let name = pages(app).textFields["Your full name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); reveal(name, in: app); name.tap(); name.typeText("Alex")
+        let pad = pages(app).descendants(matching: .any)["customer-summary-signature-pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 10)); reveal(pad, in: app)
+        pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
+        let submit = pages(app).buttons["Sign summary"]
+        reveal(submit, in: app); XCTAssertTrue(submit.isEnabled); submit.tap()
+        XCTAssertTrue(pages(app).buttons["Check signature"].waitForExistence(timeout: 20))
+        app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        app.buttons["Choose a job document"].tap(); app.buttons["INV-2209"].tap()
+        let recover = pages(app).buttons["Check signature"]
+        XCTAssertTrue(recover.waitForExistence(timeout: 20)); reveal(recover, in: app); recover.tap()
+        XCTAssertTrue(pages(app).staticTexts["customer-summary-signed"].waitForExistence(timeout: 20))
+    }
+
+    func testSigningControlsRetireAfterPermissionIsRevoked() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-summary-signing-revoke"])
+        let sign = pages(app).buttons["Sign summary"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 15))
+        let revoke = pages(app).buttons["Preview revoke signing access"]
+        reveal(revoke, in: app); XCTAssertTrue(revoke.isHittable); revoke.tap()
+        let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sign)
+        XCTAssertEqual(XCTWaiter.wait(for: [disappeared], timeout: 15), .completed)
+        XCTAssertFalse(pages(app).descendants(matching: .any)["customer-summary-signature-pad"].exists)
+    }
+
     func testUnsignedInvoiceWithoutEditStillAllowsPayment() {
         let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-deny-document-edit", "--paper-preview-owner-auth", "approved"])
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
@@ -69,6 +123,30 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Sign for the work"].exists)
         app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
+    }
+
+    func testStandaloneCustomerCanSignVerifiedSummary() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing"]
+        app.launch()
+        let sign = app.buttons["Sign summary"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 20))
+        for _ in 0..<6 where !sign.isHittable { app.swipeUp() }
+        XCTAssertTrue(sign.isHittable); sign.tap()
+        let name = app.textFields["Your full name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("Alex")
+        let pad = app.descendants(matching: .any)["customer-summary-signature-pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !pad.isHittable { app.swipeUp() }
+        XCTAssertTrue(pad.isHittable)
+        pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
+        let submit = app.buttons["Sign summary"]
+        for _ in 0..<6 where !submit.isHittable { app.swipeUp() }
+        XCTAssertTrue(submit.isHittable && submit.isEnabled); submit.tap()
+        let signed = app.staticTexts["customer-summary-signed"]
+        XCTAssertTrue(signed.waitForExistence(timeout: 20)); XCTAssertTrue(signed.label.contains("Alex"))
+        XCTAssertTrue(app.buttons["Done"].exists)
     }
 
     func testStandaloneLongSummaryOpensReadingDrawer() {

@@ -788,6 +788,98 @@ struct CustomerEstimatePresentation: View {
 
 /// "Show to customer" for an invoice: what was done, what it cost, what is due, then sign or
 /// hand back to pay. Payment itself stays with the technician's collect screen.
+
+/// The signature applies only to the displayed customer summary, not raw invoice paper.
+struct CustomerSummarySigningControls: View {
+    @ObservedObject var coordinator: CustomerSummaryDurableCoordinator
+    @EnvironmentObject private var session: SessionController
+    let consent: CustomerInvoiceSummary.Consent
+    let type: CustomerType
+    @State private var signing = false
+    @State private var name = ""
+    @State private var strokes: [[CGPoint]] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing-revoke") {
+                Button("Preview revoke signing access") {
+                    PaperPreviewProtocol.revokeInvoiceEditForSigning()
+                    Task { await session.revalidate() }
+                }
+            }
+            #endif
+            switch coordinator.phase {
+            case .idle, .checking, .preparing, .recovering:
+                HStack { ProgressView(); Text("Checking your summary…") }
+                    .font(Theme.customerFont(type.body)).accessibilityLabel("Checking your invoice summary")
+            case .ready:
+                if coordinator.hasFrozenSignature {
+                    Text("Your signature is ready to retry.").font(Theme.customerFont(type.body))
+                    CustomerSecondaryButton(title: "Retry signature", type: type) { Task { await coordinator.retryCapture() } }
+                } else if signing {
+                    Text(consent.consentText).font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                    TextField("Your full name", text: $name).textContentType(.name)
+                        .font(Theme.customerFont(type.body)).padding(16)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                        .accessibilityLabel("Your full name")
+                    ZStack(alignment: .bottomLeading) {
+                        SignaturePad(strokes: $strokes)
+                        if !SignatureInk.hasInk(strokes) {
+                            Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
+                                .padding(16).allowsHitTesting(false)
+                        }
+                    }
+                    .frame(height: 220).clipShape(RoundedRectangle(cornerRadius: 14))
+                    .accessibilityLabel("Signature box. Sign with your finger.")
+                    .accessibilityIdentifier("customer-summary-signature-pad")
+                    .accessibilityValue(SignatureInk.hasInk(strokes) ? "Signature entered" : "Signature required")
+                    if SignatureInk.hasInk(strokes) { CustomerTextButton(title: "Clear signature", type: type) { strokes = [] } }
+                    CustomerPresentationCommit(title: "Sign summary", enabled: customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes)) == nil,
+                        busy: false, type: type) {
+                        guard let png = SignatureInk.png(strokes) else { return }
+                        let signedAt = ISO8601DateFormatter().string(from: Date())
+                        Task { await coordinator.sign(signerName: name, signedAt: signedAt, png: png) }
+                    }
+                    CustomerTextButton(title: "Back", type: type) { signing = false }
+                } else {
+                    CustomerSecondaryButton(title: "Sign summary", type: type) { signing = true }
+                }
+                if let error = coordinator.errorMessage { Text(error).font(Theme.customerFont(type.body)).foregroundStyle(Theme.destructive) }
+            case .needsRecovery:
+                Text("A previous signature needs checking before another can be started.")
+                    .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                CustomerSecondaryButton(title: "Check signature", type: type) { Task { await coordinator.recover() } }
+            case .signed:
+                if let receipt = coordinator.receipt {
+                    Label("Summary signed by \(receipt.signerName)", systemImage: "checkmark.seal")
+                        .font(Theme.customerFont(type.body)).accessibilityIdentifier("customer-summary-signed")
+                }
+            case .previousResolved:
+                Text("The earlier signature was resolved. Refresh to review the current summary.")
+                    .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+            case .unavailable:
+                Text("Signing isn't available right now. Ask your technician for help.")
+                    .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                CustomerSecondaryButton(title: "Try again", type: type) { Task { await coordinator.inspect() } }
+            }
+        }
+    }
+}
+
+struct CustomerSummaryPayAction: View {
+    @ObservedObject var coordinator: CustomerSummaryDurableCoordinator
+    let allowedWithoutSummarySignature: Bool
+    let title: String
+    let type: CustomerType
+    let pay: () -> Void
+    var body: some View {
+        if allowedWithoutSummarySignature || coordinator.phase == .signed {
+            CustomerPresentationCommit(title: title, enabled: true, busy: false, type: type, action: pay)
+        }
+    }
+}
+
 private struct CustomerInvoicePresentationLoadID: Hashable {
     let invoice: InvoiceRecord
     let sessionGeneration: UUID
@@ -808,7 +900,7 @@ struct CustomerInvoicePresentation: View {
     let financing: Bool
     let onSigned: (InvoiceRecord) -> Void
     let onDone: () -> Void
-    let currentAuthority: () -> Bool
+    let currentAuthority: @MainActor () -> Bool
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
@@ -821,6 +913,8 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
+    @StateObject private var signingRegistry = CustomerSummaryHandoffRegistry()
+    @State private var signingActivation: CustomerSummaryHandoffRegistry.Activation?
     @State private var summary: CustomerInvoiceSummary?
     @State private var summaryAuthority: CustomerHandoffExitAuthority?
     @State private var summaryToken = UUID()
@@ -841,7 +935,7 @@ struct CustomerInvoicePresentation: View {
     private let opensPayChoice: Bool
 
     init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?, financing: Bool = false,
-         initiallySigning: Bool = false, opensPayChoice: Bool = false, currentAuthority: @escaping () -> Bool = { true },
+         initiallySigning: Bool = false, opensPayChoice: Bool = false, currentAuthority: @escaping @MainActor () -> Bool = { true },
          onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
         openedInvoice = invoice
         self.opensPayChoice = opensPayChoice
@@ -913,7 +1007,7 @@ struct CustomerInvoicePresentation: View {
                 await loadCustomerSummary()
                 if verifiedSummary != nil { await loadFinancing() }
             }
-        .onDisappear { summaryToken = UUID(); summary = nil; summaryAuthority = nil }
+        .onDisappear { deactivateSummarySigning(); signingRegistry.retire(); summaryToken = UUID(); summary = nil; summaryAuthority = nil }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -944,6 +1038,10 @@ struct CustomerInvoicePresentation: View {
             }
             Text("Customer summary · not the signed invoice").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             CustomerLinesCard(lines: summaryLines, currency: invoice.currency, type: type, rows: amountRows, readingAccess: readingAccess)
+            if canSign, let summary = verifiedSummary, ["issued", "paid"].contains(summary.status),
+               let consent = summary.validatedConsent, let signingActivation {
+                CustomerSummarySigningControls(coordinator: signingActivation.coordinator, consent: consent, type: type)
+            }
             if let signedBy {
                 Label("Invoice signed by \(signedBy)", systemImage: "signature")
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
@@ -962,8 +1060,13 @@ struct CustomerInvoicePresentation: View {
         return customerAmountRows(amounts, currency: summary.currency, invoice: summary.status != "void")
     }
 
+    private func deactivateSummarySigning() {
+        if let signingActivation { signingRegistry.deactivate(signingActivation.token) }
+        signingActivation = nil
+    }
+
     private func loadCustomerSummary() async {
-        let token = UUID(); summaryToken = token; summary = nil; summaryAuthority = nil; summaryLoading = false
+        let token = UUID(); summaryToken = token; deactivateSummarySigning(); summary = nil; summaryAuthority = nil; summaryLoading = false
         guard currentAuthority(),
               let authority = CustomerHandoffExitAuthority.capture(api: api, session: session),
               authority.organization == invoice.organizationId, session.can("invoice.view", feature: "invoicing") else { return }
@@ -982,6 +1085,12 @@ struct CustomerInvoicePresentation: View {
                 linesRevision: invoice.linesRevision, currentAuthority: current)
             guard current() else { return }
             summary = result; summaryAuthority = authority
+            if canSign, ["issued", "paid"].contains(result.status), result.validatedConsent != nil,
+               let signing = signingRegistry.activate(summary: result, api: api, session: session, authority: authority,
+                   handoffCurrent: currentAuthority) {
+                signingActivation = signing
+                await signing.coordinator.inspect()
+            }
         } catch { }
     }
 
@@ -1159,12 +1268,16 @@ struct CustomerInvoicePresentation: View {
                     Text("Enter a US mobile number to continue.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 }
                 CustomerSecondaryButton(title: "Back", type: type) { payChoice = nil; otherPhone = nil; error = nil }
-            } else if canSign && !authorized && invoice.jobId != nil && ["issued", "paid"].contains(verifiedSummary?.status ?? "") {
-                Text("Signing this customer summary isn't available yet. Ask your technician for help.")
-                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
             } else if verifiedSummary?.status == "issued", due > 0, dueExample != nil || onPay != nil {
-                CustomerPresentationCommit(title: "Pay \(dueText)", enabled: true, busy: false, type: type) { pay() }
+                if let signingActivation {
+                    CustomerSummaryPayAction(coordinator: signingActivation.coordinator, allowedWithoutSummarySignature: authorized || !canSign,
+                        title: "Pay \(dueText)", type: type) { pay() }
+                } else if authorized || !canSign {
+                    CustomerPresentationCommit(title: "Pay \(dueText)", enabled: true, busy: false, type: type) { pay() }
+                } else {
+                    Text("Signing this customer summary isn't available yet. Ask your technician for help.")
+                        .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                }
                 CustomerSecondaryButton(title: "Done", type: type) { onDone() }
             } else {
                 CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
