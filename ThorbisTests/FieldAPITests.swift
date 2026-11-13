@@ -7,6 +7,35 @@ final class FieldAPITests: XCTestCase {
     private let customerID = "00000000-0000-4000-8000-000000000003"
     private let jobID = "00000000-0000-4000-8000-000000000001"
 
+    func testLiveJobEstimateMembershipBypassesCacheOnEveryPage() async throws {
+        let cursor = "00000000-0000-4000-8000-000000000010"
+        let first = "{\"items\":[],\"nextCursor\":\"\(cursor)\"}"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, first), .init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.liveFieldJobEstimateLinks(jobID)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        for request in URLProtocolFixture.recorded {
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+            XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+        }
+        let next = try XCTUnwrap(URLProtocolFixture.recorded.last?.url)
+        XCTAssertEqual(URLComponents(url: next, resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "cursor", value: cursor)])
+    }
+
+    func testLiveJobEstimateMembershipDoesNotUseSavedCopyOffline() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, #"{"items":[]}"#), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "job-membership-live-offline-" + UUID().uuidString
+        _ = try await client.fieldJobEstimateLinks(jobID)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.knownOffline = true
+        _ = try await client.fieldJobEstimateLinks(jobID)
+        do {
+            _ = try await client.liveFieldJobEstimateLinks(jobID)
+            XCTFail("A saved membership list must not establish live approval authority")
+        } catch { }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
     func testJobMediaFirstPageDoesNotEagerlyFetchTheRest() async throws {
         let fixture = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":"next"}"#), .init(200, #"{"items":[]}"#)])
         let client = APIClient(session: fixture, baseURL: "https://app.thorbis.com")
