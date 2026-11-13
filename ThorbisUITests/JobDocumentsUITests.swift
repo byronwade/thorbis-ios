@@ -226,6 +226,69 @@ final class JobDocumentsUITests: XCTestCase {
         }
     }
 
+    func testMoneyShortcutsStayAvailableAfterScrollingToInvoices() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let invoices = app.buttons["job-money-jump-invoices"]
+        XCTAssertTrue(invoices.waitForExistence(timeout: 15))
+        invoices.tap()
+        let invoice = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        XCTAssertTrue(invoice.isHittable)
+        let estimates = app.buttons["job-money-jump-estimates"]
+        XCTAssertTrue(estimates.isHittable, "Switching back to estimates must not require scrolling to the top")
+        estimates.tap()
+        let estimate = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.isHittable)
+        XCTAssertGreaterThanOrEqual(estimate.frame.minY, estimates.frame.maxY, "The pinned shortcut must not cover the estimate")
+    }
+
+    func testMoneyShortcutsRemainAvailableAtLargestTextAfterScrolling() {
+        continueAfterFailure = false
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch.tap()
+        let invoices = app.buttons["job-money-jump-invoices"]
+        XCTAssertTrue(invoices.waitForExistence(timeout: 15)); invoices.tap()
+        let estimates = app.buttons["job-money-jump-estimates"]
+        XCTAssertTrue(estimates.isHittable, "The section switch stays reachable at large text")
+        estimates.tap()
+        let estimate = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.isHittable)
+        XCTAssertGreaterThanOrEqual(estimate.frame.minY, estimates.frame.maxY, "The pinned shortcut must not cover the estimate")
+    }
+
+    func testMoneyShortcutsKeepTheSelectedInvoiceForCollection() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let invoices = app.buttons["job-money-jump-invoices"]
+        XCTAssertTrue(invoices.waitForExistence(timeout: 15)); invoices.tap()
+        let second = app.buttons["job-invoice-\(depositA)"]
+        XCTAssertTrue(second.waitForExistence(timeout: 10))
+        app.scrollClearOfFoot(second)
+        XCTAssertTrue(second.isHittable); second.tap()
+        XCTAssertTrue(app.staticTexts["INV-2240"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let estimates = app.buttons["job-money-jump-estimates"]
+        XCTAssertTrue(estimates.waitForExistence(timeout: 10)); XCTAssertTrue(estimates.isHittable); estimates.tap()
+        XCTAssertTrue(invoices.isHittable); invoices.tap()
+        XCTAssertTrue(second.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(second.frame.minY, invoices.frame.maxY, "The pinned shortcut must not cover the invoice")
+        let selected = app.staticTexts["job-collect-selected-invoice"]
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        XCTAssertTrue(selected.label.contains("INV-2240"), selected.label)
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 10)); collect.tap()
+        let identity = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(identity.waitForExistence(timeout: 10))
+        XCTAssertTrue(identity.label.contains("INV-2240"), identity.label)
+    }
+
     func testMoneySectionJumpsReachInvoicesAndEstimates() {
         continueAfterFailure = false
         let app = preview()
