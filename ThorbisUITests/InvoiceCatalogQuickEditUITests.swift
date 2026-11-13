@@ -23,7 +23,10 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(canvas.waitForExistence(timeout: 10))
         canvas.tap()
         canvas.typeText(" extra detail")
-        app.buttons["Done"].firstMatch.tap()
+        // Keyboard Done only resigns first responder; the canvas commit is the navigation Done.
+        let commit = app.navigationBars.buttons["Done"]
+        XCTAssertTrue(commit.waitForExistence(timeout: 5))
+        commit.tap()
         XCTAssertTrue(canvas.waitForNonExistence(timeout: 10))
         XCTAssertTrue((inline.value as? String ?? "").contains("extra detail"), "The canvas edits must remain in the current invoice draft")
     }
