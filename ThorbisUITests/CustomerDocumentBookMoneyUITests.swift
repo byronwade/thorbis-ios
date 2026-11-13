@@ -2,6 +2,22 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testPartPaidInvoiceOverviewDoesNotSayUnpaid() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        XCTAssertTrue(invoice.label.contains("$150.00"))
+        XCTAssertTrue(invoice.label.contains("Issued"), invoice.label)
+        XCTAssertFalse(invoice.label.contains("Unpaid"), invoice.label)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Issued")).firstMatch.exists)
+    }
     func testInvoiceOverviewAtNormalText() {
         continueAfterFailure = false
         let app = XCUIApplication()
