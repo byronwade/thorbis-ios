@@ -20,7 +20,7 @@ func thorbisSection(_ app: XCUIApplication, _ name: String) -> XCUIElement {
 
 /// The job has loaded with its balance. Since #189 an in-progress job's bar reads "Wrap up · N left"
 /// (collecting is a wrap-up row and Money's bar), so the balance is read from the Money section,
-/// whose spoken label carries it ("Money, $340.00 due"; identifier "job-section-money").
+/// whose spoken label carries it ("Estimates, invoices and payments, $340.00 due"; identifier "job-section-money").
 func thorbisJobBalanceLoaded(_ app: XCUIApplication, _ amount: String) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "job-section-money", amount)).firstMatch
 }
@@ -773,7 +773,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         // At accessibility sizes the section row is one pinned chooser (a40f825), not tabs.
         let tabs = app.buttons["job-section-chooser"]
         XCTAssertTrue(tabs.exists)
-        XCTAssertTrue(tabs.label.contains("Money"))
+        XCTAssertTrue(tabs.label.contains("Estimates"))
         // At accessibility sizes Present scrolls with the content (a40f825) instead of pinning
         // above the bottom edge, so the card must fit between the pinned chooser and the screen's
         // bottom; while Present is still pinned below the card, it must clear that too.

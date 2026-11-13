@@ -1102,8 +1102,8 @@ struct JobDetailView: View {
         switch tab {
         case "Overview": return isOnSite ? "On site" : "Overview"
         case "Money":
-            guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
-            return "Money · \(jobShortMoney(balance, currency: "USD"))"
+            guard let balance = invoiceBalanceCents, balance > 0 else { return "Estimates & invoices" }
+            return "Estimates & invoices · \(jobShortMoney(balance, currency: "USD"))"
         case "Photos": return "Photos"
         default:
             let count = activityCount(job)
@@ -1114,8 +1114,8 @@ struct JobDetailView: View {
     private func spokenSectionLabel(_ tab: String, job: JobRecord) -> String {
         switch tab {
         case "Money":
-            guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
-            return "Money, \(money(balance, currency: "USD"))\u{00A0}due"
+            guard let balance = invoiceBalanceCents, balance > 0 else { return "Estimates, invoices and payments" }
+            return "Estimates, invoices and payments, \(money(balance, currency: "USD"))\u{00A0}due"
         case "Activity":
             let count = activityCount(job)
             return count > 0 ? "Activity, \(count) \(count == 1 ? "entry" : "entries")" : "Activity"
