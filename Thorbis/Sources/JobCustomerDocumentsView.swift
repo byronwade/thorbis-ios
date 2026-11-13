@@ -27,6 +27,7 @@ final class CustomerInvoiceOverviewLoader: ObservableObject {
     @Published private(set) var entries: [String: CustomerInvoiceOverviewEntry] = [:]
     @Published private(set) var loadedCount = 0
     @Published private(set) var loading = false
+    @Published private(set) var failedIDs: Set<String> = []
     private var candidates: [InvoiceRecord] = []
     var canLoadMore: Bool { loadedCount < candidates.count }
     private var token = UUID()
@@ -35,7 +36,7 @@ final class CustomerInvoiceOverviewLoader: ObservableObject {
     private var scope: JobDocumentScope?
     private var authority: CustomerHandoffExitAuthority?
 
-    func retire() { token = UUID(); entries = [:]; loadedCount = 0; loading = false; candidates = []; current = nil; api = nil; scope = nil; authority = nil }
+    func retire() { token = UUID(); entries = [:]; loadedCount = 0; loading = false; failedIDs = []; candidates = []; current = nil; api = nil; scope = nil; authority = nil }
 
     func load(records: [InvoiceRecord], api: APIClient, scope: JobDocumentScope,
               authority: CustomerHandoffExitAuthority, current: @escaping @MainActor (InvoiceRecord) -> Bool) async {
@@ -47,11 +48,23 @@ final class CustomerInvoiceOverviewLoader: ObservableObject {
 
     func loadMore() async {
         guard !loading, canLoadMore, api != nil, scope != nil, authority != nil else { return }
-        let generation = token
-        loading = true
         let end = min(loadedCount + 20, candidates.count)
         let batch = Array(candidates[loadedCount..<end])
         loadedCount = end
+        await fetchBatch(batch)
+    }
+
+    func retryFailed() async {
+        guard !loading else { return }
+        let batch = Array(candidates.filter { failedIDs.contains($0.id) }.prefix(20))
+        guard !batch.isEmpty else { return }
+        await fetchBatch(batch)
+    }
+
+    private func fetchBatch(_ batch: [InvoiceRecord]) async {
+        let generation = token
+        loading = true
+        failedIDs.formUnion(batch.map(\.id))
         defer { if token == generation { loading = false } }
         await withTaskGroup(of: Void.self) { group in
             var iterator = batch.makeIterator()
@@ -73,6 +86,7 @@ final class CustomerInvoiceOverviewLoader: ObservableObject {
                 linesRevision: record.linesRevision, currentAuthority: valid)
             guard valid() else { return }
             entries[record.id] = .init(record: record, summary: summary, authority: authority)
+            failedIDs.remove(record.id)
         } catch { }
     }
 }
@@ -384,6 +398,18 @@ struct JobCustomerDocumentsView: View {
             customerSectionLabel("Invoices", count: invoices?.records.count ?? 0)
             if let invoices {
                 if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
+                if !invoiceOverview.failedIDs.isEmpty && !invoiceOverview.loading {
+                    Button("Retry unavailable invoice amounts") {
+                        #if DEBUG
+                        if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-amount-fails-once") {
+                            PaperPreviewProtocol.restoreDocumentHistory()
+                        }
+                        #endif
+                        Task { await invoiceOverview.retryFailed() }
+                    }
+                    .accessibilityHint("Try loading invoice amounts again")
+                    .frame(minHeight: CustomerModeStyle.target)
+                }
                 if invoiceOverview.canLoadMore {
                     Button(invoiceOverview.loading ? "Loading amounts…" : "Show more invoice amounts") {
                         Task { await invoiceOverview.loadMore() }

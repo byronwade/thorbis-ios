@@ -917,6 +917,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             status = 503
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
         } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-amount-fails-once"),
+                  url.path == "/v1/invoices/00000000-0000-4000-8000-000000002209/customer-presentation",
+                  Self.scenario.lock.withLock({ !Self.scenario.documentHistoryRestored }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample invoice amount unavailable"]
+        } else if PaperPreview.isJobDocumentsPreview,
                   url.path.hasPrefix("/v1/invoices/"), url.path.hasSuffix("/payments"),
                   Self.scenario.lock.withLock({ Self.scenario.failPaymentRecheck }) {
             status = 503

@@ -27,6 +27,9 @@ final class CustomerInvoiceOverviewTests: XCTestCase {
                 routes["/v1/invoices/\(id)/customer-presentation"] = .init(200, String(decoding: try JSONSerialization.data(withJSONObject: payload), as: UTF8.self), gate: gate)
             }
         }
+        let firstPath = "/v1/invoices/\(records[0].id)/customer-presentation"
+        let success = routes[firstPath]!
+        routes[firstPath] = .init(503, "{}", gate: gate)
         let api = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
         let authority = CustomerHandoffExitAuthority(actor: "actor", organization: org, origin: "https://app.thorbis.com",
             sessionGeneration: UUID(), authorityRevision: UUID(), requestGeneration: api.requestGeneration, scopeRevision: api.savedCopyScopeRevision)
@@ -38,10 +41,16 @@ final class CustomerInvoiceOverviewTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
         gate.release(); await task.value
         XCTAssertEqual(URLProtocolFixture.recorded.count, 20)
-        XCTAssertEqual(loader.entries.count, 20)
+        XCTAssertEqual(loader.entries.count, 19)
+        routes[firstPath] = success
+        URLProtocolFixture.setRoutes(routes)
+        XCTAssertEqual(loader.failedIDs, [records[0].id])
+        await loader.retryFailed()
+        XCTAssertTrue(loader.failedIDs.isEmpty)
+        XCTAssertNotNil(loader.entries[records[0].id], "A transient failure must be retried")
         XCTAssertTrue(loader.canLoadMore)
         await loader.loadMore()
-        XCTAssertEqual(URLProtocolFixture.recorded.count, 40)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 21)
         XCTAssertEqual(loader.entries.count, 40, "The next page retains previously verified amounts")
         XCTAssertTrue(loader.canLoadMore)
 
@@ -54,6 +63,7 @@ final class CustomerInvoiceOverviewTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
         loader.retire(); retiredGate.release(); await oldTask.value
         XCTAssertTrue(loader.entries.isEmpty, "Retired responses must never repopulate the overview")
+        XCTAssertTrue(loader.failedIDs.isEmpty, "Retirement must clear retry state")
         XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "A retired batch must not start more requests")
     }
 }

@@ -120,6 +120,21 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [verified], timeout: 15), .completed)
     }
 
+    func testOverviewRetriesUnavailableInvoiceAmount() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-customer-safe-invoice", "--paper-preview-overview-amount-fails-once"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let retry = app.buttons["Retry unavailable invoice amounts"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 15)); thorbisRevealInCustomerView(retry, in: app)
+        XCTAssertTrue(retry.isHittable); retry.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        let verified = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "$340.00"), object: invoice)
+        XCTAssertEqual(XCTWaiter.wait(for: [verified], timeout: 15), .completed)
+        XCTAssertFalse(retry.exists)
+    }
+
     func testOverviewWithNoSummaryDoesNotExposeRawAmount() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"]
