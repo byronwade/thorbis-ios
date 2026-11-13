@@ -141,7 +141,7 @@ final class CustomerPresentationTests: XCTestCase {
         let overflow = line("Credit", 2, Int.min)
         XCTAssertTrue(customerSavingsRows([charge, overflow], currency: "USD", isMember: true).isEmpty)
         let wrongCurrency = FieldLine(id: "currency", description: "Credit", quantity: 1,
-                                      unitPrice: FieldMoney(amount: -100, currency: "EUR"))
+                                      unitPrice: FieldMoney(amount: -100, currency: "EUR"), source: nil)
         XCTAssertTrue(customerSavingsRows([charge, wrongCurrency], currency: "USD", isMember: false).isEmpty)
     }
 }
