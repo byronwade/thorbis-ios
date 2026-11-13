@@ -213,6 +213,9 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
             }
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }
             if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" {
+                if id == Self.b, flags.contains("--handoff-test-second-price-fails-once"), requests.filter({ $0["method"] == "GET" && $0["path"] == path }).count == 1 {
+                    return .init(status:503,payload:["title":"Sample estimate unavailable","status":503])
+                }
                 if id == Self.b, flags.contains("--paper-preview-handoff-second-details-fail") {
                     return .init(status:503,payload:["title":"Sample estimate unavailable","status":503])
                 }
