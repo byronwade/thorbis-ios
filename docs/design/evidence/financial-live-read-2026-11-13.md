@@ -19,3 +19,15 @@ This is not an integrated URLSession test, iOS build, server freshness proof,
 permission check, or draft-recovery proof. The two URLProtocol fixture tests in
 `FieldAPITests.swift` remain unrun. Live financial reads intentionally fail when
 offline; ordinary read-only field views retain their existing offline behavior.
+
+## Integrated iPhone simulator check
+
+On 13 November, four selected `FieldAPITests` passed in
+`financial-live-read-green-retry-1113.log`: invoice and estimate requests each
+used `reloadIgnoringLocalCacheData` and `Cache-Control: no-cache`; ordinary
+reads used the existing scoped saved copy while offline, and their respective
+live reads attempted the network and rejected the offline result. The first
+build did not execute tests because two new fixture references failed to compile;
+commit `f60b50d7` corrected them before the passing retry. This tests the app's
+URLProtocol path on an iPhone simulator; it does not prove freshness of a server
+or intermediary, authorization after role changes, or safe draft recovery.
