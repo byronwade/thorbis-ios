@@ -2,6 +2,42 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoRollupUITests: XCTestCase {
+    func testPhotoGroupJobLinkAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-photo-rollup", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let chooser = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Showing ")).firstMatch
+        for _ in 0..<20 where !chooser.isHittable { app.swipeUp() }
+        XCTAssertTrue(chooser.waitForExistence(timeout: 20)); chooser.tap()
+        let photos = app.buttons["Photos"].firstMatch
+        XCTAssertTrue(photos.waitForExistence(timeout: 10)); photos.tap()
+        let job = app.buttons["customer-records-job-00000000-0000-4000-8000-000000002214"]
+        for _ in 0..<20 where !job.isHittable { app.swipeUp() }
+        XCTAssertTrue(job.waitForExistence(timeout: 20))
+        XCTAssertTrue(job.isHittable)
+        XCTAssertGreaterThanOrEqual(job.frame.height, 44)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Customer photo group job navigation largest text"; screenshot.lifetime = .keepAlways; add(screenshot)
+        job.tap()
+        XCTAssertTrue(app.buttons["job-section-chooser"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
+    }
+    func testSecondPhotoGroupOpensItsOwnJob() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-photo-rollup"]
+        app.launch()
+        let photos = app.buttons["Photos"].firstMatch
+        XCTAssertTrue(photos.waitForExistence(timeout: 20)); photos.tap()
+        let job = app.buttons["customer-records-job-00000000-0000-4000-8000-000000002201"]
+        for _ in 0..<30 where !job.isHittable { app.swipeUp() }
+        XCTAssertTrue(job.exists && job.isHittable)
+        XCTAssertTrue(job.label.contains("Drain cleaning"), job.label)
+        job.tap()
+        XCTAssertTrue(app.buttons["job-section-money"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Drain cleaning"].waitForExistence(timeout: 10))
+    }
     func testPhotoGroupClearlyOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()

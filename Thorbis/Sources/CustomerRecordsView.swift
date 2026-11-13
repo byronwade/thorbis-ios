@@ -275,14 +275,22 @@ struct CustomerRecordsView: View {
     private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false) -> some View {
         NavigationLink(value: PaperRoute.job(jobID)) {
             // A quiet link to the job that groups the records under it, so it never reads as one of them.
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
-                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                Spacer(minLength: 8)
-                Text("Open job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: true, vertical: false).accessibilityHidden(true)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                if dynamicTypeSize.isAccessibilitySize {
+                    Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if !dynamicTypeSize.isAccessibilitySize {
+                        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    }
+                    Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Text("Open job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: true, vertical: false).accessibilityHidden(true)
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
             }
             .frame(minHeight: 44)
             .contentShape(Rectangle())
