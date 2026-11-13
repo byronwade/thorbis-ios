@@ -1052,11 +1052,12 @@ struct CommsMailSheet: View {
                     .accessibilityIdentifier("inbox-test-conflict")
             }
             #endif
-            if let recoveryCandidate {
+            if let recoveryCandidate, store.isActive, recoveryCurrent() {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("A protected email to \(recoveryCandidate.to) is available. It may be older or already saved; review drafts before sending.")
                         .font(Theme.font(14)).fixedSize(horizontal: false, vertical: true)
                     Button("Restore email draft") {
+                        guard store.isActive, recoveryCurrent() else { return }
                         var restored = draft; recoveryCandidate.applying(to: &restored); draft = restored; self.recoveryCandidate = nil
                     }
                     Button("Discard recovered email", role: .destructive) {

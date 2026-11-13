@@ -159,7 +159,7 @@ struct JobContactsSection: View {
     let failed: Bool
     /// When known, each real contact opens its own record; the account fallback never does.
     var customerID: String? = nil
-    var jobID: String? = nil
+    let jobID: String
     /// The account's name as the job already shows it: a contact with the same name leads with
     /// its role instead of repeating the name (each fact once).
     var customerName: String? = nil
@@ -193,7 +193,7 @@ struct JobContactsSection: View {
                             .jobPanelJoinsNext()
                     }
                     ForEach(people) { person in
-                        JobContactRow(person: person, emailContext: "job:\(jobID ?? "unknown"):contact:\(person.id)",
+                        JobContactRow(person: person, emailContext: "job:\(jobID):contact:\(person.id)",
                                       hidesName: customerName.map { $0.localizedCaseInsensitiveCompare(person.name) == .orderedSame } ?? false,
                                       route: customerID.flatMap { id in
                                           person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)

@@ -1413,6 +1413,7 @@ private struct CustomerContactIcon: View {
     @Environment(\.inboxEmail) private var inboxEmail
     let value: String
     let isPhone: Bool
+    let emailContext: String
     var size: CGFloat = 30
     private var url: URL? {
         let address = isPhone ? value.filter { $0.isNumber || $0 == "+" } : value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
@@ -1422,7 +1423,7 @@ private struct CustomerContactIcon: View {
     var body: some View {
         if let url {
             Button {
-                if isPhone { openURL(url) } else { inboxEmail(url) }
+                if isPhone { openURL(url) } else { inboxEmail(url, context: emailContext) }
             } label: {
                 Image(systemName: isPhone ? "phone" : "envelope").font(Theme.font(size == 46 ? 17 : 13)).foregroundStyle(Theme.foreground)
                     .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15, style: .continuous))

@@ -145,10 +145,10 @@ final class InboxEmailPresenter: ObservableObject {
 }
 
 struct InboxEmailAction {
-    @MainActor func callAsFunction(_ mail: MailDraft, context: String? = nil) {
-        InboxEmailPresenter.shared.open(mail, context: context ?? "recipient:\(mail.recipient.lowercased())")
+    @MainActor func callAsFunction(_ mail: MailDraft, context: String) {
+        InboxEmailPresenter.shared.open(mail, context: context)
     }
-    @MainActor func callAsFunction(_ url: URL, context: String? = nil) {
+    @MainActor func callAsFunction(_ url: URL, context: String) {
         guard let mail = MailDraft(mailtoURL: url) else { return }
         callAsFunction(mail, context: context)
     }

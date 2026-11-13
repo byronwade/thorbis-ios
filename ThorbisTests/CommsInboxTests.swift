@@ -52,7 +52,7 @@ final class CommsInboxTests: XCTestCase {
         }
         let owner = try scope(actor, "https://app.thorbis.com")
         let wrongActor = try scope(otherActor, "https://app.thorbis.com")
-        let wrongOrigin = try scope(actor, "https://other.thorbis.com")
+        let wrongOrigin = try scope(actor, "http://localhost:8787")
         let wrongJob = try XCTUnwrap(CommsEmailRecoveryScope(actorID: actor, organizationID: org,
             origin: "https://app.thorbis.com", context: "job:two", namespace: namespace))
         XCTAssertFalse(owner.account.contains("customer@example.com"))
