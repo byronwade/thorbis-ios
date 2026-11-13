@@ -180,6 +180,9 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
             XCTAssertFalse(invalidOrigin.isValid); XCTAssertThrowsError(try store.load(scope: invalidOrigin))
         }
         XCTAssertNotNil(try store.load(scope: pendingScope))
+        let missingMediaAPI = APIClient(session: URLProtocolFixture.session([.init(409, "{\"title\":\"Signature image is unavailable\"}")]), baseURL: "https://app.thorbis.com")
+        do { _ = try await missingMediaAPI.replayCustomerSummaryPending(restored, scope: pendingScope, currentAuthority: { true }); XCTFail("Missing media cannot prove a prior submission failed") } catch { }
+        XCTAssertNotNil(try store.load(scope: pendingScope), "An ambiguous conflict must retain the pending attempt")
         let changedJob = CustomerSummaryPendingScope(origin: pendingScope.origin, actorID: pendingScope.actorID, organizationID: organization, customerID: customer, jobID: "00000000-0000-4000-8000-000000000099", invoiceID: invoice)
         XCTAssertThrowsError(try store.load(scope: changedJob), "Changed job metadata cannot hide an unresolved invoice attempt")
         XCTAssertThrowsError(try store.complete(scope: pendingScope, proof: proof, currentAuthority: { false }))
