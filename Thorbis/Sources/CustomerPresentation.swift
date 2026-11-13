@@ -170,8 +170,11 @@ struct CustomerEstimatePresentation: View {
     }
     private var verifiedCustomerLines: [FieldLine]? {
         guard let amounts = CustomerDocumentAmounts(lines: flow.lines, currency: flow.currency),
-              amounts.total == flow.total else { return nil }
-        return customerEstimateProjection(flow.lines, currency: flow.currency)
+              amounts.total == flow.total,
+              let projected = customerEstimateProjection(flow.lines, currency: flow.currency),
+              let visibleAmounts = CustomerDocumentAmounts(lines: projected, currency: flow.currency),
+              visibleAmounts.total == amounts.total else { return nil }
+        return projected
     }
 
     var body: some View {
