@@ -96,6 +96,13 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(replace.isHittable); replace.tap()
         XCTAssertTrue(body.waitForNonExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["Private customer details"].exists)
+        let reopen = app.buttons["Email"].firstMatch
+        XCTAssertTrue(reopen.waitForExistence(timeout: 20)); reopen.tap()
+        let recover = app.buttons["Restore email draft"]
+        XCTAssertTrue(recover.waitForExistence(timeout: 10)); recover.tap()
+        let recoveredBody = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(recoveredBody.waitForExistence(timeout: 10))
+        XCTAssertEqual(recoveredBody.value as? String, "Private customer details")
     }
 
     func testSendWithMailPreservesFieldsAndReturnsToDraft() {
