@@ -461,8 +461,11 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
         running = true; let token = generation; phase = .checking; receipt = nil
         defer { if generation == token { running = false } }
         do {
-            guard summary.validatedConsent != nil, summary.organizationId == scope.organizationID,
-                  summary.customerId == scope.customerID, summary.jobId == scope.jobID, summary.invoiceId == scope.invoiceID else { phase = .unavailable; return }
+            guard let canonical = scope.canonical, summary.validatedConsent != nil,
+                  UUID(uuidString: summary.organizationId) == UUID(uuidString: canonical.organizationID),
+                  UUID(uuidString: summary.customerId) == UUID(uuidString: canonical.customerID),
+                  summary.jobId.flatMap(UUID.init(uuidString:)) == UUID(uuidString: canonical.jobID),
+                  UUID(uuidString: summary.invoiceId) == UUID(uuidString: canonical.invoiceID) else { phase = .unavailable; return }
             if try store.load(scope: scope) != nil { phase = .needsRecovery; return }
             let status = try await lookup()
             guard valid(token) else { return }
