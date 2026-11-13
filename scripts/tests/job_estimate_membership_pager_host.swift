@@ -59,6 +59,14 @@ struct JobEstimateLink: Sendable { let id: String; let jobId: String; let estima
             preconditionFailure("Repeated cursor accepted")
         } catch is JobEstimateMembershipPager.InvalidPage { }
         precondition(loop.estimateIDs == ["b"] && !loop.scanUsedOnlyFreshResponses && loop.canLoadMore)
+        let malformed = JobEstimateMembershipPager(jobID: "job")
+        do {
+            try await malformed.loadNext(isCurrent: { current }) { _ in
+                .init(links: [.init(id: "2", jobId: "job", estimateId: "b")], nextCursor: "wrong", isAuthoritative: true)
+            }
+            preconditionFailure("Cursor must name the last returned link")
+        } catch is JobEstimateMembershipPager.InvalidPage {}
+        precondition(malformed.estimateIDs.isEmpty && malformed.canLoadMore)
         let retry = JobEstimateMembershipPager(jobID: "job")
         enum Offline: Error { case unavailable }
         do {

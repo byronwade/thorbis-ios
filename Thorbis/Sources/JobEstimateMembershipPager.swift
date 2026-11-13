@@ -46,7 +46,10 @@ final class JobEstimateMembershipPager {
               Set(page.links.map { $0.id.lowercased() }).count == page.links.count,
               page.links.allSatisfy({ !seenLinks.contains($0.id.lowercased()) }) else { throw InvalidPage() }
         if let cursor = page.nextCursor {
-            guard !cursor.isEmpty, cursor.lowercased() != requestCursor?.lowercased(), !seenCursors.contains(cursor.lowercased()), !page.links.isEmpty else { throw InvalidPage() }
+            // The canonical jobs endpoint uses the last returned link UUID as its keyset cursor.
+            guard !cursor.isEmpty, cursor.lowercased() != requestCursor?.lowercased(),
+                  !seenCursors.contains(cursor.lowercased()),
+                  page.links.last?.id.lowercased() == cursor.lowercased() else { throw InvalidPage() }
         }
         // Commit the page atomically only after every identity and cursor check succeeds.
         for link in page.links {
