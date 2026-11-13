@@ -16,7 +16,14 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let currency: String
 
     func validate(for expected: EstimateRecord, allowApprovedForReading: Bool = false) throws {
-        guard !lines.isEmpty, (options ?? []).allSatisfy({ !$0.lines.isEmpty }),
+        guard currency == "USD", !lines.isEmpty,
+              let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
+              amounts.total == totalAmount,
+              (options ?? []).allSatisfy({ option in
+                  guard option.currency == currency, !option.lines.isEmpty,
+                        let optionAmounts = CustomerDocumentAmounts(lines: option.lines, currency: currency) else { return false }
+                  return optionAmounts.total == option.totalAmount
+              }),
               UUID(uuidString: id) != nil,
               estimateId == expected.id, organizationId == expected.organizationId,
               customerId == expected.customerId, locationId == expected.locationId,
