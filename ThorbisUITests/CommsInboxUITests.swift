@@ -37,6 +37,20 @@ final class CommsInboxUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
+    func testCustomerEmailOpensPreaddressedThorbisComposer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer"]
+        app.launch()
+        let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        XCTAssertEqual(to.value as? String, "danielle@example.invalid")
+        XCTAssertTrue(app.buttons["Send with Mail"].exists)
+        XCTAssertTrue(app.buttons["Save draft"].exists)
+    }
+
     func testSwitchToCallsAndOpenACallersThread() {
         let app = launch()
         choose(app, menu: "inbox-section-menu", row: "Calls")
