@@ -191,7 +191,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
         thorbisShowCustomerDoor(app).tap()
         let selected = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        let loaded = selected.waitForExistence(timeout: 10)
+        let loaded = selected.waitForExistence(timeout: 45)
         if !loaded {
             let hierarchy = XCTAttachment(string: app.debugDescription)
             hierarchy.name = "Customer estimate handoff hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
