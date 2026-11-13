@@ -117,6 +117,25 @@ final class CustomerPresentationTests: XCTestCase {
         XCTAssertTrue(SignatureInk.hasInk([[CGPoint(x: 1, y: 1), CGPoint(x: 4, y: 4)]]))
     }
 
+    func testCustomerSavingsDoesNotInferMemberDiscountFromPriceBookProvenance() {
+        let item = FieldLine(id: "manual-markdown", description: "Repair", quantity: 1,
+                             unitPrice: FieldMoney(amount: 8000, currency: "USD"),
+                             source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 10000, currency: "USD")))
+        XCTAssertTrue(customerSavingsRows([item], currency: "USD", isMember: true).isEmpty)
+    }
+
+    func testCustomerSavingsOnlyIncludesExplicitVisibleCredits() {
+        let charge = line("Work", 1, 10000)
+        let visible = line("Courtesy credit", 1, -500)
+        let hidden = FieldLine(id: "hidden", description: "Internal credit", quantity: 1,
+                               unitPrice: FieldMoney(amount: -2000, currency: "USD"),
+                               source: nil, showToCustomer: false)
+        let result = customerSavingsRows([charge, visible, hidden], currency: "USD", isMember: true)
+        XCTAssertEqual(result, [CustomerAmountRow(label: "Discounts and credits",
+                                                   amount: "−\(money(500, currency: "USD"))",
+                                                   emphasis: false)])
+    }
+
     func testSavingsCountOnlyPriceBookLinesChargedBelowList() {
         let member = FieldLine(id: "m", description: "Tune-up", quantity: 2, unitPrice: FieldMoney(amount: 17_000, currency: "USD"),
                                source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD")))
