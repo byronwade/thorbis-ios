@@ -208,6 +208,26 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
     }
 
+    func testLiveInvoiceReadBypassesURLCache() async throws {
+        let id = "00000000-0000-4000-8000-00000000000a"
+        let reply = #"{"id":"00000000-0000-4000-8000-00000000000a","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","origin":"manual","sourceOperationKey":"manual:test","status":"draft","lines":[],"linesRevision":1,"amountPaid":0,"currency":"USD","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.liveFieldInvoice(id)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+    }
+
+    func testLiveEstimateReadBypassesURLCache() async throws {
+        let id = "00000000-0000-4000-8000-000000000008"
+        let reply = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"draft","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.liveFieldEstimate(id)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+    }
+
     func testCreatingEstimateUsesMinorUnitsAndCanonicalRoute() async throws {
         let reply = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"draft","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
         let client = APIClient(session: URLProtocolFixture.session([.init(201, reply)]), baseURL: "https://app.thorbis.com")
