@@ -39,6 +39,12 @@ private struct CustomerHandoffEstimateDetails: View {
                     Button("Replace sample revision shortly") { previewChange(revise: true) }
                     Button("Remove sample estimate shortly") { previewChange(revise: false) }
                 }
+                if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
+                    Button("Fail sample refresh") {
+                        JobEstimateHandoffPreview.shared.interruptNextMembership()
+                        Task { await model.refresh() }
+                    }
+                }
                 #endif
                 if !current {
                     CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
@@ -431,7 +437,9 @@ struct JobEstimateHandoffView: View {
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty {
-                Text(model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Text(model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                     ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else if record.status == "approved" {
                 Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else {
