@@ -115,22 +115,41 @@ struct ContactCardDraft: Equatable {
 
 /// An email the person writes and sends from their own account.
 struct MailDraft: Equatable {
-    var recipient: String
-    var subject: String?
+    let recipients: [String]
+    let cc: [String]
+    let bcc: [String]
+    let subject: String?
+    let body: String?
+    var recipient: String { recipients[0] }
 
     init?(recipient: String?, subject: String? = nil) {
-        let address = recipient?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard address.contains("@"), !address.contains(where: \.isWhitespace) else { return nil }
-        self.recipient = address
-        self.subject = subject?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard let recipient else { return nil }
+        self.init(recipients: [recipient], cc: [], bcc: [], subject: subject, body: nil)
     }
 
-    /// The fallback when Mail has no account: another mail app opens with the same draft.
+    init?(recipients: [String], cc: [String], bcc: [String], subject: String?, body: String?) {
+        func cleaned(_ values: [String]) -> [String]? {
+            let trimmed = values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard trimmed.allSatisfy({ $0.contains("@") && !$0.contains(where: \.isWhitespace) }) else { return nil }
+            return trimmed
+        }
+        guard let to = cleaned(recipients), !to.isEmpty, let cc = cleaned(cc), let bcc = cleaned(bcc) else { return nil }
+        self.recipients = to; self.cc = cc; self.bcc = bcc
+        self.subject = subject?.isEmpty == true ? nil : subject
+        self.body = body
+    }
+
+    /// Another mail app can open the same draft when the system composer is unavailable.
     var mailtoURL: URL? {
         var components = URLComponents()
         components.scheme = "mailto"
-        components.path = recipient
-        if let subject { components.queryItems = [URLQueryItem(name: "subject", value: subject)] }
+        components.path = recipients.joined(separator: ",")
+        var query: [URLQueryItem] = []
+        if !cc.isEmpty { query.append(URLQueryItem(name: "cc", value: cc.joined(separator: ","))) }
+        if !bcc.isEmpty { query.append(URLQueryItem(name: "bcc", value: bcc.joined(separator: ","))) }
+        if let subject { query.append(URLQueryItem(name: "subject", value: subject)) }
+        if let body { query.append(URLQueryItem(name: "body", value: body)) }
+        if !query.isEmpty { components.queryItems = query }
         return components.url
     }
 }
@@ -274,8 +293,11 @@ private struct MailComposer: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> MFMailComposeViewController {
         let controller = MFMailComposeViewController()
-        controller.setToRecipients([draft.recipient])
+        controller.setToRecipients(draft.recipients)
+        if !draft.cc.isEmpty { controller.setCcRecipients(draft.cc) }
+        if !draft.bcc.isEmpty { controller.setBccRecipients(draft.bcc) }
         if let subject = draft.subject { controller.setSubject(subject) }
+        if let body = draft.body { controller.setMessageBody(body, isHTML: false) }
         controller.mailComposeDelegate = context.coordinator
         return controller
     }

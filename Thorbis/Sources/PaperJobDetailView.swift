@@ -146,6 +146,7 @@ struct JobDetailView: View {
     @State private var openedCustomerViewOnArrival = false
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
     @Environment(\.dynamicTypeSize) private var typeSize
 
     /// Photos reuse Activity's job-scoped media view, but have their own direct section.
@@ -695,7 +696,7 @@ struct JobDetailView: View {
                 handoff = JobCalendarDraft.make(job: job, customerName: store.customers.first { $0.id == job.customerId }?.name, locations: customerLocations).map(DeviceHandoff.calendar)
             }
         case .email:
-            return ThorbisMenuItem("Email customer", icon: "envelope") { handoff = customerEmail(job).map(DeviceHandoff.mail) }
+            return ThorbisMenuItem("Email customer", icon: "envelope") { if let mail = customerEmail(job) { inboxEmail(mail) } }
         case .assign:
             return ThorbisMenuItem(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician", icon: "person.crop.circle.badge.plus") { showAssign = true }
         case .billWithoutEstimate:

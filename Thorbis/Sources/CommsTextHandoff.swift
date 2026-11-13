@@ -93,3 +93,72 @@ private struct InboxTextPresenterModifier: ViewModifier {
 extension View {
     func inboxTextPresenter() -> some View { modifier(InboxTextPresenterModifier()) }
 }
+
+/// A preaddressed email opens in the same scoped, device-local inbox composer.
+@MainActor
+final class InboxEmailPresenter: ObservableObject {
+    static let shared = InboxEmailPresenter()
+    struct Opening: Identifiable {
+        let id = UUID()
+        let actorID: String
+        let organizationID: String
+        let sessionGeneration: UUID
+        let mail: MailDraft
+    }
+    @Published var opening: Opening?
+    fileprivate var identity: (actorID: String, organizationID: String, generation: UUID)?
+
+    func open(_ mail: MailDraft) {
+        guard let identity else { return }
+        opening = Opening(actorID: identity.actorID, organizationID: identity.organizationID,
+                          sessionGeneration: identity.generation, mail: mail)
+    }
+}
+
+struct InboxEmailAction {
+    @MainActor func callAsFunction(_ mail: MailDraft) { InboxEmailPresenter.shared.open(mail) }
+    @MainActor func callAsFunction(_ url: URL) {
+        guard url.scheme?.lowercased() == "mailto",
+              let address = URLComponents(url: url, resolvingAgainstBaseURL: false)?.path,
+              let mail = MailDraft(recipient: address) else { return }
+        InboxEmailPresenter.shared.open(mail)
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var inboxEmail = InboxEmailAction()
+}
+
+private struct InboxEmailPresenterModifier: ViewModifier {
+    @EnvironmentObject private var session: SessionController
+    @ObservedObject private var presenter = InboxEmailPresenter.shared
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { bind() }
+            .onChange(of: session.generation) { _, _ in bind() }
+            .onChange(of: session.user?.id) { _, _ in bind() }
+            .onChange(of: session.activeOrganization?.id) { _, _ in bind() }
+            .onDisappear { presenter.identity = nil; presenter.opening = nil }
+            .sheet(item: $presenter.opening) { opening in
+                CommsMailSheet(draft: CommsMailDraft(to: opening.mail.recipients.joined(separator: ", "), subject: opening.mail.subject ?? ""),
+                               store: CommsLocalStore.shared(actorID: opening.actorID, organizationID: opening.organizationID),
+                               onSaved: { _ in presenter.opening = nil }, onClose: { presenter.opening = nil })
+            }
+    }
+
+    private func bind() {
+        guard let actor = session.user?.id, let org = session.activeOrganization?.id else {
+            presenter.identity = nil; presenter.opening = nil; return
+        }
+        if let opening = presenter.opening,
+           opening.actorID != actor || opening.organizationID != org || opening.sessionGeneration != session.generation {
+            presenter.opening = nil
+        }
+        presenter.identity = (actor, org, session.generation)
+    }
+}
+
+extension View {
+    func inboxEmailPresenter() -> some View { modifier(InboxEmailPresenterModifier()) }
+}

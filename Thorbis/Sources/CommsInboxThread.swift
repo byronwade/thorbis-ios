@@ -960,6 +960,7 @@ struct CommsMailSheet: View {
     @State private var showCopies = false
     @State private var confirmClose = false
     @State private var saveFailure: CommsLocalStore.MailSaveFailure?
+    @State private var mailHandoff: DeviceHandoff?
     private let original: CommsLocalStore.Mail
     @FocusState private var toFocused: Bool
 
@@ -977,6 +978,11 @@ struct CommsMailSheet: View {
         return !mail.to.isEmpty || !mail.cc.isEmpty || !mail.bcc.isEmpty ||
             !mail.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
             !mail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var deviceMail: MailDraft? {
+        let mail = draft.mail
+        return MailDraft(recipients: mail.to, cc: mail.cc, bcc: mail.bcc, subject: mail.subject, body: mail.body)
     }
 
     var body: some View {
@@ -1049,6 +1055,16 @@ struct CommsMailSheet: View {
                 }
             }
             VStack(spacing: 4) {
+                Button {
+                    guard store.isActive, let mail = deviceMail else { return }
+                    mailHandoff = .mail(mail)
+                } label: {
+                    Text("Send with Mail").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(deviceMail == nil)
+                .accessibilityHint("Opens your mail app with this message. Thorbis does not mark it sent.")
                 Button { commit(send: true) } label: { Text("Queue on device").inkCommit(enabled: ready) }
                     .buttonStyle(PressStyle())
                     .disabled(!ready || saveFailure == .storage)
@@ -1063,6 +1079,7 @@ struct CommsMailSheet: View {
             }
         }
         .thorbisSheetPresentation([.large])
+        .deviceHandoffs($mailHandoff)
         .interactiveDismissDisabled(hasChanges && store.isActive)
         .disabled(!store.isActive)
         .onAppear { if !store.isActive { onClose() } }

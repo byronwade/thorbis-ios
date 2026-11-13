@@ -792,6 +792,7 @@ struct PaperQuickActions: View {
     var name: String? = nil
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var dialable: String? {
@@ -821,7 +822,7 @@ struct PaperQuickActions: View {
                 action("Call", symbol: "phone", label: "Call", stacked: stacked) { openURL(call) }
                 action("Text", symbol: "message", label: "Text", stacked: stacked) { inboxText(text, name: name, openURL: openURL) }
             }
-            if let mail { action("Email", symbol: "envelope", label: "Email", stacked: stacked) { openURL(mail) } }
+            if let mail { action("Email", symbol: "envelope", label: "Email", stacked: stacked) { inboxEmail(mail) } }
             if let directions { action("Directions", symbol: "arrow.triangle.turn.up.right.diamond", label: "Directions in Maps", stacked: stacked) { openURL(directions) } }
         }
         .fixedSize(horizontal: false, vertical: true)

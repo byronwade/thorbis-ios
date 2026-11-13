@@ -149,7 +149,7 @@ struct ThorbisApp: App {
             case .choosingWorkspace, .noWorkspace:
                 WorkspaceSelectionView()
             case .ready:
-                RootView().id(session.generation).businessSetupPrompt().inboxTextPresenter()
+                RootView().id(session.generation).businessSetupPrompt().inboxTextPresenter().inboxEmailPresenter()
             }
         }
     }
