@@ -782,6 +782,7 @@ struct BuilderLineRow: View {
         .sheet(item: $descriptionOpening) { opening in
             SheetSurface {
                 if isEnabled, opening.actorID == session.user?.id,
+                   opening.organizationID == session.activeOrganization?.id,
                    opening.generation == session.generation,
                    opening.authorityRevision == session.authorityRevision {
                     NavigationStack {
@@ -806,6 +807,7 @@ struct BuilderLineRow: View {
             }
         }
         .onChange(of: session.generation) { _, _ in descriptionOpening = nil }
+        .onChange(of: session.activeOrganization?.id) { _, _ in descriptionOpening = nil }
         .onChange(of: session.authorityRevision) { _, _ in descriptionOpening = nil }
         .onChange(of: isEnabled) { _, enabled in if !enabled { descriptionOpening = nil } }
     }
@@ -880,9 +882,10 @@ struct BuilderLineRow: View {
                 menu.padding(.trailing, -10)
             }
             Button("Edit full description") {
-                guard isEnabled, let actorID = session.user?.id else { return }
+                guard isEnabled, let actorID = session.user?.id,
+                      let organizationID = session.activeOrganization?.id else { return }
                 focus.wrappedValue = nil
-                descriptionOpening = LineDescriptionOpening(actorID: actorID, generation: session.generation,
+                descriptionOpening = LineDescriptionOpening(actorID: actorID, organizationID: organizationID, generation: session.generation,
                                                             authorityRevision: session.authorityRevision)
             }
             .font(Theme.font(14, weight: .medium))
@@ -992,6 +995,7 @@ struct BuilderLineRow: View {
 private struct LineDescriptionOpening: Identifiable {
     let id = UUID()
     let actorID: String
+    let organizationID: String
     let generation: UUID
     let authorityRevision: UUID
 }
