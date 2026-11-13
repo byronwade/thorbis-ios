@@ -349,7 +349,11 @@ struct JobEstimateHandoffView: View {
                                     Image(systemName: model.selection.optionIDs[record.id] == option.id ? "largecircle.fill.circle" : "circle")
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
-                                        Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                                            Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        } else {
+                                            Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                                        }
                                     }
                                 }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
@@ -377,10 +381,14 @@ struct JobEstimateHandoffView: View {
         let state = model.selectedIDs.contains(record.id) ? "Selected" : "Not selected"
         let price: String
         if let option = model.options(for: record.id).first(where: { $0.id == model.selection.optionIDs[record.id] }) {
-            price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            } else {
+                price = "\(option.title), price needs current terms"
+            }
         } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
             price = money(revision.totalAmount, currency: revision.currency)
-        } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+        } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
         } else {
@@ -407,7 +415,7 @@ struct JobEstimateHandoffView: View {
                 Text(money(amount, currency: option.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
                 Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+            } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty {
