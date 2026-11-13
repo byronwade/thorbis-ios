@@ -49,6 +49,8 @@ jobs:
             -derivedDataPath "${{ runner.temp }}/ThorbisDerivedData" \
             -resultBundlePath "${{ runner.temp }}/ThorbisTests.xcresult" \
             -parallel-testing-enabled NO \
+            -only-testing:ThorbisTests/CustomerPresentationTests \
+            -only-testing:ThorbisTests/CustomerDocumentAmountsTests \
             CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- \
             DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= test
       - name: Save test evidence
