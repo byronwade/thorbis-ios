@@ -414,7 +414,7 @@ private struct CustomerInvoiceBookPage: View {
             }
         }
         .overlay(alignment: .top) { Text("CHILD TRACE: \(diagnosticSignTap ? "tapped" : "not tapped") · parent after call: \(diagnosticParentAfterSign) · stage: \(diagnosticStage)").font(.caption).accessibilityIdentifier("invoice-child-trace").allowsHitTesting(false) }
-        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in diagnosticStage = UserDefaults.standard.string(forKey: "isolated-invoice-stage") ?? "not started" }
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in diagnosticStage = (UserDefaults.standard.string(forKey: "isolated-invoice-stage") ?? "not started") + " · callback owner: " + (UserDefaults.standard.string(forKey: "isolated-invoice-callback-owner") ?? "none") + " · " + (UserDefaults.standard.string(forKey: "isolated-invoice-binding") ?? "no setter") }
         .task(id: original) { await model.load() }
         .onChange(of: model.historyComplete) { _, complete in
             guard complete, !choseInitialPaymentVisibility else { return }
