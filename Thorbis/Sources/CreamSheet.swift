@@ -340,10 +340,7 @@ struct PlacesList: View {
                     let expanded = group.section == .work ? !workCollapsed : (workspaceExpansion[group.section] ?? group.expanded)
                     let workspaceID = "\(idPrefix)-workspace-\(group.section.rawValue.lowercased())"
                     let currentItem = group.items.first(where: isCurrent)
-                    Button {
-                        if group.section == .work { workCollapsed = expanded }
-                        else { workspaceExpansion[group.section] = !expanded }
-                    } label: {
+                    Button { toggleWorkspace(group.section, expanded: expanded) } label: {
                         HStack(alignment: .center, spacing: 12) {
                             PlaceRowIcon(symbol: first.symbol, tint: first.sidebarTint, filled: false)
                             Text(group.section.rawValue)
@@ -370,6 +367,8 @@ struct PlacesList: View {
                     .accessibilityValue(expanded ? "Expanded" : "Collapsed")
                     .accessibilityHint(expanded ? "Hides places" :
                                        (currentItem.map { "Shows places. Current place: \(title($0))" } ?? "Shows places"))
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { toggleWorkspace(group.section, expanded: expanded) }
                     .accessibilityIdentifier(workspaceID)
                     if expanded {
                         ForEach(group.items) { item in place(item).padding(.leading, 16) }
@@ -406,6 +405,11 @@ struct PlacesList: View {
             guard expected != nil else { return }
             await recordFavorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
         }
+    }
+
+    private func toggleWorkspace(_ section: PlaceSection, expanded: Bool) {
+        if section == .work { workCollapsed = expanded }
+        else { workspaceExpansion[section] = !expanded }
     }
 
     private func place(_ item: MenuItem, prefix: String? = nil) -> some View {
