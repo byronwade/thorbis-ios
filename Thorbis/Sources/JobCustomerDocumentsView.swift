@@ -93,7 +93,7 @@ struct JobCustomerDocumentsView: View {
                     unavailableEstimates: canViewEstimates && estimates?.scope == scope ? estimates?.unavailableIDs ?? [] : [],
                     initial: initial, actionError: error, refresh: refresh,
                     reviewEstimate: { id in Task { await openEstimate(id, decision: true) } },
-                    signInvoice: { id in Task { await openInvoice(id, decision: true, sign: true) } },
+                    signInvoice: { id in print("TRACE invoice sign button"); Task { await openInvoice(id, decision: true, sign: true) } },
                     payInvoice: { id in
                         #if DEBUG
                         if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-payment-recheck-fails") {
@@ -117,6 +117,7 @@ struct JobCustomerDocumentsView: View {
                             }
                             destinationView(destination)
                         }
+                            .onAppear { print("TRACE destination appeared") }
                             .disabled(unlocking)
                             .navigationTitle(reference(destination))
                             .toolbar {
@@ -398,20 +399,23 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
-        guard openingID == nil, currentWorkspace, canViewInvoices else { return }
+        print("TRACE invoice enter", decision, sign, openingID == nil, currentWorkspace, canViewInvoices)
+        guard openingID == nil, currentWorkspace, canViewInvoices else { print("TRACE invoice initial guard"); return }
         error = nil
         openingID = id
         defer { openingID = nil }
         let generation = session.generation
         do {
             let invoice = try await api.liveFieldInvoice(id)
-            guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
+            print("TRACE invoice fresh read")
+            guard session.generation == generation, currentWorkspace, canViewInvoices else { print("TRACE invoice first authority guard"); return }
             guard invoice.id == id, scope.contains(invoice) else {
                 throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
             }
             let model = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: scope)
             await model.load()
-            guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
+            print("TRACE invoice model loaded", model.invoice != nil, model.historyComplete)
+            guard session.generation == generation, currentWorkspace, canViewInvoices else { print("TRACE invoice second authority guard"); return }
             if let latest = model.invoice {
                 guard latest.id == id, scope.contains(latest) else {
                     throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
@@ -423,13 +427,14 @@ struct JobCustomerDocumentsView: View {
                     guard CustomerDocumentAmounts(lines: latest.lines, currency: latest.currency, amountPaid: latest.amountPaid) != nil else {
                         throw Problem(title: "These invoice amounts couldn't be verified. Refresh before continuing.", status: nil, detail: nil)
                     }
+                    print("TRACE invoice setting paper", sign)
                     paperGeneration = UUID(); paper = .invoice(latest, signing: sign)
                 } else { book = .invoice(id) }
             } else {
                 paymentModel = nil
                 throw Problem(title: model.loadError ?? "This invoice couldn't be refreshed", status: nil, detail: nil)
             }
-        } catch is CancellationError { } catch { self.error = error.customerSentence(.openInvoice) }
+        } catch is CancellationError { print("TRACE invoice cancelled") } catch { print("TRACE invoice failed"); self.error = error.customerSentence(.openInvoice) }
     }
 
     private func pay(_ invoiceID: String) async {
