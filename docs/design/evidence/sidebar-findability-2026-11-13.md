@@ -28,5 +28,7 @@ isolated rerun passed. See `/private/tmp/thorbis-sidebar-local-build-1113.log`,
 the cause of the combined-run failure. On the same simulator build, three
 focused iPad UI tests passed, including opening the web-aligned sidebar and
 toggling the Work section: `/private/tmp/thorbis-sidebar-ipad-current-1113.log`.
-Actual VoiceOver activation, largest text and single-place permission cases
-remain unverified.
+The focused phone test launched with the largest accessibility text category
+and passed its disclosure and Jobs navigation assertions:
+`/private/tmp/thorbis-sidebar-large-test-1113.log`. Actual VoiceOver activation
+and single-place permission cases remain unverified.
