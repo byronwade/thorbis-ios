@@ -415,6 +415,35 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertFalse(model.overviewPriceFailures.contains(estimate.id), "An old response must not publish a retry state into the retired handoff")
     }
 
+    func testCancelledOverviewLoadDoesNotPublishAndCanBeRetried() async throws {
+        let model = try await ready([])
+        let membershipPath = "/v1/jobs/\(jobID)/estimates", estimatePath = "/v1/estimates/\(a)"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+                                      estimatePath: .init(200, record(a))])
+        await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first)
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let revisionPath = "\(estimatePath)/revisions/1"
+        func routes(_ held: Bool) -> [String: URLProtocolFixture.Reply] {
+            ["/v1/jobs/\(jobID)": .init(200, jobJSON), "\(membershipPath)/\(a)": .init(200, link),
+             estimatePath: .init(200, record(a)), revisionPath: .init(200, revision(a), gate: held ? gate : nil)]
+        }
+        URLProtocolFixture.setRoutes(routes(true))
+        let task = Task { @MainActor in await model.loadOverviewPrices() }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == revisionPath }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == revisionPath })
+        task.cancel(); gate.release(); await task.value
+        XCTAssertTrue(model.isCurrent, "Cancellation alone leaves the handoff usable")
+        XCTAssertNil(model.revision(for: estimate.id), "The cancelled response must not publish a price")
+        XCTAssertFalse(model.overviewPriceFailures.contains(estimate.id))
+        URLProtocolFixture.setRoutes(routes(false))
+        await model.retryOverviewPrice(estimate)
+        XCTAssertEqual(model.revision(for: estimate.id)?.totalAmount, 19000, "A fresh retry must still work")
+    }
+
     func testCancelledOverviewPriceCannotPublishAfterHandoffDisappears() async throws {
         let model = try await ready([])
         let membershipPath = "/v1/jobs/\(jobID)/estimates", estimatePath = "/v1/estimates/\(a)"
