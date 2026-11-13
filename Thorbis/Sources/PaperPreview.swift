@@ -214,13 +214,19 @@ enum PaperPreview {
             primary = changed(primary, ["lines": lines])
         }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
-        return [primary,
+        var result = [primary,
          changed(original, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
                             ? "00000000-0000-4000-8000-000000012209" : "00000000-0000-4000-8000-000000002240",
                            "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
                            "amountPaid": equalBalances ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),
          changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002241", "jobId": "00000000-0000-4000-8000-000000002215"])]
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-many-invoices") {
+            result += (0..<23).map { index in
+                changed(primary, ["id": String(format: "00000000-0000-4000-8000-%012d", 3000 + index)])
+            }
+        }
+        return result
     }
     static var jobDocumentMoneyPayments: [FieldPaymentRecord] {
         let card = changed(refundPayment, ["id": "00000000-0000-4000-8000-000000002250", "invoiceId": issuedInvoice.id,
@@ -918,7 +924,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
         } else if PaperPreview.isJobDocumentsPreview,
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-amount-fails-once"),
-                  url.path == "/v1/invoices/00000000-0000-4000-8000-000000002209/customer-presentation",
+                  (url.path == "/v1/invoices/00000000-0000-4000-8000-000000002209/customer-presentation" ||
+                   (ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-many-invoices") && url.path.hasPrefix("/v1/invoices/") && url.path.hasSuffix("/customer-presentation"))),
                   Self.scenario.lock.withLock({ !Self.scenario.documentHistoryRestored }) {
             status = 503
             payload = ["status": 503, "title": "Sample invoice amount unavailable"]

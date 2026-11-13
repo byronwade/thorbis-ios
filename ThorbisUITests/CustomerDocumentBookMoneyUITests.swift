@@ -135,6 +135,41 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertFalse(retry.exists)
     }
 
+    func testOverviewBatchControlsAtNormalAndLargestText() {
+        continueAfterFailure = false
+        for size in ["UICTContentSizeCategoryL", "UICTContentSizeCategoryAccessibilityXXXL"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-customer-safe-invoice", "--paper-preview-overview-amount-fails-once", "--paper-preview-overview-many-invoices", "--paper-preview-long-document-description", "-UIPreferredContentSizeCategoryName", size]
+            app.launch()
+            XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
+            let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+            let retry = app.buttons["Retry unavailable invoice amounts"]
+            XCTAssertTrue(retry.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(retry, in: app)
+            let top = app.navigationBars["Customer view"]
+            let footer = app.buttons["Hand back to the technician"]
+            for _ in 0..<4 where retry.frame.minY < top.frame.maxY { app.scrollViews["customer-job-documents-list"].swipeDown() }
+            XCTAssertTrue(retry.isHittable)
+            XCTAssertGreaterThanOrEqual(retry.frame.minY, top.frame.maxY)
+            XCTAssertLessThanOrEqual(retry.frame.maxY, footer.frame.minY)
+            let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Invoice overview retry \(size)"; shot.lifetime = .keepAlways; add(shot)
+            retry.tap()
+            let more = app.buttons["Show more invoice amounts"]
+            XCTAssertTrue(more.waitForExistence(timeout: 20))
+            if !more.isHittable { app.scrollViews["customer-job-documents-list"].swipeDown() }
+            thorbisRevealInCustomerView(more, in: app)
+            for _ in 0..<4 where more.frame.minY < top.frame.maxY { app.scrollViews["customer-job-documents-list"].swipeDown() }
+            XCTAssertTrue(more.isHittable)
+            XCTAssertGreaterThanOrEqual(more.frame.minY, top.frame.maxY)
+            XCTAssertLessThanOrEqual(more.frame.maxY, footer.frame.minY)
+            let moreShot = XCTAttachment(screenshot: app.screenshot()); moreShot.name = "Invoice overview more \(size)"; moreShot.lifetime = .keepAlways; add(moreShot)
+            more.tap()
+            let laterInvoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000003000"]
+            let loaded = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "$340.00"), object: laterInvoice)
+            XCTAssertEqual(XCTWaiter.wait(for: [loaded], timeout: 20), .completed)
+            app.terminate()
+        }
+    }
+
     func testOverviewWithNoSummaryDoesNotExposeRawAmount() {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"]

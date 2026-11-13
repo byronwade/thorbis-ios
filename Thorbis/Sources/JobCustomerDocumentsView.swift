@@ -140,6 +140,7 @@ struct JobCustomerDocumentsView: View {
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     @StateObject private var paperNavigation = CustomerJobPaperNavigation()
@@ -214,7 +215,8 @@ struct JobCustomerDocumentsView: View {
         }
         .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
-            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: beginHandBack)
+            CustomerCommitButton(title: dynamicTypeSize.isAccessibilitySize ? "Hand back" : "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: beginHandBack)
+                .accessibilityLabel("Hand back to the technician")
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
         }
         .thorbisDestination(item: Binding(get: { book }, set: { book = $0 })) { initial in
@@ -399,21 +401,33 @@ struct JobCustomerDocumentsView: View {
             if let invoices {
                 if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
                 if !invoiceOverview.failedIDs.isEmpty && !invoiceOverview.loading {
-                    Button("Retry unavailable invoice amounts") {
+                    Button {
                         #if DEBUG
                         if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-amount-fails-once") {
                             PaperPreviewProtocol.restoreDocumentHistory()
                         }
                         #endif
                         Task { await invoiceOverview.retryFailed() }
+                    } label: {
+                        Label("Retry amounts", systemImage: "arrow.clockwise")
+                            .font(Theme.customerFont(17, weight: .medium)).frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target)
+                            .padding(.vertical, 8).background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Retry unavailable invoice amounts")
                     .accessibilityHint("Try loading invoice amounts again")
                     .frame(minHeight: CustomerModeStyle.target)
                 }
                 if invoiceOverview.canLoadMore {
-                    Button(invoiceOverview.loading ? "Loading amounts…" : "Show more invoice amounts") {
+                    Button {
                         Task { await invoiceOverview.loadMore() }
+                    } label: {
+                        Label(invoiceOverview.loading ? "Loading amounts…" : "More amounts", systemImage: "plus")
+                            .font(Theme.customerFont(17, weight: .medium)).frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target)
+                            .padding(.vertical, 8).background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(invoiceOverview.loading ? "Loading invoice amounts" : "Show more invoice amounts")
                     .disabled(invoiceOverview.loading)
                     .frame(minHeight: CustomerModeStyle.target)
                 }
