@@ -210,6 +210,18 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue((second.value as? String ?? "").contains("Not selected"))
     }
 
+    func testOverviewCanRetryAnUnavailablePrice() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-second-price-fails-once"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let retry = app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 45), "A failed issued read must have a retry")
+        visible(app, retry); retry.tap()
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        let price = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [price], timeout: 45), .completed)
+        XCTAssertFalse(retry.exists)
+    }
+
     private func openSecondEstimateForValidation(_ flag: String, extraArgs: [String] = []) -> XCUIApplication {
         let app = open(["--paper-preview-handoff-hide-controls", flag] + extraArgs)
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
