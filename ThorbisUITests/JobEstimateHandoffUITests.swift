@@ -222,6 +222,21 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(retry.exists)
     }
 
+    func testApprovedOverviewShowsMatchingVerifiedReceipt() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-second-approved", "--handoff-test-approved-receipt"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        XCTAssertTrue(app.staticTexts["$320.00"].waitForExistence(timeout: 45), "The accepted receipt's verified total should be visible")
+        XCTAssertFalse(app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"].exists)
+    }
+
+    func testApprovedOverviewRejectsReceiptForDifferentRevision() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-second-approved", "--handoff-test-approved-receipt", "--handoff-test-approved-receipt-wrong-revision"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let retry = app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 45), "A receipt for another revision must fail validation")
+        XCTAssertFalse(app.staticTexts["$320.00"].exists)
+    }
+
     private func openSecondEstimateForValidation(_ flag: String, extraArgs: [String] = []) -> XCUIApplication {
         let app = open(["--paper-preview-handoff-hide-controls", flag] + extraArgs)
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
