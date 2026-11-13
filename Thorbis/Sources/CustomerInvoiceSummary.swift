@@ -508,6 +508,7 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
     }
     func retryCapture() async {
         guard !running, !retired, current(), phase == .ready, let signature = try? context.signature() else { return }
+        errorMessage = nil
         await prepare(signature)
     }
     private func prepare(_ signature: CustomerSummaryFrozenSignature) async {

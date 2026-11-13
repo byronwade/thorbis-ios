@@ -239,8 +239,10 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         await uploadOwner.inspect()
         await uploadOwner.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
         XCTAssertEqual(uploadOwner.phase, .ready); XCTAssertTrue(uploadOwner.hasFrozenSignature)
+        XCTAssertEqual(uploadOwner.errorMessage, "The signature couldn't be uploaded. Try again.")
         XCTAssertNil(try store.load(scope: pendingScope), "No financial POST starts before upload is confirmed")
         await uploadOwner.retryCapture(); XCTAssertEqual(uploadOwner.phase, .signed)
+        XCTAssertNil(uploadOwner.errorMessage)
         XCTAssertEqual(attemptedAssets.count, 2); XCTAssertEqual(attemptedAssets[0], attemptedAssets[1])
         // A receipt for the old revision is resolved, but never displayed as the new revision's signature.
         try store.insert(restored)
