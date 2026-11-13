@@ -44,6 +44,20 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
     }
 
+    func testStandaloneLongSummaryOpensReadingDrawer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-customer-safe-invoice", "--paper-preview-customer-summary-long"]
+        app.launch()
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 15)); more.tap()
+        XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final summary detail: leave the work area clean.")).firstMatch.exists)
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Customer summary · not the signed invoice"].waitForExistence(timeout: 10))
+    }
+
     func testStandaloneCustomerInvoiceWithoutSummaryDoesNotShowRawLines() {
         continueAfterFailure = false
         let app = XCUIApplication()

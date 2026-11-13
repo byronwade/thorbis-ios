@@ -867,6 +867,19 @@ struct CustomerInvoicePresentation: View {
     private var summaryLines: [FieldLine] {
         verifiedSummary?.lines.map { FieldLine(id: $0.id, description: $0.description, quantity: $0.quantity, unitPrice: $0.unitPrice, source: nil) } ?? []
     }
+    private var readingAccess: DocumentDescriptionAccess? {
+        guard verifiedSummary != nil, let authority = summaryAuthority else { return nil }
+        let identity: DocumentDescriptionIdentity
+        if let jobID = invoice.jobId {
+            let scope = JobDocumentScope(jobID: jobID, organizationID: invoice.organizationId, customerID: invoice.customerId)
+            identity = .invoice(scope: scope, record: invoice)
+        } else {
+            identity = .standaloneInvoice(record: invoice)
+        }
+        return .init(identity: identity, organizationID: invoice.organizationId, capability: "invoice.view", feature: "invoicing",
+                     sourceGeneration: authority.sessionGeneration, fresh: true, active: currentAuthority(),
+                     scopeValid: authority.isCurrent(api: api, session: session))
+    }
     private var total: Int { verifiedSummary?.totalAmount ?? 0 }
     private var due: Int { verifiedSummary?.balanceDue ?? 0 }
     private var dueText: String { money(due, currency: invoice.currency) }
@@ -930,7 +943,7 @@ struct CustomerInvoicePresentation: View {
                 }
             }
             Text("Customer summary · not the signed invoice").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-            CustomerLinesCard(lines: summaryLines, currency: invoice.currency, type: type, rows: amountRows)
+            CustomerLinesCard(lines: summaryLines, currency: invoice.currency, type: type, rows: amountRows, readingAccess: readingAccess)
             if let signedBy {
                 Label("Invoice signed by \(signedBy)", systemImage: "signature")
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)

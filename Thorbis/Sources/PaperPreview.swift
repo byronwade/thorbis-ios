@@ -1152,7 +1152,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                         "organizationId": record.organizationId, "customerId": record.customerId, "invoiceId": record.id,
                         "jobId": record.jobId ?? "", "linesRevision": record.linesRevision, "status": record.status,
                         "currency": "USD", "totalAmount": total, "amountPaid": paid, "balanceDue": record.status == "void" ? 0 : total - paid,
-                        "lines": [["id": "customer-safe-line", "description": "Customer safe service", "quantity": 1,
+                        "lines": [["id": "customer-safe-line", "description": ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-summary-long")
+                                   ? "This customer-facing service description explains the full work in detail. The technician will complete and test the installation. Final summary detail: leave the work area clean."
+                                   : "Customer safe service", "quantity": 1,
                                    "unitPrice": ["amount": total, "currency": "USD"]]]]
             }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
@@ -1468,7 +1470,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "jobId": record.jobId as Any? ?? NSNull(), "linesRevision": record.linesRevision,
                     "status": record.status, "currency": "USD", "totalAmount": total,
                     "amountPaid": record.amountPaid, "balanceDue": total - record.amountPaid,
-                    "lines": [["id": "customer-safe-line", "description": "Customer safe service", "quantity": 1,
+                    "lines": [["id": "customer-safe-line", "description": ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-summary-long")
+                                   ? "This customer-facing service description explains the full work in detail. The technician will complete and test the installation. Final summary detail: leave the work area clean."
+                                   : "Customer safe service", "quantity": 1,
                                "unitPrice": ["amount": total, "currency": "USD"]]]]
         }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {

@@ -4,6 +4,7 @@ import SwiftUI
 enum DocumentDescriptionIdentity: Equatable {
     case estimate(scope: JobDocumentScope, record: EstimateRecord, issued: CustomerIssuedEstimateRevision?)
     case invoice(scope: JobDocumentScope, record: InvoiceRecord)
+    case standaloneInvoice(record: InvoiceRecord)
 }
 
 struct DocumentDescriptionAccess: Equatable {
