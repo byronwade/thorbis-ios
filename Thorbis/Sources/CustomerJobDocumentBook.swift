@@ -372,12 +372,13 @@ private struct CustomerEstimateBookPage: View {
                   job.customerId == scope.customerID else {
                 throw Problem(title: "This job changed", status: 409, detail: nil)
             }
-            if job.estimateId != estimate.id {
-                let link = try await api.liveFieldJobEstimateLink(scope.jobID, estimateID: estimate.id)
-                guard current() else { throw CancellationError() }
-                guard link.jobId == scope.jobID, link.estimateId == estimate.id else {
-                    throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
-                }
+            do {
+                try await JobEstimateDetailMembership.verify(jobID: scope.jobID, estimateID: estimate.id,
+                    originID: job.estimateId, isCurrent: current,
+                    read: { try await api.liveFieldJobEstimateLink(scope.jobID, estimateID: estimate.id) },
+                    list: { try await api.liveFieldJobEstimateLinks(scope.jobID) })
+            } catch is JobEstimateDetailMembership.InvalidMembership {
+                throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
             }
         }
         do {
@@ -390,7 +391,9 @@ private struct CustomerEstimateBookPage: View {
                     return
                 }
                 try await verifyMembership()
-                guard current() else { return }
+                let checked = try await api.customerIssuedEstimateRevision(for: estimate,
+                    allowApprovedForReading: true, currentAuthority: current)
+                guard current(), checked == revision else { return }
                 receipt = signed; receiptAuthority = authority; receiptActivation = activation
             }
             guard current() else { return }
