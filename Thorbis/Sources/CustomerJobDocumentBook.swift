@@ -449,6 +449,9 @@ private struct CustomerInvoiceBookPage: View {
     @State private var summaryLoading = false
     @State private var summaryError: String?
     @State private var signingActivation: CustomerSummaryHandoffRegistry.Activation?
+    #if DEBUG
+    @State private var previewSigningGateHeld = ProcessInfo.processInfo.arguments.contains("--paper-preview-signing-activation-gated")
+    #endif
     @State private var showPayments = false
     @State private var choseInitialPaymentVisibility = false
 
@@ -502,6 +505,11 @@ private struct CustomerInvoiceBookPage: View {
                         CustomerIncludedLabel(type: type)
                         CustomerIncludedLines(lines: customerLines, type: type, rows: customerAmountRows(amounts, currency: summary.currency, invoice: summary.status != "void"), readingAccess: readingAccess,
                                               descriptionContext: "INV-\(invoice.id.suffix(4).uppercased())")
+                        #if DEBUG
+                        if PaperPreview.isJobDocumentsPreview, previewSigningGateHeld {
+                            Button("Release signing activation gate") { previewSigningGateHeld = false }
+                        }
+                        #endif
                         if canSign && ["issued", "paid"].contains(summary.status) {
                             if let consent = summary.validatedConsent, let signingActivation {
                                 CustomerSummarySigningControls(coordinator: signingActivation.coordinator, consent: consent, type: type)
@@ -602,7 +610,12 @@ private struct CustomerInvoiceBookPage: View {
             customerSummary = value; summaryAuthority = authority; summaryActivation = activation
             if canSign, ["issued", "paid"].contains(value.status), value.validatedConsent != nil,
                let signing = signingRegistry.activate(summary: value, api: api, session: session, authority: authority,
-                   handoffCurrent: signingHandoffCurrent) {
+                   handoffCurrent: {
+                       #if DEBUG
+                       if previewSigningGateHeld { return false }
+                       #endif
+                       return signingHandoffCurrent()
+                   }) {
                 signingActivation = signing
                 await signing.coordinator.inspect()
             }

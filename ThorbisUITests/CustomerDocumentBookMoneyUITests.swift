@@ -36,6 +36,17 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(collecting.waitForExistence(timeout: 15)); XCTAssertTrue(collecting.label.contains("INV-2209"))
     }
 
+    func testSigningCanRetryAfterTransientActivationFailure() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-signing-activation-gated"])
+        let unavailable = pages(app).staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Signing this customer summary isn't available")).firstMatch
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 15))
+        let release = pages(app).buttons["Release signing activation gate"]
+        XCTAssertTrue(release.waitForExistence(timeout: 10)); reveal(release, in: app); release.tap()
+        let retry = pages(app).buttons["Retry signing"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10)); reveal(retry, in: app); retry.tap()
+        XCTAssertTrue(pages(app).buttons["Sign summary"].waitForExistence(timeout: 15))
+    }
+
     func testLostSummaryResponseSurvivesSwitchingDocuments() {
         continueAfterFailure = false
         let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-summary-signing-lost-once"])
