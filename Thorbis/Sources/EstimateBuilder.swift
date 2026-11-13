@@ -746,6 +746,9 @@ struct BuilderLineRow: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
     @EnvironmentObject private var session: SessionController
+    #if DEBUG
+    @EnvironmentObject private var testAPI: APIClient
+    #endif
     @State private var descriptionOpening: LineDescriptionOpening?
 
     private var removeLineButton: some View {
@@ -796,6 +799,14 @@ struct BuilderLineRow: View {
                             .navigationTitle("Description")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
+                                #if DEBUG
+                                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-line-retire-api") {
+                                    ThorbisToolbarItem(placement: .cancellationAction) {
+                                        Button("Retire requests") { testAPI.invalidateRequests() }
+                                            .accessibilityIdentifier("line-canvas-test-retire-api")
+                                    }
+                                }
+                                #endif
                                 ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
                                     Button("Done") { descriptionOpening = nil }
                                         .accessibilityIdentifier("line-description-canvas-done")
