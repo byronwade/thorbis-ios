@@ -121,6 +121,17 @@ struct CustomerInvoiceSummaryReceipt: Decodable, Sendable {
     }
 }
 
+/// Only a fresh, explicit server response can establish whether the current terms were signed.
+enum CustomerSummaryAuthorizationState {
+    case unsigned
+    case signed(CustomerInvoiceSummaryReceipt)
+}
+
+private struct CustomerSummaryAuthorizationLookup: Decodable {
+    let status: String
+    let receipt: CustomerInvoiceSummaryReceipt?
+}
+
 /// Freeze every field across uncertain network retries so the server can replay one attempt.
 struct CustomerSummarySigningAttempt: Encodable, Sendable {
     let expectedLinesRevision: Int
@@ -149,6 +160,29 @@ struct CustomerSummarySigningAttempt: Encodable, Sendable {
 
 @MainActor
 extension APIClient {
+    /// A 404, stale digest or offline response is an error, never evidence that the summary is unsigned.
+    func currentCustomerSummaryAuthorization(_ summary: CustomerInvoiceSummary,
+                                             currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerSummaryAuthorizationState {
+        let generation = requestGeneration
+        let savedScope = savedCopyScopeRevision
+        let origin = normalizedOrigin
+        func check() throws {
+            try Task.checkCancellation()
+            guard generation == requestGeneration, savedScope == savedCopyScopeRevision,
+                  origin != nil, origin == normalizedOrigin, currentAuthority(), summary.validatedConsent != nil else { throw CancellationError() }
+        }
+        try check()
+        guard let consent = summary.validatedConsent else { throw CancellationError() }
+        let path = try financialPath("/v1/invoices", id: summary.invoiceId, suffix: "/customer-presentation/summary-authorization")
+        let result: CustomerSummaryAuthorizationLookup = try await send("GET", path,
+            queryItems: [URLQueryItem(name: "digest", value: consent.digest)], requireFresh: true)
+        try check()
+        if result.status == "unsigned", result.receipt == nil { return .unsigned }
+        if result.status == "signed", let receipt = result.receipt,
+           receipt.matches(summary: summary, signerName: receipt.signerName, signedAt: receipt.signedAt) { return .signed(receipt) }
+        throw Problem(title: "This signed summary couldn't be verified", status: 409, detail: "Ask your technician to check the invoice.")
+    }
+
     /// The caller owns a single immutable attempt across retry, and must check current invoice-edit authority.
     func authorizeCustomerInvoiceSummary(_ summary: CustomerInvoiceSummary, attempt: CustomerSummarySigningAttempt,
                                          currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerInvoiceSummaryReceipt {
