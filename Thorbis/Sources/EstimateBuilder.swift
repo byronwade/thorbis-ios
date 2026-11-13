@@ -771,6 +771,14 @@ struct BuilderLineRow: View {
     private var stacked: Bool { typeSize.isAccessibilitySize }
     private var name: String { description.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    private func openDescription() {
+        guard isEnabled, let actorID = session.user?.id,
+              let organizationID = session.activeOrganization?.id else { return }
+        focus.wrappedValue = nil
+        descriptionOpening = LineDescriptionOpening(actorID: actorID, organizationID: organizationID,
+                                                    generation: session.generation, authorityRevision: session.authorityRevision)
+    }
+
     var body: some View {
         Group {
             if expanded { editor } else { summary }
@@ -815,41 +823,51 @@ struct BuilderLineRow: View {
     // MARK: Collapsed
 
     private var summary: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Button(action: toggle) {
-                let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                     : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
-                layout {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(name.isEmpty ? "Describe this item" : name)
-                            .font(Theme.font(16, weight: .medium))
-                            .foregroundStyle(name.isEmpty ? Theme.muted : Theme.foreground)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(detailText).font(Theme.font(14)).monospacedDigit()
-                            .foregroundStyle(priceText == nil ? Theme.warning : Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let note {
-                            Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                Button(action: toggle) {
+                    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                         : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+                    layout {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(name.isEmpty ? "Describe this item" : name)
+                                .font(Theme.font(16, weight: .medium))
+                                .foregroundStyle(name.isEmpty ? Theme.muted : Theme.foreground)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(2)
+                            Text(detailText).font(Theme.font(14)).monospacedDigit()
+                                .foregroundStyle(priceText == nil ? Theme.warning : Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
+                            if let note {
+                                Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                        if !stacked { Spacer(minLength: 8) }
+                        Text(totalText)
+                            .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .contentTransition(.numericText())
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .fixedSize(horizontal: !stacked, vertical: false)
                     }
-                    if !stacked { Spacer(minLength: 8) }
-                    Text(totalText)
-                        .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .contentTransition(.numericText())
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .fixedSize(horizontal: !stacked, vertical: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens quantity, price and description")
+                .modifier(OptionalDraggable(payload: dragPayload, title: name))
+                menu.padding(.trailing, -10)
             }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens quantity, price and description")
-            .modifier(OptionalDraggable(payload: dragPayload, title: name))
-            menu.padding(.trailing, -10)
+            if !name.isEmpty {
+                Button("Show full description", action: openDescription)
+                    .font(Theme.font(14, weight: .medium))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+            }
         }
     }
 
@@ -881,13 +899,7 @@ struct BuilderLineRow: View {
                     .modifier(OptionalIdentifier(identifier: descriptionIdentifier))
                 menu.padding(.trailing, -10)
             }
-            Button("Edit full description") {
-                guard isEnabled, let actorID = session.user?.id,
-                      let organizationID = session.activeOrganization?.id else { return }
-                focus.wrappedValue = nil
-                descriptionOpening = LineDescriptionOpening(actorID: actorID, organizationID: organizationID, generation: session.generation,
-                                                            authorityRevision: session.authorityRevision)
-            }
+            Button("Edit full description", action: openDescription)
             .font(Theme.font(14, weight: .medium))
             .foregroundStyle(Theme.brandText)
             .frame(minHeight: 44)
