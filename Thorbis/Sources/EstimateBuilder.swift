@@ -745,6 +745,8 @@ struct BuilderLineRow: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
+    @EnvironmentObject private var session: SessionController
+    @State private var descriptionOpening: LineDescriptionOpening?
 
     private var removeLineButton: some View {
         Button(role: .destructive, action: remove) {
@@ -777,6 +779,35 @@ struct BuilderLineRow: View {
         .id(lineID)
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Remove line", remove)
+        .sheet(item: $descriptionOpening) { opening in
+            SheetSurface {
+                if isEnabled, opening.actorID == session.user?.id,
+                   opening.generation == session.generation,
+                   opening.authorityRevision == session.authorityRevision {
+                    NavigationStack {
+                        TextEditor(text: $description)
+                            .font(Theme.font(16))
+                            .scrollContentBackground(.hidden)
+                            .padding(Theme.gutter)
+                            .background(Theme.canvas)
+                            .accessibilityLabel("Line description")
+                            .accessibilityIdentifier("line-description-canvas")
+                            .navigationTitle("Description")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
+                                    Button("Done") { descriptionOpening = nil }
+                                        .accessibilityIdentifier("line-description-canvas-done")
+                                }
+                            }
+                    }
+                    .presentationDetents([.large])
+                }
+            }
+        }
+        .onChange(of: session.generation) { _, _ in descriptionOpening = nil }
+        .onChange(of: session.authorityRevision) { _, _ in descriptionOpening = nil }
+        .onChange(of: isEnabled) { _, enabled in if !enabled { descriptionOpening = nil } }
     }
 
     // MARK: Collapsed
@@ -848,6 +879,17 @@ struct BuilderLineRow: View {
                     .modifier(OptionalIdentifier(identifier: descriptionIdentifier))
                 menu.padding(.trailing, -10)
             }
+            Button("Edit full description") {
+                guard isEnabled, let actorID = session.user?.id else { return }
+                focus.wrappedValue = nil
+                descriptionOpening = LineDescriptionOpening(actorID: actorID, generation: session.generation,
+                                                            authorityRevision: session.authorityRevision)
+            }
+            .font(Theme.font(14, weight: .medium))
+            .foregroundStyle(Theme.brandText)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .buttonStyle(.plain)
             let layout = stacked || typeSize >= .xxLarge ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
                                                          : AnyLayout(HStackLayout(spacing: 10))
             layout {
@@ -945,6 +987,13 @@ struct BuilderLineRow: View {
         .accessibilityLabel(label)
         .sensoryFeedback(.selection, trigger: quantity)
     }
+}
+
+private struct LineDescriptionOpening: Identifiable {
+    let id = UUID()
+    let actorID: String
+    let generation: UUID
+    let authorityRevision: UUID
 }
 
 struct OptionalIdentifier: ViewModifier {
