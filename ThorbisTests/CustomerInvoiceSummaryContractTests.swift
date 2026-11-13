@@ -142,6 +142,31 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         await suspended.retryFrozen(); XCTAssertEqual(suspended.phase, .signed)
         XCTAssertEqual(suspendedAttempts.count, 2)
         XCTAssertEqual(suspendedAttempts[0].idempotencyKey, suspendedAttempts[1].idempotencyKey)
+        var authority = true
+        var abandonedLookup: CheckedContinuation<Void, Never>?
+        let abandonedCheck = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { authority },
+            lookup: { await withCheckedContinuation { abandonedLookup = $0 }; return .unsigned },
+            upload: { _ in validAsset }, submit: { _ in validReceipt })
+        let abandonedCheckTask = Task { @MainActor in await abandonedCheck.checkStatus() }
+        for _ in 0..<100 where abandonedLookup == nil { await Task.yield() }
+        XCTAssertEqual(abandonedCheck.phase, .checking)
+        authority = false; abandonedLookup?.resume(); await abandonedCheckTask.value
+        XCTAssertEqual(abandonedCheck.phase, .idle, "Abandoned lookup must not stay checking")
+        authority = true; await abandonedCheck.checkStatus(); XCTAssertEqual(abandonedCheck.phase, .unsigned)
+        var abandonedSubmit: CheckedContinuation<Void, Never>?
+        let abandonedSigning = CustomerSummarySigningCoordinator(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { authority },
+            lookup: { .unsigned }, upload: { _ in validAsset }, submit: { _ in
+                await withCheckedContinuation { abandonedSubmit = $0 }; return validReceipt
+            })
+        await abandonedSigning.checkStatus()
+        let abandonedSignTask = Task { @MainActor in await abandonedSigning.sign(signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3])) }
+        for _ in 0..<100 where abandonedSubmit == nil { await Task.yield() }
+        XCTAssertEqual(abandonedSigning.phase, .submitting)
+        authority = false; abandonedSubmit?.resume(); await abandonedSignTask.value
+        XCTAssertEqual(abandonedSigning.phase, .idle, "Abandoned submit must not stay submitting")
+        await abandonedSigning.retryFrozen(); XCTAssertEqual(abandonedSigning.phase, .idle)
+        authority = true; await abandonedSigning.checkStatus(); XCTAssertEqual(abandonedSigning.phase, .unsigned)
+        await abandonedSigning.retryFrozen(); XCTAssertEqual(abandonedSigning.phase, .signed)
         handoffCurrent = false
         XCTAssertThrowsError(try handoff.attempt())
         handoff.retire(); handoffCurrent = true

@@ -269,7 +269,7 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
     func checkStatus() async {
         guard !running, !retired, current() else { return }
         running = true; let token = generation; phase = .checking; receipt = nil; errorMessage = nil
-        defer { if generation == token { running = false } }
+        defer { if generation == token { running = false; if phase == .checking { phase = .idle } } }
         do {
             let result = try await lookup()
             guard valid(token) else { return }
@@ -299,7 +299,7 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
     private func perform(_ signature: CustomerSummaryFrozenSignature) async {
         guard !running, !retired, current() else { return }
         running = true; let token = generation; phase = .submitting
-        defer { if generation == token { running = false } }
+        defer { if generation == token { running = false; if phase == .submitting { phase = .idle } } }
         do {
             if (try? context.attempt()) == nil {
                 let asset = try await upload(signature)
