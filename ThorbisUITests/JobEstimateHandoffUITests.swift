@@ -144,6 +144,10 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let select = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(select.waitForExistence(timeout: 10))
         XCTAssertTrue((select.value as? String)?.hasPrefix("Not selected,") == true)
+        let neighbor = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(neighbor.waitForExistence(timeout: 10))
+        XCTAssertTrue((neighbor.value as? String)?.hasPrefix("Not selected,") == true)
+        XCTAssertTrue(app.buttons["Review selected (0)"].exists)
     }
 
     func testLongEstimateListKeepsSelectionsFromBothEnds() {
