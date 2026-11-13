@@ -1,0 +1,9 @@
+# Navigation disclosure verification, 12 November 2026
+
+The branch is based on release commit `397990e3`. It makes multi-place headings disclosure controls, keeps Work open by default and remembers a chosen collapsed state. It is not release-ready.
+
+- The original phone simulator baseline failed because the Work heading reported an empty accessibility value rather than `Expanded`. See `/Users/byronwade/testflight-work/nav-findability-red-1112.log`.
+- The first post-change build failed Swift 6 concurrency checking for a shared `UserDefaults` value; commit `414667e3` isolates that store to the main actor.
+- The retry compiled and the `PrimaryNavigationTests` unit suite passed. Three phone UI tests failed; one expected test did not execute. See `/Users/byronwade/testflight-work/nav-findability-green-retry-1112.log`.
+- The test log searches for `drawer-workspace-work-disclosure`, an identifier removed from the current source, and does not start the new `testWorkPreferenceSurvivesRelaunchAndJobsCanBeOpened` test. The simulator's currently installed test binary and the built test binary both have SHA-256 `a655d527d248df16f0ae7b86cf611cc12176bfc06c6cf611fd4fe48bef84898a`; the built binary contains the new test name. This is evidence of a discrepancy, not proof which binary the runner executed. The Work group identifier was also not found in the failed run, and its cause remains unconfirmed.
+- Xcode used a standard `test` invocation, and no explicit `.xctestrun` file was found in that derived directory. A separate `build-for-testing` and `test-without-building` run with a fresh derived directory is pending, subject to disk capacity and the shared build slot. Verify phone, large text, iPad, disclosure accessibility, permission-limited single-item sections and direct child routes before release.
