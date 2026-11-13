@@ -7,6 +7,40 @@ final class FieldAPITests: XCTestCase {
     private let customerID = "00000000-0000-4000-8000-000000000003"
     private let jobID = "00000000-0000-4000-8000-000000000001"
 
+    func testLiveEstimateDoesNotSaveAfterSavedScopeRevisionChanges() async throws {
+        let id = "00000000-0000-4000-8000-000000000008"
+        let path = "/v1/estimates/\(id)"
+        let payload = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"sent","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, payload, gate: gate)]), baseURL: "https://app.thorbis.com")
+        let savedScope = "stale-write-" + UUID().uuidString
+        client.savedCopyScope = savedScope
+        let task = Task { @MainActor in try await SavedCopies.$liveOnly.withValue(true) { try await client.fieldEstimateWithProvenance(id) } }
+        for _ in 0..<300 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(URLProtocolFixture.recorded.isEmpty)
+        client.savedCopyScope = savedScope + "-other"; client.savedCopyScope = savedScope
+        gate.release(); _ = try? await task.value
+        SavedCopyStore.shared.waitForQueuedWrites()
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        XCTAssertFalse(SavedCopyStore.shared.exists(scope: savedScope, key: key), "A response from an old scope revision must not write a saved copy")
+    }
+    func testLiveEstimateDoesNotSaveAfterAuthorityRetires() async throws {
+        let id = "00000000-0000-4000-8000-000000000008", path = "/v1/estimates/00000000-0000-4000-8000-000000000008"
+        let payload = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"sent","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, payload, gate: gate)]), baseURL: "https://app.thorbis.com")
+        let savedScope = "retired-authority-" + UUID().uuidString
+        client.savedCopyScope = savedScope
+        var current = true
+        let task = Task { @MainActor in try await SavedCopies.$liveOnly.withValue(true) { try await client.fieldEstimateWithProvenance(id, saveIfCurrent: { current }) } }
+        for _ in 0..<300 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(URLProtocolFixture.recorded.isEmpty)
+        current = false; gate.release(); _ = try? await task.value
+        SavedCopyStore.shared.waitForQueuedWrites()
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        XCTAssertFalse(SavedCopyStore.shared.exists(scope: savedScope, key: key), "A retired authority cannot persist a response")
+    }
+
     func testConcurrentEstimateReadsRetainTheirOwnProvenance() async throws {
         let id = "00000000-0000-4000-8000-000000000008"
         let path = "/v1/estimates/\(id)"

@@ -51,6 +51,7 @@ struct JobDetailView: View {
     @StateObject private var documents = JobDocumentCollections()
     @State private var documentGeneration: UUID?
     @State private var overviewEstimatesAuthority: CustomerHandoffExitAuthority?
+    @State private var preparingEstimate = false
     @State private var overviewInvoicesAuthority: CustomerHandoffExitAuthority?
     private var invoiceRead: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     private var invoices: [InvoiceRecord] { invoiceRead?.records ?? [] }
@@ -70,7 +71,12 @@ struct JobDetailView: View {
     @State private var previewOverviewPaymentHold = false
     #endif
     @State private var showSchedule = false
-    private var estimateRead: JobDocumentRead<EstimateRecord>? { documents.estimates }
+    private var estimateRead: JobDocumentRead<EstimateRecord>? {
+        guard let job, let read = documents.estimates, read.scope == scope(for: job),
+              documentGeneration == session.generation,
+              overviewEstimatesAuthority?.isCurrent(api: api, session: session) == true else { return nil }
+        return read
+    }
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
     private var estimatesLoaded: Bool { estimateRead != nil }
     private var estimatesFailed: Bool { estimateRead?.isComplete == false }
@@ -2024,17 +2030,17 @@ struct JobDetailView: View {
             } else {
                 let unavailable = estimateRead?.unavailableIDs ?? []
                 // At accessibility sizes "Add estimate" goes under the label so neither breaks mid-word.
-                JobPanelLabel(title: "Estimates", count: jobEstimates.count + unavailable.count > 0 ? "\(jobEstimates.count + unavailable.count)" : nil,
-                              actionTitle: canBuildEstimate ? "Add estimate" : nil, actionIdentifier: "job-add-estimate",
+                JobPanelLabel(title: "Estimates", count: jobEstimates.count + unavailable.count > 0 ? "\(jobEstimates.count + unavailable.count)\(documents.canLoadMoreEstimates ? " loaded" : "")" : nil,
+                              actionTitle: session.can("estimate.create", feature: "estimates") ? (preparingEstimate ? "Preparing…" : "Add estimate") : nil, actionIdentifier: "job-add-estimate",
                               action: buildEstimate)
-                if !estimatesLoaded {
+                if !estimatesLoaded && documents.estimatePageError == nil {
                     SkeletonRows(count: 2, leading: false, inset: 0)
-                } else if jobEstimates.isEmpty && !estimatesFailed && unavailable.isEmpty {
+                } else if estimateRead?.isComplete == true && jobEstimates.isEmpty && unavailable.isEmpty {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates on this job",
                                     message: "Build one from the price book.")
                 }
                 if !jobEstimates.isEmpty || !unavailable.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(jobEstimates) { estimate in
                             NavigationLink { EstimateDetailView(id: estimate.id, jobID: jobId).thorbisBackButton() } label: {
                                 JobDocumentRow(estimate: estimate, fresh: estimateRead?.freshIDs.contains(estimate.id) == true).asJobEstimateCard()
@@ -2051,6 +2057,20 @@ struct JobDetailView: View {
                                 .accessibilityIdentifier("job-estimate-unavailable-\(id)")
                         }
                     }
+                }
+                if let error = documents.estimatePageError {
+                    Text(error).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    if !documents.canLoadMoreEstimates || documents.estimatePageNeedsRefresh {
+                        Button("Try loading estimates again") { Task { await loadJobEstimates(job) } }
+                            .accessibilityIdentifier("job-retry-estimates")
+                    }
+                }
+                if documents.canLoadMoreEstimates && !documents.estimatePageNeedsRefresh {
+                    Button(documents.estimatePageError == nil ? "Load more estimates" : "Try loading estimates again") {
+                        Task { await loadNextJobEstimates(job) }
+                    }
+                    .disabled(documents.loadingEstimatePage)
+                    .accessibilityIdentifier("job-load-more-estimates")
                 }
                 // When the bar is busy with the invoice, the estimates' customer door stays here, quieter.
                 if !jobEstimates.isEmpty, !moneyBarIsCustomerView, canOpenCustomerView {
@@ -2099,7 +2119,13 @@ struct JobDetailView: View {
                 }
             }
         }
-        .task(id: job.id) { await loadJobEstimates(job) }
+        .task(id: "\(job.id)|\(job.organizationId)|\(job.customerId)|\(job.estimateId ?? "")") {
+            let target = scope(for: job)
+            if !documents.isLoadingEstimates(for: target) &&
+                (estimateRead?.scope != target || (!estimatesLoaded && documents.estimatePageError == nil)) {
+                await loadJobEstimates(job)
+            }
+        }
     }
 
     private func scope(for job: JobRecord) -> JobDocumentScope? {
@@ -2177,7 +2203,7 @@ struct JobDetailView: View {
     }
 
     private var documentReadIssue: String? {
-        if estimatesFailed && invoicesFailed { return "Couldn't load all estimates and invoices for this job." }
+        if estimateRead?.issue != nil && invoicesFailed { return "Couldn't load all estimates and invoices for this job." }
         return estimateRead?.issue ?? invoiceRead?.issue
     }
 
@@ -2189,9 +2215,22 @@ struct JobDetailView: View {
             return
         }
         let generation = session.generation
-        let published = await documents.loadEstimates(scope: scope, api: api) {
+        let retain = overviewEstimatesAuthority?.isCurrent(api: api, session: session) == true && documentGeneration == session.generation
+        let published = await documents.loadFirstEstimatePage(scope: scope, api: api, retainExisting: retain) {
             authority.isCurrent(api: api, session: session) && session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
-                self.job?.id == scope.jobID && self.job?.customerId == scope.customerID
+                self.job.flatMap { self.scope(for: $0) } == scope
+        }
+        guard session.generation == generation, authority.isCurrent(api: api, session: session), published else { return }
+        overviewEstimatesAuthority = authority
+    }
+
+    private func loadNextJobEstimates(_ job: JobRecord) async {
+        guard session.can("estimate.view", feature: "estimates"), let scope = scope(for: job),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        let generation = session.generation
+        let published = await documents.loadNextEstimatePage(scope: scope, api: api) {
+            authority.isCurrent(api: api, session: session) && session.generation == generation && session.activeOrganization?.id == scope.organizationID &&
+                self.job.flatMap { self.scope(for: $0) } == scope
         }
         guard session.generation == generation, authority.isCurrent(api: api, session: session), published else { return }
         overviewEstimatesAuthority = authority
@@ -2692,9 +2731,12 @@ struct JobDetailView: View {
     }
 
     private var canBuildEstimate: Bool {
-        JobEstimateCreation.canOpen(canCreate: session.can("estimate.create", feature: "estimates"),
+        let current = JobEstimateCreation.currentComplete(scope: job.flatMap { scope(for: $0) }, readScope: estimateRead?.scope,
+            complete: estimateRead?.isComplete == true,
+            authorityCurrent: documentGeneration == session.generation && overviewEstimatesAuthority?.isCurrent(api: api, session: session) == true)
+        return JobEstimateCreation.canOpen(canCreate: session.can("estimate.create", feature: "estimates"),
                                     canView: session.can("estimate.view", feature: "estimates"),
-                                    estimatesComplete: estimateRead?.isComplete == true)
+                                    estimatesComplete: current)
     }
 
     private var customerHandoffSummary: String {
@@ -2739,8 +2781,27 @@ struct JobDetailView: View {
     }
 
     private func buildEstimate() {
-        guard canBuildEstimate, let job, scope(for: job) != nil else { return }
-        showNewEstimate = true
+        guard !preparingEstimate, session.can("estimate.create", feature: "estimates"),
+              let job, let scope = scope(for: job) else { return }
+        if canBuildEstimate { showNewEstimate = true; return }
+        guard session.can("estimate.view", feature: "estimates"),
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        preparingEstimate = true
+        let generation = session.generation
+        Task {
+            defer { preparingEstimate = false }
+            let current: @MainActor () -> Bool = {
+                authority.isCurrent(api: api, session: session) && session.generation == generation &&
+                    self.job.flatMap { self.scope(for: $0) } == scope &&
+                    session.can("estimate.view", feature: "estimates") && session.can("estimate.create", feature: "estimates")
+            }
+            let read = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: nil, isCurrent: current)
+            guard current(), JobEstimateCreation.canOpen(canCreate: true, canView: true, estimatesComplete: read?.isComplete == true) else {
+                error = "Couldn't prepare this estimate. Check your connection and try again."
+                return
+            }
+            showNewEstimate = true
+        }
     }
 
     private func run(_ step: TechJobStep, current: @escaping @MainActor () -> Bool = { true },

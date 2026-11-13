@@ -62,10 +62,11 @@ struct Provenance { enum Source { case urlSession(cacheBypassed: Bool), savedCop
         if id == foreign { return .init(id: "foreign") }
         return .init(id: id)
     }
-    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false) async throws -> APIRead<EstimateRecord> {
-        if requireFresh && (id == savedID || id == protocolCachedID) { throw Problem(status: nil, title: "Network error") }
+    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false, saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> APIRead<EstimateRecord> {
+        let fresh = requireFresh || SavedCopies.liveOnly
+        if fresh && (id == savedID || id == protocolCachedID) { throw Problem(status: nil, title: "Network error") }
         let record = try await fieldEstimate(id)
-        return .init(value: record, provenance: .init(source: id == savedID ? .savedCopy(Date()) : .urlSession(cacheBypassed: requireFresh)))
+        return .init(value: record, provenance: .init(source: id == savedID ? .savedCopy(Date()) : .urlSession(cacheBypassed: fresh)))
     }
     func savedCopyDate(_ path: String) -> Date? { !markerClearedByAnotherRead && path == savedID.map { "/v1/estimates/\($0)" } ? Date() : nil }
 }

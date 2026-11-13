@@ -18,7 +18,7 @@ struct APIRead<Value> { let value: Value; let provenance: APIReadProvenance }
     var mutateScope = false
     static func normalizedOrigin(_ value: String) -> String? { value.lowercased() }
     func fieldPath(_ base: String, id: String, suffix: String = "") throws -> String { "\(base)/\(id)\(suffix)" }
-    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil, requireFresh: Bool = false) async throws -> APIRead<T> {
+    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil, requireFresh: Bool = false, saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> APIRead<T> {
         observed.append((cursor, requireFresh))
         let generation = requestGeneration, revision = savedCopyScopeRevision
         if mutateScope { savedCopyScopeRevision = UUID() }
