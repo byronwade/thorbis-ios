@@ -31,6 +31,19 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         }
     }
 
+    func testStandaloneCustomerInvoiceUsesVerifiedSummaryAndCanHandBack() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "present-invoice", "--paper-preview-legacy-handoff-test", "--paper-preview-customer-safe-invoice"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Customer safe service"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Customer summary · not the signed invoice"].exists)
+        XCTAssertTrue(app.buttons["Done"].exists)
+        XCTAssertFalse(app.buttons["Sign for the work"].exists)
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
+    }
+
     func testStandaloneCustomerInvoiceWithoutSummaryDoesNotShowRawLines() {
         continueAfterFailure = false
         let app = XCUIApplication()

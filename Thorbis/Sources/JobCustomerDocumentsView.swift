@@ -448,6 +448,7 @@ struct JobCustomerDocumentsView: View {
                         paperGeneration = UUID(); paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
                     }, onDone: beginHandBack)
+                    .id(presentation)
         }
     }
 

@@ -791,6 +791,7 @@ struct InvoiceDetailView: View {
                         }
                     }
                 }, onDone: handBack)
+                .id(ObjectIdentifier(lease))
         }.environmentObject(api)
     }
 

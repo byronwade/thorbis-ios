@@ -1457,6 +1457,20 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let item = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice)) as? [String: Any]
             return ["items": matchingCustomer(item.map { [$0] } ?? [], queryItems: queryItems)]
         }
+        if PaperPreview.screen == "present-invoice", ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-safe-invoice"),
+           path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/customer-presentation" {
+            let record = PaperPreview.issuedInvoice
+            let total = paperLinesTotal(record.lines) ?? 0
+            return ["kind": "customer_invoice_presentation", "presentationVersion": 1,
+                    "presentationScopeId": "invoice:\(record.id):lines:\(record.linesRevision):customer:v1",
+                    "isSignedDocument": false, "issuedSnapshotId": "00000000-0000-4000-8000-000000000001",
+                    "organizationId": record.organizationId, "customerId": record.customerId, "invoiceId": record.id,
+                    "jobId": record.jobId as Any? ?? NSNull(), "linesRevision": record.linesRevision,
+                    "status": record.status, "currency": "USD", "totalAmount": total,
+                    "amountPaid": record.amountPaid, "balanceDue": total - record.amountPaid,
+                    "lines": [["id": "customer-safe-line", "description": "Customer safe service", "quantity": 1,
+                               "unitPrice": ["amount": total, "currency": "USD"]]]]
+        }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
         }

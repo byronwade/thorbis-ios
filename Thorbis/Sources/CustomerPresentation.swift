@@ -900,6 +900,7 @@ struct CustomerInvoicePresentation: View {
                 await loadCustomerSummary()
                 if verifiedSummary != nil { await loadFinancing() }
             }
+        .onDisappear { summaryToken = UUID(); summary = nil; summaryAuthority = nil }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
