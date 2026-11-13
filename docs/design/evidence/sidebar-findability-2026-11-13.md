@@ -32,3 +32,8 @@ The focused phone test launched with the largest accessibility text category
 and passed its disclosure and Jobs navigation assertions:
 `/private/tmp/thorbis-sidebar-large-test-1113.log`. Actual VoiceOver activation
 and single-place permission cases remain unverified.
+
+The five phone UI cases, including the largest-text test, subsequently passed
+together on the same release-based code:
+`/private/tmp/thorbis-sidebar-phone-repeat-1113.log`. The earlier combined-run
+failure remains recorded above; this repeat does not establish its cause.
