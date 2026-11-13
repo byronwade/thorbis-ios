@@ -153,7 +153,8 @@ final class JobEstimateHandoffUITests: XCTestCase {
         app.buttons["handoff-next-estimate"].tap()
         XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30))
-        XCTAssertFalse(app.staticTexts["Sample repair"].exists, "The prior estimate's terms must not remain under the new identity")
+        capture(app, "Second estimate failed without prior terms")
+        XCTAssertFalse(app.scrollViews["handoff-estimate-details"].staticTexts["Sample repair"].exists, "The prior estimate's terms must not remain inside the new estimate")
         app.buttons["handoff-previous-estimate"].tap()
         XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
     }
