@@ -145,11 +145,14 @@ final class JobEstimateHandoffUITests: XCTestCase {
                         "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30)); revealPrecisely(first, in: app, scrollID: "job-estimate-handoff"); first.tap()
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); revealPrecisely(first, in: app, scrollID: "job-estimate-handoff")
+        capture(app, "Largest text estimate detail action")
+        first.tap()
         let more = app.buttons["Show more, Estimate EST-8101, item 1"]
         XCTAssertTrue(more.waitForExistence(timeout: 30)); revealPrecisely(more, in: app, scrollID: "handoff-estimate-details"); more.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.textViews.firstMatch.exists)
+        capture(app, "Largest text read-only estimate description")
         app.buttons["Done"].tap()
         let details = app.scrollViews["handoff-estimate-details"]
         XCTAssertTrue(details.waitForExistence(timeout: 10))
