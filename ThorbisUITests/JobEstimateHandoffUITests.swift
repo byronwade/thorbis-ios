@@ -137,12 +137,16 @@ final class JobEstimateHandoffUITests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertFalse(app.buttons["handoff-review-selected"].isEnabled, "Partial membership must not authorize approval")
         let more = app.buttons["handoff-load-more-estimates"]
-        for _ in 0..<3 {
-            for _ in 0..<30 where !more.isHittable { app.scrollViews["job-estimate-handoff"].swipeUp() }
-            XCTAssertTrue(more.isHittable); more.tap()
+        let list = app.scrollViews["job-estimate-handoff"]
+        for suffix in ["082018", "082028", "082038"] {
+            for _ in 0..<30 where !(more.isHittable && more.isEnabled) { list.swipeUp() }
+            XCTAssertTrue(more.isHittable && more.isEnabled, "The next page action must be visible and enabled")
+            more.tap()
+            let nextPageEnd = app.buttons["handoff-select-00000000-0000-4000-8000-000000\(suffix)"]
+            for _ in 0..<30 where !nextPageEnd.isHittable { list.swipeUp() }
+            XCTAssertTrue(nextPageEnd.isHittable, "Each requested page must load before requesting the next one")
         }
         let last = app.buttons["handoff-select-00000000-0000-4000-8000-000000082038"]
-        let list = app.scrollViews["job-estimate-handoff"]
         for _ in 0..<60 where !last.isHittable { list.swipeUp() }
         XCTAssertTrue(last.isHittable, "The last estimate must remain reachable without obscuring its control")
         selectEstimate(app, last)
@@ -175,7 +179,17 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
         thorbisShowCustomerDoor(app).tap()
         let selected = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        let loaded = selected.waitForExistence(timeout: 10)
+        if !loaded {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Customer estimate handoff hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            let ledger = app.descendants(matching: .any).matching(identifier: "handoff-canonical-receipt").firstMatch
+            if let value = ledger.value as? String {
+                let attachment = XCTAttachment(string: value)
+                attachment.name = "Anonymized handoff request ledger"; attachment.lifetime = .keepAlways; add(attachment)
+            }
+        }
+        XCTAssertTrue(loaded)
         let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         visible(app, details)
