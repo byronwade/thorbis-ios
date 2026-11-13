@@ -89,10 +89,9 @@ private struct CustomerHandoffEstimateDetails: View {
     #endif
 
     @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, total: Int, context: String) -> some View {
-        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == total,
-           let projected = customerEstimateProjection(lines, currency: currency) {
+        if let display = customerEstimateDisplay(lines, currency: currency), display.amounts.total == total {
             CustomerIncludedLabel(type: type)
-            CustomerIncludedLines(lines: projected, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false),
+            CustomerIncludedLines(lines: display.lines, type: type, rows: customerAmountRows(display.amounts, currency: currency, invoice: false),
                                   readingAccess: access, descriptionContext: context)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
@@ -337,11 +336,10 @@ struct JobEstimateHandoffView: View {
                     }
                 }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
-                if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
-                   let projected = customerEstimateProjection(lines, currency: currency) {
+                if let display = customerEstimateDisplay(lines, currency: currency) {
                     CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: projected, type: type,
-                                          rows: customerAmountRows(amounts, currency: currency, invoice: false),
+                    CustomerIncludedLines(lines: display.lines, type: type,
+                                          rows: customerAmountRows(display.amounts, currency: currency, invoice: false),
                                           readingAccess: descriptionAccess(for: item),
                                           descriptionContext: reference)
                 } else {

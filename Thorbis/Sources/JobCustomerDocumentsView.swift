@@ -516,13 +516,12 @@ private struct CustomerJobReadOnlyPaper: View {
     }
 
     @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, type: CustomerType, expectedTotal: Int? = nil) -> some View {
-        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
-           expectedTotal.map({ $0 == amounts.total }) != false,
-           let projected = customerEstimateProjection(lines, currency: currency) {
+        if let display = customerEstimateDisplay(lines, currency: currency),
+           expectedTotal.map({ $0 == display.amounts.total }) != false {
             CustomerIncludedLabel(type: type)
-            CustomerIncludedLines(lines: projected, type: type, rows: expectedTotal.map {
-                [CustomerAmountRow(label: "Option total", amount: money($0, currency: currency), emphasis: true)]
-            } ?? customerAmountRows(amounts, currency: currency, invoice: false))
+            CustomerIncludedLines(lines: display.lines, type: type,
+                                  rows: customerAmountRows(display.amounts, currency: currency, invoice: false,
+                                                           totalLabel: expectedTotal == nil ? "Total" : "Option total"))
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                 .font(Theme.customerFont(type.body))
