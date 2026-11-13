@@ -37,3 +37,23 @@ use an ordered response queue and may require keyed responses for safe
 out-of-order requests. Scope, response provenance, partial loading/failure
 copy, cancellation, action eligibility and the shared consumers of
 `JobDocumentCollections` require independent review. Do not release yet.
+
+## Per-response estimate provenance (13 November)
+
+`EstimateDetails.fetch` previously classified a returned estimate by looking at
+the API client's shared saved-copy marker for its path. A separate request for
+the same path can clear that marker after the original response was served from
+disk. The extracted production-loader host probe reproduces this interleaving
+with a deterministic stub: before the change a saved estimate could be marked
+fresh and an otherwise complete page could become actionable. That probe fails
+on the prior loader and passes when each record is classified using its own
+`APIRead` provenance. This is a simulated race, not an observed production
+incident. A URLProtocol test was added with overlapping actual API reads: one
+falls back to a verified saved copy while a held network read later clears the
+shared marker; it checks each response retains its own provenance. The native
+test is unbuilt and unrun, and does not directly schedule the loader's return
+interleaving. The host test exercises the loader with a stub, not URLSession.
+No claim of server or intermediary freshness, device concurrency coverage, or
+full customer approval safety follows from these tests. An ordinary URLSession
+response remains subject to its existing request cache policy; final customer
+decisions still require the separate fresh revision and membership checks.

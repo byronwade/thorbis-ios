@@ -7,6 +7,28 @@ final class FieldAPITests: XCTestCase {
     private let customerID = "00000000-0000-4000-8000-000000000003"
     private let jobID = "00000000-0000-4000-8000-000000000001"
 
+    func testConcurrentEstimateReadsRetainTheirOwnProvenance() async throws {
+        let id = "00000000-0000-4000-8000-000000000008"
+        let path = "/v1/estimates/\(id)"
+        let payload = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"sent","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, payload), .init(200, payload, gate: gate), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "estimate-provenance-" + UUID().uuidString
+        _ = try await client.fieldEstimate(id)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        let live = Task { @MainActor in try await client.fieldEstimateWithProvenance(id) }
+        for _ in 0..<300 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        let cached = try await client.fieldEstimateWithProvenance(id)
+        if case .savedCopy = cached.provenance.source {} else { XCTFail("Offline read must identify its saved source") }
+        XCTAssertNotNil(client.savedCopyDate(path))
+        gate.release()
+        let fresh = try await live.value
+        if case .urlSession = fresh.provenance.source {} else { XCTFail("Successful concurrent request must identify its network source") }
+        XCTAssertNil(client.savedCopyDate(path), "The network response clears the shared path marker")
+        if case .savedCopy = cached.provenance.source {} else { XCTFail("A later request must not change the saved response provenance") }
+    }
+
     func testJobEstimateMembershipFetchesOneFreshPageOnly() async throws {
         let linkID = "00000000-0000-4000-8000-000000000010"
         let estimateID = "00000000-0000-4000-8000-000000000011"

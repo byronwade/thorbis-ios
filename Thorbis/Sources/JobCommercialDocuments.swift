@@ -314,13 +314,16 @@ enum JobDocumentsLoader {
             guard isCurrent(), !Task.isCancelled else { return }
             let id = ids[index]
             do {
-                let record = try await api.fieldEstimate(id)
+                let response = try await api.fieldEstimateWithProvenance(id)
+                let record = response.value
                 guard isCurrent(), !Task.isCancelled else { return }
                 guard scope.contains(record, requestedID: id) else {
                     slots[index] = .init(record: nil, fresh: false, failed: true, rejected: true)
                     publishPartial(); return
                 }
-                let fresh = !linksSaved && api.savedCopyDate("/v1/estimates/\(id)") == nil
+                let fresh: Bool
+                if case .urlSession = response.provenance.source { fresh = !linksSaved }
+                else { fresh = false }
                 slots[index] = .init(record: record, fresh: fresh, failed: false, rejected: false)
                 publishPartial()
             } catch is CancellationError { return }

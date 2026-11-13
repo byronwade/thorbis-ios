@@ -29,6 +29,8 @@ struct JobDocumentRead<Record> {
     }
 }
 struct Problem: Error { let status: Int? }
+struct APIRead<Value> { let value: Value; let provenance: Provenance }
+struct Provenance { enum Source { case urlSession(cacheBypassed: Bool), savedCopy(Date) }; let source: Source }
 @MainActor final class APIClient {
     let ids: [String]
     var active = 0
@@ -38,6 +40,7 @@ struct Problem: Error { let status: Int? }
     var foreign: String?
     var denied: String?
     var savedID: String?
+    var markerClearedByAnotherRead = false
     init(ids: [String], failure: String? = nil) { self.ids = ids; self.failure = failure }
     func fieldJobEstimateLinks(_ id: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
         ids.map { .init(jobId: id, estimateId: $0) }
@@ -51,7 +54,11 @@ struct Problem: Error { let status: Int? }
         if id == foreign { return .init(id: "foreign") }
         return .init(id: id)
     }
-    func savedCopyDate(_ path: String) -> Date? { path == savedID.map { "/v1/estimates/\($0)" } ? Date() : nil }
+    func fieldEstimateWithProvenance(_ id: String) async throws -> APIRead<EstimateRecord> {
+        let record = try await fieldEstimate(id)
+        return .init(value: record, provenance: .init(source: id == savedID ? .savedCopy(Date()) : .urlSession(cacheBypassed: false)))
+    }
+    func savedCopyDate(_ path: String) -> Date? { !markerClearedByAnotherRead && path == savedID.map { "/v1/estimates/\($0)" } ? Date() : nil }
 }
 
 @main struct Probe {
@@ -82,6 +89,10 @@ struct Problem: Error { let status: Int? }
                                                                    previous: nil, membershipFresh: true, membershipComplete: true,
                                                                    isCurrent: { true })!
         precondition(!savedPage.isComplete && !savedPage.freshIDs.contains("1"), "Saved details cannot make the set complete")
+        let racedAPI = APIClient(ids: ids); racedAPI.savedID = "1"; racedAPI.markerClearedByAnotherRead = true
+        let racedPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: racedAPI, ids: ["1"],
+            previous: nil, membershipFresh: true, membershipComplete: true, isCurrent: { true })!
+        precondition(!racedPage.isComplete && !racedPage.freshIDs.contains("1"), "A concurrent fresh read must not turn a saved response into a fresh estimate")
         var pagePartials: [JobDocumentRead<EstimateRecord>] = []
         let partialPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: APIClient(ids: ids), ids: ids,
             previous: nil, membershipFresh: true, membershipComplete: false, isCurrent: { true },
