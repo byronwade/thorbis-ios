@@ -171,6 +171,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     @Published private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
     @Published private(set) var overviewPriceFailures: Set<String> = []
     @Published private(set) var overviewPriceGeneration = UUID()
+    private var overviewPriceReady = false
     @Published private var overviewReceipts: [String: CustomerEstimateAcceptanceReceipt] = [:]
     private var overviewRequests: [String: UUID] = [:]
     private var request = UUID()
@@ -286,6 +287,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard isCurrent, !loading else { if !isCurrent { retire() }; return }
         retryingPage = false
         let ticket = UUID(); request = ticket; loading = true; error = nil
+        overviewPriceReady = false; revisions = [:]; overviewReceipts = [:]; overviewPriceFailures = []; overviewPriceGeneration = UUID()
         defer { if request == ticket { loading = false } }
         do {
             let fresh = try await api.liveFieldJob(scope.jobID)
@@ -346,6 +348,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
             self.revisions = [:]; self.overviewReceipts = [:]
             self.overviewPriceFailures = []
+            self.overviewPriceReady = true
             self.overviewPriceGeneration = UUID()
         }) { [weak self] cursor in
             guard let self else { throw CancellationError() }
@@ -479,6 +482,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     /// Prices are read from issued revisions, in a small bounded batch for the loaded page.
     /// Every request uses the existing live job, membership and authority checks.
     func loadOverviewPrices() async {
+        guard overviewPriceReady else { return }
         let generation = overviewPriceGeneration
         let candidates = records.filter { ($0.status == "sent" || $0.status == "approved") && detailsCurrent($0, authority: authorityRevision) }
         await withTaskGroup(of: Void.self) { group in
@@ -502,7 +506,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
 
     private func loadOverviewPrice(_ record: EstimateRecord, generation: UUID) async {
-        guard !Task.isCancelled, generation == overviewPriceGeneration,
+        guard overviewPriceReady, !Task.isCancelled, generation == overviewPriceGeneration,
               detailsCurrent(record, authority: authorityRevision) else { return }
         let ticket = UUID()
         overviewRequests[record.id] = ticket
@@ -644,7 +648,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         retired = true; request = UUID(); loading = false
         membershipPager = nil; pageRead = nil; canLoadMoreEstimates = false
         records = []; freshIDs = []; unavailableIDs = []; reviewed = []; revisions = [:]
-        overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
+        overviewPriceReady = false; overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
         jobTitle = ""; customerName = ""; lastSignerName = nil; error = nil
         for context in contexts.values { context.retire() }
         contexts = [:]
