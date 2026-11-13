@@ -28,6 +28,27 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue((inline.value as? String ?? "").contains("extra detail"), "The canvas edits must remain in the current invoice draft")
     }
 
+    func testLongCollapsedDescriptionOpensEditableCanvas() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 30))
+        let field = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        field.tap()
+        field.typeText(String(repeating: " extra detail", count: 8))
+        let close = app.buttons["Close line"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        close.tap()
+        let more = app.buttons["Show full description"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        more.tap()
+        let canvas = app.textViews["line-description-canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        XCTAssertTrue((canvas.value as? String ?? "").contains("extra detail"))
+    }
+
     func testDraftInvoiceOffersDirectLineItemEditing() {
         continueAfterFailure = false
         let app = XCUIApplication()
