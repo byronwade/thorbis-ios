@@ -224,7 +224,9 @@ private struct CustomerEstimateBookPage: View {
     let refresh: () async -> Void
     let review: () -> Void
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var receipt: CustomerEstimateAcceptanceReceipt?
     @State private var issued: CustomerIssuedEstimateRevision?
     @State private var loading = false
     @State private var error: String?
@@ -265,7 +267,16 @@ private struct CustomerEstimateBookPage: View {
                         Text("This copy needs a refresh before you can decide.").font(Theme.customerFont(type.body))
                     } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
                     if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() } }
-                    if estimate.status != "sent" || issued != nil {
+                    if estimate.status == "approved" {
+                        if fresh, readingAccess.permits(session), let issued, let receipt,
+                           issued.matchesDetails(for: estimate), (try? receipt.validate(for: issued)) != nil {
+                            if let title = receipt.optionTitle {
+                                Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                            }
+                            estimateLines(receipt.lines, currency: receipt.currency, expectedTotal: receipt.totalAmount,
+                                          requireUSDCurrency: true, descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
+                        }
+                    } else if estimate.status != "sent" || issued != nil {
                         if !issuedStructureValid {
                             Text("These amounts couldn't be verified. Hand the device back to your technician.")
                                 .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
@@ -315,17 +326,41 @@ private struct CustomerEstimateBookPage: View {
     }
 
     private func load() async {
-        guard fresh, estimate.status == "sent" else { return }
-        loading = true; error = nil; issued = nil
+        receipt = nil; issued = nil; error = nil
+        guard fresh, scope.contains(estimate, requestedID: estimate.id),
+              estimate.status == "sent" || estimate.status == "approved" else { return }
+        let authorityRevision = session.authorityRevision
+        let generation = session.generation
+        let current: @MainActor () -> Bool = {
+            !Task.isCancelled && session.phase == .ready && session.user != nil &&
+            session.generation == generation && session.authorityRevision == authorityRevision &&
+            sourceGeneration == generation && session.activeOrganization?.id == scope.organizationID &&
+            session.can("estimate.view", feature: "estimates")
+        }
+        guard current() else { return }
+        loading = true
         defer { loading = false }
         do {
-            let revision = try await api.customerIssuedEstimateRevision(for: estimate)
+            let revision = try await api.customerIssuedEstimateRevision(for: estimate,
+                allowApprovedForReading: estimate.status == "approved", currentAuthority: current)
+            if estimate.status == "approved" {
+                guard let signed = try await api.customerEstimateAcceptanceReceipt(for: revision, currentAuthority: current) else {
+                    if current() { error = "The signed estimate isn't available. Hand the device back to your technician." }
+                    return
+                }
+                try Task.checkCancellation()
+                guard current() else { return }
+                receipt = signed
+            }
             try Task.checkCancellation()
+            guard current() else { return }
             issued = revision
         } catch is CancellationError {
         } catch is CustomerIssuedEstimateAmountsUnavailable {
-            self.error = "These amounts couldn't be verified. Hand the device back to your technician."
-        } catch { self.error = error.customerSentence(.openEstimate) }
+            if current() { self.error = "These amounts couldn't be verified. Hand the device back to your technician." }
+        } catch {
+            if current() { self.error = error.customerSentence(.openEstimate) }
+        }
     }
 }
 

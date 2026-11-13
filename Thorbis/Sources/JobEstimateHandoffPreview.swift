@@ -189,6 +189,18 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
             }
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }
             if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" { return .init(status:200,payload:revision(id)) }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/1/acceptance" {
+                guard flags.contains("--paper-preview-handoff-receipt"), let acceptance = acceptances[id],
+                      let optionID = acceptance["optionId"] as? String,
+                      let option = options(id).first(where: { $0["id"] as? String == optionID }) else {
+                    return .init(status: 404, payload: ["status": 404, "title": "Not found"])
+                }
+                return .init(status: 200, payload: ["id": acceptance["id"]!, "estimateId": id,
+                    "revisionId": id.replacingOccurrences(of: "0081", with: "0091"), "revisionNumber": 1,
+                    "contentHash": String(repeating: "a", count: 64), "optionId": optionID,
+                    "optionTitle": option["title"]!, "signerName": acceptance["signerName"]!,
+                    "acceptedAt": now, "totalAmount": option["totalAmount"]!, "currency": "USD", "lines": option["lines"]!])
+            }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
             if method == "POST", path == "/v1/estimates/\(id)/action-tokens" { return .init(status:200,payload:["token":"sample-\(id)"]) }
             if method == "GET", path == "/v1/public/document-actions/sample-\(id)" { return .init(status:200,payload:action(id)) }
