@@ -184,7 +184,13 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         do { _ = try await missingMediaAPI.replayCustomerSummaryPending(restored, scope: pendingScope, currentAuthority: { true }); XCTFail("Missing media cannot prove a prior submission failed") } catch { }
         XCTAssertNotNil(try store.load(scope: pendingScope), "An ambiguous conflict must retain the pending attempt")
         let changedJob = CustomerSummaryPendingScope(origin: pendingScope.origin, actorID: pendingScope.actorID, organizationID: organization, customerID: customer, jobID: "00000000-0000-4000-8000-000000000099", invoiceID: invoice)
-        XCTAssertThrowsError(try store.load(scope: changedJob), "Changed job metadata cannot hide an unresolved invoice attempt")
+        XCTAssertThrowsError(try store.load(scope: changedJob), "Current-document reads must not display an old job's terms")
+        let oldForRecovery = try XCTUnwrap(store.loadForRecovery(scope: changedJob))
+        XCTAssertEqual(oldForRecovery.scope.jobID, job); XCTAssertEqual(oldForRecovery.attempt.idempotencyKey, attempt.idempotencyKey)
+        XCTAssertNil(try store.loadForRecovery(scope: otherActor), "A different actor cannot access this pending attempt")
+        let changedLinkAPI = APIClient(session: URLProtocolFixture.session([.init(404, "{}")]), baseURL: "https://app.thorbis.com")
+        do { _ = try await changedLinkAPI.replayCustomerSummaryPending(oldForRecovery, scope: oldForRecovery.scope, currentAuthority: { true }); XCTFail("The held backend currently refuses changed-link replay") } catch { }
+        XCTAssertNotNil(try store.loadForRecovery(scope: changedJob), "A 404 must retain the original pending attempt")
         XCTAssertThrowsError(try store.complete(scope: pendingScope, proof: proof, currentAuthority: { false }))
         XCTAssertNotNil(try store.load(scope: pendingScope))
         try store.complete(scope: pendingScope, proof: proof, currentAuthority: { true })
