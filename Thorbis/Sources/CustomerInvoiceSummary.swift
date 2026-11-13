@@ -1,15 +1,16 @@
 import Foundation
 import CryptoKit
 import Combine
+import Security
 
 /// A server-produced customer presentation. It is not a signed invoice.
-struct CustomerInvoiceSummary: Decodable, Sendable {
-    struct Consent: Decodable, Sendable {
+struct CustomerInvoiceSummary: Codable, Sendable {
+    struct Consent: Codable, Sendable {
         let digest: String
         let consentVersion: String
         let consentText: String
     }
-    struct Line: Decodable, Equatable, Sendable {
+    struct Line: Codable, Equatable, Sendable {
         let id: String
         let description: String
         let quantity: Int
@@ -135,11 +136,11 @@ private struct CustomerSummaryAuthorizationLookup: Decodable {
 }
 
 /// Freeze every field across uncertain network retries so the server can replay one attempt.
-struct CustomerSummarySigningAttempt: Encodable, Sendable {
+struct CustomerSummarySigningAttempt: Codable, Equatable, Sendable {
     let expectedLinesRevision: Int
     let presentationScopeId: String
     let consentDigest: String
-    let consent = true
+    let consent: Bool
     let consentVersion: String
     let signerName: String
     let signedAt: String
@@ -151,12 +152,111 @@ struct CustomerSummarySigningAttempt: Encodable, Sendable {
               signerName == signerName.trimmingCharacters(in: .whitespacesAndNewlines),
               ISO8601DateFormatter().date(from: signedAt) != nil,
               UUID(uuidString: imageMediaId) != nil, UUID(uuidString: idempotencyKey) != nil else { return nil }
+        self.consent = true
         expectedLinesRevision = summary.linesRevision
         presentationScopeId = summary.presentationScopeId
         consentDigest = consent.digest
         consentVersion = consent.consentVersion
         self.signerName = signerName; self.signedAt = signedAt
         self.imageMediaId = imageMediaId; self.idempotencyKey = idempotencyKey
+    }
+}
+
+/// One unresolved submission per invoice and actor, even if the invoice later changes.
+struct CustomerSummaryPendingScope: Codable, Equatable {
+    let origin: String
+    let actorID: String
+    let organizationID: String
+    let customerID: String
+    let jobID: String
+    let invoiceID: String
+
+    var isValid: Bool {
+        !origin.isEmpty && [actorID, organizationID, customerID, jobID, invoiceID].allSatisfy { UUID(uuidString: $0) != nil }
+    }
+}
+
+/// Contains no signature image or login credential. The exact previously displayed terms
+/// allow an old receipt to be checked after the current invoice revision changes.
+struct CustomerSummaryPendingAttempt: Codable {
+    let scope: CustomerSummaryPendingScope
+    let summary: CustomerInvoiceSummary
+    let attempt: CustomerSummarySigningAttempt
+
+    func isValid(for expected: CustomerSummaryPendingScope) -> Bool {
+        guard scope == expected, expected.isValid, let consent = summary.validatedConsent,
+              summary.organizationId == expected.organizationID, summary.customerId == expected.customerID,
+              summary.jobId == expected.jobID, summary.invoiceId == expected.invoiceID,
+              attempt.consent, attempt.expectedLinesRevision == summary.linesRevision,
+              attempt.presentationScopeId == summary.presentationScopeId, attempt.consentDigest == consent.digest,
+              attempt.consentVersion == consent.consentVersion,
+              !attempt.signerName.isEmpty, attempt.signerName.count <= 120,
+              attempt.signerName == attempt.signerName.trimmingCharacters(in: .whitespacesAndNewlines),
+              ISO8601DateFormatter().date(from: attempt.signedAt) != nil,
+              UUID(uuidString: attempt.imageMediaId) != nil, UUID(uuidString: attempt.idempotencyKey) != nil else { return false }
+        return true
+    }
+    func matches(_ receipt: CustomerInvoiceSummaryReceipt) -> Bool {
+        isValid(for: scope) && receipt.matches(summary: summary, signerName: attempt.signerName, signedAt: attempt.signedAt)
+    }
+}
+
+/// Constructed only after the exact actor-bound idempotent POST succeeds and its receipt verifies.
+struct CustomerSummaryReplayProof {
+    fileprivate let pending: CustomerSummaryPendingAttempt
+    let receipt: CustomerInvoiceSummaryReceipt
+    fileprivate init(pending: CustomerSummaryPendingAttempt, receipt: CustomerInvoiceSummaryReceipt) {
+        self.pending = pending; self.receipt = receipt
+    }
+}
+
+@MainActor
+protocol CustomerSummaryPendingStoring {
+    func load(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt?
+    /// Atomically insert; never overwrite another uncertain attempt.
+    func insert(_ pending: CustomerSummaryPendingAttempt) throws
+    /// Caller must also prove current authority before resolving a receipt.
+    func complete(scope: CustomerSummaryPendingScope, proof: CustomerSummaryReplayProof, currentAuthority: @MainActor () -> Bool) throws
+}
+
+@MainActor
+final class KeychainCustomerSummaryPendingStore: CustomerSummaryPendingStoring {
+    static let shared = KeychainCustomerSummaryPendingStore()
+    private let service = "com.thorbis.field.customer-summary-pending-v1"
+    private enum StoreError: Error { case invalid, alreadyPending, keychain(OSStatus) }
+    private func query(_ scope: CustomerSummaryPendingScope) throws -> [String: Any] {
+        guard scope.isValid else { throw StoreError.invalid }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        // One key per invoice: changed job/customer metadata must not hide an unresolved attempt.
+        let identity = [scope.origin, scope.actorID, scope.organizationID, scope.invoiceID]
+        let account = SHA256.hash(data: try encoder.encode(identity)).map { String(format: "%02x", $0) }.joined()
+        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+    func load(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt? {
+        var item = try query(scope); item[kSecReturnData as String] = true; item[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(item as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else { throw StoreError.keychain(status) }
+        let pending = try JSONDecoder().decode(CustomerSummaryPendingAttempt.self, from: data)
+        guard pending.isValid(for: scope) else { throw StoreError.invalid }
+        return pending
+    }
+    func insert(_ pending: CustomerSummaryPendingAttempt) throws {
+        guard pending.isValid(for: pending.scope) else { throw StoreError.invalid }
+        var item = try query(pending.scope)
+        item[kSecValueData as String] = try JSONEncoder().encode(pending)
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        let status = SecItemAdd(item as CFDictionary, nil)
+        if status == errSecDuplicateItem { throw StoreError.alreadyPending }
+        guard status == errSecSuccess else { throw StoreError.keychain(status) }
+    }
+    func complete(scope: CustomerSummaryPendingScope, proof: CustomerSummaryReplayProof, currentAuthority: @MainActor () -> Bool) throws {
+        guard currentAuthority(), let pending = try load(scope: scope),
+              proof.pending.isValid(for: scope), pending.attempt == proof.pending.attempt,
+              pending.matches(proof.receipt), currentAuthority() else { throw StoreError.invalid }
+        let status = SecItemDelete(try query(scope) as CFDictionary)
+        guard status == errSecSuccess else { throw StoreError.keychain(status) }
     }
 }
 
@@ -327,6 +427,16 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
 
 @MainActor
 extension APIClient {
+    /// Replays a previously persisted request, including old terms, under the same actor.
+    /// An unsigned lookup alone cannot prove an earlier in-flight POST has finished.
+    func replayCustomerSummaryPending(_ pending: CustomerSummaryPendingAttempt, scope: CustomerSummaryPendingScope,
+                                      currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerSummaryReplayProof {
+        guard currentAuthority(), pending.isValid(for: scope), normalizedOrigin == scope.origin else { throw CancellationError() }
+        let result = try await authorizeCustomerInvoiceSummary(pending.summary, attempt: pending.attempt, currentAuthority: currentAuthority)
+        guard currentAuthority(), normalizedOrigin == scope.origin, pending.matches(result) else { throw CancellationError() }
+        return CustomerSummaryReplayProof(pending: pending, receipt: result)
+    }
+
     /// A 404, stale digest or offline response is an error, never evidence that the summary is unsigned.
     func currentCustomerSummaryAuthorization(_ summary: CustomerInvoiceSummary,
                                              currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerSummaryAuthorizationState {
@@ -361,7 +471,7 @@ extension APIClient {
             guard generation == requestGeneration, savedScope == savedCopyScopeRevision,
                   origin != nil, origin == normalizedOrigin, currentAuthority(),
                   let consent = summary.validatedConsent,
-                  attempt.expectedLinesRevision == summary.linesRevision, attempt.presentationScopeId == summary.presentationScopeId,
+                  attempt.consent, attempt.expectedLinesRevision == summary.linesRevision, attempt.presentationScopeId == summary.presentationScopeId,
                   attempt.consentDigest == consent.digest, attempt.consentVersion == consent.consentVersion else { throw CancellationError() }
         }
         try check()
