@@ -64,6 +64,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long estimate title and status, normal text"; shot.lifetime = .keepAlways; add(shot)
         card.tap()
         XCTAssertTrue((card.value as? String)?.hasPrefix("Selected,") == true)
+
     }
     func testLongEstimateTitleAndStatusAtLargestText() {
         let app = open(["--paper-preview-handoff-long-title", "--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
@@ -77,6 +78,13 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long estimate title and status, largest text"; shot.lifetime = .keepAlways; add(shot)
         card.tap()
         XCTAssertTrue((card.value as? String)?.hasPrefix("Selected,") == true)
+        let review = app.buttons["handoff-review-selected"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); XCTAssertTrue(review.isEnabled)
+        XCTAssertTrue(review.label.contains("Review selected (1)"))
+        XCTAssertLessThan(review.frame.height, 100, "The review action should leave space for reading estimates")
+        let selectedShot = XCTAttachment(screenshot: app.screenshot()); selectedShot.name = "Selected estimate review action, largest text"; selectedShot.lifetime = .keepAlways; add(selectedShot)
+        review.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "separate estimates. You'll approve and sign each one.")).firstMatch.waitForExistence(timeout: 20))
     }
     override func tearDown() { XCUIApplication().terminate(); super.tearDown() }
     private func open(_ extra: [String] = []) -> XCUIApplication {
