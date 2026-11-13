@@ -38,6 +38,34 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(done.waitForNonExistence(timeout: 5), file: file, line: line)
     }
 
+    func testDetailHidesPreviouslyVisibleAssetAfterJobAccessRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test"]
+        app.launch()
+        let title = app.staticTexts["Outdoor unit"]
+        XCTAssertTrue(title.waitForExistence(timeout: 25))
+        app.buttons["Revoke test job access"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: title)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+    }
+
+    func testDetailRejectsMediaFromAnotherJob() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-job"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["This file is not on the job."].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
+    func testDetailRejectsMediaFromAnotherOrganization() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-org"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["This file is not on the job."].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
     func testLaterFilteredPhotosAndDocumentsRemainReachable() {
         continueAfterFailure = false
         let app = XCUIApplication()

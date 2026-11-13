@@ -86,64 +86,120 @@ struct JobNoteDetailView: View {
     }
 }
 
+private struct MediaDetailScope: Hashable {
+    let actor: String
+    let organization: String
+    let job: String
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let policy: Int
+    let requestGeneration: UUID
+    let savedCopyRevision: UUID
+    let origin: String
+}
+
 struct JobMediaDetailView: View {
     let jobID: String
     let assetID: String
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @StateObject private var preview = DocumentPreviewController()
     @State private var asset: MediaAssetRecord?
+    @State private var sourceScope: MediaDetailScope?
     @State private var error: String?
     @State private var loading = true
+
+    private var readScope: MediaDetailScope? {
+        guard session.can("job.view", feature: "jobs"), let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let policy = session.policyVersion,
+              let origin = api.normalizedOrigin else { return nil }
+        return MediaDetailScope(actor: actor, organization: organization, job: jobID,
+                                sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                                policy: policy, requestGeneration: api.requestGeneration,
+                                savedCopyRevision: api.savedCopyScopeRevision, origin: origin)
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if loading || preview.loading { SkeletonRows(count: 3, inset: 0) }
-                if let message = error ?? preview.error {
-                    ErrorBanner(message: message) { await load() }
+                #if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-test") {
+                    Button("Revoke test job access") {
+                        Task { PaperPreviewProtocol.revokeJobMediaView(); await session.revalidate() }
+                    }
                 }
-                if let asset {
-                    Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
-                        .font(Theme.font(17, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                    Text(asset.kind == "photo" ? "Photo" : "Document")
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.muted)
-                }
-                if let url = preview.url {
-                    NativeDocumentPreview(url: url)
-                        .frame(minHeight: 420)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                #endif
+                if readScope == nil {
+                    Text("This file is unavailable. Check your job access.")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                } else if readScope == sourceScope {
+                    if loading || preview.loading { SkeletonRows(count: 3, inset: 0) }
+                    if let message = error ?? preview.error {
+                        ErrorBanner(message: message) { await load() }
+                    }
+                    if let asset {
+                        Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                            .font(Theme.font(17, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Text(asset.kind == "photo" ? "Photo" : "Document")
+                            .font(Theme.font(13))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    if let url = preview.url {
+                        NativeDocumentPreview(url: url)
+                            .frame(minHeight: 420)
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    }
+                } else {
+                    SkeletonRows(count: 3, inset: 0)
                 }
             }
             .padding(.horizontal, Theme.gutter)
             .padding(.vertical, 16)
         }
         .background(Theme.canvas)
-        .navigationTitle(asset?.kind == "photo" ? "Photo" : "File")
+        .navigationTitle(readScope == sourceScope && asset?.kind == "photo" ? "Photo" : "File")
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .task(id: readScope) { await load() }
+        .onChange(of: readScope) { _, current in
+            if sourceScope != current { preview.clear(); asset = nil; sourceScope = nil; error = nil }
+        }
         .onDisappear { preview.clear() }
     }
 
     private func load() async {
-        loading = asset == nil
+        preview.clear()
+        asset = nil
+        error = nil
+        guard let scope = readScope else { sourceScope = nil; loading = false; return }
+        sourceScope = scope
+        loading = true
         do {
-            let assets = try await api.fieldMedia(jobID)
-            let match = assets.first { $0.id == assetID && !$0.archived }
-            asset = match
-            guard let match else {
+            let assets = try await api.fieldMedia(jobID, isCurrent: { readScope == scope })
+            try Task.checkCancellation()
+            guard readScope == scope, sourceScope == scope else { return }
+            guard let match = assets.first(where: { $0.id == assetID && $0.jobId == scope.job &&
+                $0.organizationId == scope.organization && $0.uploadState == "stored" && !$0.archived }) else {
                 error = "This file is not on the job."
                 loading = false
                 return
             }
-            error = nil
-            preview.open { try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename) }
+            asset = match
+            preview.open {
+                guard readScope == scope, sourceScope == scope else { throw CancellationError() }
+                let file = try await MediaTransfer(api: api).download(mediaID: match.id, filename: match.originalFilename)
+                guard !Task.isCancelled, readScope == scope, sourceScope == scope else {
+                    try? FileManager.default.removeItem(at: file)
+                    throw CancellationError()
+                }
+                return file
+            }
         } catch is CancellationError {
         } catch {
+            guard readScope == scope, sourceScope == scope else { return }
             self.error = error.localizedDescription
         }
-        loading = false
+        if readScope == scope, sourceScope == scope { loading = false }
     }
 }
 

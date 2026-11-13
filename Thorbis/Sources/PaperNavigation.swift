@@ -868,6 +868,9 @@ struct RootView: View {
             if let job = store.jobs.first(where: { $0.id == PaperPreview.jobID }) {
                 primaryTab = .jobs
                 jobsPath.append(job)
+                if PaperPreview.screen == "job-media", ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-test") {
+                    jobsPath.append(PaperRoute.media(jobID: job.id, assetID: "00000000-0000-4000-8000-000000009301"))
+                }
                 if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
                 // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
