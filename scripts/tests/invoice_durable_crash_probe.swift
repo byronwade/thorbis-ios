@@ -20,6 +20,8 @@ import Darwin
    } catch { exit(3) }
    exit(0)
   }
+  let clean = try InvoiceTransactionFence(path: "/private/tmp/invoice-intent-clean-\(UUID().uuidString).sqlite")
+  _ = try clean.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data([42]))
   for phase in ["intent-kill", "commit-kill"] {
    let path = "/private/tmp/invoice-intent-crash-\(UUID().uuidString).sqlite"
    let p = try spawn(path, phase); p.waitUntilExit(); precondition(p.terminationReason == .uncaughtSignal)
@@ -28,6 +30,7 @@ import Darwin
    precondition(evidence?.phase == (phase == "commit-kill" ? .committed : .registered) && evidence?.bytes == Data([42]))
    do { _ = try f.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: phase == "commit-kill" ? 1 : nil, sequence: 2, bytes: Data([43])); fatalError("crash left fence open") } catch InvoiceFenceError.pending { }
    do { _ = try f.recoverIdle(identity: identity); fatalError("uncertain recovery allowed") } catch InvoiceFenceError.pending { }
+   do { _ = try f.begin(domain: domain, owner: owner, expectedVersion: 1, kind: .directUnknown, command: Data([1])); fatalError("uncertain submission allowed") } catch InvoiceFenceError.pending { }
   }
   let path = "/private/tmp/invoice-intent-race-\(UUID().uuidString).sqlite"
   _ = try InvoiceTransactionFence(path: path)
