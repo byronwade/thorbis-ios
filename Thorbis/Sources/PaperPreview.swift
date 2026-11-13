@@ -191,6 +191,13 @@ enum PaperPreview {
             primary = changed(primary, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines + [discount])),
                                         "amountPaid": 15_000])
         }
+        if isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-mixed-currency"),
+           var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines)) as? [[String: Any]],
+           !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+            price["currency"] = "EUR"
+            lines[0]["unitPrice"] = price
+            primary = changed(primary, ["lines": lines])
+        }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
         return [primary,
          changed(original, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
