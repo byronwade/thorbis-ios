@@ -127,7 +127,6 @@ struct CustomerEstimatePresentation: View {
     @State private var signedName = ""
     @State private var offer = FinancingOffer.off
     @State private var showTerms = false
-    @State private var isMember = false
     @State private var openingReview = false
     @State private var openingError: String?
     @State private var reviewGeneration: UUID?
@@ -229,7 +228,6 @@ struct CustomerEstimatePresentation: View {
         .animation(.easeOut(duration: 0.2), value: flow.step)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadOffer() }
-        .task { isMember = await api.customerIsMember(flow.estimate.customerId) }
         .toolbar {
             // PresentDetail.dc.html: a round back circle opposite the lock. Only where this screen is
             // the customer-mode root; pushed hosts (handoff, job documents) already show their back.
@@ -298,7 +296,7 @@ struct CustomerEstimatePresentation: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                     if let saved = customerSavingsText(option.lines, currency: option.currency) {
-                        Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
+                        Text("Includes discounts and credits of \(saved)")
                             .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                             .padding(.top, 6)
                     }
@@ -362,10 +360,11 @@ struct CustomerEstimatePresentation: View {
             let index = flow.options.firstIndex { $0.id == flow.selectedOptionID }
             header(eyebrow: flow.hasOptions ? "Option \((index ?? 0) + 1) of \(flow.options.count)" : "Your estimate",
                    title: flow.choiceName, summary: flow.hasOptions ? flow.selectedOption?.description : nil)
-            if let projected = verifiedCustomerLines {
+            if let projected = verifiedCustomerLines,
+               let amounts = CustomerDocumentAmounts(lines: projected, currency: flow.currency),
+               amounts.total == flow.total {
                 CustomerIncludedLines(lines: projected, type: type,
-                                      rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
-                                          + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
+                                      rows: customerAmountRows(amounts, currency: flow.currency, invoice: false))
             } else {
                 Text("These amounts couldn't be verified. Hand the device back to your technician.")
                     .font(Theme.customerFont(type.body))
@@ -811,7 +810,6 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
-    @State private var isMember = false
     /// The invoice as re-read after the lender funded it while this screen was open.
     @State private var reloadedInvoice: InvoiceRecord?
     private var invoice: InvoiceRecord { reloadedInvoice ?? openedInvoice }
@@ -867,7 +865,6 @@ struct CustomerInvoicePresentation: View {
         .animation(.easeOut(duration: 0.2), value: payChoice)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadFinancing() }
-        .task { isMember = await api.customerIsMember(invoice.customerId) }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -907,12 +904,10 @@ struct CustomerInvoicePresentation: View {
         }
     }
 
-    /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest; savings sit
-    /// above them as their own labelled row (CP-06).
+    /// Show the signed invoice breakdown once, with amount due last.
     private var amountRows: [CustomerAmountRow] {
-        customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
-            + (CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
-                .map { customerAmountRows($0, currency: invoice.currency) } ?? [])
+        CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+            .map { customerAmountRows($0, currency: invoice.currency) } ?? []
     }
 
     // MARK: Choose how to pay (CP-15, CP-16)
@@ -1190,40 +1185,32 @@ struct CustomerInvoicePresentation: View {
     }
 }
 
-/// What the customer saves off list price on these lines: each price book line records the list
-/// price it came from, and the server charges a member the member price (CP: savings show only
-/// when the amount already includes them). Invoice lines carry the estimate line's provenance.
-func customerSavings(_ lines: [FieldLine]) -> Int {
-    lines.reduce(0) { sum, line in
-        let source = line.source?.kind == "price_book" ? line.source?.originalUnitPrice
-            : line.source?.estimateLineSource?.kind == "price_book" ? line.source?.estimateLineSource?.originalUnitPrice : nil
-        guard let list = source, list.currency == line.unitPrice.currency, list.amount > line.unitPrice.amount,
-              line.unitPrice.amount >= 0 else { return sum }
-        return sum + line.quantity * (list.amount - line.unitPrice.amount)
+/// Only explicit, customer-visible credits are savings. Price-book provenance is staff data
+/// and does not establish a customer-facing discount or its reason.
+func customerSavings(_ lines: [FieldLine], currency: String) -> Int? {
+    guard CustomerDocumentAmounts(lines: lines, currency: currency) != nil else { return nil }
+    var credits = 0
+    for line in lines where line.showToCustomer != false && line.unitPrice.amount < 0 {
+        let (amount, productOverflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
+        guard !productOverflow else { return nil }
+        let (next, sumOverflow) = credits.addingReportingOverflow(amount)
+        guard !sumOverflow else { return nil }
+        credits = next
     }
+    let (saved, overflow) = 0.subtractingReportingOverflow(credits)
+    return overflow ? nil : saved
 }
 
 func customerSavingsText(_ lines: [FieldLine], currency: String) -> String? {
-    let saved = customerSavings(lines)
-    return saved > 0 ? money(saved, currency: currency) : nil
+    guard let saved = customerSavings(lines, currency: currency), saved > 0 else { return nil }
+    return money(saved, currency: currency)
 }
 
-/// "Member savings" when the customer holds a membership; otherwise the plain word.
-func savingsLabel(_ isMember: Bool) -> String { isMember ? "Member savings" : "Savings" }
+func savingsLabel(_: Bool) -> String { "Discounts and credits" }
 
-/// A labelled savings row (CP-06), shown above the total and never as a strike-through alone.
 func customerSavingsRows(_ lines: [FieldLine], currency: String, isMember: Bool) -> [CustomerAmountRow] {
     guard let saved = customerSavingsText(lines, currency: currency) else { return [] }
     return [CustomerAmountRow(label: savingsLabel(isMember), amount: "−\(saved)", emphasis: false)]
-}
-
-@MainActor
-extension APIClient {
-    /// Whether to call savings "member savings". Technicians may not read memberships yet, so any
-    /// refusal reads as not known and the row says "Savings".
-    func customerIsMember(_ customerID: String) async -> Bool {
-        (try? await memberPricing(customerID))?.isMember ?? false
-    }
 }
 
 // MARK: - Shared pieces

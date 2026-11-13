@@ -136,19 +136,12 @@ final class CustomerPresentationTests: XCTestCase {
                                                    emphasis: false)])
     }
 
-    func testSavingsCountOnlyPriceBookLinesChargedBelowList() {
-        let member = FieldLine(id: "m", description: "Tune-up", quantity: 2, unitPrice: FieldMoney(amount: 17_000, currency: "USD"),
-                               source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD")))
-        let marked = FieldLine(id: "u", description: "Filter", quantity: 1, unitPrice: FieldMoney(amount: 5_000, currency: "USD"),
-                               source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 4_000, currency: "USD")))
-        let invoiced = FieldLine(id: "i", description: "Tune-up", quantity: 1, unitPrice: FieldMoney(amount: 17_000, currency: "USD"),
-                                 source: FieldLineSource(kind: "estimate", estimateLineSource: FieldEstimateLineSourceSnapshot(
-                                     kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD"))))
-        let lines = [member, marked, invoiced, line("x", 1, 9_000)]
-        XCTAssertEqual(customerSavings(lines), 9_000)
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: true),
-                       [CustomerAmountRow(label: "Member savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false).first?.label, "Savings")
-        XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD", isMember: true).isEmpty)
+    func testInvalidAmountsDoNotCreateSavingsOrOverflow() {
+        let charge = line("Work", 1, 10000)
+        let overflow = line("Credit", 2, Int.min)
+        XCTAssertTrue(customerSavingsRows([charge, overflow], currency: "USD", isMember: true).isEmpty)
+        let wrongCurrency = FieldLine(id: "currency", description: "Credit", quantity: 1,
+                                      unitPrice: FieldMoney(amount: -100, currency: "EUR"))
+        XCTAssertTrue(customerSavingsRows([charge, wrongCurrency], currency: "USD", isMember: false).isEmpty)
     }
 }
