@@ -138,8 +138,13 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("Alex\n")
         let pad = app.descendants(matching: .any)["customer-summary-signature-pad"]
         XCTAssertTrue(pad.waitForExistence(timeout: 10))
-        for _ in 0..<6 where !pad.isHittable { app.swipeUp() }
-        XCTAssertTrue(pad.isHittable)
+        let footer = app.buttons["Done"]
+        XCTAssertTrue(footer.exists)
+        for _ in 0..<6 where !pad.isHittable || pad.frame.maxY > footer.frame.minY {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.22)))
+        }
+        XCTAssertTrue(pad.isHittable && pad.frame.maxY <= footer.frame.minY, "The entire signature pad must be above the handback button")
         pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
         let submit = app.buttons["Sign summary"]
         revealAboveSignature(submit, in: app)
