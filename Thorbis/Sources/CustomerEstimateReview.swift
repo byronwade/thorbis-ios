@@ -1,6 +1,9 @@
 import Foundation
 
 /// Frozen commercial facts from the revision endpoint, distinct from the live aggregate.
+/// Issued terms have no verifiable customer-facing monetary scope.
+struct CustomerIssuedEstimateAmountsUnavailable: Error {}
+
 struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let id: String
     let estimateId: String
@@ -16,6 +19,13 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let currency: String
 
     func validate(for expected: EstimateRecord, allowApprovedForReading: Bool = false) throws {
+        guard UUID(uuidString: id) != nil,
+              estimateId == expected.id, organizationId == expected.organizationId,
+              customerId == expected.customerId, locationId == expected.locationId,
+              revisionNumber == expected.currentRevisionNumber,
+              (status == "issued" && expected.status == "sent" ||
+               allowApprovedForReading && status == "approved" && expected.status == "approved")
+        else { throw customerReviewUnavailable() }
         guard currency == "USD", !lines.isEmpty,
               let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
               amounts.total == totalAmount,
@@ -23,14 +33,7 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
                   guard option.currency == currency, !option.lines.isEmpty,
                         let optionAmounts = CustomerDocumentAmounts(lines: option.lines, currency: currency) else { return false }
                   return optionAmounts.total == option.totalAmount
-              }),
-              UUID(uuidString: id) != nil,
-              estimateId == expected.id, organizationId == expected.organizationId,
-              customerId == expected.customerId, locationId == expected.locationId,
-              revisionNumber == expected.currentRevisionNumber,
-              (status == "issued" && expected.status == "sent" ||
-               allowApprovedForReading && status == "approved" && expected.status == "approved")
-        else { throw customerReviewUnavailable() }
+              }) else { throw CustomerIssuedEstimateAmountsUnavailable() }
     }
 
     /// Retained reader content must still match the record now backing its destination.
