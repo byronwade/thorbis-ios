@@ -93,6 +93,11 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         return id == Self.d ? "draft" : "sent"
     }
     private func options(_ id: String) -> [[String: Any]] {
+        if id == Self.b, flags.contains("--handoff-test-empty-option") {
+            return [["id": "00000000-0000-4000-8000-000000008202", "title": "Empty package", "description": "",
+                     "lines": [["id": "sample-option", "description": "Unverified package", "quantity": 1,
+                                "unitPrice": ["amount": 25000, "currency": "USD"]]], "totalAmount": 25000, "currency": "USD"]]
+        }
         guard id == Self.a, flags.contains("--paper-preview-handoff-options") else { return [] }
         let scope: [[String: Any]] = [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 25000, "currency": "USD"]]]
         let description = flags.contains("--paper-preview-handoff-long-description")
