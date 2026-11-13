@@ -175,6 +175,34 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["customer-document-position"].exists)
     }
 
+    func testInvoiceSigningDisablesRepeatedTapsWhileRechecking() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-view",
+                               "--paper-preview-working-job", "--paper-preview-job-documents",
+                               "--paper-preview-delay-invoice-signing"]
+        app.launch()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 15))
+        estimate.tap()
+        XCTAssertTrue(app.buttons["customer-book-review-sign"].waitForExistence(timeout: 15))
+        thorbisStableButton(app, "customer-book-review-sign").tap()
+        XCTAssertTrue(app.scrollViews["customer-estimate-presentation-00000000-0000-4000-8000-000000002218"].waitForExistence(timeout: 15))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2209"].tap()
+        let sign = app.buttons["Sign for the work"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 15))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: sign)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+        sign.tap()
+        let busy = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: sign)
+        XCTAssertEqual(XCTWaiter.wait(for: [busy], timeout: 10), .completed,
+                       "The same invoice cannot start another recheck while one is running")
+        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 30))
+    }
+
     func testEstimateReviewCanReturnToJobDocumentsAndChooseAnotherEstimate() {
         continueAfterFailure = false
         let app = XCUIApplication()
