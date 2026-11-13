@@ -2,6 +2,19 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testInvoiceBookShowsOnlyVerifiedCustomerSummary() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice"])
+        XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+        XCTAssertFalse(text("Water heater", in: app).exists)
+    }
+
+    func testInvoiceBookWithoutSummaryDoesNotShowRawDescriptions() {
+        let app = openPrimary(extra: ["--paper-preview-long-document-description"])
+        XCTAssertTrue(text("Invoice details aren't available", in: app).waitForExistence(timeout: 15))
+        XCTAssertFalse(text("Invoice first paragraph", in: app).exists)
+        XCTAssertFalse(app.buttons["Sign for the work"].exists)
+    }
+
     func testMixedCurrencyInvoiceDoesNotShowMisleadingOverviewAmount() {
         continueAfterFailure = false
         let app = XCUIApplication()

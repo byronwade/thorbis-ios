@@ -203,7 +203,7 @@ struct CustomerJobDocumentBook: View {
         case .invoice(let value):
             if let record = invoices.first(where: { $0.id == value }) {
                 CustomerInvoiceBookPage(invoice: record, scope: scope, sourceGeneration: sourceGeneration, api: api, fresh: freshInvoices.contains(value),
-                    canSign: canSignInvoice, canPay: canPayInvoice, active: selection.selected == id,
+                    canSign: canSignInvoice, canPay: canPayInvoice, active: selection.selected == id, activation: selection.activation,
                     refresh: refresh, sign: { signInvoice(value) }, pay: { payInvoice(value) })
             }
         }
@@ -404,6 +404,18 @@ private struct CustomerEstimateBookPage: View {
     }
 }
 
+private struct CustomerInvoiceBookLoadID: Hashable {
+    let invoice: InvoiceRecord
+    let fresh: Bool
+    let active: Bool
+    let activation: UUID
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let apiGeneration: UUID
+    let scopeRevision: UUID
+    let retry: UUID
+}
+
 private struct CustomerInvoiceBookPage: View {
     let original: InvoiceRecord
     let scope: JobDocumentScope
@@ -412,19 +424,29 @@ private struct CustomerInvoiceBookPage: View {
     let canSign: Bool
     let canPay: Bool
     let active: Bool
+    let activation: UUID
     let refresh: () async -> Void
     let sign: () -> Void
     let pay: () -> Void
     @StateObject private var model: InvoicePaymentCollectionModel
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @State private var customerSummary: CustomerInvoiceSummary?
+    @State private var summaryAuthority: CustomerHandoffExitAuthority?
+    @State private var summaryActivation: UUID?
+    @State private var summaryToken = UUID()
+    @State private var summaryRetry = UUID()
+    @State private var summaryLoading = false
+    @State private var summaryError: String?
     @State private var showPayments = false
     @State private var choseInitialPaymentVisibility = false
 
     init(invoice: InvoiceRecord, scope: JobDocumentScope, sourceGeneration: UUID?, api: APIClient, fresh: Bool,
-         canSign: Bool, canPay: Bool, active: Bool, refresh: @escaping () async -> Void,
+         canSign: Bool, canPay: Bool, active: Bool, activation: UUID, refresh: @escaping () async -> Void,
          sign: @escaping () -> Void, pay: @escaping () -> Void) {
         original = invoice; self.scope = scope; self.sourceGeneration = sourceGeneration; self.fresh = fresh; self.canSign = canSign; self.canPay = canPay
-        self.active = active; self.refresh = refresh; self.sign = sign; self.pay = pay
+        self.active = active; self.activation = activation; self.refresh = refresh; self.sign = sign; self.pay = pay
         _model = StateObject(wrappedValue: InvoicePaymentCollectionModel(api: api, invoiceID: invoice.id, expectedJobScope: scope))
     }
 
@@ -434,7 +456,19 @@ private struct CustomerInvoiceBookPage: View {
         .init(identity: .invoice(scope: scope, record: invoice), organizationID: scope.organizationID,
               capability: "invoice.view", feature: "invoicing", sourceGeneration: sourceGeneration, fresh: fresh, active: active, scopeValid: scope.contains(invoice))
     }
-    private var amounts: CustomerDocumentAmounts? { CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) }
+    private var verifiedSummary: CustomerInvoiceSummary? {
+        guard fresh, readingAccess.permits(session), let summary = customerSummary, let authority = summaryAuthority,
+              summaryActivation == activation, authority.isCurrent(api: api, session: session),
+              summary.matches(scope: scope, invoiceID: invoice.id, linesRevision: invoice.linesRevision) else { return nil }
+        return summary
+    }
+    private var customerLines: [FieldLine] {
+        verifiedSummary?.lines.map { FieldLine(id: $0.id, description: $0.description, quantity: $0.quantity, unitPrice: $0.unitPrice, source: nil) } ?? []
+    }
+    private var amounts: CustomerDocumentAmounts? {
+        guard let summary = verifiedSummary else { return nil }
+        return CustomerDocumentAmounts(lines: customerLines, currency: summary.currency, amountPaid: summary.amountPaid)
+    }
     private var signed: Bool { invoice.customerAuthorization?.linesRevision == invoice.linesRevision }
 
     var body: some View {
@@ -443,28 +477,29 @@ private struct CustomerInvoiceBookPage: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(invoice.origin == "estimate_deposit" ? "Deposit invoice" : "Invoice")
                         .font(Theme.customerFont(type.heading, weight: .medium)).accessibilityIdentifier("customer-invoice-summary")
-                    if fresh { CustomerStatusWord(status: invoice.status, type: type) }
-                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
-                    if signed, let authorization = invoice.customerAuthorization {
-                        Label("Signed by \(authorization.signerName)", systemImage: "signature")
-                            .font(Theme.customerFont(type.body))
-                    }
-                    if let amounts {
-                        let balance = CustomerInvoiceBalanceSummary(status: invoice.status, fresh: fresh, amounts: amounts,
-                            historyReconciled: model.historyComplete && model.paymentTotalCents == amounts.paid)
-                        Text(balance.title)
-                            .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    if let summary = verifiedSummary, let amounts {
+                        CustomerStatusWord(status: summary.status, type: type)
+                        Text("Customer summary · not the signed invoice").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        let balance = CustomerInvoiceBalanceSummary(status: summary.status, fresh: true, amounts: amounts,
+                            historyReconciled: model.historyComplete && model.paymentTotalCents == summary.amountPaid)
+                        Text(balance.title).font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                         if let headlineAmount = balance.amount {
-                            Text(money(headlineAmount, currency: invoice.currency))
+                            Text(money(headlineAmount, currency: summary.currency))
                                 .font(Theme.customerFont(type.total, weight: .medium)).monospacedDigit()
                         }
                         CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: invoice.lines, type: type, rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess,
-                                          descriptionContext: "INV-\(invoice.id.suffix(4).uppercased())")
+                        CustomerIncludedLines(lines: customerLines, type: type, rows: customerAmountRows(amounts, currency: summary.currency, invoice: summary.status != "void"), readingAccess: readingAccess,
+                                              descriptionContext: "INV-\(invoice.id.suffix(4).uppercased())")
+                        if !signed && canSign && ["issued", "paid"].contains(summary.status) {
+                            Text("Signing this customer summary isn't available yet. Ask your technician for help.")
+                                .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                        }
+                    } else if summaryLoading {
+                        CustomerSkeleton(caption: "Opening your invoice…", heading: false)
                     } else {
-                        Text("These amounts couldn't be verified. Hand the device back to your technician.").font(Theme.customerFont(type.body))
+                        CustomerProblemBanner(message: summaryError ?? "Invoice details aren't available. Hand the device back to your technician.",
+                                              actionTitle: "Try again") { summaryRetry = UUID() }
                     }
-                    if !fresh { Text("This copy needs a refresh.").font(Theme.customerFont(type.body)) }
                     if model.isLoading {
                         SkeletonRows(count: 2, leading: false, inset: 0)
                             .accessibilityLabel("Loading your payments")
@@ -478,7 +513,7 @@ private struct CustomerInvoiceBookPage: View {
                         }
                     } else {
                         paymentHistory
-                        if model.paymentTotalCents != invoice.amountPaid {
+                        if let summary = verifiedSummary, model.paymentTotalCents != summary.amountPaid {
                             CustomerProblemBanner(message: "Payments are still updating. Refresh to confirm the balance.",
                                                   symbol: "arrow.clockwise", actionTitle: "Refresh payments") {
                                 #if DEBUG
@@ -491,24 +526,51 @@ private struct CustomerInvoiceBookPage: View {
                 }
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
-            if fresh, model.invoice != nil, amounts != nil, ["issued", "paid"].contains(invoice.status) {
-                if !signed && canSign {
-                    CustomerPresentationCommit(title: "Sign for the work", enabled: !model.isLoading, busy: false, type: type, action: sign)
-                        .padding(Theme.gutter)
-                } else if invoice.status == "issued", canPay, model.canRecordPayment, let amounts, amounts.due > 0 {
-                    CustomerPresentationCommit(title: "Pay \(money(amounts.due, currency: invoice.currency))", enabled: true, busy: false, type: type, action: pay)
-                        .padding(Theme.gutter)
-                }
+            if let summary = verifiedSummary, let amounts, model.invoice != nil,
+               summary.status == "issued", signed, canPay, model.canRecordPayment, amounts.due > 0 {
+                CustomerPresentationCommit(title: "Pay \(money(amounts.due, currency: summary.currency))", enabled: true, busy: false, type: type, action: pay)
+                    .padding(Theme.gutter)
             } else if !fresh {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
         .task(id: original) { await model.load() }
+        .task(id: CustomerInvoiceBookLoadID(invoice: invoice, fresh: fresh, active: active, activation: activation,
+            sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+            apiGeneration: api.requestGeneration, scopeRevision: api.savedCopyScopeRevision, retry: summaryRetry)) { await loadSummary() }
         .onChange(of: model.historyComplete) { _, complete in
             guard complete, !choseInitialPaymentVisibility else { return }
             // Show a short history immediately; keep large histories easy to scan.
             showPayments = model.payments.count <= 2
             choseInitialPaymentVisibility = true
+        }
+    }
+
+    private func loadSummary() async {
+        let token = UUID(); summaryToken = token
+        customerSummary = nil; summaryAuthority = nil; summaryActivation = nil; summaryError = nil; summaryLoading = false
+        guard fresh, active, scope.contains(invoice), sourceGeneration == session.generation,
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        func current() -> Bool {
+            !Task.isCancelled && summaryToken == token && authority.isCurrent(api: api, session: session) &&
+            session.can("invoice.view", feature: "invoicing")
+        }
+        guard current() else { return }
+        summaryLoading = true
+        defer { if summaryToken == token { summaryLoading = false } }
+        do {
+            let latest = try await api.liveFieldInvoice(invoice.id)
+            guard current() else { return }
+            guard scope.contains(latest), latest.id == invoice.id, latest.linesRevision == invoice.linesRevision else {
+                throw Problem(title: "This invoice changed", status: 409, detail: nil)
+            }
+            let value = try await api.customerInvoiceSummary(scope: scope, invoiceID: latest.id,
+                linesRevision: latest.linesRevision, currentAuthority: current)
+            guard current() else { return }
+            customerSummary = value; summaryAuthority = authority; summaryActivation = activation
+        } catch is CancellationError {
+        } catch {
+            if current() { summaryError = "Invoice details aren't available. Hand the device back to your technician." }
         }
     }
 

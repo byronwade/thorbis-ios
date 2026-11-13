@@ -28,3 +28,21 @@ production backend or TestFlight claim is implied by these contract tests.
 - The backend is separately held. Old clients, public/document dispatch and
   ambiguous legacy invoices still require a coordinated rollout and review.
   Do not merge or deploy this slice as a privacy fix.
+
+## In-progress job book slice
+
+The job document book requests a live scope-bound presentation and renders only its
+projected lines. It identifies the view as an unsigned summary and does not offer
+customer signature against a different raw revision. Existing payment history and
+payment handback stay present when independently authorized. The backend signing
+contract remains held, so this slice must not ship alone or be described as full
+feature parity. Standalone, legacy and read-only routes and customer overview still
+require the same contract; permissions, cancellation, revisit, refunds, large text
+and iPad remain to be tested.
+
+Focused evidence so far: the new summary transport's four tests passed at
+`/private/tmp/thorbis-customer-summary-transport-green-1113.log`; two job-book UI
+checks passed at `/private/tmp/thorbis-customer-invoice-book-green-1113.log`, with
+prior failure at `/private/tmp/thorbis-customer-invoice-book-red-1113.log`. These
+results predate the latest explicit saved-copy fixture. No server deployment or
+TestFlight claim is implied.

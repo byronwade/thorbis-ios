@@ -56,3 +56,28 @@ struct CustomerInvoiceSummary: Decodable, Sendable {
         return balanceDue == expectedDue
     }
 }
+
+@MainActor
+extension APIClient {
+    /// Fetches the server's separate customer view, never a saved invoice copy.
+    func customerInvoiceSummary(scope: JobDocumentScope, invoiceID: String, linesRevision: Int,
+                                currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerInvoiceSummary {
+        let generation = requestGeneration
+        let savedScope = savedCopyScopeRevision
+        let origin = normalizedOrigin
+        func check() throws {
+            try Task.checkCancellation()
+            guard generation == requestGeneration, savedScope == savedCopyScopeRevision,
+                  origin != nil, origin == normalizedOrigin, currentAuthority() else { throw CancellationError() }
+        }
+        try check()
+        let path = try financialPath("/v1/invoices", id: invoiceID, suffix: "/customer-presentation")
+        let summary: CustomerInvoiceSummary = try await send("GET", path, requireFresh: true)
+        try check()
+        guard summary.matches(scope: scope, invoiceID: invoiceID, linesRevision: linesRevision) else {
+            throw Problem(title: "This invoice summary couldn't be verified", status: 409,
+                          detail: "Ask your technician to refresh the invoice.")
+        }
+        return summary
+    }
+}

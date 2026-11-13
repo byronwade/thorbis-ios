@@ -1139,6 +1139,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }
                 return revision
             }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-safe-invoice"),
+               let record = invoices.first(where: { path == "/v1/invoices/\($0.id)/customer-presentation" }),
+               let total = paperLinesTotal(record.lines) {
+                let paid = record.amountPaid
+                return ["kind": "customer_invoice_presentation", "presentationVersion": 1,
+                        "presentationScopeId": "invoice:\(record.id):lines:\(record.linesRevision):customer:v1",
+                        "isSignedDocument": false, "issuedSnapshotId": "00000000-0000-4000-8000-000000000001",
+                        "organizationId": record.organizationId, "customerId": record.customerId, "invoiceId": record.id,
+                        "jobId": record.jobId ?? "", "linesRevision": record.linesRevision, "status": record.status,
+                        "currency": "USD", "totalAmount": total, "amountPaid": paid, "balanceDue": total - paid,
+                        "lines": [["id": "customer-safe-line", "description": "Customer safe service", "quantity": 1,
+                                   "unitPrice": ["amount": total, "currency": "USD"]]]]
+            }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
                 var object = jsonObject(record) as! [String: Any]
                 if record.id == invoices[0].id, scenario.lock.withLock({ scenario.documentStatusesChanged }) {
