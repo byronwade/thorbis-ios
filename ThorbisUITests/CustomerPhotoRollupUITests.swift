@@ -17,8 +17,14 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         XCTAssertTrue(job.waitForExistence(timeout: 20))
         XCTAssertTrue(job.isHittable)
         XCTAssertGreaterThanOrEqual(job.frame.height, 44)
+        for _ in 0..<10 where job.frame.minY < app.frame.height * 0.2 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+                .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        }
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Customer photo group job navigation largest text"; screenshot.lifetime = .keepAlways; add(screenshot)
+        XCTAssertGreaterThanOrEqual(job.frame.minY, app.frame.height * 0.2)
+        XCTAssertLessThanOrEqual(job.frame.maxY, app.frame.height * 0.95)
         job.tap()
         XCTAssertTrue(app.buttons["job-section-chooser"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
