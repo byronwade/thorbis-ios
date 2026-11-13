@@ -64,6 +64,73 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key), "The first live response must be saved before testing offline fallback")
     }
 
+    func testMoneyCompilationOfflineWithoutSavedRecordsDoesNotReportEmptyMoney() async throws {
+        let client = APIClient(session: URLProtocolFixture.session([URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "customer-money-empty-offline-\(UUID().uuidString)"
+        client.knownOffline = true
+        do {
+            _ = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+            XCTFail("Offline without saved records must not look like an empty customer account")
+        } catch is CancellationError {
+            XCTFail("Expected an offline error, not cancellation")
+        } catch {
+            // Failure remains visible to the Money view, which retains any prior scoped snapshot.
+        }
+    }
+
+    func testMoneyCompilationStopsAfterScopeBecomesStale() async throws {
+        let bodies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0,
+                             estimatesA: 1, estimatesB: 0, invoicesA: 1, invoicesB: 0, historyA: 0, historyB: 0)
+        let client = APIClient(session: URLProtocolFixture.session(bodies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+        do {
+            _ = try await CustomerJobCompilationLoader.load(
+                customerID: customer, organizationID: org, api: client, moneyOnly: true,
+                isCurrent: { URLProtocolFixture.recorded.isEmpty }
+            )
+            XCTFail("A Money compilation must not publish after its scope changes")
+        } catch is CancellationError {
+            XCTAssertFalse(URLProtocolFixture.recorded.isEmpty, "The scope should change after the first request begins")
+            XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/estimates" || $0.url?.path == "/v1/invoices" })
+        }
+    }
+
+    func testMoneyCompilationHandlesMoreThanTwoJobsWithoutUnrelatedReads() async throws {
+        let jobIDs = (1...6).map { uid(100 + $0) }
+        let bodies = [
+            page(jobIDs.map { job(id: $0, title: "Job") }), page([contact()]), page([location()]),
+            page([]), page([])
+        ] + Array(repeating: page([]), count: jobIDs.count * 2)
+        let client = APIClient(session: URLProtocolFixture.session(bodies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+        XCTAssertEqual(compiled.estimateCount, 0)
+        XCTAssertEqual(compiled.invoiceCount, 0)
+        let paths = URLProtocolFixture.recorded.compactMap { $0.url?.path }
+        XCTAssertEqual(paths.filter { $0.hasSuffix("/estimates") && $0.hasPrefix("/v1/jobs/") }.count, 6)
+        XCTAssertEqual(paths.filter { $0.hasSuffix("/invoices") && $0.hasPrefix("/v1/jobs/") }.count, 6)
+        XCTAssertFalse(paths.contains { $0.hasSuffix("/media") || $0.hasSuffix("/photos") || $0.hasSuffix("/notes") || $0.hasSuffix("/history") })
+    }
+
+    func testMoneyCompilationKeepsJobGroupingAndSkipsUnrelatedCollections() async throws {
+        var bodies = fixture(photosA: 1, photosB: 1, notesA: 1, notesB: 1, documentsA: 1, documentsB: 1,
+                             estimatesA: 1, estimatesB: 1, invoicesA: 1, invoicesB: 1, historyA: 1, historyB: 1)
+        var foreign = invoice(id: uid(99999), jobID: jobA)
+        foreign["organizationId"] = uid(999)
+        bodies[4] = page([invoice(id: uid(9_000), jobID: jobA), invoice(id: uid(10_000), jobID: jobB), foreign])
+        let moneyBodies = [0, 1, 2, 3, 4, 7, 8, 11, 12].map { bodies[$0] }
+        let client = APIClient(session: URLProtocolFixture.session(moneyBodies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+
+        XCTAssertEqual(compiled.estimateCount, 2)
+        XCTAssertEqual(compiled.invoiceCount, 2)
+        XCTAssertTrue(compiled.invoicesIncomplete, "Foreign workspace invoices must be excluded and marked incomplete")
+        assertGrouped(compiled.estimates, counts: (1, 1))
+        assertGrouped(compiled.invoices, counts: (1, 1))
+        let paths = URLProtocolFixture.recorded.compactMap { $0.url?.path }
+        XCTAssertEqual(paths.count, 9)
+        XCTAssertFalse(paths.contains { $0.hasSuffix("/media") || $0.hasSuffix("/photos") || $0.hasSuffix("/notes") || $0.hasSuffix("/history") })
+    }
+
     func testTwoJobsCompileToThirtyFiveAndStayGrouped() async throws {
         let replies = fixture(photosA: 15, photosB: 20, notesA: 15, notesB: 20, documentsA: 15, documentsB: 20, estimatesA: 15, estimatesB: 20, invoicesA: 15, invoicesB: 20, historyA: 15, historyB: 20)
         let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
