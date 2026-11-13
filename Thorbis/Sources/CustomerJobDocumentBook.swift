@@ -320,6 +320,7 @@ private struct CustomerInvoiceBookPage: View {
     @StateObject private var model: InvoicePaymentCollectionModel
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var diagnosticSignTap = UserDefaults.standard.bool(forKey: "isolated-invoice-sign-tapped")
+    @State private var diagnosticParentAfterSign = false
     @State private var showPayments = false
     @State private var choseInitialPaymentVisibility = false
 
@@ -400,6 +401,7 @@ private struct CustomerInvoiceBookPage: View {
                         UserDefaults.standard.set(true, forKey: "isolated-invoice-sign-tapped")
                         diagnosticSignTap = true
                         sign()
+                        diagnosticParentAfterSign = UserDefaults.standard.bool(forKey: "isolated-invoice-parent-called")
                     }
                         .padding(Theme.gutter)
                 } else if invoice.status == "issued", canPay, model.canRecordPayment, let amounts, amounts.due > 0 {
@@ -410,7 +412,7 @@ private struct CustomerInvoiceBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
-        .overlay(alignment: .top) { Text("CHILD TRACE: \(diagnosticSignTap ? "tapped" : "not tapped")").font(.caption).accessibilityIdentifier("invoice-child-trace").allowsHitTesting(false) }
+        .overlay(alignment: .top) { Text("CHILD TRACE: \(diagnosticSignTap ? "tapped" : "not tapped") · parent after call: \(diagnosticParentAfterSign)").font(.caption).accessibilityIdentifier("invoice-child-trace").allowsHitTesting(false) }
         .task(id: original) { await model.load() }
         .onChange(of: model.historyComplete) { _, complete in
             guard complete, !choseInitialPaymentVisibility else { return }
