@@ -938,6 +938,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                   url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments" {
             status = 503
             payload = ["status": 503, "title": "Sample payment history unavailable"]
+        } else if PaperPreview.isJobDocumentsPreview,
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-fails-after-payment-retry"),
+                  url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/customer-presentation",
+                  Self.scenario.lock.withLock({ Self.scenario.documentHistoryRestored }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample invoice amount unavailable"]
         } else if PaperPreview.isJobEstimateRecoveryPreview,
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   Self.scenario.lock.withLock({ Self.scenario.estimateUnavailable }) {

@@ -421,6 +421,29 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         assertMoneyRow("Amount due", "$0.00", in: app)
     }
 
+    func testPaymentRetryKeepsVerifiedSummaryWhenPresentationFails() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-deposit-history-failure",
+                                      "--paper-preview-summary-fails-after-payment-retry"])
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        assertText("Customer safe service", in: app)
+        assertMoneyRow("Paid", "$340.00", in: app)
+        assertText("Payments couldn't be loaded", in: app)
+        let retry = pages(app).buttons["Try again"]
+        reveal(retry, in: app)
+        XCTAssertTrue(retry.isHittable)
+        retry.tap()
+        let loading = pages(app).descendants(matching: .any)["Loading your payments"]
+        XCTAssertTrue(loading.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: loading)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse(text("Invoice details aren't available", in: app).waitForExistence(timeout: 5))
+        assertText("Payments couldn't be loaded", in: app)
+        assertText("Customer safe service", in: app)
+        assertMoneyRow("Paid", "$340.00", in: app)
+    }
+
     func testUnavailablePaymentHistoryDoesNotClaimPaidInFull() {
         let app = openPrimary(extra: ["--paper-preview-deposit-history-failure"])
         app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()

@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-13-payment-retry-keeps-amounts",
+            date: "2026-11-13",
+            highlights: [
+                .init(symbol: "arrow.clockwise", title: "See amounts while payments refresh",
+                      detail: "Retrying payments keeps the invoice lines and amounts you already saw if the refresh doesn't finish."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-12-job-document-shortcuts",
             date: "2026-11-12",
             highlights: [

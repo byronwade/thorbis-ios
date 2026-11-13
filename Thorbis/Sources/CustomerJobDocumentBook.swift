@@ -551,9 +551,12 @@ private struct CustomerInvoiceBookPage: View {
 
     private func loadSummary() async {
         let token = UUID(); summaryToken = token
-        customerSummary = nil; summaryAuthority = nil; summaryActivation = nil; summaryError = nil; summaryLoading = false
+        summaryError = nil; summaryLoading = false
         guard fresh, active, scope.contains(invoice), sourceGeneration == session.generation,
-              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            customerSummary = nil; summaryAuthority = nil; summaryActivation = nil
+            return
+        }
         func current() -> Bool {
             !Task.isCancelled && summaryToken == token && authority.isCurrent(api: api, session: session) &&
             session.can("invoice.view", feature: "invoicing")
