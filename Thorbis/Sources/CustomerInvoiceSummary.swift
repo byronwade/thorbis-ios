@@ -171,9 +171,15 @@ struct CustomerSummaryPendingScope: Codable, Equatable {
     let jobID: String
     let invoiceID: String
 
-    var isValid: Bool {
-        !origin.isEmpty && [actorID, organizationID, customerID, jobID, invoiceID].allSatisfy { UUID(uuidString: $0) != nil }
+    @MainActor var canonical: CustomerSummaryPendingScope? {
+        guard let origin = APIClient.normalizedOrigin(origin),
+              let actor = UUID(uuidString: actorID), let organization = UUID(uuidString: organizationID),
+              let customer = UUID(uuidString: customerID), let job = UUID(uuidString: jobID),
+              let invoice = UUID(uuidString: invoiceID) else { return nil }
+        return .init(origin: origin, actorID: actor.uuidString.lowercased(), organizationID: organization.uuidString.lowercased(),
+                     customerID: customer.uuidString.lowercased(), jobID: job.uuidString.lowercased(), invoiceID: invoice.uuidString.lowercased())
     }
+    @MainActor var isValid: Bool { canonical != nil }
 }
 
 /// Contains no signature image or login credential. The exact previously displayed terms
@@ -183,10 +189,12 @@ struct CustomerSummaryPendingAttempt: Codable {
     let summary: CustomerInvoiceSummary
     let attempt: CustomerSummarySigningAttempt
 
-    func isValid(for expected: CustomerSummaryPendingScope) -> Bool {
-        guard scope == expected, expected.isValid, let consent = summary.validatedConsent,
-              summary.organizationId == expected.organizationID, summary.customerId == expected.customerID,
-              summary.jobId == expected.jobID, summary.invoiceId == expected.invoiceID,
+    @MainActor func isValid(for expected: CustomerSummaryPendingScope) -> Bool {
+        guard let canonical = expected.canonical, scope.canonical == canonical, let consent = summary.validatedConsent,
+              UUID(uuidString: summary.organizationId) == UUID(uuidString: canonical.organizationID),
+              UUID(uuidString: summary.customerId) == UUID(uuidString: canonical.customerID),
+              summary.jobId.flatMap(UUID.init(uuidString:)) == UUID(uuidString: canonical.jobID),
+              UUID(uuidString: summary.invoiceId) == UUID(uuidString: canonical.invoiceID),
               attempt.consent, attempt.expectedLinesRevision == summary.linesRevision,
               attempt.presentationScopeId == summary.presentationScopeId, attempt.consentDigest == consent.digest,
               attempt.consentVersion == consent.consentVersion,
@@ -196,7 +204,7 @@ struct CustomerSummaryPendingAttempt: Codable {
               UUID(uuidString: attempt.imageMediaId) != nil, UUID(uuidString: attempt.idempotencyKey) != nil else { return false }
         return true
     }
-    func matches(_ receipt: CustomerInvoiceSummaryReceipt) -> Bool {
+    @MainActor func matches(_ receipt: CustomerInvoiceSummaryReceipt) -> Bool {
         isValid(for: scope) && receipt.matches(summary: summary, signerName: attempt.signerName, signedAt: attempt.signedAt)
     }
 }
@@ -225,10 +233,10 @@ final class KeychainCustomerSummaryPendingStore: CustomerSummaryPendingStoring {
     private let service = "com.thorbis.field.customer-summary-pending-v1"
     private enum StoreError: Error { case invalid, alreadyPending, keychain(OSStatus) }
     private func query(_ scope: CustomerSummaryPendingScope) throws -> [String: Any] {
-        guard scope.isValid else { throw StoreError.invalid }
+        guard let canonical = scope.canonical else { throw StoreError.invalid }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         // One key per invoice: changed job/customer metadata must not hide an unresolved attempt.
-        let identity = [scope.origin, scope.actorID, scope.organizationID, scope.invoiceID]
+        let identity = [canonical.origin, canonical.actorID, canonical.organizationID, canonical.invoiceID]
         let account = SHA256.hash(data: try encoder.encode(identity)).map { String(format: "%02x", $0) }.joined()
         return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
     }
@@ -431,9 +439,9 @@ extension APIClient {
     /// An unsigned lookup alone cannot prove an earlier in-flight POST has finished.
     func replayCustomerSummaryPending(_ pending: CustomerSummaryPendingAttempt, scope: CustomerSummaryPendingScope,
                                       currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerSummaryReplayProof {
-        guard currentAuthority(), pending.isValid(for: scope), normalizedOrigin == scope.origin else { throw CancellationError() }
+        guard currentAuthority(), pending.isValid(for: scope), normalizedOrigin == scope.canonical?.origin else { throw CancellationError() }
         let result = try await authorizeCustomerInvoiceSummary(pending.summary, attempt: pending.attempt, currentAuthority: currentAuthority)
-        guard currentAuthority(), normalizedOrigin == scope.origin, pending.matches(result) else { throw CancellationError() }
+        guard currentAuthority(), normalizedOrigin == scope.canonical?.origin, pending.matches(result) else { throw CancellationError() }
         return CustomerSummaryReplayProof(pending: pending, receipt: result)
     }
 
