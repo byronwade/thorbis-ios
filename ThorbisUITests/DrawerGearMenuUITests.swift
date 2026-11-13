@@ -117,6 +117,24 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertFalse(app.scrollViews["drawer-rows"].exists)
     }
 
+    func testOnlyPermittedWorkPlaceIsDirectlyReachable() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer check") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "office",
+                               "--paper-preview-sidebar-job-view-only", "--paper-preview-menu-suite", UUID().uuidString]
+        app.launch(); app.openDrawer()
+        let jobs = app.buttons["drawer-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 15))
+        XCTAssertTrue(jobs.isHittable)
+        XCTAssertFalse(app.buttons["drawer-workspace-work"].exists)
+        XCTAssertFalse(app.buttons["drawer-estimates"].exists)
+        XCTAssertFalse(app.buttons["drawer-invoices"].exists)
+        XCTAssertFalse(app.buttons["drawer-team"].exists)
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 10))
+    }
+
     func testWorkspaceDisclosureRevealsPlacesWithoutOpeningAnotherScreen() {
         continueAfterFailure = false
         let app = XCUIApplication()
