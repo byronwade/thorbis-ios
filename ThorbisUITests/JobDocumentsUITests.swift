@@ -315,10 +315,38 @@ final class JobDocumentsUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-no-customer-handoff"])
         thorbisStableButton(app, "job-section-money").tap()
+        XCTAssertTrue(app.staticTexts["Estimates are off for your role"].waitForExistence(timeout: 15),
+                      "Wait for the restricted Money screen before checking that document controls are absent")
         XCTAssertFalse(app.buttons["job-money-jump-estimates"].exists)
         XCTAssertFalse(app.buttons["job-money-jump-invoices"].exists)
         XCTAssertFalse(app.buttons["job-estimate-\(estimateA)"].exists)
         XCTAssertFalse(app.buttons["job-invoice-\(invoiceA)"].exists)
+    }
+
+    func testMoneyRetainsInvoicesWhenEstimateAccessIsDenied() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-deny-estimate-view"])
+        thorbisStableButton(app, "job-section-money").tap()
+        XCTAssertTrue(app.staticTexts["Estimates are off for your role"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["job-money-jump-estimates"].exists)
+        XCTAssertFalse(app.buttons["job-money-jump-invoices"].exists)
+        XCTAssertFalse(app.buttons["job-estimate-\(estimateA)"].exists)
+        let invoice = app.buttons["job-invoice-\(invoiceA)"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !invoice.isHittable { app.swipeUp() }
+        XCTAssertTrue(invoice.isHittable, "Invoices remain accessible when only estimate access is denied")
+    }
+
+    func testMoneyRetainsEstimatesWhenInvoiceAccessIsDenied() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-deny-invoice-view"])
+        thorbisStableButton(app, "job-section-money").tap()
+        let estimate = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["job-money-jump-estimates"].exists)
+        XCTAssertFalse(app.buttons["job-money-jump-invoices"].exists)
+        XCTAssertFalse(app.buttons["job-invoice-\(invoiceA)"].exists)
+        XCTAssertTrue(estimate.isHittable, "Estimates remain accessible when only invoice access is denied")
     }
 
     func testMoneySectionJumpsReachInvoicesAndEstimates() {

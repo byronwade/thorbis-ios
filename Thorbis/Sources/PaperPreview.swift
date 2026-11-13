@@ -1457,6 +1457,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-no-customer-handoff") {
                 capabilities.removeAll { ["estimate.view", "invoice.view", "customer.edit"].contains($0) }
             }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-deny-estimate-view") {
+                capabilities.removeAll { $0 == "estimate.view" }
+            }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-deny-invoice-view") {
+                capabilities.removeAll { $0 == "invoice.view" }
+            }
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
