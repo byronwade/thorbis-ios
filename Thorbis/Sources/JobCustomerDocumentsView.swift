@@ -436,7 +436,9 @@ struct JobCustomerDocumentsView: View {
                     }
                     UserDefaults.standard.set("setting paper: \(sign)", forKey: "isolated-invoice-stage"); diagnosticTrace = "setting paper: \(sign)"
                     print("TRACE invoice setting paper", sign)
+                    UserDefaults.standard.removeObject(forKey: "isolated-invoice-binding")
                     paperGeneration = UUID(); paper = .invoice(latest, signing: sign)
+                    UserDefaults.standard.set("assigned: \(paper != nil), sign: \(sign)", forKey: "isolated-invoice-stage")
                 } else { book = .invoice(id) }
             } else {
                 paymentModel = nil
