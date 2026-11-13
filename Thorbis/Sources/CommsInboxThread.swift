@@ -1019,11 +1019,13 @@ struct CommsMailSheet: View {
                     TextField("Cc", text: $draft.cc, prompt: .placeholder("Optional"))
                         .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(Theme.font(16)).fieldWell()
+                        .accessibilityLabel("Cc").accessibilityIdentifier("inbox-mail-cc")
                 }
                 PaperFormField("Bcc") {
                     TextField("Bcc", text: $draft.bcc, prompt: .placeholder("Optional"))
                         .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(Theme.font(16)).fieldWell()
+                        .accessibilityLabel("Bcc").accessibilityIdentifier("inbox-mail-bcc")
                 }
             } else {
                 Button { showCopies = true } label: {
@@ -1034,6 +1036,7 @@ struct CommsMailSheet: View {
             }
             PaperFormField("Subject") {
                 TextField("Subject", text: $draft.subject, prompt: .placeholder("What it\u{2019}s about")).font(Theme.font(16)).fieldWell()
+                    .accessibilityLabel("Subject").accessibilityIdentifier("inbox-mail-subject")
             }
             PaperFormField("Message") {
                 TextField("Message", text: $draft.body, prompt: .placeholder("Write your email"), axis: .vertical)
@@ -1087,7 +1090,7 @@ struct CommsMailSheet: View {
             }
         }
         .thorbisSheetPresentation([.large])
-        .deviceHandoffs($mailHandoff)
+        .deviceHandoffs($mailHandoff, isCurrent: { store.isActive })
         .interactiveDismissDisabled(hasChanges && store.isActive)
         .disabled(!store.isActive)
         .onAppear { if !store.isActive { onClose() } }

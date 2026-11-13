@@ -58,9 +58,9 @@ final class CommsInboxUITests: XCTestCase {
         let to = app.textFields["inbox-mail-to"]
         XCTAssertTrue(to.waitForExistence(timeout: 10)); to.tap(); to.typeText("customer@example.com")
         app.buttons["Add Cc or Bcc"].tap()
-        let cc = app.textFields["Cc"]; XCTAssertTrue(cc.waitForExistence(timeout: 5)); cc.tap(); cc.typeText("copy@example.com")
-        let bcc = app.textFields["Bcc"]; bcc.tap(); bcc.typeText("private@example.com")
-        let subject = app.textFields["Subject"]; subject.tap(); subject.typeText("Visit")
+        let cc = app.textFields["inbox-mail-cc"]; XCTAssertTrue(cc.waitForExistence(timeout: 5)); cc.tap(); cc.typeText("copy@example.com")
+        let bcc = app.textFields["inbox-mail-bcc"]; bcc.tap(); bcc.typeText("private@example.com")
+        let subject = app.textFields["inbox-mail-subject"]; subject.tap(); subject.typeText("Visit")
         let body = app.textFields["inbox-mail-body"]; body.tap(); body.typeText("Please review")
         let send = app.buttons["Send with Mail"]
         for _ in 0..<6 where !send.isHittable { app.swipeUp() }
