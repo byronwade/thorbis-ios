@@ -105,6 +105,9 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(sign.waitForExistence(timeout: 10))
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: sign)
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 15), .completed, "Invoice signing control never became enabled")
+        let childTrace = app.staticTexts["invoice-child-trace"]
+        XCTAssertTrue(childTrace.waitForExistence(timeout: 5))
+        XCTAssertTrue(childTrace.label.contains("not tapped"), "Diagnostic tap marker was not initially clear")
         sign.tap()
         let name = app.textFields["Your full name"]
         XCTAssertTrue(name.waitForExistence(timeout: 15), "Missing invoice signing field; hierarchy: \(app.debugDescription)")
