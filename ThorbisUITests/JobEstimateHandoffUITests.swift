@@ -197,8 +197,8 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["job-estimate-handoff"].waitForExistence(timeout: 15), "The system edge-back gesture must return to the estimate overview")
     }
 
-    private func openSecondEstimateForValidation(_ flag: String) -> XCUIApplication {
-        let app = open(["--paper-preview-handoff-hide-controls", flag])
+    private func openSecondEstimateForValidation(_ flag: String, extraArgs: [String] = []) -> XCUIApplication {
+        let app = open(["--paper-preview-handoff-hide-controls", flag] + extraArgs)
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
         thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
@@ -218,31 +218,42 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(details.staticTexts["Anonymized service scope"].exists)
     }
 
+    private func returnFromRejectedSecondEstimate(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30), "The issued-revision read must finish and reject these terms")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["handoff-review-selected"].waitForExistence(timeout: 15))
+    }
+
     func testUnverifiedSentAmountIsHiddenAndCannotAdvanceReview() {
-        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-empty-base"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let app = openSecondEstimateForValidation("--handoff-test-empty-base")
+        returnFromRejectedSecondEstimate(app)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(second.waitForExistence(timeout: 30))
         XCTAssertFalse((second.value as? String ?? "").contains("$320.00"), "The accessible selection must not describe the unverified record amount")
         XCTAssertFalse(app.staticTexts["$320.00"].exists, "The unverified issued total must not be shown")
         visible(app, second); selectEstimate(app, second)
         thorbisStableButton(app, "handoff-review-selected").tap()
-        XCTAssertFalse(app.buttons["Continue to signatures"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30), "Review must finish with a validation failure")
+        XCTAssertFalse(app.buttons["Continue to signatures"].exists)
         XCTAssertFalse(app.textFields["Your full name"].exists)
     }
 
     func testUnverifiedPackagePriceIsHidden() {
-        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-empty-option"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let app = openSecondEstimateForValidation("--handoff-test-empty-option")
+        returnFromRejectedSecondEstimate(app)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(second.waitForExistence(timeout: 30)); visible(app, second); selectEstimate(app, second)
-        XCTAssertTrue(app.staticTexts["Empty package"].waitForExistence(timeout: 15))
+        let option = app.buttons["handoff-option-00000000-0000-4000-8000-000000008102-00000000-0000-4000-8000-000000008202"]
+        XCTAssertTrue(option.waitForExistence(timeout: 15)); visible(app, option); option.tap()
         XCTAssertFalse(app.staticTexts["$250.00"].exists, "Unverified package totals must not be presented as issued prices")
+        let value = second.value as? String ?? ""
+        XCTAssertTrue(value.contains("Empty package"), "Accessibility should identify the selected package")
+        XCTAssertFalse(value.contains("$250.00"), "Accessibility must not announce an unverified package price")
     }
 
     func testUnverifiedApprovedAmountIsHidden() {
-        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-empty-base", "--handoff-test-second-approved"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let app = openSecondEstimateForValidation("--handoff-test-empty-base", extraArgs: ["--handoff-test-second-approved"])
+        returnFromRejectedSecondEstimate(app)
         XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 30))
         XCTAssertFalse(app.staticTexts["$320.00"].exists, "An approved record amount is not a verified issued receipt")
     }
