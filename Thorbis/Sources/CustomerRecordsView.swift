@@ -144,9 +144,14 @@ struct CustomerRecordsView: View {
         section(title, total: total, symbol: symbol, groups: groups, incomplete: incomplete) { asset in
             NavigationLink(value: PaperRoute.media(jobID: asset.jobId, assetID: asset.id)) {
                 HStack(spacing: 10) {
-                    Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
-                        .font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if asset.uploadState != "stored" {
+                            Text("File is not ready yet").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        }
+                    }
                     Spacer(minLength: 8)
                     Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
                         .foregroundStyle(Theme.muted).accessibilityHidden(true)
