@@ -516,6 +516,7 @@ private struct CustomerInvoiceBookPage: View {
                             } else {
                                 Text("Signing this customer summary isn't available yet. Ask your technician for help.")
                                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                                CustomerSecondaryButton(title: "Retry signing", type: type) { summaryRetry = UUID() }
                             }
                         }
                     } else if summaryLoading {
