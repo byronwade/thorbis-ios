@@ -220,6 +220,29 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertEqual(model.selectedIDs, [a, b])
         XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path.hasSuffix("/estimates") == true }.count, 2)
     }
+    func testInterruptedPartialHandoffOffersRetryAndKeepsSelection() async throws {
+        let model = try await ready([])
+        let ids = (11...16).map { String(format: "00000000-0000-4000-8000-%012d", $0) }
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        var routes: [String: URLProtocolFixture.Reply] = [
+            "/v1/jobs/\(jobID)": .init(200, jobJSON),
+            "/v1/jobs/\(jobID)/estimates": .init(200, membership(ids))
+        ]
+        for id in ids { routes["/v1/estimates/\(id)"] = .init(200, record(id), gate: id == ids.last ? gate : nil) }
+        URLProtocolFixture.setRoutes(routes)
+        let task = Task { @MainActor in await model.refresh() }
+        for _ in 0..<300 where model.records.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        let first = try XCTUnwrap(model.records.first)
+        model.setSelected(first.id, selected: true)
+        XCTAssertTrue(model.selectedIDs.contains(first.id))
+        XCTAssertFalse(model.complete)
+        XCTAssertFalse(model.canReview, "A partial collection cannot authorize a full review")
+        task.cancel(); gate.release(); await task.value
+        XCTAssertFalse(model.loading)
+        XCTAssertFalse(model.complete)
+        XCTAssertNotNil(model.error, "An interrupted partial load must offer a recovery action")
+        XCTAssertTrue(model.selectedIDs.contains(first.id))
+    }
     func testApprovedAndDraftStayVisibleButNeverEnterApprovalSelection() async throws {
         let model = try await ready([.init(200, jobJSON), .init(200, membership([a, b])), .init(200, record(a, status: "approved")), .init(200, record(b, status: "draft"))])
         await model.refresh()

@@ -276,6 +276,79 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path.hasSuffix(self.id(12)) == true })
     }
 
+    func testPartialEstimateReadStaysLocalWhileSharedSnapshotWaitsForCompletion() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let numbers = Array(11...16)
+        var routes = ["/v1/jobs/\(id(100))/estimates": URLProtocolFixture.Reply(200, page(numbers.map { link($0) }))]
+        for number in numbers {
+            routes["/v1/estimates/\(id(number))"] = .init(200, estimate(number), gate: number == 16 ? gate : nil)
+        }
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let documents = JobDocumentCollections()
+        var partials: [JobDocumentRead<EstimateRecord>] = []
+        let pending = Task { @MainActor in
+            await documents.loadEstimates(scope: scope(), api: client, onPartial: { partials.append($0) }, isCurrent: { true })
+        }
+        for _ in 0..<300 where partials.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        let partial = try XCTUnwrap(partials.first)
+        XCTAssertFalse(partial.isComplete)
+        XCTAssertTrue(partial.isLoadingMore)
+        XCTAssertNil(partial.issue)
+        XCTAssertLessThan(partial.records.count, numbers.count)
+        XCTAssertNil(documents.estimates, "Other job screens must not mistake a healthy partial for a failed collection")
+        gate.release()
+        let published = await pending.value
+        XCTAssertTrue(published)
+        XCTAssertEqual(documents.estimates?.records.map(\.id), numbers.map(id))
+        XCTAssertTrue(documents.estimates?.isComplete == true)
+    }
+
+    func testCancelledPartialEstimateReadCannotPublishSharedCollection() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let numbers = Array(11...16)
+        var routes = ["/v1/jobs/\(id(100))/estimates": URLProtocolFixture.Reply(200, page(numbers.map { link($0) }))]
+        for number in numbers {
+            routes["/v1/estimates/\(id(number))"] = .init(200, estimate(number), gate: number == 16 ? gate : nil)
+        }
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let documents = JobDocumentCollections()
+        var partialCount = 0
+        let pending = Task { @MainActor in
+            await documents.loadEstimates(scope: scope(), api: client, onPartial: { _ in partialCount += 1 }, isCurrent: { true })
+        }
+        for _ in 0..<300 where partialCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertGreaterThan(partialCount, 0)
+        pending.cancel(); gate.release()
+        let published = await pending.value
+        XCTAssertFalse(published)
+        XCTAssertNil(documents.estimates)
+    }
+
+    func testSupersededPartialCannotReplaceNewerCompleteEstimateList() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let numbers = Array(11...16)
+        var routes = ["/v1/jobs/\(id(100))/estimates": URLProtocolFixture.Reply(200, page(numbers.map { link($0) }))]
+        for number in numbers {
+            routes["/v1/estimates/\(id(number))"] = .init(200, estimate(number), gate: number == 16 ? gate : nil)
+        }
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let documents = JobDocumentCollections()
+        var partialCount = 0
+        let older = Task { @MainActor in
+            await documents.loadEstimates(scope: scope(), api: client, onPartial: { _ in partialCount += 1 }, isCurrent: { true })
+        }
+        for _ in 0..<300 where partialCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertGreaterThan(partialCount, 0)
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(id(100))/estimates": .init(200, page([]))])
+        let newer = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
+        XCTAssertTrue(newer)
+        gate.release()
+        let obsolete = await older.value
+        XCTAssertFalse(obsolete)
+        XCTAssertTrue(documents.estimates?.isComplete == true)
+        XCTAssertEqual(documents.estimates?.records.count, 0)
+    }
+
     func testOneFailedEstimateKeepsOtherSuccessesAndSameJobPreviousRow() async throws {
         let first = api([.init(200, page([link(11), link(12)])),
                          .init(200, estimate(10)), .init(200, estimate(11)), .init(200, estimate(12))])

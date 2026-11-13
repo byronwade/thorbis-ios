@@ -23,6 +23,11 @@ publishes only completed or failed final reads. If the handoff's load returns
 without publishing while authority remains current, it shows a retryable error
 and keeps the previous selection. This revision is source-reviewed only and
 requires integrated cancellation, supersession and shared-consumer tests.
+Four targeted integrated tests are prepared for partial publication isolation,
+cancellation, supersession and handoff retry; their path-keyed URLProtocol
+fixture avoids assigning responses by concurrent request arrival order. These
+tests have only been parsed, not compiled or run on iOS. Older queue-based
+tests still need migration or confirmation before this can ship.
 
 The 40-estimate customer fixture and selection test are prepared but unrun.
 There is no iOS build, integrated URLProtocol test, real offline cache,

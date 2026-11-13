@@ -58,6 +58,7 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
     private final class Storage: @unchecked Sendable {
         let lock = NSLock()
         var replies: [Reply] = []
+        var routes: [String: Reply]? = nil
         var requests: [RecordedRequest] = []
     }
 
@@ -68,11 +69,28 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
     static func session(_ replies: [Reply]) -> URLSession {
         storage.lock.withLock {
             storage.replies = replies
+            storage.routes = nil
             storage.requests = []
         }
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [URLProtocolFixture.self]
         return URLSession(configuration: config)
+    }
+
+    /// Deterministic responses for parallel requests; keys are URL paths, not arrival order.
+    static func session(routes: [String: Reply]) -> URLSession {
+        storage.lock.withLock {
+            storage.replies = []
+            storage.routes = routes
+            storage.requests = []
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [URLProtocolFixture.self]
+        return URLSession(configuration: config)
+    }
+
+    static func setRoutes(_ routes: [String: Reply]) {
+        storage.lock.withLock { storage.routes = routes; storage.replies = []; storage.requests = [] }
     }
 
     static var recorded: [RecordedRequest] {
@@ -105,6 +123,7 @@ final class URLProtocolFixture: URLProtocol, @unchecked Sendable {
                                        cachePolicy: request.cachePolicy)
         let reply = Self.storage.lock.withLock { () -> Reply in
             Self.storage.requests.append(recorded)
+            if let routes = Self.storage.routes { return routes[request.url?.path ?? ""] ?? Reply(599) }
             return Self.storage.replies.isEmpty ? Reply(599) : Self.storage.replies.removeFirst()
         }
         if let gate = reply.gate {
