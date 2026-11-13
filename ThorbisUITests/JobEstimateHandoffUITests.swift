@@ -139,7 +139,12 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let more = app.buttons["handoff-load-more-estimates"]
         let list = app.scrollViews["job-estimate-handoff"]
         for suffix in ["082018", "082028", "082038"] {
-            for _ in 0..<30 where !(more.isHittable && more.isEnabled) { list.swipeUp() }
+            let pageReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                more.exists && more.isEnabled
+            }, object: more)
+            XCTAssertEqual(XCTWaiter.wait(for: [pageReady], timeout: 45), .completed,
+                           "The previous page must finish before requesting another")
+            for _ in 0..<30 where !more.isHittable { list.swipeUp() }
             XCTAssertTrue(more.isHittable && more.isEnabled, "The next page action must be visible and enabled")
             more.tap()
             let nextPageEnd = app.buttons["handoff-select-00000000-0000-4000-8000-000000\(suffix)"]
