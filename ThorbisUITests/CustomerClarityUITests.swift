@@ -2,6 +2,29 @@ import XCTest
 
 @MainActor
 final class CustomerClarityUITests: XCTestCase {
+    func testLongSiteNotesOpenCompleteReaderAndKeepLocationActions() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-notes", "--paper-preview-scroll", "center"]
+        app.launch()
+        let read = app.buttons["location-notes-more-00000000-0000-4000-8000-000000007001"]
+        for _ in 0..<15 where !read.isHittable { app.swipeUp() }
+        XCTAssertTrue(read.waitForExistence(timeout: 20))
+        XCTAssertTrue(read.isHittable)
+        XCTAssertGreaterThanOrEqual(read.frame.height, 44)
+        read.tap()
+        let full = app.staticTexts["location-notes-full"]
+        XCTAssertTrue(full.waitForExistence(timeout: 10))
+        XCTAssertTrue(full.label.contains("Additional details for the visit"))
+        XCTAssertTrue(full.label.contains("Front entrance instructions"))
+        app.buttons["Done"].tap()
+        let actions = app.buttons["Options for Home"]
+        for _ in 0..<8 where !actions.isHittable { app.swipeUp() }
+        XCTAssertTrue(actions.isHittable)
+        actions.tap()
+        XCTAssertTrue(app.buttons["Edit location"].waitForExistence(timeout: 5))
+    }
+
     func testContactOffersDirectCallAndTextWithoutHidingOtherActions() {
         continueAfterFailure = false
         let app = XCUIApplication()

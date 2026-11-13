@@ -1866,7 +1866,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                     "label": ProcessInfo.processInfo.arguments.contains("--paper-preview-long-location-label")
                                         ? "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
                                         : "Home", "kind": "service", "address": address,
-                                    "notes": "Sample location for design preview",
+                                    "notes": ProcessInfo.processInfo.arguments.contains("--paper-preview-long-location-notes")
+                                        ? "Front entrance instructions: use the side gate before the main door. The customer's dog stays inside until the technician calls.\n\nThe equipment room is down the hall past the second door; check in with the site contact before entering.\n\nAdditional details for the visit: parking is behind the building and the office should be informed when work is complete."
+                                        : "Sample location for design preview",
                                     "coordinates": previewCoordinates(customerID: id),
                                     "gateCode": "4821#", "alarmCode": "7350",
                                     "dogOnSite": "Rusty — friendly, stays in the back yard",
