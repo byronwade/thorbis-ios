@@ -218,6 +218,26 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(details.staticTexts["Anonymized service scope"].exists)
     }
 
+    func testUnverifiedSentAmountIsHiddenAndCannotAdvanceReview() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-empty-base"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(second.waitForExistence(timeout: 30))
+        XCTAssertFalse((second.value as? String ?? "").contains("$320.00"), "The accessible selection must not describe the unverified record amount")
+        XCTAssertFalse(app.staticTexts["$320.00"].exists, "The unverified issued total must not be shown")
+        visible(app, second); selectEstimate(app, second)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertFalse(app.buttons["Continue to signatures"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.textFields["Your full name"].exists)
+    }
+
+    func testUnverifiedApprovedAmountIsHidden() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-empty-base", "--handoff-test-second-approved"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.staticTexts["$320.00"].exists, "An approved record amount is not a verified issued receipt")
+    }
+
     func testBrowserRejectsEmptyIssuedBase() { assertInvalidSecondEstimate("--handoff-test-empty-base") }
     func testBrowserRejectsEmptyIssuedOption() { assertInvalidSecondEstimate("--handoff-test-empty-option") }
     func testBrowserRejectsNonUSDRevision() { assertInvalidSecondEstimate("--handoff-test-non-usd") }
