@@ -101,6 +101,57 @@ struct JobEstimateLink: Sendable { let id: String; let jobId: String; let estima
             .init(links: [.init(id: "AA", jobId: "job", estimateId: "AB"), .init(id: "BB", jobId: "JOB", estimateId: "ab")], nextCursor: nil, isAuthoritative: true)
         }
         precondition(mixed.estimateIDs == ["AB"])
+        // The handoff still has to load each page's details after membership arrives.
+        // If that work is interrupted, the final cursor must remain retryable.
+        let interrupted = JobEstimateMembershipPager(jobID: "job")
+        try await interrupted.loadNext(isCurrent: { current }) { _ in
+            .init(links: [.init(id: "a", jobId: "job", estimateId: "first")], nextCursor: "a", isAuthoritative: true)
+        }
+        var interruptedCursors: [String?] = []
+        do {
+            try await interrupted.loadNext(isCurrent: { current }, beforeCommit: { candidate in
+                precondition(candidate.estimateIDs == ["first", "second"] && candidate.scanReachedEnd)
+                throw CancellationError()
+            }) { cursor in
+                interruptedCursors.append(cursor)
+                return .init(links: [.init(id: "b", jobId: "job", estimateId: "second")], nextCursor: nil, isAuthoritative: true)
+            }
+            preconditionFailure("Expected detail interruption")
+        } catch is CancellationError { }
+        guard interrupted.canLoadMore && interrupted.estimateIDs == ["first"] else {
+            throw Offline.unavailable
+        }
+        try await interrupted.loadNext(isCurrent: { current }) { cursor in
+            interruptedCursors.append(cursor)
+            return .init(links: [.init(id: "b", jobId: "job", estimateId: "second")], nextCursor: nil, isAuthoritative: true)
+        }
+        precondition(interruptedCursors.count == 2 && interruptedCursors.allSatisfy { $0 == "a" })
+        precondition(interrupted.estimateIDs == ["first", "second"] && interrupted.scanUsedOnlyFreshResponses)
+        let retiredDuringDetails = JobEstimateMembershipPager(jobID: "job")
+        current = true
+        do {
+            try await retiredDuringDetails.loadNext(isCurrent: { current }, beforeCommit: { _ in
+                current = false
+            }) { _ in .init(links: [.init(id: "a", jobId: "job", estimateId: "first")], nextCursor: nil, isAuthoritative: true) }
+            preconditionFailure("Retired authority cannot commit prepared details")
+        } catch is CancellationError { }
+        precondition(retiredDuringDetails.estimateIDs.isEmpty && retiredDuringDetails.canLoadMore)
+        current = true
+        let preparing = JobEstimateMembershipPager(jobID: "job")
+        var releaseDetails: CheckedContinuation<Void, Never>?
+        let preparation = Task { @MainActor in
+            try await preparing.loadNext(isCurrent: { current }, beforeCommit: { _ in
+                await withCheckedContinuation { releaseDetails = $0 }
+            }) { _ in .init(links: [.init(id: "a", jobId: "job", estimateId: "first")], nextCursor: nil, isAuthoritative: true) }
+        }
+        while releaseDetails == nil { await Task.yield() }
+        precondition(preparing.estimateIDs.isEmpty && !preparing.canLoadMore)
+        do {
+            try await preparing.loadNext(isCurrent: { current }) { _ in preconditionFailure("duplicate fetch") }
+            preconditionFailure("A page was accepted during detail preparation")
+        } catch is JobEstimateMembershipPager.InvalidPage { }
+        releaseDetails?.resume(); try await preparation.value
+        precondition(preparing.estimateIDs == ["first"] && preparing.scanReachedEnd)
         print("membership paging probe passed")
     }
 }

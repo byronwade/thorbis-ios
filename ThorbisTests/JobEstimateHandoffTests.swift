@@ -266,6 +266,80 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertFalse(model.complete); XCTAssertFalse(model.canReview)
         XCTAssertNotNil(model.error); XCTAssertTrue(model.selectedIDs.contains(a))
     }
+    func testInterruptedLastPageDetailsRetryTheSameMembershipCursor() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let model = try await ready([.init(200, jobJSON), .init(200, membership([a], next: a)), .init(200, record(a)),
+                                     .init(200, membership([b])), .init(200, record(b), gate: gate),
+                                     .init(200, membership([b])), .init(200, record(b))])
+        await model.refresh(); model.setSelected(a, selected: true)
+        let task = Task { @MainActor in await model.loadMoreEstimates() }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(b)" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/estimates/\(b)" }, "The final membership page must be received before interrupting its details")
+        task.cancel(); gate.release(); await task.value
+        XCTAssertFalse(model.complete); XCTAssertFalse(model.canReview)
+        XCTAssertNotNil(model.error); XCTAssertTrue(model.selectedIDs.contains(a))
+        XCTAssertTrue(model.canLoadMoreEstimates, "The interrupted membership cursor must stay retryable")
+        await model.loadMoreEstimates()
+        XCTAssertEqual(model.records.map(\.id), [a, b]); XCTAssertTrue(model.complete)
+        XCTAssertTrue(model.selectedIDs.contains(a))
+        let membershipRequests = URLProtocolFixture.recorded.compactMap(\.url).filter { $0.path == "/v1/jobs/\(jobID)/estimates" }
+        let cursors = membershipRequests.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "cursor" })?.value }
+        XCTAssertEqual(cursors, [a, a], "Retry must request the interrupted page, never skip or exhaust it")
+    }
+    func testBannerRetryResumesInterruptedPageInsteadOfRestartingJob() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let model = try await ready([.init(200, jobJSON), .init(200, membership([a], next: a)), .init(200, record(a)),
+                                     .init(200, membership([b])), .init(200, record(b), gate: gate),
+                                     .init(200, membership([b])), .init(200, record(b))])
+        await model.refresh(); model.setSelected(a, selected: true)
+        let task = Task { @MainActor in await model.loadMoreEstimates() }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(b)" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/estimates/\(b)" })
+        task.cancel(); gate.release(); await task.value
+        XCTAssertNotNil(model.error)
+        await model.retryEstimateLoading()
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == "/v1/jobs/\(jobID)" }.count, 1,
+                       "Retry after Load more must not restart the job scan")
+        XCTAssertTrue(model.selectedIDs.contains(a))
+        XCTAssertEqual(model.records.map(\.id), [a, b]); XCTAssertTrue(model.complete)
+        let cursors = URLProtocolFixture.recorded.compactMap(\.url).filter { $0.path == "/v1/jobs/\(jobID)/estimates" }.compactMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "cursor" })?.value }
+        XCTAssertEqual(cursors, [a, a])
+    }
+    func testBannerRetryAfterInitialFailureRefreshesJob() async throws {
+        let model = try await ready([.init(503, #"{"status":503,"title":"Unavailable"}"#), .init(200, jobJSON), .init(200, membership([a])), .init(200, record(a))])
+        await model.refresh()
+        XCTAssertNotNil(model.error)
+        await model.retryEstimateLoading()
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == "/v1/jobs/\(jobID)" }.count, 2)
+        XCTAssertEqual(model.records.map(\.id), [a]); XCTAssertTrue(model.complete)
+    }
+    func testInterruptedLaterPageDoesNotPublishPartialRows() async throws {
+        let ids = (11...16).map { String(format: "00000000-0000-4000-8000-%012d", $0) }
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let model = try await ready([.init(200, jobJSON), .init(200, membership([a], next: a)), .init(200, record(a))])
+        await model.refresh(); model.setSelected(a, selected: true)
+        var routes: [String: URLProtocolFixture.Reply] = ["/v1/jobs/\(jobID)/estimates": .init(200, membership(ids))]
+        for id in ids { routes["/v1/estimates/\(id)"] = .init(200, record(id), gate: id == ids.last ? gate : nil) }
+        URLProtocolFixture.setRoutes(routes)
+        let task = Task { @MainActor in await model.loadMoreEstimates() }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/estimates/\(ids.last!)" }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/estimates/\(ids.last!)" })
+        XCTAssertEqual(model.records.map(\.id), [a])
+        task.cancel(); gate.release(); await task.value
+        XCTAssertEqual(model.records.map(\.id), [a]); XCTAssertTrue(model.selectedIDs.contains(a))
+        XCTAssertFalse(model.complete); XCTAssertTrue(model.canLoadMoreEstimates)
+        for id in ids { routes["/v1/estimates/\(id)"] = .init(200, record(id)) }
+        URLProtocolFixture.setRoutes(routes)
+        await model.retryEstimateLoading()
+        XCTAssertEqual(model.records.map(\.id), [a] + ids); XCTAssertTrue(model.complete)
+        XCTAssertTrue(model.selectedIDs.contains(a))
+    }
     func testIssuedDetailsUsesTargetedMembershipAndRefuses403OrRemovedLink() async throws {
         let model = try await ready([])
         let membershipPath = "/v1/jobs/\(jobID)/estimates"

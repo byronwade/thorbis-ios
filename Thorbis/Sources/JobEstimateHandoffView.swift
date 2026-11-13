@@ -184,7 +184,7 @@ struct JobEstimateHandoffView: View {
                 Text("You can review these estimates. Your current access doesn't allow approvals.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             }
             if model.hasResults { results }
-            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.refresh() } }
+            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.retryEstimateLoading() } }
             if model.loading {
                 if model.records.isEmpty { CustomerSkeleton(caption: "Opening current job estimates…", lines: 2) }
                 else { Text("Opening current job estimates…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }

@@ -172,6 +172,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     private var request = UUID()
     private var membershipPager: JobEstimateMembershipPager?
     private var pageRead: JobDocumentRead<EstimateRecord>?
+    private var retryingPage = false
     private var reviewedGeneration: UUID?
     private var lastSignerName: String?
     var isCurrent: Bool { isCurrentJob && session.can("estimate.view", feature: "estimates") }
@@ -278,6 +279,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     func refresh() async {
         guard isCurrent, !loading else { if !isCurrent { retire() }; return }
+        retryingPage = false
         let ticket = UUID(); request = ticket; loading = true; error = nil
         defer { if request == ticket { loading = false } }
         do {
@@ -296,21 +298,48 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     func loadMoreEstimates() async {
         guard isCurrent, !loading, canLoadMoreEstimates else { return }
+        retryingPage = false
         let ticket = request
         loading = true; error = nil
         defer { if request == ticket { loading = false } }
         do { try await loadPage(ticket: ticket) }
         catch is CancellationError {
-            if isCurrent, request == ticket { complete = false; error = "Couldn't load more estimates. Your selections are still here." }
+            if isCurrent, request == ticket { complete = false; retryingPage = true; error = "Couldn't load more estimates. Your selections are still here." }
         }
         catch {
             guard isCurrent, request == ticket else { return }
-            complete = false; self.error = "Couldn't load more estimates. Your selections are still here."
+            complete = false; retryingPage = true; self.error = "Couldn't load more estimates. Your selections are still here."
         }
+    }
+    func retryEstimateLoading() async {
+        if retryingPage && canLoadMoreEstimates { await loadMoreEstimates() }
+        else { await refresh() }
     }
     private func loadPage(ticket: UUID) async throws {
         guard let pager = membershipPager, isCurrent, request == ticket else { throw CancellationError() }
-        try await pager.loadNext(isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }) { [weak self] cursor in
+        var preparedRead: JobDocumentRead<EstimateRecord>?
+        try await pager.loadNext(isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, beforeCommit: { [weak self] candidate in
+            guard let self, self.isCurrent, self.request == ticket, !Task.isCancelled else { throw CancellationError() }
+            var ids = candidate.estimateIDs
+            if let origin = self.scope.originEstimateID, !ids.contains(where: { $0.caseInsensitiveCompare(origin) == .orderedSame }) { ids.insert(origin, at: 0) }
+            guard let read = await JobDocumentsLoader.estimatesForPage(scope: self.scope, api: self.api, ids: ids,
+                previous: self.pageRead, membershipFresh: candidate.pagesUsedOnlyFreshResponses,
+                membershipComplete: candidate.scanReachedEnd && candidate.pagesUsedOnlyFreshResponses,
+                isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, onPartial: { [weak self] partial in
+                    guard let self, self.isCurrent, self.request == ticket, self.pageRead == nil else { return }
+                    self.records = partial.records; self.freshIDs = partial.freshIDs
+                    self.unavailableIDs = partial.unavailableIDs; self.complete = false
+                }) else { throw CancellationError() }
+            guard self.isCurrent, self.request == ticket, !Task.isCancelled else { throw CancellationError() }
+            preparedRead = read
+        }, onCommit: { [weak self] candidate in
+            guard let self, let read = preparedRead else { return }
+            self.pageRead = read; self.records = read.records; self.freshIDs = read.freshIDs
+            self.unavailableIDs = read.unavailableIDs; self.complete = read.isComplete
+            self.canLoadMoreEstimates = !candidate.scanReachedEnd
+            self.error = (!read.isComplete && !self.canLoadMoreEstimates) ? read.issue : nil
+            self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
+        }) { [weak self] cursor in
             guard let self else { throw CancellationError() }
             let current: @MainActor () -> Bool = { [weak self] in self?.isCurrent == true && self?.request == ticket }
             let page: APIRead<JobEstimateLinkPage>
@@ -323,23 +352,6 @@ final class JobEstimateHandoffModel: ObservableObject {
             return .init(links: page.value.items, nextCursor: page.value.nextCursor,
                          isAuthoritative: page.provenance.source == .urlSession(cacheBypassed: true))
         }
-        guard isCurrent, request == ticket, !Task.isCancelled else { throw CancellationError() }
-        var ids = pager.estimateIDs
-        if let origin = scope.originEstimateID, !ids.contains(where: { $0.caseInsensitiveCompare(origin) == .orderedSame }) { ids.insert(origin, at: 0) }
-        guard let read = await JobDocumentsLoader.estimatesForPage(scope: scope, api: api, ids: ids,
-            previous: pageRead, membershipFresh: pager.pagesUsedOnlyFreshResponses,
-            membershipComplete: pager.scanReachedEnd && pager.scanUsedOnlyFreshResponses,
-            isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, onPartial: { [weak self] partial in
-                guard let self, self.isCurrent, self.request == ticket else { return }
-                self.records = partial.records; self.freshIDs = partial.freshIDs
-                self.unavailableIDs = partial.unavailableIDs; self.complete = false
-            }) else { throw CancellationError() }
-        guard isCurrent, request == ticket, !Task.isCancelled else { throw CancellationError() }
-        pageRead = read; records = read.records; freshIDs = read.freshIDs
-        unavailableIDs = read.unavailableIDs; complete = read.isComplete
-        canLoadMoreEstimates = pager.canLoadMore
-        error = (!read.isComplete && !canLoadMoreEstimates) ? read.issue : nil
-        selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
     }
     func setSelected(_ id: String, selected: Bool) {
         guard isCurrent, !contexts.values.contains(where: \.running) else { return }

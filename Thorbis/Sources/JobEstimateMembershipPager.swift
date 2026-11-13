@@ -12,6 +12,13 @@ final class JobEstimateMembershipPager {
         let isAuthoritative: Bool
     }
     struct InvalidPage: Error {}
+    /// Candidate state is not visible as committed membership until the consumer
+    /// has finished preparing the page's details under the same authority.
+    struct Candidate {
+        let estimateIDs: [String]
+        let pagesUsedOnlyFreshResponses: Bool
+        let scanReachedEnd: Bool
+    }
 
     private let jobID: String
     private var started = false
@@ -34,6 +41,8 @@ final class JobEstimateMembershipPager {
     var canLoadMore: Bool { !exhausted && !inFlight }
 
     func loadNext(isCurrent: @MainActor () -> Bool,
+                  beforeCommit: @MainActor (Candidate) async throws -> Void = { _ in },
+                  onCommit: @MainActor (Candidate) -> Void = { _ in },
                   fetch: @MainActor (String?) async throws -> Page) async throws {
         guard isCurrent(), !Task.isCancelled else { throw CancellationError() }
         guard !exhausted, !inFlight else { throw InvalidPage() }
@@ -52,7 +61,18 @@ final class JobEstimateMembershipPager {
                   !seenCursors.contains(cursor.lowercased()),
                   page.links.last?.id.lowercased() == cursor.lowercased() else { throw InvalidPage() }
         }
-        // Commit the page atomically only after every identity and cursor check succeeds.
+        var candidateIDs = estimateIDs
+        var candidateEstimates = seenEstimates
+        for link in page.links {
+            if candidateEstimates.insert(link.estimateId.lowercased()).inserted { candidateIDs.append(link.estimateId) }
+        }
+        let candidate = Candidate(estimateIDs: candidateIDs,
+                                  pagesUsedOnlyFreshResponses: !sawUnverifiedPage && page.isAuthoritative,
+                                  scanReachedEnd: page.nextCursor == nil)
+        try await beforeCommit(candidate)
+        try Task.checkCancellation()
+        guard isCurrent() else { throw CancellationError() }
+        // Commit only after both membership and detail preparation complete.
         for link in page.links {
             seenLinks.insert(link.id.lowercased())
             if seenEstimates.insert(link.estimateId.lowercased()).inserted { estimateIDs.append(link.estimateId) }
@@ -62,5 +82,6 @@ final class JobEstimateMembershipPager {
         exhausted = page.nextCursor == nil
         sawUnverifiedPage = sawUnverifiedPage || !page.isAuthoritative
         started = true
+        onCommit(candidate)
     }
 }
