@@ -13,12 +13,13 @@ enum Failure: Error { case offline, invalid }
     var freshFlag: Bool?
     var offline = false
     var afterAggregate: (() -> Void)?
+    var aggregateStatus = "sent"
     func checkCustomerReviewRequest(_ generation: UUID, currentAuthority: @MainActor () -> Bool) throws {
         guard generation == requestGeneration, currentAuthority(), !Task.isCancelled else { throw CancellationError() }
     }
     func customerReviewUnavailable() -> Error { Failure.invalid }
     func liveFieldEstimate(_ id: String) async throws -> EstimateRecord {
-        afterAggregate?(); return .init(id: id, organizationId: "org", customerId: "customer", locationId: nil, status: "sent", currentRevisionNumber: 2)
+        afterAggregate?(); return .init(id: id, organizationId: "org", customerId: "customer", locationId: nil, status: aggregateStatus, currentRevisionNumber: 2)
     }
     func financialPath(_ base: String, id: String, suffix: String) throws -> String { base + "/" + id + suffix }
     func send<T>(_ method: String, _ path: String, requireFresh: Bool = false) async throws -> T {
@@ -40,6 +41,10 @@ enum Failure: Error { case offline, invalid }
         client.freshFlag = nil
         do { _ = try await client.customerIssuedEstimateRevision(for: expected, currentAuthority: { authorized }); preconditionFailure("Retired access") } catch is CancellationError { }
         precondition(client.freshFlag == nil, "No revision request after revocation")
+        client.afterAggregate = nil; client.offline = false; client.aggregateStatus = "approved"
+        let approved = EstimateRecord(id: "estimate", organizationId: "org", customerId: "customer", locationId: nil, status: "approved", currentRevisionNumber: 2)
+        _ = try await client.customerIssuedEstimateRevision(for: approved, allowApprovedForReading: true)
+        do { _ = try await client.customerIssuedEstimateRevision(for: approved); preconditionFailure("Approved must not enter signing preparation") } catch Failure.invalid { }
         print("PASS issued revision freshness and retirement")
     }
 }

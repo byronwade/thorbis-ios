@@ -432,7 +432,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     /// Reading one estimate never selects it or prepares an approval.
     func detailsCurrent(_ record: EstimateRecord, authority: UUID) -> Bool {
         isCurrent && session.authorityRevision == authority && freshIDs.contains(record.id)
-            && record.status == "sent" && records.contains(record)
+            && (record.status == "sent" || record.status == "approved") && records.contains(record)
             && scope.contains(record, requestedID: record.id)
     }
 
@@ -445,7 +445,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             throw Problem(title: "This job changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
         try await verifyDetailMembership(record, job: fresh, current: current)
-        let revision = try await api.customerIssuedEstimateRevision(for: record, currentAuthority: current)
+        let revision = try await api.customerIssuedEstimateRevision(for: record, allowApprovedForReading: true, currentAuthority: current)
         guard current() else { throw CancellationError() }
         let verifiedJob = try await api.liveFieldJob(scope.jobID)
         guard current() else { throw CancellationError() }

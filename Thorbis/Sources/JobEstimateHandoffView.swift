@@ -44,6 +44,10 @@ private struct CustomerHandoffEstimateDetails: View {
                 } else if let revision, revisionMatches {
                     Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
+                    if record.status == "approved", !(revision.options ?? []).isEmpty {
+                        Text("These are the options on the issued estimate. Which option was approved isn't shown here.")
+                            .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    }
                     if let options = revision.options, !options.isEmpty {
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             VStack(alignment: .leading, spacing: 12) {

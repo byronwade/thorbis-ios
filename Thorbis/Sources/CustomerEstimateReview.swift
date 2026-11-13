@@ -85,7 +85,7 @@ private struct CustomerReviewPaper: Decodable {
 
 @MainActor
 extension APIClient {
-    func customerIssuedEstimateRevision(for expected: EstimateRecord, currentAuthority: @escaping @MainActor () -> Bool = { true }) async throws -> CustomerIssuedEstimateRevision {
+    func customerIssuedEstimateRevision(for expected: EstimateRecord, allowApprovedForReading: Bool = false, currentAuthority: @escaping @MainActor () -> Bool = { true }) async throws -> CustomerIssuedEstimateRevision {
         let generation = requestGeneration
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard let number = expected.currentRevisionNumber, number > 0 else { throw customerReviewUnavailable() }
@@ -93,7 +93,9 @@ extension APIClient {
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard current.id == expected.id, current.organizationId == expected.organizationId,
               current.customerId == expected.customerId, current.locationId == expected.locationId,
-              current.status == "sent", current.currentRevisionNumber == number
+              current.status == expected.status,
+              (current.status == "sent" || (allowApprovedForReading && current.status == "approved")),
+              current.currentRevisionNumber == number
         else { throw customerReviewUnavailable() }
 
         let path = try financialPath("/v1/estimates", id: expected.id, suffix: "/revisions/\(number)")

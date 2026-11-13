@@ -266,6 +266,26 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertFalse(model.complete); XCTAssertFalse(model.canReview)
         XCTAssertNotNil(model.error); XCTAssertTrue(model.selectedIDs.contains(a))
     }
+    func testApprovedEstimateAllowsReadOnlyDetailsButCannotBeSelectedForApproval() async throws {
+        let model = try await ready([])
+        let estimatePath = "/v1/estimates/\(a)"
+        let membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let singlePath = "\(membershipPath)/\(a)"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+            singlePath: .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+            "\(estimatePath)/revisions/1": .init(200, revision(a))
+        ])
+        await model.refresh()
+        let approved = try XCTUnwrap(model.records.first)
+        XCTAssertTrue(model.detailsCurrent(approved, authority: model.session.authorityRevision))
+        let issued = try await model.issuedDetails(approved, authority: model.session.authorityRevision)
+        XCTAssertEqual(issued.estimateId, a)
+        model.setSelected(a, selected: true)
+        XCTAssertFalse(model.selectedIDs.contains(a))
+        XCTAssertFalse(model.canReview)
+    }
     func testIssuedDetailsUsesTargetedMembershipAndRefuses403OrRemovedLink() async throws {
         let model = try await ready([])
         let membershipPath = "/v1/jobs/\(jobID)/estimates"
