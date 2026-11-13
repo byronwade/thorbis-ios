@@ -2,6 +2,32 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testFinancialSectionNamesEstimatesAndInvoices() {
+        continueAfterFailure = false
+        let app = preview("job", working: true)
+        let financial = app.buttons["job-section-money"]
+        XCTAssertTrue(financial.waitForExistence(timeout: 15))
+        XCTAssertTrue(financial.label.contains("Estimates"), financial.label)
+        XCTAssertTrue(financial.label.contains("invoices"), financial.label)
+        let photos = app.buttons["job-section-photos"]
+        XCTAssertTrue(photos.exists)
+        XCTAssertFalse(financial.frame.intersects(photos.frame), "Financial and photo sections must not overlap")
+        financial.tap()
+        XCTAssertTrue(app.buttons["job-money-jump-estimates"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["job-money-jump-invoices"].exists)
+    }
+    func testFinancialSectionIsNamedInLargeTextChooser() {
+        continueAfterFailure = false
+        let app = preview("job", accessibleText: true, working: true)
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
+        let financial = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Estimates & invoices")).firstMatch
+        XCTAssertTrue(financial.waitForExistence(timeout: 5))
+        XCTAssertGreaterThanOrEqual(financial.frame.height, 44)
+        financial.tap()
+        XCTAssertTrue(chooser.label.contains("Estimates"), chooser.label)
+        XCTAssertTrue(chooser.label.contains("invoices"), chooser.label)
+    }
     func testLargeSameDayActivityRemainsScrollableAndFilterable() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -250,7 +250,7 @@ final class JobDocumentsUITests: XCTestCase {
         let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch.tap()
         let invoices = app.buttons["job-money-jump-invoices"]
         XCTAssertTrue(invoices.waitForExistence(timeout: 15)); invoices.tap()
         let estimates = app.buttons["job-money-jump-estimates"]
@@ -392,7 +392,7 @@ final class JobDocumentsUITests: XCTestCase {
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15))
         chooser.tap()
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch.tap()
         let jump = app.buttons["job-money-jump-invoices"]
         for _ in 0..<8 where !jump.isHittable { app.swipeUp() }
         XCTAssertTrue(jump.isHittable)
@@ -470,7 +470,7 @@ final class JobDocumentsUITests: XCTestCase {
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15))
         chooser.tap()
-        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
+        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch
         XCTAssertTrue(money.waitForExistence(timeout: 5))
         money.tap()
         let first = app.buttons["job-estimate-\(estimateA)"]
@@ -592,7 +592,7 @@ final class JobDocumentsUITests: XCTestCase {
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15))
         chooser.tap()
-        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
+        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch
         XCTAssertTrue(money.waitForExistence(timeout: 5))
         money.tap()
         let items = app.buttons["job-invoice-items-\(invoiceA)"]
