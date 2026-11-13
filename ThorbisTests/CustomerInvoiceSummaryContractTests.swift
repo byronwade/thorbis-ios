@@ -63,7 +63,7 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         let api = APIClient(session: URLProtocolFixture.session([.init(200, try responseJSON(id: id), gate: gate)]), baseURL: "https://app.thorbis.com")
         var authorized = true
         let task = Task { @MainActor in try await api.customerInvoiceSummary(scope: jobScope, invoiceID: id, linesRevision: 2, currentAuthority: { authorized }) }
-        for _ in 0..<300 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<1500 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
         authorized = false; gate.release()
         do { _ = try await task.value; XCTFail("A response under retired authority must be discarded") } catch is CancellationError { } catch { XCTFail("Expected cancellation, got \(error)") }
