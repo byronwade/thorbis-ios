@@ -362,14 +362,22 @@ enum JobDocumentsLoader {
     static func estimatesForPage(scope: JobDocumentScope, api: APIClient, ids: [String],
                                  previous: JobDocumentRead<EstimateRecord>?, membershipFresh: Bool,
                                  membershipComplete: Bool,
-                                 isCurrent: @escaping @MainActor () -> Bool) async -> JobDocumentRead<EstimateRecord>? {
+                                 isCurrent: @escaping @MainActor () -> Bool,
+                                 onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void = { _ in }) async -> JobDocumentRead<EstimateRecord>? {
         guard isCurrent(), !Task.isCancelled else { return nil }
         let old = previous?.scope == scope ? previous : nil
         let present = Set((old?.records.map(\.id) ?? []) + (old?.unavailableIDs ?? []))
         let incoming = unique(ids).filter { !present.contains($0) }
         let details = EstimateDetails(ids: incoming, scope: scope, api: api, retained: [],
                                       linksSaved: !membershipFresh, includeRetained: false,
-                                      isCurrent: isCurrent, onPartial: { _ in })
+                                      isCurrent: isCurrent, onPartial: { page in
+            guard isCurrent(), !Task.isCancelled else { return }
+            let records = (old?.records ?? []) + page.records
+            let fresh = membershipFresh ? (old?.freshIDs ?? []).union(page.freshIDs) : []
+            onPartial(.init(scope: scope, records: records, freshIDs: fresh, isComplete: false,
+                            unavailableIDs: (old?.unavailableIDs ?? []) + page.unavailableIDs,
+                            kind: "estimates", loadingMore: true))
+        })
         await runBoundedMainActorOperations(count: incoming.count, limit: 4) { index in await details.fetch(index) }
         guard isCurrent(), !Task.isCancelled else { return nil }
         var records = old?.records ?? []

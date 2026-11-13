@@ -82,6 +82,13 @@ struct Problem: Error { let status: Int? }
                                                                    previous: nil, membershipFresh: true, membershipComplete: true,
                                                                    isCurrent: { true })!
         precondition(!savedPage.isComplete && !savedPage.freshIDs.contains("1"), "Saved details cannot make the set complete")
+        var pagePartials: [JobDocumentRead<EstimateRecord>] = []
+        let partialPage = await JobDocumentsLoader.estimatesForPage(scope: scope, api: APIClient(ids: ids), ids: ids,
+            previous: nil, membershipFresh: true, membershipComplete: false, isCurrent: { true },
+            onPartial: { pagePartials.append($0) })!
+        precondition(!pagePartials.isEmpty && pagePartials[0].records.count < partialPage.records.count,
+                     "First page cards must appear before all its detail reads finish")
+        precondition(pagePartials.allSatisfy { !$0.isComplete }, "A partial page must never enable approval")
         let api = APIClient(ids: ids, failure: "5")
         var partials: [JobDocumentRead<EstimateRecord>] = []
         let result = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: nil, isCurrent: { true },

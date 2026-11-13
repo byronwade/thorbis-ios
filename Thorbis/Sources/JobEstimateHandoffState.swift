@@ -287,7 +287,9 @@ final class JobEstimateHandoffModel: ObservableObject {
             membershipPager = JobEstimateMembershipPager(jobID: scope.jobID)
             pageRead = nil; complete = false; canLoadMoreEstimates = false
             try await loadPage(ticket: ticket)
-        } catch is CancellationError {} catch {
+        } catch is CancellationError {
+            if isCurrent, request == ticket { complete = false; error = "Couldn't finish loading estimates. Your previous selections are still here." }
+        } catch {
             guard isCurrent, request == ticket else { return }
             complete = false; self.error = "Couldn't refresh all estimates. Your previous selections are still here."
         }
@@ -298,7 +300,9 @@ final class JobEstimateHandoffModel: ObservableObject {
         loading = true; error = nil
         defer { if request == ticket { loading = false } }
         do { try await loadPage(ticket: ticket) }
-        catch is CancellationError { }
+        catch is CancellationError {
+            if isCurrent, request == ticket { complete = false; error = "Couldn't load more estimates. Your selections are still here." }
+        }
         catch {
             guard isCurrent, request == ticket else { return }
             complete = false; error = "Couldn't load more estimates. Your selections are still here."
@@ -325,7 +329,11 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard let read = await JobDocumentsLoader.estimatesForPage(scope: scope, api: api, ids: ids,
             previous: pageRead, membershipFresh: pager.pagesUsedOnlyFreshResponses,
             membershipComplete: pager.scanReachedEnd && pager.scanUsedOnlyFreshResponses,
-            isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }) else { throw CancellationError() }
+            isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, onPartial: { [weak self] partial in
+                guard let self, self.isCurrent, self.request == ticket else { return }
+                self.records = partial.records; self.freshIDs = partial.freshIDs
+                self.unavailableIDs = partial.unavailableIDs; self.complete = false
+            }) else { throw CancellationError() }
         guard isCurrent, request == ticket, !Task.isCancelled else { throw CancellationError() }
         pageRead = read; records = read.records; freshIDs = read.freshIDs
         unavailableIDs = read.unavailableIDs; complete = read.isComplete

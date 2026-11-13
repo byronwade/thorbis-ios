@@ -213,10 +213,14 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, before); XCTAssertEqual(context.signature, intent)
     }
     func testCompleteCollectionIncludesSecondPageAndIndependentSelection() async throws {
-        let model = try await ready([.init(200, jobJSON), .init(200, membership([a], next: "next")), .init(200, membership([b])), .init(200, record(a)), .init(200, record(b))])
+        let model = try await ready([.init(200, jobJSON), .init(200, membership([a], next: a)), .init(200, record(a)), .init(200, membership([b])), .init(200, record(b))])
         await model.refresh()
+        XCTAssertEqual(model.records.map(\.id), [a]); XCTAssertFalse(model.complete)
+        XCTAssertTrue(model.canLoadMoreEstimates)
+        model.setSelected(a, selected: true); XCTAssertFalse(model.canReview)
+        await model.loadMoreEstimates()
         XCTAssertEqual(model.records.map(\.id), [a, b]); XCTAssertTrue(model.complete)
-        model.setSelected(a, selected: true); model.setSelected(b, selected: true)
+        model.setSelected(b, selected: true)
         XCTAssertEqual(model.selectedIDs, [a, b])
         XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path.hasSuffix("/estimates") == true }.count, 2)
     }
@@ -243,8 +247,27 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertNotNil(model.error, "An interrupted partial load must offer a recovery action")
         XCTAssertTrue(model.selectedIDs.contains(first.id))
     }
+    func testCancelledLastPageKeepsSelectionAndOffersRetry() async throws {
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let model = try await ready([.init(200, jobJSON), .init(200, membership([a], next: a)), .init(200, record(a)),
+                                     .init(200, membership([b]), gate: gate)])
+        await model.refresh(); model.setSelected(a, selected: true)
+        XCTAssertTrue(model.canLoadMoreEstimates); XCTAssertTrue(model.selectedIDs.contains(a))
+        let task = Task { @MainActor in await model.loadMoreEstimates() }
+        for _ in 0..<300 where !model.loading { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(model.loading)
+        task.cancel(); gate.release(); await task.value
+        XCTAssertFalse(model.complete); XCTAssertFalse(model.canReview)
+        XCTAssertNotNil(model.error); XCTAssertTrue(model.selectedIDs.contains(a))
+    }
     func testApprovedAndDraftStayVisibleButNeverEnterApprovalSelection() async throws {
-        let model = try await ready([.init(200, jobJSON), .init(200, membership([a, b])), .init(200, record(a, status: "approved")), .init(200, record(b, status: "draft"))])
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON),
+            "/v1/jobs/\(jobID)/estimates": .init(200, membership([a, b])),
+            "/v1/estimates/\(a)": .init(200, record(a, status: "approved")),
+            "/v1/estimates/\(b)": .init(200, record(b, status: "draft"))
+        ])
         await model.refresh()
         XCTAssertEqual(model.records.count, 2)
         model.setSelected(a, selected: true); model.setSelected(b, selected: true)
