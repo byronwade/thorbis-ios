@@ -41,7 +41,7 @@ private struct CustomerHandoffEstimateDetails: View {
                 }
                 if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
                     Button("Fail sample refresh") {
-                        JobEstimateHandoffPreview.shared.interruptNextMembership()
+                        JobEstimateHandoffPreview.shared.rejectNextMembership()
                         Task { await model.refresh() }
                     }
                 }
