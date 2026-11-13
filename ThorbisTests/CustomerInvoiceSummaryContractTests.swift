@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import Thorbis
 
 @MainActor
@@ -63,6 +64,31 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         receipt["signedAt"] = "2026-11-13T12:00:00.000Z"
         XCTAssertTrue(try decoded().matches(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z"))
         receipt["signedAt"] = "2026-11-13T12:00:00Z"
+        var handoffCurrent = true
+        let handoff = CustomerSummarySigningContext(summary: summary, actorID: "00000000-0000-4000-8000-000000000025", current: { handoffCurrent })
+        let signature = try handoff.freeze(signerName: " Alex ", signedAt: "2026-11-13T12:00:00Z", png: Data([1, 2, 3]))
+        XCTAssertEqual(try handoff.freeze(signerName: "Alex", signedAt: signature.signedAt, png: signature.png), signature)
+        XCTAssertThrowsError(try handoff.freeze(signerName: "Alex", signedAt: signature.signedAt, png: Data([4])))
+        XCTAssertThrowsError(try handoff.attempt())
+        var assetJSON: [String: Any] = ["id": "00000000-0000-4000-8000-000000000020", "organizationId": organization,
+            "jobId": job, "uploaderUserId": "00000000-0000-4000-8000-000000000025", "kind": "photo", "mime": "image/png",
+            "sizeBytes": signature.png.count, "originalFilename": "signature.png",
+            "contentHash": SHA256.hash(data: signature.png).map { String(format: "%02x", $0) }.joined(),
+            "storageKey": "preview", "uploadState": "stored", "tags": ["signature"], "archived": false,
+            "createdAt": signature.signedAt, "updatedAt": signature.signedAt]
+        func media() throws -> MediaAssetRecord { try JSONDecoder().decode(MediaAssetRecord.self, from: JSONSerialization.data(withJSONObject: assetJSON)) }
+        try handoff.acceptUploadedMedia(media())
+        let frozenAttempt = try handoff.attempt()
+        XCTAssertEqual(frozenAttempt.idempotencyKey, signature.idempotencyKey)
+        XCTAssertEqual(try handoff.attempt().imageMediaId, frozenAttempt.imageMediaId)
+        assetJSON["id"] = "00000000-0000-4000-8000-000000000022"
+        XCTAssertThrowsError(try handoff.acceptUploadedMedia(media()))
+        assetJSON["jobId"] = "00000000-0000-4000-8000-000000000099"
+        XCTAssertThrowsError(try handoff.acceptUploadedMedia(media()))
+        handoffCurrent = false
+        XCTAssertThrowsError(try handoff.attempt())
+        handoff.retire(); handoffCurrent = true
+        XCTAssertThrowsError(try handoff.attempt())
         let attempt = try XCTUnwrap(CustomerSummarySigningAttempt(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", imageMediaId: "00000000-0000-4000-8000-000000000020", idempotencyKey: "00000000-0000-4000-8000-000000000021"))
         let receiptJSON = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
         let api = APIClient(session: URLProtocolFixture.session([.init(201, receiptJSON), .init(201, receiptJSON)]), baseURL: "https://app.thorbis.com")
