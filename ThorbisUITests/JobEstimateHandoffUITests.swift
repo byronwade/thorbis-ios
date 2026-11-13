@@ -123,21 +123,42 @@ final class JobEstimateHandoffUITests: XCTestCase {
         }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed, "Each real selection must stick before the next tap")
     }
+    private func revealPrecisely(_ element: XCUIElement, in app: XCUIApplication, scrollID: String) {
+        let scroll = app.scrollViews[scrollID]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        for _ in 0..<24 {
+            let footerIDs = ["handoff-review-selected", "handoff-previous-estimate", "handoff-next-estimate"]
+            let footerTop = footerIDs.flatMap { app.buttons.matching(identifier: $0).allElementsBoundByIndex }
+                .filter { $0.exists && $0.frame.intersects(app.frame) }.map { $0.frame.minY }.min() ?? app.frame.maxY
+            let top = app.frame.minY + 105
+            let point = element.frame.midY
+            if element.isHittable && point > top && point < footerTop { return }
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: point <= top ? 0.68 : 0.42))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTFail("The customer control must have an unobscured tap point")
+    }
+
     func testEstimateBrowseKeepsLongDescriptionReadOnlyAndEdgeBackWorks() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls",
                         "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); revealPrecisely(first, in: app, scrollID: "job-estimate-handoff")
+        capture(app, "Largest text estimate detail action")
+        first.tap()
         let more = app.buttons["Show more, Estimate EST-8101, item 1"]
-        XCTAssertTrue(more.waitForExistence(timeout: 30)); visible(app, more); more.tap()
+        XCTAssertTrue(more.waitForExistence(timeout: 30)); revealPrecisely(more, in: app, scrollID: "handoff-estimate-details"); more.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.textViews.firstMatch.exists)
+        capture(app, "Largest text read-only estimate description")
         app.buttons["Done"].tap()
         let details = app.scrollViews["handoff-estimate-details"]
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         details.swipeLeft()
         XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        capture(app, "Largest text second estimate before edge back")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: end)
