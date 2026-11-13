@@ -101,8 +101,11 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.buttons["INV-2209"].tap()
         let sign = app.buttons["Sign for the work"]
         XCTAssertTrue(sign.waitForExistence(timeout: 10))
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: sign)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 15), .completed, "Invoice signing control never became enabled")
         sign.tap()
-        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
+        let name = app.textFields["Your full name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 15), "Missing invoice signing field; hierarchy: \(app.debugDescription)")
         XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
         XCTAssertTrue(app.navigationBars["INV-2209"].exists)
     }
