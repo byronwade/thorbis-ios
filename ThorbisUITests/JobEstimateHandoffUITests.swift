@@ -158,6 +158,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         details.swipeLeft()
         XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        capture(app, "Largest text second estimate before edge back")
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
         start.press(forDuration: 0.05, thenDragTo: end)
