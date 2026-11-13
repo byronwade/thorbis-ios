@@ -344,7 +344,6 @@ struct JobCustomerDocumentsView: View {
                 CustomerJobReadOnlyPaper(estimate: estimate, handBack: beginHandBack)
             }
         case .invoice(let invoice, let signing):
-            if ["issued", "paid"].contains(invoice.status) {
                 CustomerInvoicePresentation(invoice: invoice, customerName: customerName,
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
@@ -359,9 +358,6 @@ struct JobCustomerDocumentsView: View {
                         paperGeneration = UUID(); paper = .invoice(updated, signing: false)
                         invoiceUpdated(updated)
                     }, onDone: beginHandBack)
-            } else {
-                CustomerJobReadOnlyPaper(invoice: invoice, handBack: beginHandBack)
-            }
         }
     }
 
@@ -579,10 +575,9 @@ private struct CustomerJobReadOnlyPaper: View {
                                 estimateLines(option.lines, currency: option.currency, type: type, expectedTotal: option.totalAmount)
                             }
                         } else { estimateLines(estimate.lines, currency: estimate.lines.first?.unitPrice.currency ?? "USD", type: type) }
-                    } else if let invoice {
-                        Text("Invoice").font(Theme.customerFont(type.heading, weight: .medium))
-                        CustomerStatusWord(status: invoice.status, type: type)
-                        lines(invoice.lines, currency: invoice.currency, type: type)
+                    } else if invoice != nil {
+                        Text("Invoice details aren't available. Hand the device back to your technician.")
+                            .font(Theme.customerFont(type.body))
                     }
                 }
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
