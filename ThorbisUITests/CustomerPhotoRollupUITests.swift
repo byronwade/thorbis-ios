@@ -2,6 +2,22 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoRollupUITests: XCTestCase {
+    func testLongJobTitleWrapsAndOpensItsJob() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-photo-rollup", "--paper-preview-customer-long-job"]
+        app.launch()
+        let photos = app.buttons["Photos"].firstMatch
+        XCTAssertTrue(photos.waitForExistence(timeout: 20)); photos.tap()
+        let job = app.buttons["customer-records-job-00000000-0000-4000-8000-000000002214"]
+        XCTAssertTrue(job.waitForExistence(timeout: 20))
+        XCTAssertTrue(job.label.contains("Air conditioning is not cooling the upstairs rooms after several hours of running"))
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Long customer record job title"; screenshot.lifetime = .keepAlways; add(screenshot)
+        XCTAssertGreaterThan(job.frame.height, 44, "Long job titles need room to wrap")
+        job.tap()
+        XCTAssertTrue(app.buttons["job-section-money"].waitForExistence(timeout: 15))
+    }
     func testPhotoGroupJobLinkAtLargestText() {
         continueAfterFailure = false
         let app = XCUIApplication()
