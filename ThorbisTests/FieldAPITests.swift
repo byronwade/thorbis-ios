@@ -283,6 +283,19 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
     }
 
+    func testLiveSingleEstimateMembershipUsesExactPathAndBypassesCache() async throws {
+        let job = "00000000-0000-4000-8000-000000000004"
+        let estimate = "00000000-0000-4000-8000-000000000008"
+        let reply = #"{"id":"00000000-0000-4000-8000-000000000009","jobId":"00000000-0000-4000-8000-000000000004","estimateId":"00000000-0000-4000-8000-000000000008","linkedAt":"2026-10-26T12:00:00Z"}"#
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply)]), baseURL: "https://app.thorbis.com")
+        let link = try await client.liveFieldJobEstimateLink(job, estimateID: estimate)
+        XCTAssertEqual(link.jobId, job); XCTAssertEqual(link.estimateId, estimate)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.last)
+        XCTAssertEqual(request.url?.path, "/v1/jobs/\(job)/estimates/\(estimate)")
+        XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+    }
+
     func testLiveInvoiceReadBypassesURLCache() async throws {
         let id = "00000000-0000-4000-8000-00000000000a"
         let reply = #"{"id":"00000000-0000-4000-8000-00000000000a","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","origin":"manual","sourceOperationKey":"manual:test","status":"draft","lines":[],"linesRevision":1,"amountPaid":0,"currency":"USD","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#

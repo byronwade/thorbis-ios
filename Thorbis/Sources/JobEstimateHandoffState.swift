@@ -444,23 +444,28 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard sameJob(fresh) else {
             throw Problem(title: "This job changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
-        let links = try await api.liveFieldJobEstimateLinks(scope.jobID)
-        guard current() else { throw CancellationError() }
-        guard links.allSatisfy({ $0.jobId == scope.jobID }),
-              links.contains(where: { $0.estimateId == record.id }) || fresh.estimateId == record.id else {
-            throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
-        }
+        try await verifyDetailMembership(record, job: fresh, current: current)
         let revision = try await api.customerIssuedEstimateRevision(for: record, currentAuthority: current)
         guard current() else { throw CancellationError() }
         let verifiedJob = try await api.liveFieldJob(scope.jobID)
         guard current() else { throw CancellationError() }
-        let verifiedLinks = try await api.liveFieldJobEstimateLinks(scope.jobID)
         guard current() else { throw CancellationError() }
-        guard sameJob(verifiedJob), verifiedLinks.allSatisfy({ $0.jobId == scope.jobID }),
-              verifiedLinks.contains(where: { $0.estimateId == record.id }) || verifiedJob.estimateId == record.id else {
+        guard sameJob(verifiedJob) else {
             throw Problem(title: "This job's estimates changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
+        try await verifyDetailMembership(record, job: verifiedJob, current: current)
         return revision
+    }
+    private func verifyDetailMembership(_ record: EstimateRecord, job: JobRecord,
+                                        current: @MainActor () -> Bool) async throws {
+        do {
+            try await JobEstimateDetailMembership.verify(jobID: scope.jobID, estimateID: record.id,
+                originID: job.estimateId, isCurrent: current,
+                read: { try await self.api.liveFieldJobEstimateLink(self.scope.jobID, estimateID: record.id) },
+                list: { try await self.api.liveFieldJobEstimateLinks(self.scope.jobID) })
+        } catch is JobEstimateDetailMembership.InvalidMembership {
+            throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
+        }
     }
     func verifyMembership(_ item: JobEstimateReviewedItem) async throws {
         guard isCurrent, approvalAllowed(item) else { throw CancellationError() }

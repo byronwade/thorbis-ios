@@ -97,7 +97,8 @@ extension APIClient {
         else { throw customerReviewUnavailable() }
 
         let path = try financialPath("/v1/estimates", id: expected.id, suffix: "/revisions/\(number)")
-        let revision: CustomerIssuedEstimateRevision = try await send("GET", path)
+        // Issued terms are read for a live customer decision, never from a saved copy.
+        let revision: CustomerIssuedEstimateRevision = try await send("GET", path, requireFresh: true)
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         try revision.validate(for: expected)
         return revision

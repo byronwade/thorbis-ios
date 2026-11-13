@@ -1149,6 +1149,11 @@ extension APIClient {
     func fieldJobEstimateLinks(_ jobID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
         try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), isCurrent: isCurrent)
     }
+    /// One uncached job/estimate association; never use a saved copy for issued terms.
+    func liveFieldJobEstimateLink(_ jobID: String, estimateID: String) async throws -> JobEstimateLink {
+        guard UUID(uuidString: estimateID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: estimateID) }
+        return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/estimates/\(estimateID)"), requireFresh: true)
+    }
     /// Reads exactly one job-scoped membership page. A saved copy is for reading only;
     /// only the returned provenance describes this specific response's source.
     func fieldJobEstimateLinkPage(_ jobID: String, cursor: String? = nil,

@@ -63,15 +63,15 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         #"{"id":"00000000-0000-4000-8000-000000000099","estimateId":"\#(id)","organizationId":"\#(org)","customerId":"\#(customer)","revisionNumber":1,"status":"issued","title":"Sample scope","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}],"totalAmount":19000,"currency":"USD"}"#
     }
     private var jobJSON: String { #"{"id":"\#(jobID)","organizationId":"\#(org)","customerId":"\#(customer)","title":"Sample visit","status":"in_progress","createdAt":"2026-10-29T00:00:00Z","updatedAt":"2026-10-29T00:00:00Z"}"# }
-    private func ready(_ responses: [URLProtocolFixture.Reply]) async throws -> JobEstimateHandoffModel {
+    private func ready(_ responses: [URLProtocolFixture.Reply], job: String? = nil) async throws -> JobEstimateHandoffModel {
         let sessionJSON = #"{"user":{"id":"\#(actor)","name":"Sample"},"session":{"userId":"\#(actor)","activeOrganizationId":"\#(org)","expiresAt":"2099-10-29T00:00:00Z"}}"#
         let catalog = #"{"authority":{"actorId":"\#(actor)","organizationId":"\#(org)","policyVersion":1,"generation":"sample"},"capabilities":["job.view","estimate.view","estimate.send","estimate.approve"],"resources":[],"views":[]}"#
         let features = #"{"organizationId":"\#(org)","evaluatedAt":"2026-10-29T00:00:00Z","features":{"jobs":{"enabled":true,"released":true,"entitled":true},"estimates":{"enabled":true,"released":true,"entitled":true}}}"#
         let api = APIClient(session: URLProtocolFixture.session([.init(200, sessionJSON), .init(200, #"[{"id":"\#(org)","name":"Sample"}]"#), .init(200, catalog), .init(200, features)] + responses), baseURL: "https://app.thorbis.com")
         let session = SessionController(api: api, defaults: UserDefaults(suiteName: UUID().uuidString)!)
         await session.restore()
-        let job = try JSONDecoder().decode(JobRecord.self, from: Data(jobJSON.utf8))
-        return JobEstimateHandoffModel(job: job, customerName: "Sample customer", documents: JobDocumentCollections(), api: api, session: session)
+        let jobRecord = try JSONDecoder().decode(JobRecord.self, from: Data((job ?? jobJSON).utf8))
+        return JobEstimateHandoffModel(job: jobRecord, customerName: "Sample customer", documents: JobDocumentCollections(), api: api, session: session)
     }
     private func membership(_ ids: [String], next: String? = nil, foreignJob: String? = nil) -> String {
         let links = ids.map { #"{"id":"\#($0)","jobId":"\#(foreignJob ?? jobID)","estimateId":"\#($0)","linkedAt":"2026-10-29T00:00:00Z"}"# }.joined(separator: ",")
@@ -259,6 +259,72 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         task.cancel(); gate.release(); await task.value
         XCTAssertFalse(model.complete); XCTAssertFalse(model.canReview)
         XCTAssertNotNil(model.error); XCTAssertTrue(model.selectedIDs.contains(a))
+    }
+    func testIssuedDetailsUsesTargetedMembershipAndRefuses403OrRemovedLink() async throws {
+        let model = try await ready([])
+        let membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let singlePath = "\(membershipPath)/\(a)"
+        let item = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let estimatePath = "/v1/estimates/\(a)"
+        func routes(_ status: Int, _ links: [String]) -> [String: URLProtocolFixture.Reply] {
+            ["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership(links)),
+             singlePath: .init(status, status == 200 ? item : #"{"status":\#(status),"title":"Unavailable"}"#),
+             estimatePath: .init(200, record(a)), "\(estimatePath)/revisions/1": .init(200, revision(a))]
+        }
+        URLProtocolFixture.setRoutes(routes(200, [a])); await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first)
+        URLProtocolFixture.setRoutes(routes(200, [a]))
+        _ = try await model.issuedDetails(estimate, authority: model.session.authorityRevision)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == singlePath }.count, 2)
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path == membershipPath }, "A linked detail must not scan all pages")
+        URLProtocolFixture.setRoutes(routes(403, [a]))
+        do { _ = try await model.issuedDetails(estimate, authority: model.session.authorityRevision); XCTFail("Denied access must not fall back") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 403) }
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path == membershipPath })
+        URLProtocolFixture.setRoutes(routes(404, []))
+        do { _ = try await model.issuedDetails(estimate, authority: model.session.authorityRevision); XCTFail("Removed estimate must not open") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 409) }
+        URLProtocolFixture.setRoutes(routes(404, [a]))
+        _ = try await model.issuedDetails(estimate, authority: model.session.authorityRevision)
+        XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == membershipPath }.count, 2, "Older server fallback checks both boundaries")
+    }
+    func testIssuedDetailsAllowsUnlinkedOriginButNeverFallsBackOnDeniedAccess() async throws {
+        let originJob = jobJSON.replacingOccurrences(of: "\"title\":\"Sample visit\"", with: "\"estimateId\":\"\(a)\",\"title\":\"Sample visit\"")
+        let model = try await ready([], job: originJob)
+        let membershipPath = "/v1/jobs/\(jobID)/estimates", singlePath = "/v1/jobs/\(jobID)/estimates/\(a)"
+        let estimatePath = "/v1/estimates/\(a)"
+        func routes(_ status: Int) -> [String: URLProtocolFixture.Reply] {
+            ["/v1/jobs/\(jobID)": .init(200, originJob), membershipPath: .init(200, membership([])),
+             singlePath: .init(status, #"{"status":\#(status),"title":"Unavailable"}"#),
+             estimatePath: .init(200, record(a)), "\(estimatePath)/revisions/1": .init(200, revision(a))]
+        }
+        URLProtocolFixture.setRoutes(routes(404)); await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first)
+        URLProtocolFixture.setRoutes(routes(404))
+        _ = try await model.issuedDetails(estimate, authority: model.session.authorityRevision)
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path == membershipPath }, "The freshly verified origin needs no link scan")
+        URLProtocolFixture.setRoutes(routes(403))
+        do { _ = try await model.issuedDetails(estimate, authority: model.session.authorityRevision); XCTFail("Origin must not bypass denied access") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 403) }
+    }
+    func testIssuedDetailsStopsWhenAuthorityChangesDuringTargetedRead() async throws {
+        let model = try await ready([])
+        let membershipPath = "/v1/jobs/\(jobID)/estimates", singlePath = "/v1/jobs/\(jobID)/estimates/\(a)"
+        let item = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let estimatePath = "/v1/estimates/\(a)"
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+                                      estimatePath: .init(200, record(a))])
+        await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first), gate = URLProtocolFixture.Gate()
+        defer { gate.release() }
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(200, jobJSON), singlePath: .init(200, item, gate: gate),
+                                      estimatePath: .init(200, record(a)), "\(estimatePath)/revisions/1": .init(200, revision(a))])
+        let task = Task { @MainActor in try await model.issuedDetails(estimate, authority: model.session.authorityRevision) }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == singlePath }) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == singlePath })
+        model.api.invalidateRequests(); gate.release()
+        do { _ = try await task.value; XCTFail("Retired authority cannot open issued terms") } catch { }
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path == "\(estimatePath)/revisions/1" })
     }
     func testApprovedAndDraftStayVisibleButNeverEnterApprovalSelection() async throws {
         let model = try await ready([])

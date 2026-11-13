@@ -180,6 +180,10 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         }
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return .init(status:200,payload:["items":[]]) }
         for id in ids {
+            if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates/\(id)" {
+                if removedFirst && id == Self.a { return .init(status:404,payload:["status":404,"title":"Not found"]) }
+                return .init(status:200,payload:["id":id,"jobId":PaperPreview.jobID,"estimateId":id,"linkedAt":now])
+            }
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }
             if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" { return .init(status:200,payload:revision(id)) }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
