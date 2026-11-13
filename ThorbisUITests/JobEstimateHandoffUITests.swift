@@ -139,6 +139,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let more = app.buttons["handoff-load-more-estimates"]
         let list = app.scrollViews["job-estimate-handoff"]
         for suffix in ["082018", "082028", "082038"] {
+            // The lazy stack may not instantiate the footer while it is offscreen.
+            for _ in 0..<30 where !more.exists { list.swipeUp() }
+            XCTAssertTrue(more.exists, "The next-page action must be reachable in the list")
             let pageReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
                 more.exists && more.isEnabled
             }, object: more)
@@ -149,7 +152,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
             more.tap()
             let nextPageEnd = app.buttons["handoff-select-00000000-0000-4000-8000-000000\(suffix)"]
             for _ in 0..<30 where !nextPageEnd.isHittable { list.swipeUp() }
-            XCTAssertTrue(nextPageEnd.isHittable, "Each requested page must load before requesting the next one")
+            let markerReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                nextPageEnd.exists && nextPageEnd.isHittable
+            }, object: nextPageEnd)
+            XCTAssertEqual(XCTWaiter.wait(for: [markerReady], timeout: 45), .completed,
+                           "Each requested page must load before requesting the next one")
         }
         let last = app.buttons["handoff-select-00000000-0000-4000-8000-000000082038"]
         for _ in 0..<60 where !last.isHittable { list.swipeUp() }
