@@ -54,7 +54,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Description"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final summary detail: leave the work area clean.")).firstMatch.exists)
         XCTAssertFalse(app.textViews.firstMatch.exists)
-        app.buttons["Done"].tap()
+        app.navigationBars["Description"].buttons["Done"].tap()
         XCTAssertTrue(app.staticTexts["Customer summary · not the signed invoice"].waitForExistence(timeout: 10))
     }
 
