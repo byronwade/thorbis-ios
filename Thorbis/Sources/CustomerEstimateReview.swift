@@ -15,17 +15,19 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let totalAmount: Int
     let currency: String
 
-    func validate(for expected: EstimateRecord) throws {
+    func validate(for expected: EstimateRecord, allowApprovedForReading: Bool = false) throws {
         guard UUID(uuidString: id) != nil,
               estimateId == expected.id, organizationId == expected.organizationId,
               customerId == expected.customerId, locationId == expected.locationId,
-              revisionNumber == expected.currentRevisionNumber, status == "issued"
+              revisionNumber == expected.currentRevisionNumber,
+              (status == "issued" && expected.status == "sent" ||
+               allowApprovedForReading && status == "approved" && expected.status == "approved")
         else { throw customerReviewUnavailable() }
     }
 
     /// Retained reader content must still match the record now backing its destination.
     func matchesDetails(for record: EstimateRecord) -> Bool {
-        (try? validate(for: record)) != nil
+        (try? validate(for: record, allowApprovedForReading: true)) != nil
     }
 
     fileprivate func validate(action: PublicEstimateAction, paperHash: String) throws {
@@ -64,6 +66,48 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     }
 }
 
+/// The server projects only the customer-visible scope captured when this revision was signed.
+struct CustomerEstimateAcceptanceReceipt: Decodable, Equatable {
+    let id: String
+    let estimateId: String
+    let revisionId: String
+    let revisionNumber: Int
+    let contentHash: String
+    let optionId: String?
+    let optionTitle: String?
+    let signerName: String
+    let acceptedAt: String
+    let totalAmount: Int
+    let currency: String
+    let lines: [FieldLine]
+
+    func validate(for revision: CustomerIssuedEstimateRevision) throws {
+        guard revision.status == "approved", estimateId == revision.estimateId,
+              revisionId == revision.id, revisionNumber == revision.revisionNumber,
+              !id.isEmpty, contentHash.count >= 15, !signerName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !acceptedAt.isEmpty else { throw customerReviewUnavailable() }
+        let expectedLines: [FieldLine]
+        let expectedTotal: Int
+        let expectedCurrency: String
+        if let optionId {
+            guard let option = revision.options?.first(where: { $0.id == optionId }),
+                  optionTitle == option.title else { throw customerReviewUnavailable() }
+            expectedLines = option.lines; expectedTotal = option.totalAmount; expectedCurrency = option.currency
+        } else {
+            guard (revision.options ?? []).isEmpty, optionTitle == nil else { throw customerReviewUnavailable() }
+            expectedLines = revision.lines; expectedTotal = revision.totalAmount; expectedCurrency = revision.currency
+        }
+        guard currency == expectedCurrency, totalAmount == expectedTotal,
+              let projected = customerEstimateProjection(expectedLines, currency: currency),
+              let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == totalAmount,
+              projected.count == lines.count,
+              zip(projected, lines).allSatisfy({ expected, actual in
+                  expected.id == actual.id && expected.description == actual.description &&
+                  expected.quantity == actual.quantity && expected.unitPrice == actual.unitPrice
+              }) else { throw customerReviewUnavailable() }
+    }
+}
+
 private func customerReviewUnavailable() -> Problem {
     Problem(title: "This estimate changed or can't be signed here.", status: 409,
             detail: "Ask your technician to reopen the current estimate.")
@@ -85,7 +129,7 @@ private struct CustomerReviewPaper: Decodable {
 
 @MainActor
 extension APIClient {
-    func customerIssuedEstimateRevision(for expected: EstimateRecord, currentAuthority: @escaping @MainActor () -> Bool = { true }) async throws -> CustomerIssuedEstimateRevision {
+    func customerIssuedEstimateRevision(for expected: EstimateRecord, allowApprovedForReading: Bool = false, currentAuthority: @escaping @MainActor () -> Bool = { true }) async throws -> CustomerIssuedEstimateRevision {
         let generation = requestGeneration
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard let number = expected.currentRevisionNumber, number > 0 else { throw customerReviewUnavailable() }
@@ -93,15 +137,33 @@ extension APIClient {
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
         guard current.id == expected.id, current.organizationId == expected.organizationId,
               current.customerId == expected.customerId, current.locationId == expected.locationId,
-              current.status == "sent", current.currentRevisionNumber == number
+              current.status == expected.status,
+              (current.status == "sent" || (allowApprovedForReading && current.status == "approved")),
+              current.currentRevisionNumber == number
         else { throw customerReviewUnavailable() }
 
         let path = try financialPath("/v1/estimates", id: expected.id, suffix: "/revisions/\(number)")
         // Issued terms are read for a live customer decision, never from a saved copy.
         let revision: CustomerIssuedEstimateRevision = try await send("GET", path, requireFresh: true)
         try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
-        try revision.validate(for: expected)
+        try revision.validate(for: expected, allowApprovedForReading: allowApprovedForReading)
         return revision
+    }
+
+    func customerEstimateAcceptanceReceipt(for revision: CustomerIssuedEstimateRevision, currentAuthority: @escaping @MainActor () -> Bool) async throws -> CustomerEstimateAcceptanceReceipt? {
+        let generation = requestGeneration
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
+        guard revision.status == "approved", revision.revisionNumber > 0 else { throw customerReviewUnavailable() }
+        let path = try financialPath("/v1/estimates", id: revision.estimateId, suffix: "/revisions/\(revision.revisionNumber)/acceptance")
+        let receipt: CustomerEstimateAcceptanceReceipt
+        do { receipt = try await send("GET", path, requireFresh: true) }
+        catch let problem as Problem where problem.status == 404 {
+            try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
+            return nil
+        }
+        try checkCustomerReviewRequest(generation, currentAuthority: currentAuthority)
+        try receipt.validate(for: revision)
+        return receipt
     }
 
     /// The customer reviewed this immutable revision before this paper/token chain begins.

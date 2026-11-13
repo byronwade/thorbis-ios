@@ -8,6 +8,8 @@ private struct CustomerHandoffEstimateDetails: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var revision: CustomerIssuedEstimateRevision?
     @State private var loading = false
+    @State private var receipt: CustomerEstimateAcceptanceReceipt?
+    @State private var unsigned = false
     @State private var error: String?
 
     init(model: JobEstimateHandoffModel, record: EstimateRecord) {
@@ -44,7 +46,22 @@ private struct CustomerHandoffEstimateDetails: View {
                 } else if let revision, revisionMatches {
                     Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    if let options = revision.options, !options.isEmpty {
+                    if record.status == "approved", let receipt {
+                        Text("Approved · Signed by \(receipt.signerName)")
+                            .font(Theme.customerFont(type.body, weight: .medium))
+                        if let title = receipt.optionTitle {
+                            Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                        }
+                        if let option = revision.options?.first(where: { $0.id == receipt.optionId }), !option.description.isEmpty {
+                            ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: access,
+                                                        customerFacing: true, accessibilityContext: "Estimate EST-\(record.id.suffix(4).uppercased()), approved package")
+                        }
+                        lines(receipt.lines, currency: receipt.currency, total: receipt.totalAmount,
+                              context: "Estimate EST-\(record.id.suffix(4).uppercased()), approved work")
+                    } else if record.status == "approved", unsigned {
+                        Text("No signed customer receipt is available for this approval. Ask your technician for details.")
+                            .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    } else if let options = revision.options, !options.isEmpty {
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
@@ -101,11 +118,17 @@ private struct CustomerHandoffEstimateDetails: View {
 
     private func load() async {
         guard current, !loading else { return }
-        loading = true; revision = nil; error = nil
+        loading = true; revision = nil; receipt = nil; unsigned = false; error = nil
         defer { loading = false }
         do {
             let issued = try await model.issuedDetails(record, authority: authority)
             guard current, !Task.isCancelled else { return }
+            if record.status == "approved" {
+                let signed = try await model.approvedReceipt(record, revision: issued, authority: authority)
+                guard current, !Task.isCancelled else { return }
+                receipt = signed
+                unsigned = signed == nil
+            }
             revision = issued
         } catch is CancellationError {} catch {
             guard current else { return }

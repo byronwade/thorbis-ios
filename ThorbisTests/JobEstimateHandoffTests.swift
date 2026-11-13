@@ -59,8 +59,8 @@ final class JobEstimateHandoffModelTests: XCTestCase {
     private func record(_ id: String, status: String = "sent") -> String {
         #"{"id":"\#(id)","organizationId":"\#(org)","customerId":"\#(customer)","createdByUserId":"\#(actor)","status":"\#(status)","currentRevisionNumber":1,"title":"Sample scope","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}],"createdAt":"2026-10-29T00:00:00Z","updatedAt":"2026-10-29T00:00:00Z"}"#
     }
-    private func revision(_ id: String) -> String {
-        #"{"id":"00000000-0000-4000-8000-000000000099","estimateId":"\#(id)","organizationId":"\#(org)","customerId":"\#(customer)","revisionNumber":1,"status":"issued","title":"Sample scope","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}],"totalAmount":19000,"currency":"USD"}"#
+    private func revision(_ id: String, status: String = "issued") -> String {
+        #"{"id":"00000000-0000-4000-8000-000000000099","estimateId":"\#(id)","organizationId":"\#(org)","customerId":"\#(customer)","revisionNumber":1,"status":"\#(status)","title":"Sample scope","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}],"totalAmount":19000,"currency":"USD"}"#
     }
     private var jobJSON: String { #"{"id":"\#(jobID)","organizationId":"\#(org)","customerId":"\#(customer)","title":"Sample visit","status":"in_progress","createdAt":"2026-10-29T00:00:00Z","updatedAt":"2026-10-29T00:00:00Z"}"# }
     private func ready(_ responses: [URLProtocolFixture.Reply], job: String? = nil) async throws -> JobEstimateHandoffModel {
@@ -339,6 +339,97 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         await model.retryEstimateLoading()
         XCTAssertEqual(model.records.map(\.id), [a] + ids); XCTAssertTrue(model.complete)
         XCTAssertTrue(model.selectedIDs.contains(a))
+    }
+    func testApprovedEstimateAllowsReadOnlyDetailsButCannotBeSelectedForApproval() async throws {
+        let model = try await ready([])
+        let estimatePath = "/v1/estimates/\(a)"
+        let membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let singlePath = "\(membershipPath)/\(a)"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+            singlePath: .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+            "\(estimatePath)/revisions/1": .init(200, revision(a, status: "approved"))
+        ])
+        await model.refresh()
+        let approved = try XCTUnwrap(model.records.first)
+        XCTAssertTrue(model.detailsCurrent(approved, authority: model.session.authorityRevision))
+        let issued = try await model.issuedDetails(approved, authority: model.session.authorityRevision)
+        XCTAssertEqual(issued.estimateId, a)
+        model.setSelected(a, selected: true)
+        XCTAssertFalse(model.selectedIDs.contains(a))
+        XCTAssertFalse(model.canReview)
+    }
+    func testReceiptValidatesFoldedMaterialsAndExplicitCreditsWithoutOverflow() throws {
+        var value = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(revision(a, status: "approved").utf8)) as? [String: Any])
+        let lines: [[String: Any]] = [
+            ["id": "line", "description": "Repair", "quantity": 1, "unitPrice": ["amount": 19000, "currency": "USD"]],
+            ["id": "hidden", "description": "Internal part", "quantity": 2, "unitPrice": ["amount": 1000, "currency": "USD"], "showToCustomer": false],
+            ["id": "credit", "description": "Courtesy credit", "quantity": 1, "unitPrice": ["amount": -1000, "currency": "USD"]]
+        ]
+        value["lines"] = lines; value["totalAmount"] = 20000
+        let issued = try JSONDecoder().decode(CustomerIssuedEstimateRevision.self, from: JSONSerialization.data(withJSONObject: value))
+        let json = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":20000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}},{"id":"credit","description":"Courtesy credit","quantity":1,"unitPrice":{"amount":-1000,"currency":"USD"}},{"id":"hidden","description":"Materials","quantity":1,"unitPrice":{"amount":2000,"currency":"USD"}}]}"#
+        let receipt = try JSONDecoder().decode(CustomerEstimateAcceptanceReceipt.self, from: Data(json.utf8))
+        XCTAssertNoThrow(try receipt.validate(for: issued))
+        XCTAssertEqual(CustomerDocumentAmounts(lines: receipt.lines, currency: "USD")?.credits, -1000)
+        XCTAssertFalse(receipt.lines.contains { $0.description == "Internal part" })
+        let overflow = FieldLine(id: "bad", description: "Bad", quantity: Int.max,
+                                 unitPrice: FieldMoney(amount: 2, currency: "USD"), source: nil)
+        XCTAssertNil(CustomerDocumentAmounts(lines: [overflow], currency: "USD"))
+    }
+    func testReceiptIsDiscardedWhenAuthorityChangesDuringRead() async throws {
+        let model = try await ready([])
+        let estimatePath = "/v1/estimates/\(a)", membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let receiptPath = "\(estimatePath)/revisions/1/acceptance"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let receipt = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":19000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}]}"#
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        URLProtocolFixture.setRoutes(["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+            "\(membershipPath)/\(a)": .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+            "\(estimatePath)/revisions/1": .init(200, revision(a, status: "approved")), receiptPath: .init(200, receipt, gate: gate)])
+        await model.refresh()
+        let record = try XCTUnwrap(model.records.first), authority = model.session.authorityRevision
+        let issued = try await model.issuedDetails(record, authority: authority)
+        let task = Task { @MainActor in try await model.approvedReceipt(record, revision: issued, authority: authority) }
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == receiptPath }) { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == receiptPath })
+        model.api.invalidateRequests(); gate.release()
+        do { _ = try await task.value; XCTFail("Retired authority must not expose a receipt") } catch { }
+    }
+    func testApprovedReceiptRequiresCurrentJobAndDistinguishesMissingFromDenied() async throws {
+        let model = try await ready([])
+        let estimatePath = "/v1/estimates/\(a)"
+        let membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let receiptPath = "\(estimatePath)/revisions/1/acceptance"
+        let valid = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":19000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}]}"#
+        func routes(_ status: Int, _ body: String) -> [String: URLProtocolFixture.Reply] {
+            ["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+             "\(membershipPath)/\(a)": .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+             "\(estimatePath)/revisions/1": .init(200, revision(a, status: "approved")), receiptPath: .init(status, body)]
+        }
+        URLProtocolFixture.setRoutes(routes(200, valid)); await model.refresh()
+        let estimate = try XCTUnwrap(model.records.first)
+        let authority = model.session.authorityRevision
+        let issued = try await model.issuedDetails(estimate, authority: authority)
+        let receipt = try await model.approvedReceipt(estimate, revision: issued, authority: authority)
+        XCTAssertEqual(receipt?.signerName, "Alex")
+        XCTAssertEqual(receipt?.lines.first?.description, "Repair")
+        var changed = routes(200, valid)
+        changed[estimatePath] = .init(200, record(a, status: "approved").replacingOccurrences(of: "\"currentRevisionNumber\":1", with: "\"currentRevisionNumber\":2"))
+        URLProtocolFixture.setRoutes(changed)
+        do { _ = try await model.approvedReceipt(estimate, revision: issued, authority: authority); XCTFail("A superseded revision must not be presented as current") }
+        catch { }
+        URLProtocolFixture.setRoutes(routes(404, #"{"status":404,"title":"Not found"}"#))
+        let absent = try await model.approvedReceipt(estimate, revision: issued, authority: authority)
+        XCTAssertNil(absent)
+        URLProtocolFixture.setRoutes(routes(403, #"{"status":403,"title":"Denied"}"#))
+        do { _ = try await model.approvedReceipt(estimate, revision: issued, authority: authority); XCTFail("A denied receipt must not be treated as unsigned") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 403) }
+        URLProtocolFixture.setRoutes(routes(200, valid.replacingOccurrences(of: "Repair", with: "Different")))
+        do { _ = try await model.approvedReceipt(estimate, revision: issued, authority: authority); XCTFail("Mismatched scope must be rejected") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 409) }
     }
     func testIssuedDetailsUsesTargetedMembershipAndRefuses403OrRemovedLink() async throws {
         let model = try await ready([])

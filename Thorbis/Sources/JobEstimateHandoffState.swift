@@ -444,7 +444,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     /// Reading one estimate never selects it or prepares an approval.
     func detailsCurrent(_ record: EstimateRecord, authority: UUID) -> Bool {
         isCurrent && session.authorityRevision == authority && freshIDs.contains(record.id)
-            && record.status == "sent" && records.contains(record)
+            && (record.status == "sent" || record.status == "approved") && records.contains(record)
             && scope.contains(record, requestedID: record.id)
     }
 
@@ -457,7 +457,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             throw Problem(title: "This job changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
         try await verifyDetailMembership(record, job: fresh, current: current)
-        let revision = try await api.customerIssuedEstimateRevision(for: record, currentAuthority: current)
+        let revision = try await api.customerIssuedEstimateRevision(for: record, allowApprovedForReading: true, currentAuthority: current)
         guard current() else { throw CancellationError() }
         let verifiedJob = try await api.liveFieldJob(scope.jobID)
         guard current() else { throw CancellationError() }
@@ -467,6 +467,16 @@ final class JobEstimateHandoffModel: ObservableObject {
         }
         try await verifyDetailMembership(record, job: verifiedJob, current: current)
         return revision
+    }
+    func approvedReceipt(_ record: EstimateRecord, revision: CustomerIssuedEstimateRevision, authority: UUID) async throws -> CustomerEstimateAcceptanceReceipt? {
+        func current() -> Bool { detailsCurrent(record, authority: authority) && !Task.isCancelled }
+        guard current(), record.status == "approved" else { throw CancellationError() }
+        let receipt = try await api.customerEstimateAcceptanceReceipt(for: revision, currentAuthority: current)
+        guard current() else { throw CancellationError() }
+        // Recheck job membership and the live revision after the receipt request.
+        let checked = try await issuedDetails(record, authority: authority)
+        guard current(), checked == revision else { throw CancellationError() }
+        return receipt
     }
     private func verifyDetailMembership(_ record: EstimateRecord, job: JobRecord,
                                         current: @MainActor () -> Bool) async throws {
