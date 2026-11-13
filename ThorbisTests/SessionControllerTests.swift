@@ -128,7 +128,7 @@ final class SessionControllerTests: XCTestCase {
         let gate = URLProtocolFixture.Gate()
         URLProtocolFixture.setRoutes(["/v1/jobs": .init(200, #"{ "items": [] }"#, gate: gate)])
         let pending = Task { @MainActor in
-            try await CustomerJobCompilationLoader.load(
+            _ = try await CustomerJobCompilationLoader.load(
                 customerID: oldScope.customerID, organizationID: oldScope.organizationID, api: api,
                 access: oldScope.access, moneyOnly: true, isCurrent: { oldScope.isCurrent(session: session) }
             )
