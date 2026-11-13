@@ -318,7 +318,7 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertEqual(model.records.map(\.id), [a]); XCTAssertTrue(model.complete)
     }
     func testInterruptedLaterPageDoesNotPublishPartialRows() async throws {
-        let ids = (11...16).map { String(format: "00000000-0000-4000-8000-%012d", $0) }
+        let ids = (21...26).map { String(format: "00000000-0000-4000-8000-%012d", $0) }
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
         let model = try await ready([.init(200, jobJSON), .init(200, membership([a], next: a)), .init(200, record(a))])
         await model.refresh(); model.setSelected(a, selected: true)
