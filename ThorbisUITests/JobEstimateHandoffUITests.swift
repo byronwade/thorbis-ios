@@ -225,7 +225,8 @@ final class JobEstimateHandoffUITests: XCTestCase {
     func testApprovedOverviewShowsMatchingVerifiedReceipt() {
         let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-second-approved", "--handoff-test-approved-receipt"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
-        XCTAssertTrue(app.staticTexts["$320.00"].waitForExistence(timeout: 45), "The accepted receipt's verified total should be visible")
+        let approvedCard = app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(approvedCard.staticTexts["$320.00"].waitForExistence(timeout: 45), "The accepted receipt's verified total should be visible in its own card")
         XCTAssertFalse(app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"].exists)
     }
 
