@@ -319,7 +319,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(second.waitForExistence(timeout: 30))
         XCTAssertFalse((second.value as? String ?? "").contains("$320.00"), "The accessible selection must not describe the unverified record amount")
-        XCTAssertFalse(app.staticTexts["$320.00"].exists, "The unverified issued total must not be shown")
+        capture(app, "Unverified sent estimate price is withheld")
+        let card = app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"]
+        XCTAssertFalse(card.staticTexts["$320.00"].exists, "The customer estimate card must not show an unverified issued total")
         visible(app, second); selectEstimate(app, second)
         thorbisStableButton(app, "handoff-review-selected").tap()
         XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30), "Review must finish with a validation failure")
