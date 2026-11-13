@@ -123,9 +123,17 @@ final class CustomerDocumentBookUITests: XCTestCase {
         let menu = thorbisCustomerViewMenuItem(app)
         XCTAssertTrue(menu.waitForExistence(timeout: 15))
         menu.tap()
-        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
-        XCTAssertTrue(invoice.waitForExistence(timeout: 15))
-        invoice.tap()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 15))
+        estimate.tap()
+        let review = app.buttons["customer-book-review-sign"]
+        XCTAssertTrue(review.waitForExistence(timeout: 15))
+        thorbisStableButton(app, "customer-book-review-sign").tap()
+        XCTAssertTrue(app.scrollViews["customer-estimate-presentation-00000000-0000-4000-8000-000000002218"].waitForExistence(timeout: 15))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2209"].tap()
         let sign = app.buttons["Sign for the work"]
         XCTAssertTrue(sign.waitForExistence(timeout: 15))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: sign)
@@ -136,6 +144,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         let noEarlyForm = XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)
         _ = XCTWaiter.wait(for: [noEarlyForm], timeout: 18)
         XCTAssertFalse(app.textFields["Your full name"].exists)
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
         invoice.tap()
         XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
