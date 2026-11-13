@@ -762,6 +762,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
         var summaryReceipts: [String: [String: Any]] = [:]
+        var summaryLostOnce = false
         var setupPaymentReads = 0
         var documentHistoryRestored = false
         var failPaymentRecheck = false
@@ -790,7 +791,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.summaryReceipts = [:]; scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.summaryReceipts = [:]; scenario.summaryLostOnce = false; scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -913,8 +914,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "digest": consent["digest"]!, "consentVersion": consent["consentVersion"]!, "consentText": consent["consentText"]!,
                     "signerName": name, "signedAt": signedAt, "recordedAt": signedAt, "currency": shown["currency"]!,
                     "totalAmount": shown["totalAmount"]!, "lines": shown["lines"]!]
-                Self.scenario.lock.withLock { Self.scenario.summaryReceipts[base] = receipt }
-                status = 201; payload = receipt
+                let lose = Self.scenario.lock.withLock {
+                    Self.scenario.summaryReceipts[base] = receipt
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing-lost-once"), !Self.scenario.summaryLostOnce {
+                        Self.scenario.summaryLostOnce = true; return true
+                    }
+                    return false
+                }
+                if lose { status = 503; payload = ["title": "Preview response unavailable"] }
+                else { status = 201; payload = receipt }
             } else { status = 409; payload = ["title": "Preview summary changed"] }
         } else if PaperPreview.isJobDocumentsPreview,
            ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),

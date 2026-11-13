@@ -792,6 +792,7 @@ struct CustomerEstimatePresentation: View {
 /// The signature applies only to the displayed customer summary, not raw invoice paper.
 struct CustomerSummarySigningControls: View {
     @ObservedObject var coordinator: CustomerSummaryDurableCoordinator
+    @EnvironmentObject private var session: SessionController
     let consent: CustomerInvoiceSummary.Consent
     let type: CustomerType
     @State private var signing = false
@@ -800,6 +801,14 @@ struct CustomerSummarySigningControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            #if DEBUG
+            if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing-revoke") {
+                Button("Preview revoke signing access") {
+                    PaperPreviewProtocol.revokeInvoiceEditForSigning()
+                    Task { await session.revalidate() }
+                }
+            }
+            #endif
             switch coordinator.phase {
             case .idle, .checking, .preparing, .recovering:
                 HStack { ProgressView(); Text("Checking your summary…") }
