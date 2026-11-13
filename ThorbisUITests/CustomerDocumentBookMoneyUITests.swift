@@ -8,6 +8,12 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertFalse(text("Water heater", in: app).exists)
     }
 
+    func testVerifiedSignedInvoiceKeepsPaymentAction() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-job-invoice-signed"])
+        XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.waitForExistence(timeout: 15))
+    }
+
     func testInvoiceBookWithoutSummaryDoesNotShowRawDescriptions() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description"])
         XCTAssertTrue(text("Invoice details aren't available", in: app).waitForExistence(timeout: 15))
