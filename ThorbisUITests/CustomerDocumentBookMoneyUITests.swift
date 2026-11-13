@@ -76,6 +76,19 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Customer summary · not the signed invoice"].waitForExistence(timeout: 10))
     }
 
+    func testLargeTextSummaryReaderClosesWhenSessionEnds() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-customer-summary-long", "--paper-preview-description-expire-session", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let more = pages(app).buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 15)); reveal(more, in: app); more.tap()
+        let reader = app.navigationBars["Description"]
+        XCTAssertTrue(reader.waitForExistence(timeout: 10))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Customer summary reader at largest text"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final summary detail: leave the work area clean.")).firstMatch.exists)
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: reader)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 25), .completed)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final summary detail: leave the work area clean.")).firstMatch.exists)
+    }
+
     func testStandaloneCustomerInvoiceWithoutSummaryDoesNotShowRawLines() {
         continueAfterFailure = false
         let app = XCUIApplication()
