@@ -197,6 +197,39 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["job-estimate-handoff"].waitForExistence(timeout: 15), "The system edge-back gesture must return to the estimate overview")
     }
 
+    private func openSecondEstimateForValidation(_ flag: String) -> XCUIApplication {
+        let app = open(["--paper-preview-handoff-hide-controls", flag])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        let next = app.buttons["handoff-next-estimate"]
+        XCTAssertTrue(next.waitForExistence(timeout: 15)); next.tap()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        return app
+    }
+
+    private func assertInvalidSecondEstimate(_ flag: String) {
+        let app = openSecondEstimateForValidation(flag)
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30))
+        let details = app.scrollViews["handoff-estimate-details"]
+        XCTAssertFalse(details.staticTexts["Sample additional work"].exists)
+        XCTAssertFalse(details.staticTexts["Anonymized service scope"].exists)
+    }
+
+    func testBrowserRejectsEmptyIssuedBase() { assertInvalidSecondEstimate("--handoff-test-empty-base") }
+    func testBrowserRejectsEmptyIssuedOption() { assertInvalidSecondEstimate("--handoff-test-empty-option") }
+    func testBrowserRejectsNonUSDRevision() { assertInvalidSecondEstimate("--handoff-test-non-usd") }
+    func testBrowserRejectsMismatchedRevisionTotal() { assertInvalidSecondEstimate("--handoff-test-mismatch") }
+
+    func testBrowserAllowsNonemptyZeroPricedScope() {
+        let app = openSecondEstimateForValidation("--handoff-test-zero-line")
+        let details = app.scrollViews["handoff-estimate-details"]
+        XCTAssertTrue(details.staticTexts["Included sample service"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["Try again"].exists)
+    }
+
     func testEstimateBrowsingDoesNotShowPriorTermsWhenNextReadFails() {
         let app = open(["--paper-preview-handoff-hide-controls", "--paper-preview-handoff-second-details-fail"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
