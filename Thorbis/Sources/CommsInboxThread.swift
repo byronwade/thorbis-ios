@@ -961,6 +961,9 @@ struct CommsMailDraft: Identifiable {
 /// The email composer (web compose.tsx): To, Cc and Bcc, subject, body. Save draft keeps it on
 /// this device; queued messages do not send automatically.
 struct CommsMailSheet: View {
+    #if DEBUG
+    @EnvironmentObject private var session: SessionController
+    #endif
     @State var draft: CommsMailDraft
     @ObservedObject var store: CommsLocalStore
     let onSaved: (String) -> Void
@@ -997,6 +1000,10 @@ struct CommsMailSheet: View {
         let ready = !draft.mail.to.isEmpty
         ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: requestClose) {
             #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-session-replace") {
+                Button("Replace email session (test)") { Task { await session.restore() } }
+                    .accessibilityIdentifier("inbox-mail-replace-session")
+            }
             if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invalidate-inbox") {
                 Button("Invalidate inbox session (test)") { store.invalidate() }
                     .accessibilityIdentifier("inbox-test-invalidate")
