@@ -98,30 +98,41 @@ extension View {
 @MainActor
 final class InboxEmailPresenter: ObservableObject {
     static let shared = InboxEmailPresenter()
+    #if DEBUG
+    private static let previewRecoveryNamespace = UUID().uuidString
+    #endif
     struct Opening: Identifiable {
         let id = UUID()
         let actorID: String
         let organizationID: String
         let sessionGeneration: UUID
+        let recoveryScope: CommsEmailRecoveryScope
         let mail: MailDraft
     }
     @Published var opening: Opening?
-    private var identity: (actorID: String, organizationID: String, generation: UUID)?
+    private var identity: (actorID: String, organizationID: String, origin: String, generation: UUID)?
     private var current: (@MainActor () -> Bool)?
 
-    func bind(actorID: String, organizationID: String, generation: UUID, current: @escaping @MainActor () -> Bool) {
-        if let opening, opening.actorID != actorID || opening.organizationID != organizationID || opening.sessionGeneration != generation {
+    func bind(actorID: String, organizationID: String, origin: String, generation: UUID, current: @escaping @MainActor () -> Bool) {
+        if let opening, opening.actorID != actorID || opening.organizationID != organizationID || opening.sessionGeneration != generation || identity?.origin != origin {
             self.opening = nil
         }
-        identity = (actorID, organizationID, generation); self.current = current
+        identity = (actorID, organizationID, origin, generation); self.current = current
     }
     func unbind() { identity = nil; current = nil; opening = nil }
     func open(_ mail: MailDraft) {
         guard let identity, current?() == true else { unbind(); return }
         // Do not replace an unsaved composer through another entry point.
-        guard opening == nil else { return }
+        #if DEBUG
+        let namespace: String? = PaperPreview.enabled ? Self.previewRecoveryNamespace : nil
+        #else
+        let namespace: String? = nil
+        #endif
+        guard opening == nil,
+              let scope = CommsEmailRecoveryScope(actorID: identity.actorID, organizationID: identity.organizationID,
+                                                  origin: identity.origin, initial: mail, namespace: namespace) else { return }
         opening = Opening(actorID: identity.actorID, organizationID: identity.organizationID,
-                          sessionGeneration: identity.generation, mail: mail)
+                          sessionGeneration: identity.generation, recoveryScope: scope, mail: mail)
     }
     func isCurrent(_ opening: Opening) -> Bool {
         self.opening?.id == opening.id && current?() == true && identity?.actorID == opening.actorID &&
@@ -147,6 +158,7 @@ extension EnvironmentValues {
 
 private struct InboxEmailPresenterModifier: ViewModifier {
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
     @ObservedObject private var presenter = InboxEmailPresenter.shared
 
     func body(content: Content) -> some View {
@@ -155,24 +167,27 @@ private struct InboxEmailPresenterModifier: ViewModifier {
             .onChange(of: session.generation) { _, _ in bind() }
             .onChange(of: session.user?.id) { _, _ in bind() }
             .onChange(of: session.activeOrganization?.id) { _, _ in bind() }
+            .onChange(of: api.requestGeneration) { _, _ in bind() }
             .onDisappear { presenter.unbind() }
             .sheet(item: $presenter.opening) { opening in
                 if presenter.isCurrent(opening) {
                     CommsMailSheet(draft: CommsMailDraft(mail: opening.mail),
                                    store: CommsLocalStore.shared(actorID: opening.actorID, organizationID: opening.organizationID),
+                                   recoveryScope: opening.recoveryScope, recoveryCurrent: { presenter.isCurrent(opening) },
                                    onSaved: { _ in presenter.close(opening.id) }, onClose: { presenter.close(opening.id) })
                 }
             }
     }
 
     private func bind() {
-        guard let actor = session.user?.id, let org = session.activeOrganization?.id else {
-            presenter.unbind(); return
-        }
+        guard let actor = session.user?.id, let org = session.activeOrganization?.id,
+              let origin = api.normalizedOrigin else { presenter.unbind(); return }
         let generation = session.generation
-        presenter.bind(actorID: actor, organizationID: org, generation: generation, current: { [weak session] in
-            guard let session else { return false }
-            return session.user?.id == actor && session.activeOrganization?.id == org && session.generation == generation
+        let apiGeneration = api.requestGeneration
+        presenter.bind(actorID: actor, organizationID: org, origin: origin, generation: generation, current: { [weak session, weak api] in
+            guard let session, let api else { return false }
+            return session.user?.id == actor && session.activeOrganization?.id == org && session.generation == generation &&
+                api.requestGeneration == apiGeneration && api.normalizedOrigin == origin
         })
     }
 }
