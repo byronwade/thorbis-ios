@@ -15,20 +15,26 @@ import Darwin
    let f = try InvoiceTransactionFence(path: args[2])
    do {
     let token = try f.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data([42]))
-    if args[1] == "commit-kill" { try f.commitCaptureIntent(token) }
+    if args[1] == "commit-kill" || args[1] == "choice-kill" { try f.commitCaptureIntent(token) }
+    if args[1] == "choice-kill" { try f.recordRecoverySelection(identity: identity, selection: .candidate, decisionID: UUID(uuidString: "00000000-0000-4000-8000-000000000009")!, authorize: { true }) }
     if args[1] != "register" { kill(getpid(), SIGKILL) }
    } catch { exit(3) }
    exit(0)
   }
   let clean = try InvoiceTransactionFence(path: "/private/tmp/invoice-intent-clean-\(UUID().uuidString).sqlite")
   _ = try clean.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data([42]))
-  for phase in ["intent-kill", "commit-kill"] {
+  for phase in ["intent-kill", "commit-kill", "choice-kill"] {
    let path = "/private/tmp/invoice-intent-crash-\(UUID().uuidString).sqlite"
    let p = try spawn(path, phase); p.waitUntilExit(); precondition(p.terminationReason == .uncaughtSignal)
    let f = try InvoiceTransactionFence(path: path)
    let evidence = try f.inspectUnresolvedCapture(identity: identity)
-   precondition(evidence?.phase == (phase == "commit-kill" ? .committed : .registered) && evidence?.bytes == Data([42]))
-   do { _ = try f.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: phase == "commit-kill" ? 1 : nil, sequence: 2, bytes: Data([43])); fatalError("crash left fence open") } catch InvoiceFenceError.pending { }
+   precondition(evidence?.phase == (phase == "intent-kill" ? .registered : .committed) && evidence?.bytes == Data([42]))
+   if phase == "choice-kill" {
+    precondition(evidence?.selection == .candidate)
+    try f.recordRecoverySelection(identity: identity, selection: .candidate, decisionID: UUID(uuidString: "00000000-0000-4000-8000-000000000009")!, authorize: { true })
+    do { try f.recordRecoverySelection(identity: identity, selection: .candidate, decisionID: UUID(), authorize: { true }); fatalError("different decision accepted") } catch InvoiceFenceError.conflict { }
+   }
+   do { _ = try f.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: phase == "intent-kill" ? nil : 1, sequence: 2, bytes: Data([43])); fatalError("crash left fence open") } catch InvoiceFenceError.pending { }
    do { _ = try f.recoverIdle(identity: identity); fatalError("uncertain recovery allowed") } catch InvoiceFenceError.pending { }
    do { _ = try f.begin(domain: domain, owner: owner, expectedVersion: 1, kind: .directUnknown, command: Data([1])); fatalError("uncertain submission allowed") } catch InvoiceFenceError.pending { }
   }

@@ -40,11 +40,13 @@ struct InvoiceIdleCaptureRecovery: Sendable {
 struct InvoiceCaptureIntent { let identity: InvoiceIdleCaptureIdentity; let owner: UUID; let expectedVersion: Int64?; let sequence: Int64; let bytes: Data; let token: String }
 
 enum InvoiceUnresolvedPhase { case registered, committed }
+enum InvoiceRecoverySelection: String { case previous, candidate }
 struct InvoiceUnresolvedCapture {
     let phase: InvoiceUnresolvedPhase
     let owner: UUID
     let previousVersion: Int64?
     let sequence: Int64
+    let selection: InvoiceRecoverySelection?
     /// Ciphertext only; live authority and key access must be checked before disclosure.
     let bytes: Data
 }
@@ -67,6 +69,7 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             try exec(db, "CREATE TABLE IF NOT EXISTS heads (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, owner TEXT NOT NULL, version INTEGER NOT NULL, pending INTEGER NOT NULL DEFAULT 0, command BLOB, PRIMARY KEY(origin,org,invoice))")
             try exec(db, "CREATE TABLE IF NOT EXISTS capture_heads (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, actor TEXT NOT NULL, customer TEXT NOT NULL, job TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(origin,org,invoice))")
             try exec(db, "CREATE TABLE IF NOT EXISTS capture_intents (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, token TEXT NOT NULL, owner TEXT NOT NULL, actor TEXT NOT NULL, customer TEXT NOT NULL, job TEXT NOT NULL, expected INTEGER, sequence INTEGER NOT NULL, draft BLOB NOT NULL, committed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(origin,org,invoice))")
+            try exec(db, "CREATE TABLE IF NOT EXISTS recovery_choices (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, token TEXT NOT NULL, decision TEXT NOT NULL, selection TEXT NOT NULL, PRIMARY KEY(origin,org,invoice))")
             try exec(db, "CREATE TABLE IF NOT EXISTS snapshots (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, version INTEGER NOT NULL, draft BLOB NOT NULL, PRIMARY KEY(origin,org,invoice,version))")
         }
     }
@@ -203,7 +206,7 @@ final class InvoiceTransactionFence: @unchecked Sendable {
     }
     func commitCaptureIntent(_ intent: InvoiceCaptureIntent) throws {
         try transaction(intent.identity.domain, allowIntent: true) { db in
-            let found = try statement(db, "SELECT 1 FROM capture_intents WHERE origin=? AND org=? AND invoice=? AND token=? AND owner=? AND actor=? AND customer=? AND job=? AND expected IS ? AND sequence=? AND draft=? AND committed=0") { s in
+            let found = try statement(db, "SELECT 1 FROM capture_intents WHERE origin=? AND org=? AND invoice=? AND token=? AND owner=? AND actor=? AND customer=? AND job=? AND expected IS ? AND sequence=? AND draft=? AND committed=0 AND NOT EXISTS (SELECT 1 FROM recovery_choices c WHERE c.origin=capture_intents.origin AND c.org=capture_intents.org AND c.invoice=capture_intents.invoice)") { s in
                 try keys(s, intent.identity.domain); try bind(s, 4, intent.token); try bind(s, 5, intent.owner.uuidString.lowercased()); try bind(s, 6, intent.identity.actorID); try bind(s, 7, intent.identity.customerID); try bind(s, 8, intent.identity.jobID ?? "")
                 if let expected = intent.expectedVersion { sqlite3_bind_int64(s, 9, expected) } else { sqlite3_bind_null(s, 9) }
                 sqlite3_bind_int64(s, 10, intent.sequence); try bind(s, 11, intent.bytes)
@@ -220,14 +223,55 @@ final class InvoiceTransactionFence: @unchecked Sendable {
     func inspectUnresolvedCapture(identity: InvoiceIdleCaptureIdentity) throws -> InvoiceUnresolvedCapture? {
         guard identity.valid else { throw InvoiceFenceError.invalid }
         return try transaction(identity.domain, allowIntent: true) { db in
-            try statement(db, "SELECT owner,actor,customer,job,expected,sequence,draft,committed FROM capture_intents WHERE origin=? AND org=? AND invoice=?") { s in
+            try statement(db, "SELECT i.owner,i.actor,i.customer,i.job,i.expected,i.sequence,i.draft,i.committed,c.selection FROM capture_intents i LEFT JOIN recovery_choices c ON c.origin=i.origin AND c.org=i.org AND c.invoice=i.invoice AND c.token=i.token WHERE i.origin=? AND i.org=? AND i.invoice=?") { s in
                 try keys(s, identity.domain)
                 let code = sqlite3_step(s); if code == SQLITE_DONE { return nil }
                 guard code == SQLITE_ROW, let ownerText = sqlite3_column_text(s, 0), let actor = sqlite3_column_text(s, 1), let customer = sqlite3_column_text(s, 2), let job = sqlite3_column_text(s, 3), let data = sqlite3_column_blob(s, 6), let owner = UUID(uuidString: String(cString: ownerText)) else { throw InvoiceFenceError.database(code) }
                 guard String(cString: actor) == identity.actorID, String(cString: customer) == identity.customerID, String(cString: job) == (identity.jobID ?? "") else { throw InvoiceFenceError.conflict }
                 let phaseCode = sqlite3_column_int(s, 7); guard phaseCode == 0 || phaseCode == 1 else { throw InvoiceFenceError.conflict }
                 let expected: Int64? = sqlite3_column_type(s, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(s, 4)
-                return InvoiceUnresolvedCapture(phase: phaseCode == 0 ? .registered : .committed, owner: owner, previousVersion: expected, sequence: sqlite3_column_int64(s, 5), bytes: Data(bytes: data, count: Int(sqlite3_column_bytes(s, 6))))
+                let selection: InvoiceRecoverySelection?
+                if sqlite3_column_type(s, 8) == SQLITE_NULL { selection = nil }
+                else { guard let text = sqlite3_column_text(s, 8), let value = InvoiceRecoverySelection(rawValue: String(cString: text)) else { throw InvoiceFenceError.conflict }; selection = value }
+                return InvoiceUnresolvedCapture(phase: phaseCode == 0 ? .registered : .committed, owner: owner, previousVersion: expected, sequence: sqlite3_column_int64(s, 5), selection: selection, bytes: Data(bytes: data, count: Int(sqlite3_column_bytes(s, 6))))
+            }
+        }
+    }
+    /// Records a user choice but keeps all data and the intent fenced. Authorization is supplied by
+    /// the future coordinator; this storage layer cannot authenticate that callback.
+    func recordRecoverySelection(identity: InvoiceIdleCaptureIdentity, selection: InvoiceRecoverySelection,
+                                 decisionID: UUID, authorize: () throws -> Bool) throws {
+        guard identity.valid else { throw InvoiceFenceError.invalid }
+        try transaction(identity.domain, allowIntent: true) { db in
+            guard try authorize() else { throw InvoiceFenceError.conflict }
+            let token = try statement(db, "SELECT token,actor,customer,job,expected FROM capture_intents WHERE origin=? AND org=? AND invoice=?") { s -> String in
+                try keys(s, identity.domain); let code = sqlite3_step(s)
+                guard code == SQLITE_ROW, let token = sqlite3_column_text(s, 0), let actor = sqlite3_column_text(s, 1), let customer = sqlite3_column_text(s, 2), let job = sqlite3_column_text(s, 3) else { throw InvoiceFenceError.conflict }
+                guard String(cString: actor) == identity.actorID, String(cString: customer) == identity.customerID, String(cString: job) == (identity.jobID ?? "") else { throw InvoiceFenceError.conflict }
+                if selection == .previous {
+                    guard sqlite3_column_type(s, 4) != SQLITE_NULL else { throw InvoiceFenceError.conflict }
+                    let version = sqlite3_column_int64(s, 4)
+                    let present = try statement(db, "SELECT 1 FROM snapshots WHERE origin=? AND org=? AND invoice=? AND version=?") { q in
+                        try keys(q, identity.domain); sqlite3_bind_int64(q, 4, version); let result = sqlite3_step(q)
+                        if result == SQLITE_ROW { return true }; guard result == SQLITE_DONE else { throw InvoiceFenceError.database(result) }; return false
+                    }
+                    guard present else { throw InvoiceFenceError.conflict }
+                }
+                return String(cString: token)
+            }
+            let choice = try statement(db, "SELECT token,decision,selection FROM recovery_choices WHERE origin=? AND org=? AND invoice=?") { s -> (String,String,String)? in
+                try keys(s, identity.domain); let code = sqlite3_step(s); if code == SQLITE_DONE { return nil }
+                guard code == SQLITE_ROW, let a = sqlite3_column_text(s, 0), let b = sqlite3_column_text(s, 1), let c = sqlite3_column_text(s, 2) else { throw InvoiceFenceError.database(code) }
+                return (String(cString: a), String(cString: b), String(cString: c))
+            }
+            let decision = decisionID.uuidString.lowercased()
+            if let choice {
+                guard choice.0 == token, choice.1 == decision, choice.2 == selection.rawValue else { throw InvoiceFenceError.conflict }
+                return
+            }
+            try statement(db, "INSERT INTO recovery_choices(origin,org,invoice,token,decision,selection) VALUES(?,?,?,?,?,?)") { s in
+                try keys(s, identity.domain); try bind(s, 4, token); try bind(s, 5, decision); try bind(s, 6, selection.rawValue)
+                let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
             }
         }
     }

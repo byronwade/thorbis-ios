@@ -30,12 +30,26 @@ import SQLite3
   try first.commitCaptureIntent(intent)
   let committed = try second.inspectUnresolvedCapture(identity: id)
   precondition(committed?.phase == .committed && committed?.bytes == Data([1]) && committed?.previousVersion == 1)
+  let decision = UUID()
+  do { try second.recordRecoverySelection(identity: wrong, selection: .candidate, decisionID: decision, authorize: { true }); fatalError("wrong scope selected") } catch InvoiceFenceError.conflict { }
+  do { try second.recordRecoverySelection(identity: id, selection: .candidate, decisionID: decision, authorize: { false }); fatalError("denied selection accepted") } catch InvoiceFenceError.conflict { }
+  try second.recordRecoverySelection(identity: id, selection: .candidate, decisionID: decision, authorize: { true })
+  try first.recordRecoverySelection(identity: id, selection: .candidate, decisionID: decision, authorize: { true })
+  do { try first.recordRecoverySelection(identity: id, selection: .previous, decisionID: UUID(), authorize: { true }); fatalError("choice silently replaced") } catch InvoiceFenceError.conflict { }
+  let selected = try second.inspectUnresolvedCapture(identity: id)
+  precondition(selected?.selection == .candidate)
   try blocked { _ = try second.registerCaptureIntent(identity: id, owner: owner, expectedVersion: 2, sequence: 3, bytes: Data([3])) }
   try blocked { _ = try second.capture(identity: id, owner: owner, expectedVersion: 2, sequence: 3, bytes: Data([3])) }
   try blocked { _ = try second.recoverIdle(identity: id) }
   var db: OpaquePointer?; precondition(sqlite3_open(path, &db) == SQLITE_OK); defer { sqlite3_close(db) }
   var statement: OpaquePointer?; precondition(sqlite3_prepare_v2(db, "SELECT count(*) FROM snapshots", -1, &statement, nil) == SQLITE_OK); defer { sqlite3_finalize(statement) }
   precondition(sqlite3_step(statement) == SQLITE_ROW && sqlite3_column_int(statement, 0) == 2, "earlier snapshot lost")
+  let pendingPath = "/private/tmp/invoice-selection-precommit-\(UUID().uuidString).sqlite"
+  let pending = try InvoiceTransactionFence(path: pendingPath)
+  let pendingIntent = try pending.registerCaptureIntent(identity: id, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data([5]))
+  do { try pending.recordRecoverySelection(identity: id, selection: .previous, decisionID: UUID(), authorize: { true }); fatalError("missing previous snapshot selected") } catch InvoiceFenceError.conflict { }
+  try pending.recordRecoverySelection(identity: id, selection: .candidate, decisionID: UUID(), authorize: { true })
+  do { try pending.commitCaptureIntent(pendingIntent); fatalError("capture changed after choice") } catch InvoiceFenceError.conflict { }
   print("unresolved capture fenced across instances; previous snapshot retained")
  }
 }
