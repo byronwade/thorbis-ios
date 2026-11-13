@@ -283,6 +283,13 @@ struct CustomerDetailView: View {
     @State private var recordsLoadGeneration = 0
     @State private var recordsPublishedScope: CustomerRecordsScope?
     @State private var recordsRequestedScope: CustomerRecordsScope?
+    // Money is compiled independently so slow job media never blocks financial records.
+    @State private var moneyRecords: CustomerJobCompilation?
+    @State private var moneyRecordsLoading = false
+    @State private var moneyRecordsError: String?
+    @State private var moneyRecordsLoadGeneration = 0
+    @State private var moneyRecordsPublishedScope: CustomerRecordsScope?
+    @State private var moneyRecordsRequestedScope: CustomerRecordsScope?
     private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
@@ -392,7 +399,12 @@ struct CustomerDetailView: View {
                 recordsPublishedScope = nil
                 recordsError = nil
             }
-            if tab != "Overview" { await loadRecords() }
+            if moneyRecordsPublishedScope != recordsScope {
+                moneyRecords = nil
+                moneyRecordsPublishedScope = nil
+                moneyRecordsError = nil
+            }
+            await loadSelectedRecords()
         }
         .onAppear {
             customerWindowAnchor.visible = true
@@ -404,14 +416,14 @@ struct CustomerDetailView: View {
         }
         .onDisappear { customerWindowAnchor.visible = false }
         .onChange(of: tab, initial: true) { _, selectedTab in
-            if selectedTab != "Overview" { Task { await loadRecords() } }
+            if selectedTab != "Overview" { Task { await loadSelectedRecords() } }
             if selectedTab == "Jobs" { Task { await loadJobRecords() } }
         }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
                 await loadActivity(reset: true)
-                if tab != "Overview" { await loadRecords() }
+                await loadSelectedRecords()
                 if tab == "Jobs" { await loadJobRecords() }
             }
         }
@@ -1141,25 +1153,29 @@ struct CustomerDetailView: View {
     }
 
     /// Money: the customer's estimates and invoices, on and off jobs.
-    private var moneySection: some View { recordsParts([.estimates, .invoices]) }
+    private var moneySection: some View { recordsParts([.estimates, .invoices], moneyOnly: true) }
 
-    private func recordsParts(_ parts: Set<CustomerRecordsPart>) -> some View {
+    private func recordsParts(_ parts: Set<CustomerRecordsPart>, moneyOnly: Bool = false) -> some View {
         let scope = recordsScope
-        let visible = visibleRecords
-        let visibleError = scope != nil && recordsRequestedScope == scope ? recordsError : nil
+        let visible = moneyOnly ? (scope != nil && moneyRecordsPublishedScope == scope ? moneyRecords : nil) : visibleRecords
+        let visibleError = moneyOnly
+            ? (scope != nil && moneyRecordsRequestedScope == scope ? moneyRecordsError : nil)
+            : (scope != nil && recordsRequestedScope == scope ? recordsError : nil)
         return VStack(alignment: .leading, spacing: 10) {
             if scope == nil {
                 emptyText("You don’t have access to this customer’s records.")
             } else {
                 if let visibleError {
                     ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) {
-                        await loadRecords()
+                        if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
                     }.accessibilityIdentifier("customer-records-retry")
                 }
                 if visible == nil && visibleError == nil {
                     SkeletonRows(count: 3, inset: 0)
                 } else if let visible {
-                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() }, parts: parts)
+                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: {
+                        if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
+                    }, parts: parts)
                 }
             }
         }
@@ -1170,6 +1186,39 @@ struct CustomerDetailView: View {
         let generation = session.generation
         guard let loaded = try? await api.fieldJobs(customerID: customer.id), session.generation == generation else { return }
         jobRecords = loaded.filter { $0.customerId == customer.id && $0.organizationId == organizationID }
+    }
+
+    private func loadSelectedRecords() async {
+        switch tab {
+        case "Money": await loadMoneyRecords()
+        case "Jobs", "Photos": await loadRecords()
+        default: break
+        }
+    }
+
+    private func loadMoneyRecords() async {
+        guard let scope = recordsScope else { return }
+        guard !moneyRecordsLoading || moneyRecordsRequestedScope != scope else { return }
+        moneyRecordsLoadGeneration += 1
+        let request = moneyRecordsLoadGeneration
+        moneyRecordsLoading = true
+        moneyRecordsRequestedScope = scope
+        moneyRecordsError = nil
+        defer { if moneyRecordsLoadGeneration == request { moneyRecordsLoading = false } }
+        do {
+            let recordsSession = session
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: scope.customerID,
+                organizationID: scope.organizationID, api: api, access: scope.access, moneyOnly: true,
+                isCurrent: { scope.isCurrent(session: recordsSession) })
+            guard !Task.isCancelled, moneyRecordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
+            moneyRecords = compiled
+            moneyRecordsPublishedScope = scope
+            moneyRecordsError = nil
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled, moneyRecordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
+            moneyRecordsError = error.localizedDescription
+        }
     }
 
     private func loadRecords() async {
