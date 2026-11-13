@@ -188,7 +188,12 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
                 return .init(status:200,payload:["id":id,"jobId":PaperPreview.jobID,"estimateId":id,"linkedAt":now])
             }
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }
-            if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" { return .init(status:200,payload:revision(id)) }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" {
+                if id == Self.b, flags.contains("--paper-preview-handoff-second-details-fail") {
+                    return .init(status:503,payload:["title":"Sample estimate unavailable","status":503])
+                }
+                return .init(status:200,payload:revision(id))
+            }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
             if method == "POST", path == "/v1/estimates/\(id)/action-tokens" { return .init(status:200,payload:["token":"sample-\(id)"]) }
             if method == "GET", path == "/v1/public/document-actions/sample-\(id)" { return .init(status:200,payload:action(id)) }
