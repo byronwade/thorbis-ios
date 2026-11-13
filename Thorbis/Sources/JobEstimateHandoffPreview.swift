@@ -57,6 +57,9 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         return String(data: try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), encoding: .utf8)!
     } }
     private func title(_ id: String) -> String {
+        if id == Self.a, flags.contains("--paper-preview-handoff-long-title") {
+            return "Replace the water heater and restore the service area"
+        }
         if flags.contains("--paper-preview-handoff-duplicate-titles") { return "Sample service" }
         return id == Self.a ? "Sample repair" : id == Self.b ? "Sample additional work" : id == Self.c ? "Previously approved work" : "Draft work"
     }
