@@ -146,6 +146,35 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertFalse(app.textFields["Your full name"].exists, "A finished old request must not reopen signing")
     }
 
+    func testInvoiceSigningDoesNotOpenAfterEditPermissionIsRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-view",
+                               "--paper-preview-working-job", "--paper-preview-job-documents",
+                               "--paper-preview-revoke-invoice-edit-on-sign"]
+        app.launch()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 15))
+        estimate.tap()
+        XCTAssertTrue(app.buttons["customer-book-review-sign"].waitForExistence(timeout: 15))
+        thorbisStableButton(app, "customer-book-review-sign").tap()
+        XCTAssertTrue(app.scrollViews["customer-estimate-presentation-00000000-0000-4000-8000-000000002218"].waitForExistence(timeout: 15))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2209"].tap()
+        let sign = app.buttons["Sign for the work"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 15))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: sign)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+        sign.tap()
+        let revoked = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: sign)
+        XCTAssertEqual(XCTWaiter.wait(for: [revoked], timeout: 20), .completed, "Preview must complete the permission change")
+        XCTAssertFalse(app.textFields["Your full name"].waitForExistence(timeout: 5),
+                       "A revoked invoice editor must not open signing")
+        XCTAssertTrue(app.staticTexts["customer-document-position"].exists)
+    }
+
     func testEstimateReviewCanReturnToJobDocumentsAndChooseAnotherEstimate() {
         continueAfterFailure = false
         let app = XCUIApplication()
