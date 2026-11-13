@@ -426,6 +426,142 @@ final class CustomerSelfEditTests: XCTestCase {
     }
 
     @MainActor
+    func testSaveExplainsWhenAuthorityIsAlreadyGone() async {
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: MemoryCustomerSelfEditRecoveryStore(), recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
+        draft.name = "Updated Customer"
+        model.draft = draft
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        await model.save(api: api, currentAuthority: { false })
+        XCTAssertTrue(URLProtocolFixture.recorded.isEmpty)
+        XCTAssertEqual(model.saveError, "These changes couldn't be saved. Try again.")
+        XCTAssertFalse(model.saveNeedsReconciliation)
+        XCTAssertFalse(model.savedAll)
+    }
+
+    @MainActor
+    func testCancelledCapabilityReadExplainsTheFailedSave() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let json = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, json, gate: gate, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"])
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: MemoryCustomerSelfEditRecoveryStore(), recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
+        draft.name = "Updated Customer"
+        model.draft = draft
+        let task = Task { await model.save(api: api) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        api.invalidateRequests()
+        gate.release()
+        await task.value
+        XCTAssertFalse(model.savedAll)
+        XCTAssertFalse(model.saveNeedsReconciliation)
+        XCTAssertEqual(model.saveError, "These changes couldn't be saved. Try again.")
+    }
+
+    @MainActor
+    func testAuthorityLossAfterASuccessfulWriteRequiresReconciliation() async throws {
+        let location = ServiceLocationRecord(id: UUID().uuidString, organizationId: "org", customerId: record().id,
+            label: "Home", kind: "service", address: "1 Main St", notes: nil, coordinates: nil,
+            gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil,
+            createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        let updated = record(name: "Updated Customer")
+        let customerJSON = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let updatedJSON = String(decoding: try JSONEncoder().encode(updated), as: UTF8.self)
+        let locationJSON = String(decoding: try JSONEncoder().encode(location), as: UTF8.self)
+        let gate = URLProtocolFixture.Gate()
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, customerJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]),
+            .init(200, updatedJSON),
+            .init(200, "{\"items\":[\(locationJSON)],\"nextCursor\":null}", gate: gate)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: MemoryCustomerSelfEditRecoveryStore(), recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [location], smsConsent: nil)
+        draft.name = "Updated Customer"
+        draft.locations[0].address = "2 Main St"
+        model.draft = draft
+        let task = Task { await model.save(api: api) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 3 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3)
+        api.invalidateRequests()
+        gate.release()
+        await task.value
+        XCTAssertFalse(model.savedAll)
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        XCTAssertEqual(model.saveError, "Some changes may have saved. Check the customer record before trying again.")
+        XCTAssertEqual(model.draft?.name, "Updated Customer")
+        XCTAssertEqual(model.draft?.locations.first?.address, "2 Main St")
+    }
+
+    @MainActor
+    func testCreatedContactStaysOnDraftWhenALaterStepFails() async throws {
+        let created = CustomerContactRecord(id: "new-contact", organizationId: "org", customerId: record().id,
+            name: "Sam", role: nil, email: nil, phone: "555-0101", primary: false,
+            createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        let createdJSON = String(decoding: try JSONEncoder().encode(created), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, createdJSON),
+            .init(409, "{\"title\":\"sms_consent_conflict\",\"detail\":\"Stale consent\"}")
+        ]), baseURL: "https://app.thorbis.com")
+        let store = MemoryCustomerSelfEditRecoveryStore()
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [],
+            smsConsent: .init(decision: "revoke", version: "v1", recordedAt: "2026-10-01T00:00:00Z"))
+        draft.newContactName = "Sam"; draft.newContactPhone = "555-0101"; draft.allowsTexts = true
+        model.draft = draft
+        await model.save(api: api)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        XCTAssertEqual(model.draft?.contacts.map(\.id), ["new-contact"])
+        XCTAssertEqual(model.draft?.newContactName, "")
+        XCTAssertNil(model.draft?.newContact)
+        XCTAssertEqual(model.draft?.allowsTexts, true)
+        XCTAssertEqual(try store.load(scope: recoveryScope)?.draft.contacts.map(\.id), ["new-contact"])
+    }
+
+    @MainActor
+    func testCreatedContactCanContinueAfterCheckpointFailure() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let created = CustomerContactRecord(id: "new-contact", organizationId: "org", customerId: record().id,
+            name: "Sam", role: nil, email: nil, phone: "555-0101", primary: false,
+            createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        let createdJSON = String(decoding: try JSONEncoder().encode(created), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, createdJSON, gate: gate)]), baseURL: "https://app.thorbis.com")
+        let store = MemoryCustomerSelfEditRecoveryStore()
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
+        draft.newContactName = "Sam"; draft.newContactPhone = "555-0101"
+        model.draft = draft
+        let task = Task { await model.save(api: api) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        store.rejectWrites = true
+        gate.release()
+        await task.value
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        XCTAssertEqual(model.draft?.contacts.map(\.id), ["new-contact"])
+        XCTAssertEqual(model.draft?.newContactName, "")
+        XCTAssertNil(model.draft?.newContact)
+        XCTAssertTrue(model.matchingNewContacts.isEmpty)
+        store.rejectWrites = false
+        let recordJSON = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let inspectAPI = APIClient(session: URLProtocolFixture.session([
+            .init(200, recordJSON), .init(200, "{\"items\":[\(createdJSON)],\"nextCursor\":null}"),
+            .init(200, "{\"items\":[],\"nextCursor\":null}")
+        ]), baseURL: "https://app.thorbis.com")
+        await model.inspectRecovery(api: inspectAPI, currentAuthority: { true })
+        model.resolveRecovery(contactAlreadySaved: false, keepConflictingEdits: nil, currentAuthority: { true })
+        XCTAssertFalse(model.saveNeedsReconciliation)
+        XCTAssertEqual(model.draft?.contacts.map(\.id), ["new-contact"])
+        XCTAssertNil(try store.load(scope: recoveryScope)?.pending)
+    }
+
+    @MainActor
     func testRecoveryStorageFailurePreventsTheCustomerWrite() async throws {
         let store = MemoryCustomerSelfEditRecoveryStore(); store.rejectWrites = true
         let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)

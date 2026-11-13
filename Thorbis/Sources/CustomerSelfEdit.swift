@@ -658,7 +658,7 @@ final class CustomerSelfEditModel: ObservableObject {
         guard currentAuthority(), let evidence = recoveryEvidence, var current = draft, let pendingWrite else { return }
         guard recoveryConflicts.isEmpty || keepConflictingEdits != nil,
               !(recoveryHasRemovedTargets && keepConflictingEdits == true) else { return }
-        if case .createContact = pendingWrite {
+        if case .createContact = pendingWrite, current.newContact != nil {
             guard contactAlreadySaved, !matchingNewContacts.isEmpty else { return }
         }
         current = current.mergingRecovery(record: evidence.record, contacts: evidence.contacts, locations: evidence.locations,
@@ -783,7 +783,11 @@ final class CustomerSelfEditModel: ObservableObject {
     /// Customer record first, then contacts, addresses and the text decision. Each step is its own
     /// audited write; the draft is rebased after each one so a retry doesn't repeat finished work.
     func save(api: APIClient, currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
-        guard currentAuthority(), var current = draft else { return }
+        guard var current = draft else { return }
+        guard currentAuthority() else {
+            saveError = "These changes couldn't be saved. Try again."
+            return
+        }
         guard recoveryScope != nil else { saveError = "Customer changes can't be secured on this device. Try again."; return }
         guard !saveNeedsReconciliation else {
             saveError = "Some changes may have saved. Check the customer record before trying again."
@@ -793,6 +797,7 @@ final class CustomerSelfEditModel: ObservableObject {
         defer { saving = false }
         saveError = nil
         var writeInFlight = false
+        var completedWrite = false
         let generation = api.requestGeneration
         let scopeRevision = api.savedCopyScopeRevision
         let copyScope = api.savedCopyScope
@@ -801,20 +806,32 @@ final class CustomerSelfEditModel: ObservableObject {
             currentAuthority() && api.requestGeneration == generation && api.savedCopyScopeRevision == scopeRevision &&
             api.savedCopyScope == copyScope && recoveryScope == boundScope && api.normalizedOrigin == boundScope?.origin
         }
-        func confirmWrite() -> Bool {
-            guard authority() else {
+        func explainRetiredSave() {
+            if writeInFlight || pendingWrite != nil || completedWrite {
                 saveNeedsReconciliation = true
                 saveError = "Some changes may have saved. Check the customer record before trying again."
+            } else {
+                saveError = "These changes couldn't be saved. Try again."
+            }
+        }
+        func keepAuthority() -> Bool {
+            guard authority() else {
+                explainRetiredSave()
                 return false
             }
+            return true
+        }
+        func confirmWrite() -> Bool {
+            guard keepAuthority() else { return false }
             writeInFlight = false
+            completedWrite = true
             return true
         }
         do {
             try checkpoint(current, pending: nil)
             let needsGuardedWrite = !current.customerUpdate.isEmpty || !current.contactUpdates.isEmpty || !current.locationChanges.isEmpty
             if needsGuardedWrite {
-                guard authority(), let scope = boundScope else { return }
+                guard keepAuthority(), let scope = boundScope else { return }
                 let capability = try await api.customerConditionalRead(customerID)
                 guard authority(), capability.provenance.origin == scope.origin,
                       capability.value.id == customerID, capability.value.organizationId == scope.organizationID else { throw CancellationError() }
@@ -832,7 +849,7 @@ final class CustomerSelfEditModel: ObservableObject {
             }
             let update = current.customerUpdate
             if !update.isEmpty {
-                guard authority() else { return }
+                guard keepAuthority() else { return }
                 try checkpoint(current, pending: .customer)
                 writeInFlight = true
                 let record = try await api.updateFieldCustomerConditionally(customerID, request: current.conditionalCustomerUpdate())
@@ -845,7 +862,7 @@ final class CustomerSelfEditModel: ObservableObject {
                 try checkpoint(current, pending: nil)
             }
             for change in current.contactUpdates {
-                guard authority() else { return }
+                guard keepAuthority() else { return }
                 try checkpoint(current, pending: .contact(change.id))
                 writeInFlight = true
                 guard let baseline = current.conditionalContactBaselines?.first(where: { $0.id == change.id }) else { throw CancellationError() }
@@ -859,7 +876,7 @@ final class CustomerSelfEditModel: ObservableObject {
                 try checkpoint(current, pending: nil)
             }
             if let create = current.newContact {
-                guard authority() else { return }
+                guard keepAuthority() else { return }
                 try checkpoint(current, pending: .createContact)
                 writeInFlight = true
                 let created = try await api.createFieldContact(customerID, request: create)
@@ -867,16 +884,17 @@ final class CustomerSelfEditModel: ObservableObject {
                     saveNeedsReconciliation = true; saveError = "The contact couldn't be verified. Check the record before continuing."; return
                 }
                 guard confirmWrite() else { return }
+                current = current.addingRecoveredContact(created)
                 current.newContactName = ""; current.newContactPhone = ""; current.newContactEmail = ""
                 draft = current
                 try checkpoint(current, pending: nil)
             }
             if !current.locationChanges.isEmpty {
-                guard authority() else { return }
+                guard keepAuthority() else { return }
                 let records = try await api.allLocationsForRecovery(customerID, currentAuthority: authority)
-                guard authority() else { return }
+                guard keepAuthority() else { return }
                 for change in current.locationChanges {
-                    guard authority() else { return }
+                    guard keepAuthority() else { return }
                     guard let existing = records.first(where: { $0.id == change.id }),
                           existing.organizationId == recoveryScope?.organizationID, existing.customerId == customerID else {
                         throw Problem(title: "A service location changed or was removed. Review the customer record before saving.", status: 409, detail: nil)
@@ -895,7 +913,7 @@ final class CustomerSelfEditModel: ObservableObject {
                 }
             }
             if let texts = current.textsChange {
-                guard authority() else { return }
+                guard keepAuthority() else { return }
                 guard current.consentBaselineKnown == true else {
                     try checkpoint(current, pending: .reviewDraft)
                     saveNeedsReconciliation = true
@@ -917,7 +935,7 @@ final class CustomerSelfEditModel: ObservableObject {
             savedAll = true
             try? recoveryStore.remove(scope: recoveryScope)
         } catch is CancellationError {
-            if writeInFlight { saveNeedsReconciliation = true; saveError = "Some changes may have saved. Check the customer record before trying again." }
+            explainRetiredSave()
         } catch {
             if writeInFlight || pendingWrite != nil {
                 saveNeedsReconciliation = true
@@ -1153,7 +1171,7 @@ struct CustomerSelfEditReview: View {
                         if keepConflictingEdits == nil { Text("Choose which values to keep before continuing.").font(Theme.customerFont(13)).foregroundStyle(Theme.muted) }
                         if model.recoveryHasRemovedTargets { Text("A contact or location was removed. Restore it before keeping its edit, or use the record's values.").font(Theme.customerFont(13)).foregroundStyle(Theme.muted) }
                     }
-                    if case .createContact = model.pendingWrite {
+                    if case .createContact = model.pendingWrite, model.draft?.newContact != nil {
                         Text("Contacts now on this customer").font(Theme.customerFont(17, weight: .medium))
                         LazyVStack(alignment: .leading, spacing: 12) {
                             ForEach(evidence.contacts) { contact in

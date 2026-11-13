@@ -223,6 +223,22 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Sent"].exists)
     }
 
+    func testNewTextExplainsWhenInboxStorageIsBlocked() {
+        let app = launch(["--paper-preview-inbox-section", "texts", "--paper-preview-inbox-storage-failure"])
+        let compose = app.buttons["New text"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20))
+        compose.tap()
+        let phone = app.textFields["inbox-new-text-phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 10))
+        let message = "Inbox storage could not be confirmed. Reopen the app and check drafts before making changes."
+        XCTAssertGreaterThanOrEqual(app.staticTexts.matching(NSPredicate(format: "label == %@", message)).count, 2,
+                                    "The new-text sheet must explain a blocked inbox")
+        phone.tap()
+        phone.typeText("5550100100")
+        app.buttons["Start text"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["New text"].exists, "A blocked inbox must not open a thread")
+    }
+
     func testEmailStorageFailureKeepsTextAndPreventsBlindRetry() {
         let app = launch(["--paper-preview-inbox-section", "email", "--paper-preview-inbox-storage-failure"])
         let compose = app.buttons["New email"].firstMatch

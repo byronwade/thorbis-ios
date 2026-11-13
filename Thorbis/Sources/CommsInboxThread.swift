@@ -866,6 +866,7 @@ struct CommsComposeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var phone = ""
     @State private var name = ""
+    @State private var startError: String?
     @FocusState private var phoneFocused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -887,9 +888,25 @@ struct CommsComposeSheet: View {
                 Text("An existing conversation with this number opens instead of a new one. Drafts stay on this device.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                if store.storageBlocked {
+                    Text("Inbox storage could not be confirmed. Reopen the app and check drafts before making changes.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let startError {
+                    Text(startError).font(Theme.font(14)).foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 let ready = CommsCallGrouping.key(phone) != nil
                 Button {
-                    if let id = store.threadForPhone(phone, contactName: name) { onOpen(id) }
+                    if let id = store.threadForPhone(phone, contactName: name) {
+                        startError = nil
+                        onOpen(id)
+                    } else if !store.storageBlocked {
+                        startError = !store.isActive
+                            ? "This inbox isn't available. Return to the inbox and try again."
+                            : "Inbox storage could not be confirmed. Reopen the app and check drafts before making changes."
+                    }
                 } label: {
                     Text("Start text").inkCommit(enabled: ready)
                 }

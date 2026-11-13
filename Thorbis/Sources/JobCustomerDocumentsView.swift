@@ -459,7 +459,10 @@ struct JobCustomerDocumentsView: View {
             documentSelectionRevision == selectionRevision && paperGeneration == presentationRevision &&
             paper == originalPaper && book == originalBook && paymentModel?.invoice?.id == invoiceID &&
             paymentModel?.canRecordPayment == true
-        guard current else { return }
+        guard current else {
+            error = "Payment isn't ready. Ask your technician to check this invoice."
+            return
+        }
         if unlocked {
             requestPayment(invoiceID)
         } else {
