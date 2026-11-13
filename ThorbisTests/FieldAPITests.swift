@@ -231,7 +231,7 @@ final class FieldAPITests: XCTestCase {
     func testLiveInvoiceDoesNotUseSavedCopyWhileOffline() async throws {
         let id = "00000000-0000-4000-8000-00000000000a"
         let reply = #"{"id":"00000000-0000-4000-8000-00000000000a","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","origin":"manual","sourceOperationKey":"manual:test","status":"draft","lines":[],"linesRevision":1,"amountPaid":0,"currency":"USD","createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
-        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply), .offline]), baseURL: "https://app.thorbis.com")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "invoice-live-offline-" + UUID().uuidString
         _ = try await client.fieldInvoice(id)
         SavedCopyStore.shared.waitForQueuedWrites()
@@ -248,7 +248,7 @@ final class FieldAPITests: XCTestCase {
     func testLiveEstimateDoesNotUseSavedCopyWhileOffline() async throws {
         let id = "00000000-0000-4000-8000-000000000008"
         let reply = #"{"id":"00000000-0000-4000-8000-000000000008","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000003","createdByUserId":"00000000-0000-4000-8000-000000000004","status":"draft","title":"Quote","lines":[],"createdAt":"2026-10-26T12:00:00Z","updatedAt":"2026-10-26T12:00:00Z"}"#
-        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply), .offline]), baseURL: "https://app.thorbis.com")
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, reply), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "estimate-live-offline-" + UUID().uuidString
         _ = try await client.fieldEstimate(id)
         SavedCopyStore.shared.waitForQueuedWrites()
