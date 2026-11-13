@@ -71,6 +71,14 @@ struct InvoiceLineEditorView: View {
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-change-origin") {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    Button("Change API") { api.baseURL = "https://retired-preview.invalid" }
+                        .accessibilityIdentifier("invoice-editor-test-change-origin")
+                }
+            }
+            #endif
             ThorbisToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }

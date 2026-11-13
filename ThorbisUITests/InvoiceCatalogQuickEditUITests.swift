@@ -7,6 +7,28 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testInvoiceDraftRetainsButCannotBeSavedOrReopenedAfterAPIOriginChange() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line", "--paper-preview-invoice-change-origin"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 30))
+        let inline = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(inline.waitForExistence(timeout: 20))
+        inline.tap()
+        inline.typeText(" unsent draft")
+        let changed = app.buttons["invoice-editor-test-change-origin"]
+        XCTAssertTrue(changed.waitForExistence(timeout: 10))
+        changed.tap()
+        XCTAssertTrue((inline.value as? String ?? "").contains("unsent draft"), "The original draft must stay in memory")
+        let openCanvas = app.buttons["Edit full description"]
+        XCTAssertTrue(openCanvas.exists)
+        XCTAssertFalse(openCanvas.isEnabled, "Old-origin data must not reopen under another API")
+        let save = app.buttons["Save draft"]
+        XCTAssertTrue(save.exists)
+        XCTAssertFalse(save.isEnabled, "Old-origin draft must not be written to the new API")
+    }
+
     func testDescriptionCanvasRetiresWithAPIRequestsPreservingDraft() {
         continueAfterFailure = false
         let app = XCUIApplication()
