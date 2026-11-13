@@ -104,6 +104,15 @@ final class CustomerPresentationTests: XCTestCase {
         XCTAssertNil(customerSignatureHint(name: "Dana", hasInk: true))
     }
 
+    func testPayStaysAvailableWhenSummarySigningIsNotOffered() {
+        XCTAssertTrue(customerSummaryAllowsPayWithoutSigningActivation(canSign: true, authorized: false, jobID: nil),
+                      "Standalone invoices never start summary signing")
+        XCTAssertTrue(customerSummaryAllowsPayWithoutSigningActivation(canSign: false, authorized: false, jobID: "job-1"))
+        XCTAssertTrue(customerSummaryAllowsPayWithoutSigningActivation(canSign: true, authorized: true, jobID: "job-1"))
+        XCTAssertFalse(customerSummaryAllowsPayWithoutSigningActivation(canSign: true, authorized: false, jobID: "job-1"),
+                       "A job invoice still waits for signing before Pay")
+    }
+
     func testCustomerTypeStepsUpOnIPad() {
         XCTAssertEqual(CustomerType(.compact).body, 20)
         XCTAssertEqual(CustomerType(.regular).body, 22)

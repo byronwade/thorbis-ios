@@ -99,6 +99,11 @@ func customerSignatureHint(name: String, hasInk: Bool) -> String? {
     }
 }
 
+/// Summary signing is job-bound. Off-job invoices keep Pay without a live activation.
+func customerSummaryAllowsPayWithoutSigningActivation(canSign: Bool, authorized: Bool, jobID: String?) -> Bool {
+    authorized || !canSign || jobID == nil
+}
+
 // MARK: - Estimate
 
 /// "Show to customer" for an estimate: choose an option, review it, sign, done.
@@ -858,6 +863,7 @@ struct CustomerSummarySigningControls: View {
             case .previousResolved:
                 Text("The earlier signature was resolved. Refresh to review the current summary.")
                     .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                CustomerSecondaryButton(title: "Refresh", type: type) { Task { await coordinator.inspect() } }
             case .unavailable:
                 Text("Signing isn't available right now. Ask your technician for help.")
                     .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
@@ -1007,7 +1013,7 @@ struct CustomerInvoicePresentation: View {
                 await loadCustomerSummary()
                 if verifiedSummary != nil { await loadFinancing() }
             }
-        .onDisappear { deactivateSummarySigning(); signingRegistry.retire(); summaryToken = UUID(); summary = nil; summaryAuthority = nil }
+        .onDisappear { deactivateSummarySigning(); summaryToken = UUID(); summary = nil; summaryAuthority = nil }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -1272,7 +1278,7 @@ struct CustomerInvoicePresentation: View {
                 if let signingActivation {
                     CustomerSummaryPayAction(coordinator: signingActivation.coordinator, allowedWithoutSummarySignature: authorized || !canSign,
                         title: "Pay \(dueText)", type: type) { pay() }
-                } else if authorized || !canSign {
+                } else if customerSummaryAllowsPayWithoutSigningActivation(canSign: canSign, authorized: authorized, jobID: invoice.jobId) {
                     CustomerPresentationCommit(title: "Pay \(dueText)", enabled: true, busy: false, type: type) { pay() }
                 } else {
                     Text("Signing this customer summary isn't available yet. Ask your technician for help.")

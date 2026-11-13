@@ -254,6 +254,7 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         await changedOwner.inspect(); XCTAssertEqual(changedOwner.phase, .needsRecovery)
         await changedOwner.recover(); XCTAssertEqual(changedOwner.phase, .previousResolved)
         XCTAssertNil(changedOwner.receipt); XCTAssertNil(try store.load(scope: pendingScope))
+        await changedOwner.inspect(); XCTAssertEqual(changedOwner.phase, .ready, "Refresh must reopen signing for the current summary")
         var shouldNotPost = false
         let failingOwner = CustomerSummaryDurableCoordinator(summary: summary, scope: pendingScope, store: FailingSummaryPendingStore(), current: { true },
             lookup: { .unsigned }, upload: { _ in durableAsset }, replay: { _ in shouldNotPost = true; throw URLError(.cannotConnectToHost) })
@@ -303,7 +304,11 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertEqual(secondActivation.coordinator.phase, .ready)
         live = false; await secondActivation.coordinator.inspect()
         XCTAssertEqual(secondActivation.coordinator.phase, .unavailable, "Revoked authority must hide signing state")
-        registry.deactivate(secondActivation.token); registry.retire()
+        live = true
+        registry.deactivate(secondActivation.token)
+        XCTAssertNotNil(registry.activate(key: key, authorityCurrent: { true }, make: make),
+                        "A disappeared destination must be able to activate again")
+        registry.retire()
         XCTAssertNil(registry.activate(key: key, authorityCurrent: { true }, make: make))
         // Leaving during upload must not advance to POST, and reopening retries the same capture.
         var uploadWait: CheckedContinuation<Void, Never>?; var assetIDs: [String] = []
