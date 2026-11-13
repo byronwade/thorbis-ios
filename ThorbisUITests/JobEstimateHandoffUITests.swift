@@ -123,6 +123,27 @@ final class JobEstimateHandoffUITests: XCTestCase {
         }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed, "Each real selection must stick before the next tap")
     }
+    func testEstimateBrowseKeepsLongDescriptionReadOnlyAndEdgeBackWorks() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls",
+                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        let more = app.buttons["Show more, Estimate EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 30)); visible(app, more); more.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        app.buttons["Done"].tap()
+        let details = app.scrollViews["handoff-estimate-details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        details.swipeLeft()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        XCTAssertTrue(app.scrollViews["job-estimate-handoff"].waitForExistence(timeout: 15), "The system edge-back gesture must return to the estimate overview")
+    }
+
     func testCustomerCanBrowseJobEstimatesUsingAccessibleControls() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
