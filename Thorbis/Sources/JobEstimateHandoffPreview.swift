@@ -121,6 +121,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         if id == Self.b {
             if flags.contains("--handoff-test-empty-base") { value["lines"] = []; value["totalAmount"] = 0 }
             if flags.contains("--handoff-test-empty-option") {
+                value["lines"] = []; value["totalAmount"] = 0
                 value["options"] = [["id": "00000000-0000-4000-8000-000000008202", "title": "Empty package",
                                      "description": "", "lines": [], "totalAmount": 0, "currency": "USD"]]
             }

@@ -5,9 +5,19 @@ struct EstimateRecord {
 }
 enum Failure: Error { case invalid }
 func customerReviewUnavailable() -> Error { Failure.invalid }
+struct FieldLine {}
+struct FieldEstimateOption { let lines: [FieldLine]; let totalAmount: Int; let currency: String }
+struct CustomerEstimateDisplay { struct Amounts { let total: Int }; let amounts: Amounts }
+func customerEstimateDisplay(_ lines: [FieldLine], currency: String) -> CustomerEstimateDisplay? {
+    .init(amounts: .init(total: 1))
+}
 struct CustomerIssuedEstimateRevision {
     let id: String; let estimateId: String; let organizationId: String; let customerId: String
     let locationId: String?; let revisionNumber: Int; let status: String
+    let lines: [FieldLine] = [FieldLine()]
+    let options: [FieldEstimateOption]? = []
+    let totalAmount: Int = 1
+    let currency: String = "USD"
     // ACTUAL_VALIDATOR
 }
 @main struct Probe {

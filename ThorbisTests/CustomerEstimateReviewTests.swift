@@ -91,7 +91,8 @@ final class CustomerEstimateReviewTests: XCTestCase {
             ["estimateId": "00000000-0000-4000-8000-000000000999"],
             ["organizationId": "00000000-0000-4000-8000-000000000999"],
             ["customerId": "00000000-0000-4000-8000-000000000999"],
-            ["locationId": NSNull()], ["revisionNumber": 1], ["status": "superseded"]
+            ["locationId": NSNull()], ["revisionNumber": 1], ["status": "superseded"],
+            ["lines": [] as [Any], "totalAmount": 0], ["currency": "EUR"], ["totalAmount": 13_201]
         ] {
             var foreign = revision
             foreign.merge(mutation) { _, new in new }

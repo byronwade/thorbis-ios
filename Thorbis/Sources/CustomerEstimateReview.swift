@@ -23,6 +23,13 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
               (status == "issued" && expected.status == "sent" ||
                allowApprovedForReading && status == "approved" && expected.status == "approved")
         else { throw customerReviewUnavailable() }
+        // Issued revisions have an explicit USD currency and at least one base line.
+        guard currency == "USD", !lines.isEmpty else { throw customerReviewUnavailable() }
+        let offered = options ?? []
+        if offered.isEmpty {
+            guard let display = customerEstimateDisplay(lines, currency: currency),
+                  display.amounts.total == totalAmount else { throw customerReviewUnavailable() }
+        }
     }
 
     /// Retained reader content must still match the record now backing its destination.
