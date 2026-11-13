@@ -302,7 +302,7 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         delayedLookup?.resume(returning: .unsigned); await oldLookup.value
         XCTAssertEqual(secondActivation.coordinator.phase, .ready)
         live = false; await secondActivation.coordinator.inspect()
-        XCTAssertEqual(secondActivation.coordinator.phase, .ready, "Revoked authority must not start a new lookup")
+        XCTAssertEqual(secondActivation.coordinator.phase, .unavailable, "Revoked authority must hide signing state")
         registry.deactivate(secondActivation.token); registry.retire()
         XCTAssertNil(registry.activate(key: key, authorityCurrent: { true }, make: make))
         let receiptJSON = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
