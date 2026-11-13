@@ -209,6 +209,7 @@ enum CustomerJobCompilationLoader {
     /// this person can read. There is no customer-wide media or notes route; the groups are built from the job routes.
     static func load(customerID: String, organizationID: String, api: APIClient,
                      access: CustomerRecordAccess = .all,
+                     moneyOnly: Bool = false,
                      isCurrent: @escaping @MainActor @Sendable () -> Bool = { true }) async throws -> CustomerJobCompilation {
         let requestGeneration = api.requestGeneration
         try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
@@ -241,7 +242,7 @@ enum CustomerJobCompilationLoader {
         try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
         let jobReads = try await mapJobs(jobs) { job in
             try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
-            return try await readJob(job, api: api, access: access, generation: requestGeneration, isCurrent: isCurrent)
+            return try await readJob(job, api: api, access: access, moneyOnly: moneyOnly, generation: requestGeneration, isCurrent: isCurrent)
         }
         for (job, read) in zip(jobs, jobReads) {
             let notes = read.notes.filter { $0.organizationId == organizationID && $0.jobId == job.id }
@@ -269,7 +270,7 @@ enum CustomerJobCompilationLoader {
         var cursor: String?
         var seen = Set<String>()
         var activityIncomplete = false
-        repeat {
+        while !moneyOnly {
             try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
             let page = try await api.fieldCustomerHistory(customerID, cursor: cursor)
             try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
@@ -279,10 +280,11 @@ enum CustomerJobCompilationLoader {
                 activityIncomplete = true
                 break
             }
-        } while cursor != nil
+            if cursor == nil { break }
+        }
         var legacyPhotosByJob: [String: [JobPhotoRecord]] = [:]
         // Only an archived-inclusive media read permits a legacy photo fallback.
-        let photoJobs = jobs.filter { mediaByJob[$0.id] != nil }
+        let photoJobs = moneyOnly ? [] : jobs.filter { mediaByJob[$0.id] != nil }
         let photoReads = try await mapJobs(photoJobs) { job in
             try requireCurrent(api, generation: requestGeneration, isCurrent: isCurrent)
             do {
@@ -369,16 +371,20 @@ enum CustomerJobCompilationLoader {
         guard api.requestGeneration == generation, isCurrent() else { throw CancellationError() }
     }
 
-    private static func readJob(_ job: JobRecord, api: APIClient, access: CustomerRecordAccess, generation: UUID,
+    private static func readJob(_ job: JobRecord, api: APIClient, access: CustomerRecordAccess, moneyOnly: Bool, generation: UUID,
                                 isCurrent: @MainActor () -> Bool) async throws -> JobRead {
         try requireCurrent(api, generation: generation, isCurrent: isCurrent)
-        let notes = try await api.fieldNotes(job.id)
+        let notes = moneyOnly ? [] : try await api.fieldNotes(job.id)
         try requireCurrent(api, generation: generation, isCurrent: isCurrent)
         let media: [MediaAssetRecord]?
-        do { media = try await api.fieldMedia(job.id, includeArchived: true, isCurrent: isCurrent) }
-        catch is CancellationError { throw CancellationError() }
-        catch let problem as Problem where problem.status == 401 { throw problem }
-        catch { media = nil }
+        if moneyOnly {
+            media = []
+        } else {
+            do { media = try await api.fieldMedia(job.id, includeArchived: true, isCurrent: isCurrent) }
+            catch is CancellationError { throw CancellationError() }
+            catch let problem as Problem where problem.status == 401 { throw problem }
+            catch { media = nil }
+        }
         try requireCurrent(api, generation: generation, isCurrent: isCurrent)
         let links = access.estimates ? try await api.fieldJobEstimateLinks(job.id, isCurrent: isCurrent) : []
         try requireCurrent(api, generation: generation, isCurrent: isCurrent)
