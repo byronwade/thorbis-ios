@@ -30,6 +30,11 @@ struct InvoiceIdleCaptureIdentity: Sendable {
         return domain.valid && validUUID(actorID) && validUUID(customerID) && (jobID.map(validUUID) ?? true)
     }
 }
+struct InvoiceIdleCaptureStatus: Sendable {
+    let version: Int64
+    let sequence: Int64
+    let acknowledged: Bool
+}
 struct InvoiceIdleCaptureRecovery: Sendable {
     let owner: UUID
     let version: Int64
@@ -53,6 +58,7 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             try exec(db, "PRAGMA journal_mode=WAL")
             try exec(db, "PRAGMA synchronous=FULL")
             try exec(db, "CREATE TABLE IF NOT EXISTS heads (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, owner TEXT NOT NULL, version INTEGER NOT NULL, pending INTEGER NOT NULL DEFAULT 0, command BLOB, PRIMARY KEY(origin,org,invoice))")
+            try exec(db, "CREATE TABLE IF NOT EXISTS capture_ack (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, version INTEGER NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(origin,org,invoice))")
             try exec(db, "CREATE TABLE IF NOT EXISTS capture_heads (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, actor TEXT NOT NULL, customer TEXT NOT NULL, job TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(origin,org,invoice))")
             try exec(db, "CREATE TABLE IF NOT EXISTS snapshots (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, version INTEGER NOT NULL, draft BLOB NOT NULL, PRIMARY KEY(origin,org,invoice,version))")
         }
@@ -175,11 +181,52 @@ final class InvoiceTransactionFence: @unchecked Sendable {
                     let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
                 }
             }
+            // Invalidate the previous acknowledgement in the same transaction as the new capture.
+            try statement(db, "DELETE FROM capture_ack WHERE origin=? AND org=? AND invoice=?") { s in
+                try keys(s, domain); let code = sqlite3_step(s)
+                guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
+            }
             try statement(db, "INSERT INTO snapshots(origin,org,invoice,version,draft) VALUES(?,?,?,?,?)") { s in
                 try keys(s, domain); sqlite3_bind_int64(s, 4, version); try bind(s, 5, bytes)
                 let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
             }
             return version
+        }
+    }
+    private func acknowledged(_ db: OpaquePointer, _ domain: InvoiceFenceDomain, version: Int64, sequence: Int64) throws -> Bool {
+        try statement(db, "SELECT version,sequence FROM capture_ack WHERE origin=? AND org=? AND invoice=?") { s in
+            try keys(s, domain); let code = sqlite3_step(s)
+            if code == SQLITE_DONE { return false }
+            guard code == SQLITE_ROW else { throw InvoiceFenceError.database(code) }
+            return sqlite3_column_int64(s, 0) == version && sqlite3_column_int64(s, 1) == sequence
+        }
+    }
+    private func verifiedCapture(_ db: OpaquePointer, _ identity: InvoiceIdleCaptureIdentity) throws -> (String, Int64, Int64)? {
+        guard let current = try head(db, identity.domain) else { return nil }
+        guard current.2 == 0 else { throw InvoiceFenceError.pending }
+        guard let capture = try captureHead(db, identity.domain), capture.0 == identity.actorID,
+              capture.1 == identity.customerID, capture.2 == (identity.jobID ?? "") else { throw InvoiceFenceError.conflict }
+        return (current.0, current.1, capture.3)
+    }
+    /// Status is not authorization and does not reveal draft bytes or owner.
+    func captureStatus(identity: InvoiceIdleCaptureIdentity) throws -> InvoiceIdleCaptureStatus? {
+        guard identity.valid else { throw InvoiceFenceError.invalid }
+        return try transaction(identity.domain) { db in
+            guard let current = try verifiedCapture(db, identity) else { return nil }
+            return try InvoiceIdleCaptureStatus(version: current.1, sequence: current.2,
+                acknowledged: acknowledged(db, identity.domain, version: current.1, sequence: current.2))
+        }
+    }
+    /// Acknowledgement itself can have an ambiguous commit result; callers must inspect status.
+    func acknowledge(identity: InvoiceIdleCaptureIdentity, owner: UUID, expectedVersion: Int64, sequence: Int64) throws {
+        guard identity.valid else { throw InvoiceFenceError.invalid }
+        try transaction(identity.domain) { db in
+            guard let current = try verifiedCapture(db, identity), current.0 == owner.uuidString.lowercased(),
+                  current.1 == expectedVersion, current.2 == sequence else { throw InvoiceFenceError.conflict }
+            try statement(db, "INSERT INTO capture_ack(origin,org,invoice,version,sequence) VALUES(?,?,?,?,?) ON CONFLICT(origin,org,invoice) DO UPDATE SET version=excluded.version,sequence=excluded.sequence") { s in
+                try keys(s, identity.domain); sqlite3_bind_int64(s, 4, expectedVersion); sqlite3_bind_int64(s, 5, sequence)
+                let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
+            }
         }
     }
     /// Metadata matching is not authentication. Reauthorization must occur before disclosure.
@@ -192,6 +239,7 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             guard let capture = try captureHead(db, domain), capture.0 == identity.actorID,
                   capture.1 == identity.customerID, capture.2 == (identity.jobID ?? ""),
                   let owner = UUID(uuidString: current.0) else { throw InvoiceFenceError.conflict }
+            guard try acknowledged(db, domain, version: current.1, sequence: capture.3) else { throw InvoiceFenceError.pending }
             return try statement(db, "SELECT draft FROM snapshots WHERE origin=? AND org=? AND invoice=? AND version=?") { s in
                 try keys(s, domain); sqlite3_bind_int64(s, 4, current.1)
                 let code = sqlite3_step(s)
@@ -207,6 +255,9 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             guard let current = try head(db, domain) else { throw InvoiceFenceError.conflict }
             guard current.2 == 0 else { throw InvoiceFenceError.pending }
             guard current.0 == owner.uuidString.lowercased(), current.1 == expectedVersion, current.1 < Int64.max else { throw InvoiceFenceError.conflict }
+            if let capture = try captureHead(db, domain) {
+                guard try acknowledged(db, domain, version: current.1, sequence: capture.3) else { throw InvoiceFenceError.pending }
+            }
             try statement(db, "UPDATE heads SET version=?,pending=?,command=? WHERE origin=? AND org=? AND invoice=?") { s in
                 sqlite3_bind_int64(s, 1, current.1 + 1); sqlite3_bind_int(s, 2, kind.rawValue); try bind(s, 3, command)
                 try bind(s, 4, domain.origin); try bind(s, 5, domain.organizationID); try bind(s, 6, domain.invoiceID)
