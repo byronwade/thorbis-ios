@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-12-job-document-shortcuts",
+            date: "2026-11-12",
+            highlights: [
+                .init(symbol: "arrow.up.arrow.down", title: "Move between job documents",
+                      detail: "Switch between estimates and invoices while scrolling through a job's documents."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-12-job-and-inbox",
             date: "2026-11-12",
             highlights: [

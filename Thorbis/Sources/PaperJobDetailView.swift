@@ -216,7 +216,7 @@ struct JobDetailView: View {
                     Section {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selectedTab {
-                            case "Money": moneyContent(job, proxy: proxy)
+                            case "Money": moneyContent(job)
                             case "Activity": activityContent(job)
                             default: overviewContent(job)
                             }
@@ -226,8 +226,14 @@ struct JobDetailView: View {
                         .padding(.top, selectedTab == "Overview" ? (isOnSite ? 12 : 14) : 8)
                         .padding(.bottom, 28)
                     } header: {
-                        // Inset 1pt so the pinned tabs never cut the sheet's rim.
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.card.padding(.horizontal, 1)) }
+                        // Keep document shortcuts with the section selector as the job scrolls.
+                        // At accessibility sizes the chooser stays above the scroll view; these
+                        // shortcuts pin only after the tall job header has scrolled away.
+                        VStack(alignment: .leading, spacing: 0) {
+                            if !typeSize.isAccessibilitySize { tabBar(job) }
+                            if selectedTab == "Money" { moneyJumps(proxy: proxy) }
+                        }
+                        .background(Theme.card.padding(.horizontal, 1))
                     }
                     }
                     }
@@ -1972,14 +1978,8 @@ struct JobDetailView: View {
 
     /// Money: the job's estimates, then its invoices. Each paper shows its own amount once; what's
     /// owed across them is on Overview and in the bar, never repeated in a header.
-    private func moneyContent(_ job: JobRecord, proxy: ScrollViewProxy) -> some View {
+    private func moneyContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 28) {
-            if session.can("estimate.view", feature: "estimates") && session.can("invoice.view", feature: "invoicing") {
-                FlowRow(spacing: 8, lineSpacing: 8) {
-                    moneyJump("Estimates", id: "job-money-estimates", proxy: proxy)
-                    moneyJump("Invoices", id: "job-money-invoices", proxy: proxy)
-                }
-            }
             VStack(alignment: .leading, spacing: 0) {
                 Color.clear.frame(height: 1).id("job-money-estimates")
                 estimatesContent(job)
@@ -1988,6 +1988,17 @@ struct JobDetailView: View {
                 Color.clear.frame(height: 1).id("job-money-invoices")
                 invoiceContent(job)
             }
+        }
+    }
+
+    @ViewBuilder private func moneyJumps(proxy: ScrollViewProxy) -> some View {
+        if session.can("estimate.view", feature: "estimates") && session.can("invoice.view", feature: "invoicing") {
+            FlowRow(spacing: 8, lineSpacing: 8) {
+                moneyJump("Estimates", id: "job-money-estimates", proxy: proxy)
+                moneyJump("Invoices", id: "job-money-invoices", proxy: proxy)
+            }
+            .padding(.horizontal, Theme.gutter)
+            .padding(.bottom, 8)
         }
     }
 
