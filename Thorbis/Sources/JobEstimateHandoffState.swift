@@ -170,6 +170,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     private var freshIDs: Set<String> = []
     @Published private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
     @Published private(set) var overviewPriceFailures: Set<String> = []
+    @Published private(set) var overviewUnsignedIDs: Set<String> = []
     @Published private(set) var overviewPriceGeneration = UUID()
     private var overviewPriceReady = false
     @Published private(set) var overviewPricesNeedRefresh = false
@@ -288,7 +289,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard isCurrent, !loading else { if !isCurrent { retire() }; return }
         retryingPage = false
         let ticket = UUID(); request = ticket; loading = true; error = nil
-        overviewPriceReady = false; overviewPricesNeedRefresh = false; revisions = [:]; overviewReceipts = [:]; overviewPriceFailures = []; overviewPriceGeneration = UUID()
+        overviewPriceReady = false; overviewPricesNeedRefresh = false; revisions = [:]; overviewReceipts = [:]; overviewPriceFailures = []; overviewUnsignedIDs = []; overviewPriceGeneration = UUID()
         defer { if request == ticket { loading = false } }
         do {
             let fresh = try await api.liveFieldJob(scope.jobID)
@@ -359,6 +360,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
             self.revisions = retainedRevisions; self.overviewReceipts = retainedReceipts
             self.overviewPriceFailures = []
+            self.overviewUnsignedIDs = Set(self.overviewUnsignedIDs.filter { retainedRevisions[$0] != nil })
             self.overviewPriceReady = true; self.overviewPricesNeedRefresh = false
             self.overviewPriceGeneration = UUID()
         }) { [weak self] cursor in
@@ -496,7 +498,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard overviewPriceReady else { return }
         let generation = overviewPriceGeneration
         let candidates = records.filter { record in
-            guard detailsCurrent(record, authority: authorityRevision) else { return false }
+            guard detailsCurrent(record, authority: authorityRevision), !overviewUnsignedIDs.contains(record.id) else { return false }
             if record.status == "sent" { return revision(for: record.id) == nil }
             if record.status == "approved" { return overviewReceipt(for: record) == nil }
             return false
@@ -527,6 +529,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         let ticket = UUID()
         overviewRequests[record.id] = ticket
         overviewPriceFailures.remove(record.id)
+        overviewUnsignedIDs.remove(record.id)
         defer { if overviewRequests[record.id] == ticket { overviewRequests[record.id] = nil } }
         do {
             let issued = try await issuedDetails(record, authority: authorityRevision)
@@ -538,17 +541,23 @@ final class JobEstimateHandoffModel: ObservableObject {
             }
             guard !Task.isCancelled, generation == overviewPriceGeneration, overviewRequests[record.id] == ticket,
                   detailsCurrent(record, authority: authorityRevision) else { return }
+            if record.status != "approved", !customerIssuedOverviewAmountsMatch(issued) {
+                revisions[record.id] = nil
+                overviewReceipts[record.id] = nil
+                overviewPriceFailures.insert(record.id)
+                return
+            }
             revisions[record.id] = issued
             if record.status == "approved" {
                 if let receipt { overviewReceipts[record.id] = receipt }
-                else { overviewReceipts[record.id] = nil; overviewPriceFailures.insert(record.id) }
+                else { overviewReceipts[record.id] = nil; overviewUnsignedIDs.insert(record.id) }
             }
-        } catch is CancellationError {
         } catch {
             guard !Task.isCancelled, generation == overviewPriceGeneration, overviewRequests[record.id] == ticket,
                   detailsCurrent(record, authority: authorityRevision) else { return }
             revisions[record.id] = nil
             overviewReceipts[record.id] = nil
+            overviewUnsignedIDs.remove(record.id)
             overviewPriceFailures.insert(record.id)
         }
     }
@@ -560,6 +569,55 @@ final class JobEstimateHandoffModel: ObservableObject {
               let receipt = overviewReceipts[record.id],
               (try? receipt.validate(for: revision)) != nil else { return nil }
         return receipt
+    }
+
+    func overviewSentTotal(for record: EstimateRecord) -> (amount: Int, currency: String)? {
+        guard record.status == "sent", let revision = revision(for: record.id), (revision.options ?? []).isEmpty,
+              customerOverviewAmountsMatch(lines: revision.lines, currency: revision.currency, total: revision.totalAmount) else { return nil }
+        return (revision.totalAmount, revision.currency)
+    }
+
+    func overviewOptionTotal(_ option: FieldEstimateOption, estimateID: String) -> (amount: Int, currency: String)? {
+        guard revision(for: estimateID)?.options?.contains(where: { $0 == option }) == true,
+              customerOverviewAmountsMatch(lines: option.lines, currency: option.currency, total: option.totalAmount) else { return nil }
+        return (option.totalAmount, option.currency)
+    }
+
+    func overviewFallbackPrice(for record: EstimateRecord) -> String {
+        if overviewPricesNeedRefresh || !detailsCurrent(record, authority: authorityRevision) {
+            return "Refresh to check price"
+        }
+        if overviewUnsignedIDs.contains(record.id) {
+            return "No signed customer receipt is available for this approval. Ask your technician for details."
+        }
+        if overviewPriceFailures.contains(record.id) || (record.status == "sent" && revision(for: record.id) != nil) {
+            if record.status == "approved", !(record.options ?? []).isEmpty { return "Accepted package needs verification" }
+            return (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+        }
+        if (record.options ?? []).isEmpty || record.status == "approved" { return "Checking price…" }
+        return "Choose a package"
+    }
+
+    func overviewOptionFallbackPrice(for record: EstimateRecord) -> String {
+        if overviewPricesNeedRefresh || !detailsCurrent(record, authority: authorityRevision) {
+            return "Refresh to check price"
+        }
+        if overviewPriceFailures.contains(record.id) || revision(for: record.id) != nil {
+            return "Price needs current terms"
+        }
+        return "Checking price…"
+    }
+
+    private func customerIssuedOverviewAmountsMatch(_ revision: CustomerIssuedEstimateRevision) -> Bool {
+        let options = revision.options ?? []
+        if options.isEmpty {
+            return customerOverviewAmountsMatch(lines: revision.lines, currency: revision.currency, total: revision.totalAmount)
+        }
+        return options.allSatisfy { customerOverviewAmountsMatch(lines: $0.lines, currency: $0.currency, total: $0.totalAmount) }
+    }
+
+    private func customerOverviewAmountsMatch(lines: [FieldLine], currency: String, total: Int) -> Bool {
+        customerEstimateDisplay(lines, currency: currency)?.amounts.total == total
     }
 
     func approvedReceipt(_ record: EstimateRecord, revision: CustomerIssuedEstimateRevision, authority: UUID) async throws -> CustomerEstimateAcceptanceReceipt? {
@@ -664,7 +722,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         retired = true; request = UUID(); loading = false
         membershipPager = nil; pageRead = nil; canLoadMoreEstimates = false
         records = []; freshIDs = []; unavailableIDs = []; reviewed = []; revisions = [:]
-        overviewPriceReady = false; overviewPricesNeedRefresh = false; overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
+        overviewPriceReady = false; overviewPricesNeedRefresh = false; overviewReceipts = [:]; overviewPriceFailures = []; overviewUnsignedIDs = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
         jobTitle = ""; customerName = ""; lastSignerName = nil; error = nil
         for context in contexts.values { context.retire() }
         contexts = [:]

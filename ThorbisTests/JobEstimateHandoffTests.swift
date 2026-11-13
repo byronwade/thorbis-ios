@@ -760,4 +760,119 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertEqual(model.contexts[reviewed.key]?.signature, original)
         XCTAssertEqual(context.signature?.clientAssetID, original.clientAssetID)
     }
+
+    private var overviewLink: String { #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"# }
+    private var validReceipt: String {
+        #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":19000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}]}"#
+    }
+    private func overviewRoutes(status: String = "sent", recordBody: String? = nil, revisionBody: String? = nil,
+                                receiptStatus: Int? = nil, receiptBody: String? = nil,
+                                receiptGate: URLProtocolFixture.Gate? = nil,
+                                membershipGate: URLProtocolFixture.Gate? = nil) -> [String: URLProtocolFixture.Reply] {
+        let estimatePath = "/v1/estimates/\(a)", membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let issuedStatus = status == "approved" ? "approved" : "issued"
+        var routes: [String: URLProtocolFixture.Reply] = [
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+            "\(membershipPath)/\(a)": .init(200, overviewLink, gate: membershipGate),
+            estimatePath: .init(200, recordBody ?? record(a, status: status)),
+            "\(estimatePath)/revisions/1": .init(200, revisionBody ?? revision(a, status: issuedStatus))
+        ]
+        if let receiptStatus, let receiptBody {
+            routes["\(estimatePath)/revisions/1/acceptance"] = .init(receiptStatus, receiptBody, gate: receiptGate)
+        }
+        return routes
+    }
+    func testOverviewKeepsCheckingCopyUntilVerifiedIssuedAmountsMatch() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes(overviewRoutes())
+        await model.refresh()
+        let record = try XCTUnwrap(model.records.first)
+        XCTAssertEqual(model.overviewFallbackPrice(for: record), "Checking price…")
+        XCTAssertNil(model.overviewSentTotal(for: record))
+        await model.loadOverviewPrices()
+        XCTAssertEqual(model.overviewSentTotal(for: try XCTUnwrap(model.records.first))?.amount, 19000)
+        XCTAssertFalse(model.overviewPriceFailures.contains(a))
+    }
+    func testOverviewDoesNotShowIssuedTotalWhenLineMathDoesNotMatch() async throws {
+        let model = try await ready([])
+        let inconsistent = revision(a).replacingOccurrences(of: "\"totalAmount\":19000", with: "\"totalAmount\":20000")
+        URLProtocolFixture.setRoutes(overviewRoutes(revisionBody: inconsistent))
+        await model.refresh()
+        await model.loadOverviewPrices()
+        let record = try XCTUnwrap(model.records.first)
+        XCTAssertNil(model.revision(for: a))
+        XCTAssertNil(model.overviewSentTotal(for: record))
+        XCTAssertTrue(model.overviewPriceFailures.contains(a))
+        XCTAssertEqual(model.overviewFallbackPrice(for: record), "Price needs current terms")
+    }
+    func testOverviewReceiptRereadMismatchWhileCurrentOffersRetry() async throws {
+        let model = try await ready([])
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        URLProtocolFixture.setRoutes(overviewRoutes(status: "approved", revisionBody: revision(a, status: "approved"),
+                                                    receiptStatus: 200, receiptBody: validReceipt, receiptGate: gate))
+        await model.refresh()
+        let task = Task { @MainActor in await model.loadOverviewPrices() }
+        let receiptPath = "/v1/estimates/\(a)/revisions/1/acceptance"
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == receiptPath }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == receiptPath })
+        URLProtocolFixture.setRoutes(overviewRoutes(status: "approved",
+                                                    revisionBody: revision(a, status: "approved").replacingOccurrences(of: "Sample scope", with: "Changed title"),
+                                                    receiptStatus: 200, receiptBody: validReceipt))
+        gate.release()
+        await task.value
+        XCTAssertTrue(model.overviewPriceFailures.contains(a))
+        XCTAssertFalse(model.overviewUnsignedIDs.contains(a))
+        XCTAssertNil(model.overviewReceipt(for: try XCTUnwrap(model.records.first)))
+    }
+    func testOverviewCancelledPriceLoadDoesNotOfferRetry() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes(overviewRoutes())
+        await model.refresh()
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        URLProtocolFixture.setRoutes(overviewRoutes(membershipGate: gate))
+        let task = Task { @MainActor in await model.loadOverviewPrices() }
+        let membershipPath = "/v1/jobs/\(jobID)/estimates/\(a)"
+        for _ in 0..<300 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == membershipPath }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == membershipPath })
+        task.cancel(); gate.release(); await task.value
+        XCTAssertFalse(model.overviewPriceFailures.contains(a))
+        XCTAssertNil(model.overviewSentTotal(for: try XCTUnwrap(model.records.first)))
+    }
+    func testOverviewAnnouncesCheckingPriceForSelectedPackageUntilVerified() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes(overviewRoutes(recordBody: try packageRecord(), revisionBody: try packageRevision()))
+        await model.refresh()
+        let record = try XCTUnwrap(model.records.first)
+        XCTAssertEqual(model.overviewOptionFallbackPrice(for: record), "Checking price…")
+        XCTAssertEqual(model.overviewFallbackPrice(for: record), "Choose a package")
+        await model.loadOverviewPrices()
+        let option = try XCTUnwrap(model.revision(for: a)?.options?.first)
+        XCTAssertEqual(model.overviewOptionTotal(option, estimateID: a)?.amount, 19000)
+    }
+    func testOverviewApprovedPackageStaysCheckingUntilReceipt() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes(overviewRoutes(status: "approved", recordBody: try packageRecord(status: "approved"),
+                                                    revisionBody: try packageRevision().replacingOccurrences(of: "\"status\":\"issued\"", with: "\"status\":\"approved\"")))
+        await model.refresh()
+        XCTAssertEqual(model.overviewFallbackPrice(for: try XCTUnwrap(model.records.first)), "Checking price…")
+    }
+    func testOverviewMissingReceiptIsUnsignedNotRetryable() async throws {
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes(overviewRoutes(status: "approved", revisionBody: revision(a, status: "approved"),
+                                                    receiptStatus: 404, receiptBody: #"{"status":404,"title":"Not found"}"#))
+        await model.refresh()
+        let pending = try XCTUnwrap(model.records.first)
+        XCTAssertEqual(model.overviewFallbackPrice(for: pending), "Checking price…")
+        await model.loadOverviewPrices()
+        let record = try XCTUnwrap(model.records.first)
+        XCTAssertFalse(model.overviewPriceFailures.contains(a))
+        XCTAssertTrue(model.overviewUnsignedIDs.contains(a))
+        XCTAssertNil(model.overviewReceipt(for: record))
+        XCTAssertEqual(model.overviewFallbackPrice(for: record),
+                       "No signed customer receipt is available for this approval. Ask your technician for details.")
+    }
 }

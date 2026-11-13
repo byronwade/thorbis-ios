@@ -363,10 +363,10 @@ struct JobEstimateHandoffView: View {
                                     Image(systemName: model.selection.optionIDs[record.id] == option.id ? "largecircle.fill.circle" : "circle")
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
-                                        if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
-                                            Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        if let total = model.overviewOptionTotal(option, estimateID: record.id) {
+                                            Text(money(total.amount, currency: total.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
                                         } else {
-                                            Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                                            Text(model.overviewOptionFallbackPrice(for: record)).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                                         }
                                     }
                                 }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
@@ -397,19 +397,18 @@ struct JobEstimateHandoffView: View {
         let state = model.selectedIDs.contains(record.id) ? "Selected" : "Not selected"
         let price: String
         if let option = model.options(for: record.id).first(where: { $0.id == model.selection.optionIDs[record.id] }) {
-            if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
-                price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            if let total = model.overviewOptionTotal(option, estimateID: record.id) {
+                price = "\(option.title), \(money(total.amount, currency: total.currency))"
             } else {
-                price = "\(option.title), price needs current terms"
+                price = "\(option.title), \(model.overviewOptionFallbackPrice(for: record))"
             }
-        } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
-            price = money(revision.totalAmount, currency: revision.currency)
+        } else if let total = model.overviewSentTotal(for: record) {
+            price = money(total.amount, currency: total.currency)
         } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
         } else {
-            price = model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
-                ? "Refresh to check price" : (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+            price = model.overviewFallbackPrice(for: record)
         }
         return "\(state), \(record.status.capitalized), \(price)"
     }
@@ -433,19 +432,13 @@ struct JobEstimateHandoffView: View {
             } else if let receipt = model.overviewReceipt(for: record) {
                 if let title = receipt.optionTitle { Text(title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
                 Text(money(receipt.totalAmount, currency: receipt.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if record.status == "sent", let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
-                Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
+            } else if let total = model.overviewSentTotal(for: record) {
+                Text(money(total.amount, currency: total.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty {
-                Text(model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
-                     ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…")
-                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-            } else if record.status == "approved" {
-                Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else {
-                Text("Choose a package").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Text(model.overviewFallbackPrice(for: record)).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
         }.frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Theme.foreground)
     }
