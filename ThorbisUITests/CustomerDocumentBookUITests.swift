@@ -136,14 +136,16 @@ final class CustomerDocumentBookUITests: XCTestCase {
         sign.tap()
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(app.scrollViews["customer-job-documents-list"].waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        let canReopen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: estimate)
+        XCTAssertEqual(XCTWaiter.wait(for: [canReopen], timeout: 5), .completed,
+                       "Leaving the book must release the pending open immediately")
+        estimate.tap()
+        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
         let noEarlyForm = XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)
         _ = XCTWaiter.wait(for: [noEarlyForm], timeout: 18)
-        XCTAssertFalse(app.textFields["Your full name"].exists)
-        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
-        estimate.tap()
-        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10),
-                      "Reopening the job book must not restore a stale invoice signing destination: \(app.debugDescription)")
-        XCTAssertFalse(app.textFields["Your full name"].exists, "A finished old request must not reopen signing")
+        XCTAssertFalse(app.textFields["Your full name"].exists,
+                       "The old request must not reopen signing after the customer returns to the job book")
     }
 
     func testInvoiceSigningDoesNotOpenAfterEditPermissionIsRevoked() {
