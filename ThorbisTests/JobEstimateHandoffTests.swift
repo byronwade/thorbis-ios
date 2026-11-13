@@ -366,7 +366,12 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertNotNil(model.error)
     }
     func testNextCheckpointPrefillsConfirmedSignerWithoutCarryingInkOrConsent() async throws {
-        let model = try await ready([.init(200, jobJSON), .init(200, membership([a,b])), .init(200, record(a)), .init(200, record(b)), .init(200, record(a)), .init(200, revision(a)), .init(200, record(b)), .init(200, revision(b))])
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), "/v1/jobs/\(jobID)/estimates": .init(200, membership([a,b])),
+            "/v1/estimates/\(a)": .init(200, record(a)), "/v1/estimates/\(b)": .init(200, record(b)),
+            "/v1/estimates/\(a)/revisions/1": .init(200, revision(a)), "/v1/estimates/\(b)/revisions/1": .init(200, revision(b))
+        ])
         await model.refresh(); model.setSelected(a, selected: true); model.setSelected(b, selected: true); await model.reviewSelected()
         let first = try XCTUnwrap(model.context(for: a)), second = try XCTUnwrap(model.context(for: b))
         _ = try first.freezeSignature(signerName: "Sample different signer", png: Data([1,2,3]), signedAt: "2026-10-29T12:00:00Z")
@@ -505,7 +510,12 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertEqual(context.signature, intent, "Canonical display attribution must not replace the retained attempt")
     }
     func testReviewedTermsComeFromBothExactImmutableRevisions() async throws {
-        let model = try await ready([.init(200, jobJSON), .init(200, membership([a,b])), .init(200, record(a)), .init(200, record(b)), .init(200, record(a)), .init(200, revision(a)), .init(200, record(b)), .init(200, revision(b))])
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), "/v1/jobs/\(jobID)/estimates": .init(200, membership([a,b])),
+            "/v1/estimates/\(a)": .init(200, record(a)), "/v1/estimates/\(b)": .init(200, record(b)),
+            "/v1/estimates/\(a)/revisions/1": .init(200, revision(a)), "/v1/estimates/\(b)/revisions/1": .init(200, revision(b))
+        ])
         await model.refresh(); model.setSelected(a, selected: true); model.setSelected(b, selected: true)
         await model.reviewSelected()
         XCTAssertEqual(model.reviewed.map(\.id), [a,b]); XCTAssertEqual(model.reviewed.map(\.revision.totalAmount), [19000,19000])

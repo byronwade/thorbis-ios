@@ -392,12 +392,14 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testOneFailedEstimateKeepsOtherSuccessesAndSameJobPreviousRow() async throws {
-        let first = api([.init(200, page([link(11), link(12)])),
-                         .init(200, estimate(10)), .init(200, estimate(11)), .init(200, estimate(12))])
+        let membership = "/v1/jobs/\(id(100))/estimates"
+        let path10 = "/v1/estimates/\(id(10))", path11 = "/v1/estimates/\(id(11))", path12 = "/v1/estimates/\(id(12))"
+        let first = APIClient(session: URLProtocolFixture.session(routes: [membership: .init(200, page([link(11), link(12)])),
+            path10: .init(200, estimate(10)), path11: .init(200, estimate(11)), path12: .init(200, estimate(12))]), baseURL: "https://app.thorbis.com")
         let previous = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: first, retaining: nil, isCurrent: { true })
-        let second = api([.init(200, page([link(11), link(12)])), .init(200, estimate(10)),
-                          .init(503, problem(503)), .init(200, estimate(12))])
-        let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: second, retaining: previous, isCurrent: { true })
+        URLProtocolFixture.setRoutes([membership: .init(200, page([link(11), link(12)])),
+                                      path10: .init(200, estimate(10)), path11: .init(503, problem(503)), path12: .init(200, estimate(12))])
+        let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: first, retaining: previous, isCurrent: { true })
         let read = try XCTUnwrap(result)
         XCTAssertEqual(Set(read.records.map(\.id)), Set([id(10), id(11), id(12)]))
         XCTAssertEqual(read.freshIDs, Set([id(10), id(12)]))
