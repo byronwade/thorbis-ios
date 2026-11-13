@@ -47,6 +47,24 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(pages(app).buttons["Sign summary"].waitForExistence(timeout: 15))
     }
 
+    func testDelayedSigningLookupCannotReplaceReopenedDocumentActivation() {
+        continueAfterFailure = false
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-hold-first-signing-lookup"])
+        let page = pages(app)
+        XCTAssertTrue(page.descendants(matching: .any)["Checking your invoice summary"].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.buttons["Sign summary"].exists)
+        app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        app.buttons["Choose a job document"].tap(); app.buttons["INV-2209"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2209"].waitForExistence(timeout: 10))
+        let sign = page.buttons["Sign summary"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 15))
+        app.buttons["Release delayed signing lookup"].tap()
+        XCTAssertTrue(app.buttons["Delayed signing lookup released"].waitForExistence(timeout: 5))
+        XCTAssertTrue(sign.waitForExistence(timeout: 10))
+        XCTAssertFalse(page.buttons["Check signature"].exists)
+    }
+
     func testLostSummaryResponseSurvivesSwitchingDocuments() {
         continueAfterFailure = false
         let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-summary-signing-lost-once"])

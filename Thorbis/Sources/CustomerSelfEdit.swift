@@ -455,12 +455,18 @@ struct CustomerModeOwnerUnlockButton: View {
 private struct CustomerModePreviewControlsStack: ViewModifier {
     @EnvironmentObject private var session: SessionController
     @State private var replaced = false
+    @State private var releasedSigningLookup = false
     func body(content: Content) -> some View {
         VStack(spacing: 0) {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-legacy-handoff-test") {
                 Button(replaced ? "Preview session replaced" : "Preview replace session") {
                     Task { await session.restore(); replaced = true }
                 }.frame(minHeight: 44).accessibilityIdentifier(replaced ? "preview-session-replaced" : "preview-replace-session")
+            }
+            if PaperPreview.isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-first-signing-lookup") {
+                Button(releasedSigningLookup ? "Delayed signing lookup released" : "Release delayed signing lookup") {
+                    PaperPreviewProtocol.releaseHeldSigningLookup(); releasedSigningLookup = true
+                }
             }
             if PaperPreview.isJobEstimateHandoff && !ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-hide-controls") { JobEstimateHandoffPreviewControls() }
             else if PaperPreview.isJobEstimateRecoveryPreview { PaperPreviewConnectionMenu() }

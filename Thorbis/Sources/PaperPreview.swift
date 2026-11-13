@@ -763,6 +763,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let lock = NSLock()
         var summaryReceipts: [String: [String: Any]] = [:]
         var summaryLostOnce = false
+        var signingLookupHeldOnce = false
+        var heldSigningLookup: (@Sendable () -> Void)?
         var setupPaymentReads = 0
         var documentHistoryRestored = false
         var failPaymentRecheck = false
@@ -791,7 +793,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.summaryReceipts = [:]; scenario.summaryLostOnce = false; scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.summaryReceipts = [:]; scenario.summaryLostOnce = false; scenario.signingLookupHeldOnce = false; scenario.heldSigningLookup = nil; scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+    }
+    static func releaseHeldSigningLookup() {
+        let release = scenario.lock.withLock { let result = scenario.heldSigningLookup; scenario.heldSigningLookup = nil; return result }
+        release?()
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -1021,6 +1027,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
                 self.client?.urlProtocol(self, didLoad: body)
                 self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if PaperPreview.isJobDocumentsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-first-signing-lookup"),
+               url.path == "/v1/invoices/00000000-0000-4000-8000-000000002209/customer-presentation/summary-authorization",
+               Self.scenario.lock.withLock({
+                   guard !Self.scenario.signingLookupHeldOnce else { return false }
+                   Self.scenario.signingLookupHeldOnce = true
+                   Self.scenario.heldSigningLookup = deliver
+                   return true
+               }) {
+                return
             }
             if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
