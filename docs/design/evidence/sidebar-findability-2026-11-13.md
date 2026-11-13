@@ -25,6 +25,8 @@ the simulator switched through another app while opening the drawer. Its
 isolated rerun passed. See `/private/tmp/thorbis-sidebar-local-build-1113.log`,
 `/private/tmp/thorbis-sidebar-current-test-1113.log` and
 `/private/tmp/thorbis-sidebar-current-retry-1113.log`. This does not establish
-the cause of the combined-run failure. A current-candidate iPad run, actual
-VoiceOver activation, largest text and single-place permission cases remain
-unverified.
+the cause of the combined-run failure. On the same simulator build, three
+focused iPad UI tests passed, including opening the web-aligned sidebar and
+toggling the Work section: `/private/tmp/thorbis-sidebar-ipad-current-1113.log`.
+Actual VoiceOver activation, largest text and single-place permission cases
+remain unverified.
