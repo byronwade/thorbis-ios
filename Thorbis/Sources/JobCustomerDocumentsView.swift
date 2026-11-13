@@ -14,7 +14,20 @@ private enum CustomerJobPaper: Hashable {
     var selectionRevision = UUID()
     private(set) var requestRevision = UUID()
 
-    func invalidatePendingOpen() { requestRevision = UUID() }
+    func beginOpen(_ id: String) -> UUID? {
+        guard openingID == nil else { return nil }
+        let request = UUID()
+        requestRevision = request
+        openingID = id
+        return request
+    }
+    func finishOpen(_ request: UUID) {
+        if requestRevision == request { openingID = nil }
+    }
+    func invalidatePendingOpen() {
+        requestRevision = UUID()
+        openingID = nil
+    }
 }
 
 /// Customer view's home. Lives inside one CustomerModeContainer: the job's estimates (select and
@@ -417,14 +430,14 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func openEstimate(_ id: String, decision: Bool = false) async {
-        guard openingID == nil, currentWorkspace, canViewEstimates else { return }
-        openingID = id
-        defer { openingID = nil }
+        guard currentWorkspace, canViewEstimates, let request = paperNavigation.beginOpen(id) else { return }
+        defer { paperNavigation.finishOpen(request) }
         let generation = session.generation
         let published = await documents.loadEstimates(scope: scope, api: api) {
-            session.generation == generation && currentWorkspace && canViewEstimates
+            paperNavigation.requestRevision == request && session.generation == generation && currentWorkspace && canViewEstimates
         }
-        guard session.generation == generation, currentWorkspace, published, let read = estimates else { return }
+        guard paperNavigation.requestRevision == request, session.generation == generation,
+              currentWorkspace, published, let read = estimates else { return }
         guard read.freshIDs.contains(id), let estimate = read.records.first(where: { $0.id == id }) else {
             error = "This estimate couldn't be refreshed. Try again in a moment."
             return
@@ -434,16 +447,15 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
-        guard openingID == nil, currentWorkspace, canViewInvoices,
+        guard currentWorkspace, canViewInvoices,
               !sign || session.can("invoice.edit", feature: "invoicing"),
-              !decision || book != nil else { return }
+              !decision || book != nil,
+              let request = paperNavigation.beginOpen(id) else { return }
         error = nil
-        openingID = id
-        defer { openingID = nil }
+        defer { paperNavigation.finishOpen(request) }
         let generation = session.generation
         let authority = session.authorityRevision
         let apiGeneration = api.requestGeneration
-        let request = paperNavigation.requestRevision
         let originatingBook = book
         let selection = documentSelectionRevision
         let presentation = paperGeneration
