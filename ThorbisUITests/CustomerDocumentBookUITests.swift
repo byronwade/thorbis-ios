@@ -84,7 +84,9 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        let customerView = thorbisCustomerViewMenuItem(app)
+        XCTAssertTrue(customerView.waitForExistence(timeout: 15), "Customer view menu row missing; hierarchy: \(app.debugDescription)")
+        customerView.tap()
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10))
         estimate.tap()
