@@ -144,6 +144,38 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.scrollViews["job-estimate-handoff"].waitForExistence(timeout: 15), "The system edge-back gesture must return to the estimate overview")
     }
 
+    func testEstimateBrowsingDoesNotShowPriorTermsWhenNextReadFails() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--paper-preview-handoff-second-details-fail"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        app.buttons["handoff-next-estimate"].tap()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30))
+        capture(app, "Second estimate failed without prior terms")
+        XCTAssertFalse(app.scrollViews["handoff-estimate-details"].staticTexts["Sample repair"].exists, "The prior estimate's terms must not remain inside the new estimate")
+        app.buttons["handoff-previous-estimate"].tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+    }
+
+    func testEstimateBrowsingRetiresAfterSessionEndsOnSecondEstimate() {
+        let app = open(["--paper-preview-handoff-slow-invalidation"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
+        toggleSampleControls(app); app.buttons["End sample session shortly"].tap(); toggleSampleControls(app)
+        visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        app.buttons["handoff-next-estimate"].tap()
+        XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 15))
+        let detail = app.staticTexts["Sample additional work"]
+        let retired = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: detail)
+        XCTAssertEqual(XCTWaiter.wait(for: [retired], timeout: 30), .completed)
+        XCTAssertFalse(app.buttons["handoff-next-estimate"].exists)
+        XCTAssertFalse(app.buttons["handoff-previous-estimate"].exists)
+    }
+
     func testCustomerCanBrowseJobEstimatesUsingAccessibleControls() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
