@@ -39,13 +39,6 @@ private struct CustomerHandoffEstimateDetails: View {
                     Button("Replace sample revision shortly") { previewChange(revise: true) }
                     Button("Remove sample estimate shortly") { previewChange(revise: false) }
                 }
-                if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
-                    Button("Fail sample refresh") {
-                        JobEstimateHandoffPreview.shared.rejectNextMembership()
-                        Task { await model.refresh() }
-                    }
-                    if model.overviewPricesNeedRefresh { Text("Sample refresh failed") }
-                }
                 #endif
                 if !current {
                     CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
@@ -278,6 +271,14 @@ struct JobEstimateHandoffView: View {
 
     private var overview: some View {
         LazyVStack(alignment: .leading, spacing: 20) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
+                Button("Fail sample refresh") {
+                    JobEstimateHandoffPreview.shared.rejectNextMembership()
+                    Task { await model.refresh() }
+                }
+            }
+            #endif
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.jobTitle).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                 Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : model.loading ? "Loading estimates…" : model.canLoadMoreEstimates ? "More estimates are available for this job." : "Some estimates still need a refresh")
