@@ -459,6 +459,10 @@ struct JobCustomerDocumentsView: View {
         }
         do {
             #if DEBUG
+            if sign && PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-revoke-invoice-edit-on-sign") {
+                PaperPreviewProtocol.revokeInvoiceEditForSigning()
+                await session.revalidate()
+            }
             if sign && PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-delay-invoice-signing") {
                 try await Task.sleep(for: .seconds(15))
             }
