@@ -1425,28 +1425,27 @@ struct CustomerDetailView: View {
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
     private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
-        guard currentAuthority() else { return }
-        let noteAuthority = locationNoteAuthority
+        guard currentAuthority(), let noteAuthority = locationNoteAuthority else { return }
         loadGeneration += 1
         let requestGeneration = loadGeneration
         let locationRequestGeneration = locationState.beginLoad()
         let contactRequestGeneration = contactState.beginLoading()
         do {
             let loadedRecord = try await api.fieldCustomer(customer.id)
-            guard currentAuthority(), loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), locationNoteAuthority == noteAuthority, loadGeneration == requestGeneration else { return }
             record = loadedRecord
             let loadedContacts = try await api.fieldContacts(customer.id)
-            guard currentAuthority(), loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), locationNoteAuthority == noteAuthority, loadGeneration == requestGeneration else { return }
             contactState.receive(loadedContacts, generation: contactRequestGeneration)
             let loadedLocations = try await api.fieldLocations(customer.id)
-            guard currentAuthority(), loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), locationNoteAuthority == noteAuthority, loadGeneration == requestGeneration else { return }
             if locationState.receive(loadedLocations, generation: locationRequestGeneration) {
-                locationNotesSource = noteAuthority == locationNoteAuthority ? noteAuthority : nil
+                locationNotesSource = noteAuthority
                 locationError = nil
             }
             error = nil
         } catch is CancellationError {} catch {
-            guard loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), locationNoteAuthority == noteAuthority, loadGeneration == requestGeneration else { return }
             self.error = error.localizedDescription
         }
     }
