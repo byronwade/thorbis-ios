@@ -27,6 +27,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private var choosingWorkspace = false
     private var unlocks = 0
     private var interruptMembership = false
+    private var rejectMembership = false
     private var interruptUpload = false
     private var unlockAllowed = true
     private var changedRevision = false
@@ -41,11 +42,12 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         }
         return flags.contains("--paper-preview-handoff-third-sent") ? [Self.a, Self.b, Self.c] : flags.contains("--paper-preview-handoff-all-statuses") ? [Self.a, Self.b, Self.c, Self.d] : [Self.a,Self.b]
     }
-    func reset() { lock.withLock { approved = [:]; acceptances = [:]; assets = [:]; clients = [:]; bytes = [:]; attempts = []; requests = []; lost = false; workspaceChanged = false; sessionEnded = false; choosingWorkspace = false; unlocks = 0; interruptMembership = false; interruptUpload = false; changedRevision = false; changedFirstRevision = false; removedFirst = false; unlockAllowed = !flags.contains("--paper-preview-handoff-denied-unlock") } }
+    func reset() { lock.withLock { approved = [:]; acceptances = [:]; assets = [:]; clients = [:]; bytes = [:]; attempts = []; requests = []; lost = false; workspaceChanged = false; sessionEnded = false; choosingWorkspace = false; unlocks = 0; interruptMembership = false; rejectMembership = false; interruptUpload = false; changedRevision = false; changedFirstRevision = false; removedFirst = false; unlockAllowed = !flags.contains("--paper-preview-handoff-denied-unlock") } }
     func changeWorkspace() { lock.withLock { workspaceChanged = true } }
     func endSession() { lock.withLock { sessionEnded = true } }
     func chooseWorkspace() { lock.withLock { choosingWorkspace = true } }
     func interruptNextMembership() { lock.withLock { interruptMembership = true } }
+    func rejectNextMembership() { lock.withLock { rejectMembership = true } }
     func interruptNextUpload() { lock.withLock { interruptUpload = true } }
     func allowUnlock() { lock.withLock { unlockAllowed = true } }
     func authenticate() -> Bool { lock.withLock { unlocks += 1; return unlockAllowed } }
@@ -188,6 +190,9 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates",
            flags.contains("--paper-preview-handoff-membership-fails-after-approval"), !approved.isEmpty {
             return .init(status: 200, payload: [:], error: URLError(.networkConnectionLost))
+        }
+        if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates", rejectMembership {
+            rejectMembership = false; return .init(status:503,payload:["status":503,"title":"Sample membership unavailable"])
         }
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates", interruptMembership {
             interruptMembership = false; return .init(status: 200, payload: [:], error: URLError(.networkConnectionLost))
