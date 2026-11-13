@@ -41,8 +41,9 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let close = app.buttons["Close line"]
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         close.tap()
-        let more = app.buttons["Show full description"]
+        let more = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "line-summary-full-")).firstMatch
         XCTAssertTrue(more.waitForExistence(timeout: 10))
+        XCTAssertTrue(more.label.hasPrefix("Show full description for "))
         more.tap()
         let canvas = app.textViews["line-description-canvas"]
         XCTAssertTrue(canvas.waitForExistence(timeout: 10))

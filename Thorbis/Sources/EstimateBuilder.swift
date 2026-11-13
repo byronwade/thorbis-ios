@@ -867,6 +867,8 @@ struct BuilderLineRow: View {
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Show full description for \(String(name.prefix(80)))")
+                    .accessibilityIdentifier("line-summary-full-\(lineID)")
             }
         }
     }
