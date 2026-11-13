@@ -1188,19 +1188,14 @@ struct CustomerInvoicePresentation: View {
     }
 }
 
-/// Only explicit, customer-visible credits are savings. Price-book provenance is staff data
+/// Only credits in the customer-visible projection are savings. Price-book provenance is staff data
 /// and does not establish a customer-facing discount or its reason.
 func customerSavings(_ lines: [FieldLine], currency: String) -> Int? {
-    guard CustomerDocumentAmounts(lines: lines, currency: currency) != nil else { return nil }
-    var credits = 0
-    for line in lines where line.showToCustomer != false && line.unitPrice.amount < 0 {
-        let (amount, productOverflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
-        guard !productOverflow else { return nil }
-        let (next, sumOverflow) = credits.addingReportingOverflow(amount)
-        guard !sumOverflow else { return nil }
-        credits = next
-    }
-    let (saved, overflow) = 0.subtractingReportingOverflow(credits)
+    guard let raw = CustomerDocumentAmounts(lines: lines, currency: currency),
+          let projected = customerEstimateProjection(lines, currency: currency),
+          let visible = CustomerDocumentAmounts(lines: projected, currency: currency),
+          raw.total == visible.total else { return nil }
+    let (saved, overflow) = 0.subtractingReportingOverflow(visible.credits)
     return overflow ? nil : saved
 }
 
