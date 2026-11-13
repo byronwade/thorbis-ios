@@ -48,7 +48,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
         let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
-        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        thorbisRevealInCustomerView(invoice, in: app); XCTAssertTrue(invoice.exists)
         let verified = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "$340.00"), object: invoice)
         XCTAssertEqual(XCTWaiter.wait(for: [verified], timeout: 15), .completed)
     }
@@ -60,7 +60,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["Job actions"].tap()
         let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
-        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        thorbisRevealInCustomerView(invoice, in: app); XCTAssertTrue(invoice.exists)
         XCTAssertTrue(invoice.label.contains("Open to check amount"))
         XCTAssertFalse(invoice.label.contains("$340.00"))
     }
