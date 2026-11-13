@@ -26,6 +26,36 @@ struct JobEstimateHandoffSelection {
     }
 }
 
+/// Interior estimate paging. UIKit's interactive pop and the column-back swipe start from the
+/// leading edge, which is max-x when the layout leads right-to-left.
+enum CustomerHandoffBrowseMotion {
+    static let backEdgeWidth: CGFloat = 30
+    static let pagingDistance: CGFloat = 70
+
+    static func pageOffset(translation: CGSize, startX: CGFloat, width: CGFloat, rightToLeft: Bool) -> Int? {
+        let fromBackEdge = rightToLeft ? startX >= width - backEdgeWidth : startX <= backEdgeWidth
+        guard !fromBackEdge,
+              abs(translation.width) > pagingDistance,
+              abs(translation.width) > abs(translation.height) * 2 else { return nil }
+        let towardNext = rightToLeft ? translation.width > 0 : translation.width < 0
+        return towardNext ? 1 : -1
+    }
+}
+
+/// The visible page is independent of the estimate that first opened the destination.
+struct CustomerHandoffBrowseState: Equatable {
+    private(set) var currentID: String
+    init(openedID: String) { currentID = openedID }
+    mutating func move(_ offset: Int, readableIDs: [String]) {
+        guard let index = readableIDs.firstIndex(of: currentID),
+              readableIDs.indices.contains(index + offset) else { return }
+        currentID = readableIDs[index + offset]
+    }
+    func visibleID(in readableIDs: [String]) -> String? {
+        readableIDs.contains(currentID) ? currentID : nil
+    }
+}
+
 
 struct JobEstimateReviewedItem: Equatable, Identifiable {
     let estimate: EstimateRecord

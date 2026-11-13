@@ -48,6 +48,41 @@ final class JobEstimateHandoffSelectionTests: XCTestCase {
     }
 }
 
+final class JobEstimateHandoffBrowseTests: XCTestCase {
+    func testLeadingEdgeBackDoesNotPageInLeftToRight() {
+        XCTAssertNil(CustomerHandoffBrowseMotion.pageOffset(
+            translation: CGSize(width: 80, height: 0), startX: 10, width: 390, rightToLeft: false))
+        XCTAssertEqual(CustomerHandoffBrowseMotion.pageOffset(
+            translation: CGSize(width: -80, height: 0), startX: 380, width: 390, rightToLeft: false), 1)
+        XCTAssertEqual(CustomerHandoffBrowseMotion.pageOffset(
+            translation: CGSize(width: 80, height: 0), startX: 120, width: 390, rightToLeft: false), -1)
+    }
+
+    func testTrailingEdgeBackDoesNotPageInRightToLeft() {
+        XCTAssertNil(CustomerHandoffBrowseMotion.pageOffset(
+            translation: CGSize(width: -80, height: 0), startX: 380, width: 390, rightToLeft: true))
+        XCTAssertEqual(CustomerHandoffBrowseMotion.pageOffset(
+            translation: CGSize(width: 80, height: 0), startX: 10, width: 390, rightToLeft: true), 1)
+        XCTAssertEqual(CustomerHandoffBrowseMotion.pageOffset(
+            translation: CGSize(width: -80, height: 0), startX: 200, width: 390, rightToLeft: true), -1)
+    }
+
+    func testVisiblePageSurvivesTheOpenedEstimateLeaving() {
+        var browse = CustomerHandoffBrowseState(openedID: "a")
+        browse.move(1, readableIDs: ["a", "b"])
+        XCTAssertEqual(browse.visibleID(in: ["b"]), "b")
+        XCTAssertEqual(browse.currentID, "b")
+    }
+
+    func testMissingCurrentPageKeepsTheLockInsteadOfAnotherEstimate() {
+        var browse = CustomerHandoffBrowseState(openedID: "a")
+        XCTAssertNil(browse.visibleID(in: ["b"]))
+        browse.move(1, readableIDs: ["b"])
+        XCTAssertEqual(browse.currentID, "a")
+        XCTAssertNil(browse.visibleID(in: ["b"]))
+    }
+}
+
 @MainActor
 final class JobEstimateHandoffModelTests: XCTestCase {
     private let actor = "00000000-0000-4000-8000-000000000001"

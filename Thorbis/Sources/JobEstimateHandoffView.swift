@@ -141,32 +141,35 @@ private struct CustomerHandoffEstimateDetails: View {
 /// retains the existing issued-revision read and never changes the selected work.
 private struct CustomerHandoffEstimateBrowser: View {
     @ObservedObject var model: JobEstimateHandoffModel
-    @State private var currentID: String
+    @State private var browse: CustomerHandoffBrowseState
+    @State private var pageWidth: CGFloat = 390
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.layoutDirection) private var layoutDirection
 
-    init(model: JobEstimateHandoffModel, initial: EstimateRecord) {
+    init(model: JobEstimateHandoffModel, openedID: String) {
         self.model = model
-        _currentID = State(initialValue: initial.id)
+        _browse = State(initialValue: .init(openedID: openedID))
     }
 
     private var type: CustomerType { CustomerType(sizeClass) }
     private var readable: [EstimateRecord] {
         model.records.filter { model.detailsCurrent($0, authority: model.session.authorityRevision) }
     }
-    private var index: Int? { readable.firstIndex { $0.id == currentID } }
+    private var readableIDs: [String] { readable.map(\.id) }
+    private var index: Int? { readableIDs.firstIndex(of: browse.currentID) }
 
     var body: some View {
         Group {
-            if let record = readable.first(where: { $0.id == currentID }) {
+            if let record = readable.first(where: { $0.id == browse.currentID }) {
                 CustomerHandoffEstimateDetails(model: model, record: record)
                     .id(record)
                     .simultaneousGesture(
                         DragGesture(minimumDistance: 50).onEnded { value in
-                            let horizontal = value.translation.width
-                            guard value.startLocation.x > 30,
-                                  abs(horizontal) > 70,
-                                  abs(horizontal) > abs(value.translation.height) * 2 else { return }
-                            move(horizontal < 0 ? 1 : -1)
+                            guard let offset = CustomerHandoffBrowseMotion.pageOffset(
+                                translation: value.translation, startX: value.startLocation.x,
+                                width: pageWidth, rightToLeft: layoutDirection == .rightToLeft
+                            ) else { return }
+                            move(offset)
                         }
                     )
             } else {
@@ -175,6 +178,7 @@ private struct CustomerHandoffEstimateBrowser: View {
                     .padding(Theme.gutter)
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { pageWidth = $0 }
         .safeAreaInset(edge: .bottom) {
             if let index, readable.count > 1 {
                 ViewThatFits(in: .horizontal) {
@@ -197,10 +201,7 @@ private struct CustomerHandoffEstimateBrowser: View {
     }
 
     private func move(_ offset: Int) {
-        let current = readable
-        guard let index = current.firstIndex(where: { $0.id == currentID }),
-              current.indices.contains(index + offset) else { return }
-        currentID = current[index + offset].id
+        browse.move(offset, readableIDs: readableIDs)
     }
 }
 
@@ -258,11 +259,9 @@ struct JobEstimateHandoffView: View {
         }
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
         .thorbisDestination(item: $detailsID) { id in
-            if let record = model.records.first(where: { $0.id == id }) {
-                CustomerHandoffEstimateBrowser(model: model, initial: record)
-                    .id(record.id)
-                    .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
-            }
+            CustomerHandoffEstimateBrowser(model: model, openedID: id)
+                .id(id)
+                .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
         }
     }
 
