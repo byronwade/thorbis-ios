@@ -1512,7 +1512,7 @@ struct CustomerStatusWord: View {
         let tint = StatusWord.documentTint(status)
         HStack(spacing: 8) {
             if let tint { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
-            Text(status == "issued" ? "Unpaid" : status.statusLabel).font(Theme.customerFont(type.small, weight: .medium))
+            Text(status.statusLabel).font(Theme.customerFont(type.small, weight: .medium))
                 .foregroundStyle(tint == nil ? Theme.muted : Theme.foreground)
         }
         .fixedSize()
