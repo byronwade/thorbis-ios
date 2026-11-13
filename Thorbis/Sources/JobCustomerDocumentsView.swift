@@ -1,12 +1,12 @@
 import SwiftUI
 
-private enum CustomerJobPaper: Hashable {
+enum CustomerJobPaper: Hashable {
     case estimate(EstimateRecord)
     case invoice(InvoiceRecord, signing: Bool)
 }
 
 /// Stable navigation owner for async rechecks and destination callbacks.
-@MainActor private final class CustomerJobPaperNavigation: ObservableObject {
+@MainActor final class CustomerJobPaperNavigation: ObservableObject {
     @Published var paper: CustomerJobPaper?
     @Published var generation = UUID()
     @Published var book: CustomerJobDocumentID?
