@@ -1,0 +1,36 @@
+import Foundation
+import Darwin
+
+@main struct CrashProbe {
+ static let domain = InvoiceFenceDomain(origin: "https://thorbis.com", organizationID: "00000000-0000-4000-8000-000000000001", invoiceID: "00000000-0000-4000-8000-000000000002")
+ static let identity = InvoiceIdleCaptureIdentity(domain: domain, actorID: "00000000-0000-4000-8000-000000000003", customerID: "00000000-0000-4000-8000-000000000004", jobID: nil)
+ static let owner = UUID(uuidString: "00000000-0000-4000-8000-000000000005")!
+ static func spawn(_ path: String, _ mode: String) throws -> Process {
+  let p = Process(); p.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]); p.arguments = [mode, path]
+  p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice; try p.run(); return p
+ }
+ static func main() throws {
+  let args = CommandLine.arguments
+  if args.count == 3 {
+   let f = try InvoiceTransactionFence(path: args[2])
+   do {
+    let token = try f.registerCaptureIntent(identity: identity, owner: owner, expectedVersion: nil, sequence: 1, bytes: Data([42]))
+    if args[1] == "commit-kill" { try f.commitCaptureIntent(token) }
+    if args[1] != "register" { kill(getpid(), SIGKILL) }
+   } catch { exit(3) }
+   exit(0)
+  }
+  for phase in ["intent-kill", "commit-kill"] {
+   let path = "/private/tmp/invoice-intent-crash-\(UUID().uuidString).sqlite"
+   let p = try spawn(path, phase); p.waitUntilExit(); precondition(p.terminationReason == .uncaughtSignal)
+   let f = try InvoiceTransactionFence(path: path)
+   do { _ = try f.capture(identity: identity, owner: owner, expectedVersion: phase == "commit-kill" ? 1 : nil, sequence: 2, bytes: Data([43])); fatalError("crash left fence open") } catch InvoiceFenceError.pending { }
+   do { _ = try f.recoverIdle(identity: identity); fatalError("uncertain recovery allowed") } catch InvoiceFenceError.pending { }
+  }
+  let path = "/private/tmp/invoice-intent-race-\(UUID().uuidString).sqlite"
+  _ = try InvoiceTransactionFence(path: path)
+  let a = try spawn(path, "register"), b = try spawn(path, "register"); a.waitUntilExit(); b.waitUntilExit()
+  precondition([a.terminationStatus,b.terminationStatus].sorted() == [0,3])
+  print("intent and capture process deaths remain fenced; one concurrent writer admitted")
+ }
+}

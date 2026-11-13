@@ -37,6 +37,8 @@ struct InvoiceIdleCaptureRecovery: Sendable {
     let bytes: Data
 }
 
+struct InvoiceCaptureIntent { let identity: InvoiceIdleCaptureIdentity; let owner: UUID; let expectedVersion: Int64?; let sequence: Int64; let bytes: Data; let token: String }
+
 enum InvoiceFencePending: Int32, Sendable { case keyed = 1, directUnknown = 2 }
 enum InvoiceFenceError: Error { case invalid, conflict, pending, database(Int32) }
 
@@ -54,6 +56,7 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             try exec(db, "PRAGMA synchronous=FULL")
             try exec(db, "CREATE TABLE IF NOT EXISTS heads (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, owner TEXT NOT NULL, version INTEGER NOT NULL, pending INTEGER NOT NULL DEFAULT 0, command BLOB, PRIMARY KEY(origin,org,invoice))")
             try exec(db, "CREATE TABLE IF NOT EXISTS capture_heads (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, actor TEXT NOT NULL, customer TEXT NOT NULL, job TEXT NOT NULL, sequence INTEGER NOT NULL, PRIMARY KEY(origin,org,invoice))")
+            try exec(db, "CREATE TABLE IF NOT EXISTS capture_intents (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, token TEXT NOT NULL, owner TEXT NOT NULL, actor TEXT NOT NULL, customer TEXT NOT NULL, job TEXT NOT NULL, expected INTEGER, sequence INTEGER NOT NULL, draft BLOB NOT NULL, committed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(origin,org,invoice))")
             try exec(db, "CREATE TABLE IF NOT EXISTS snapshots (origin TEXT NOT NULL, org TEXT NOT NULL, invoice TEXT NOT NULL, version INTEGER NOT NULL, draft BLOB NOT NULL, PRIMARY KEY(origin,org,invoice,version))")
         }
     }
@@ -88,11 +91,20 @@ final class InvoiceTransactionFence: @unchecked Sendable {
     private func keys(_ s: OpaquePointer, _ domain: InvoiceFenceDomain) throws {
         try bind(s, 1, domain.origin); try bind(s, 2, domain.organizationID); try bind(s, 3, domain.invoiceID)
     }
-    private func transaction<T>(_ domain: InvoiceFenceDomain, _ body: (OpaquePointer) throws -> T) throws -> T {
+    private func transaction<T>(_ domain: InvoiceFenceDomain, allowIntent: Bool = false, _ body: (OpaquePointer) throws -> T) throws -> T {
         guard domain.valid else { throw InvoiceFenceError.invalid }
         return try connection { db in
             try exec(db, "BEGIN IMMEDIATE")
-            do { let result = try body(db); try exec(db, "COMMIT"); return result }
+            do {
+                if !allowIntent {
+                    let exists = try statement(db, "SELECT 1 FROM capture_intents WHERE origin=? AND org=? AND invoice=?") { s in
+                        try keys(s, domain); let code = sqlite3_step(s)
+                        if code == SQLITE_ROW { return true }; guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }; return false
+                    }
+                    if exists { throw InvoiceFenceError.pending }
+                }
+                let result = try body(db); try exec(db, "COMMIT"); return result
+            }
             catch { try? exec(db, "ROLLBACK"); throw error }
         }
     }
@@ -146,8 +158,13 @@ final class InvoiceTransactionFence: @unchecked Sendable {
     /// No authorization is performed here; identity must be freshly verified by the caller.
     func capture(identity: InvoiceIdleCaptureIdentity, owner: UUID, expectedVersion: Int64?, sequence: Int64, bytes: Data) throws -> Int64 {
         guard identity.valid, sequence > 0, !bytes.isEmpty, bytes.count <= Int(Int32.max) else { throw InvoiceFenceError.invalid }
-        let domain = identity.domain, ownerID = owner.uuidString.lowercased()
+        let domain = identity.domain
         return try transaction(domain) { db in
+            try captureInTransaction(db, identity: identity, owner: owner, expectedVersion: expectedVersion, sequence: sequence, bytes: bytes)
+        }
+    }
+    private func captureInTransaction(_ db: OpaquePointer, identity: InvoiceIdleCaptureIdentity, owner: UUID, expectedVersion: Int64?, sequence: Int64, bytes: Data) throws -> Int64 {
+        let domain = identity.domain, ownerID = owner.uuidString.lowercased()
             let current = try head(db, domain), capture = try captureHead(db, domain)
             if let current {
                 guard current.2 == 0 else { throw InvoiceFenceError.pending }
@@ -180,6 +197,40 @@ final class InvoiceTransactionFence: @unchecked Sendable {
                 let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
             }
             return version
+    }
+    /// Held protocol experiment. Intent remains durable until a separately designed resolution.
+    func registerCaptureIntent(identity: InvoiceIdleCaptureIdentity, owner: UUID, expectedVersion: Int64?, sequence: Int64, bytes: Data) throws -> InvoiceCaptureIntent {
+        guard identity.valid, sequence > 0, !bytes.isEmpty, bytes.count <= Int(Int32.max) else { throw InvoiceFenceError.invalid }
+        let intent = InvoiceCaptureIntent(identity: identity, owner: owner, expectedVersion: expectedVersion, sequence: sequence, bytes: bytes, token: UUID().uuidString.lowercased())
+        try transaction(identity.domain) { db in
+            let current = try head(db, identity.domain), capture = try captureHead(db, identity.domain)
+            if let current {
+                guard current.2 == 0 else { throw InvoiceFenceError.pending }
+                guard let capture, current.0 == owner.uuidString.lowercased(), current.1 == expectedVersion, current.1 < Int64.max,
+                      capture.0 == identity.actorID, capture.1 == identity.customerID, capture.2 == (identity.jobID ?? ""), sequence > capture.3 else { throw InvoiceFenceError.conflict }
+            } else if capture != nil || expectedVersion != nil { throw InvoiceFenceError.conflict }
+            try statement(db, "INSERT INTO capture_intents(origin,org,invoice,token,owner,actor,customer,job,expected,sequence,draft) VALUES(?,?,?,?,?,?,?,?,?,?,?)") { s in
+                try keys(s, identity.domain); try bind(s, 4, intent.token); try bind(s, 5, owner.uuidString.lowercased()); try bind(s, 6, identity.actorID); try bind(s, 7, identity.customerID); try bind(s, 8, identity.jobID ?? "")
+                if let expectedVersion { sqlite3_bind_int64(s, 9, expectedVersion) } else { sqlite3_bind_null(s, 9) }
+                sqlite3_bind_int64(s, 10, sequence); try bind(s, 11, bytes)
+                let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
+            }
+        }
+        return intent
+    }
+    func commitCaptureIntent(_ intent: InvoiceCaptureIntent) throws {
+        try transaction(intent.identity.domain, allowIntent: true) { db in
+            let found = try statement(db, "SELECT 1 FROM capture_intents WHERE origin=? AND org=? AND invoice=? AND token=? AND owner=? AND actor=? AND customer=? AND job=? AND expected IS ? AND sequence=? AND draft=? AND committed=0") { s in
+                try keys(s, intent.identity.domain); try bind(s, 4, intent.token); try bind(s, 5, intent.owner.uuidString.lowercased()); try bind(s, 6, intent.identity.actorID); try bind(s, 7, intent.identity.customerID); try bind(s, 8, intent.identity.jobID ?? "")
+                if let expected = intent.expectedVersion { sqlite3_bind_int64(s, 9, expected) } else { sqlite3_bind_null(s, 9) }
+                sqlite3_bind_int64(s, 10, intent.sequence); try bind(s, 11, intent.bytes)
+                let code = sqlite3_step(s); if code == SQLITE_ROW { return true }; guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }; return false
+            }
+            guard found else { throw InvoiceFenceError.conflict }
+            _ = try captureInTransaction(db, identity: intent.identity, owner: intent.owner, expectedVersion: intent.expectedVersion, sequence: intent.sequence, bytes: intent.bytes)
+            try statement(db, "UPDATE capture_intents SET committed=1 WHERE origin=? AND org=? AND invoice=? AND token=?") { s in
+                try keys(s, intent.identity.domain); try bind(s, 4, intent.token); let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
+            }
         }
     }
     /// Metadata matching is not authentication. Reauthorization must occur before disclosure.
