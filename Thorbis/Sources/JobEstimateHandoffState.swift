@@ -341,12 +341,22 @@ final class JobEstimateHandoffModel: ObservableObject {
             preparedRead = read
         }, onCommit: { [weak self] candidate in
             guard let self, let read = preparedRead else { return }
+            let previousRecords = self.records
+            let retainedRevisions = self.revisions.filter { id, revision in
+                guard let record = read.records.first(where: { $0.id == id }), previousRecords.contains(record),
+                      read.freshIDs.contains(id), self.scope.contains(record, requestedID: id) else { return false }
+                return (try? revision.validate(for: record, allowApprovedForReading: true)) != nil
+            }
+            let retainedReceipts = self.overviewReceipts.filter { id, receipt in
+                guard let revision = retainedRevisions[id] else { return false }
+                return (try? receipt.validate(for: revision)) != nil
+            }
             self.pageRead = read; self.records = read.records; self.freshIDs = read.freshIDs
             self.unavailableIDs = read.unavailableIDs; self.complete = read.isComplete
             self.canLoadMoreEstimates = !candidate.scanReachedEnd
             self.error = (!read.isComplete && !self.canLoadMoreEstimates) ? read.issue : nil
             self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
-            self.revisions = [:]; self.overviewReceipts = [:]
+            self.revisions = retainedRevisions; self.overviewReceipts = retainedReceipts
             self.overviewPriceFailures = []
             self.overviewPriceReady = true
             self.overviewPriceGeneration = UUID()
@@ -484,7 +494,12 @@ final class JobEstimateHandoffModel: ObservableObject {
     func loadOverviewPrices() async {
         guard overviewPriceReady else { return }
         let generation = overviewPriceGeneration
-        let candidates = records.filter { ($0.status == "sent" || $0.status == "approved") && detailsCurrent($0, authority: authorityRevision) }
+        let candidates = records.filter { record in
+            guard detailsCurrent(record, authority: authorityRevision) else { return false }
+            if record.status == "sent" { return revision(for: record.id) == nil }
+            if record.status == "approved" { return overviewReceipt(for: record) == nil }
+            return false
+        }
         await withTaskGroup(of: Void.self) { group in
             var iterator = candidates.makeIterator()
             for _ in 0..<3 {
