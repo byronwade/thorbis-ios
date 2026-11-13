@@ -15,6 +15,8 @@ func customerEstimateProjection(_ lines: [FieldLine], currency: String) -> [Fiel
 struct CustomerDocumentAmounts: Equatable {
     let subtotal: Int
     let credits: Int
+    /// Customer-visible credit total; hidden credits still affect `credits` and `total`.
+    let visibleCredits: Int
     let total: Int
     let paid: Int
     let due: Int
@@ -23,6 +25,7 @@ struct CustomerDocumentAmounts: Equatable {
         guard !currency.isEmpty, amountPaid >= 0 else { return nil }
         var charges = 0
         var adjustments = 0
+        var visibleAdjustments = 0
         for line in lines {
             guard line.quantity > 0, line.unitPrice.currency == currency else { return nil }
             let (amount, productOverflow) = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
@@ -31,6 +34,11 @@ struct CustomerDocumentAmounts: Equatable {
                 let (next, overflow) = adjustments.addingReportingOverflow(amount)
                 guard !overflow else { return nil }
                 adjustments = next
+                if line.showToCustomer != false {
+                    let (visibleNext, visibleOverflow) = visibleAdjustments.addingReportingOverflow(amount)
+                    guard !visibleOverflow else { return nil }
+                    visibleAdjustments = visibleNext
+                }
             } else {
                 let (next, overflow) = charges.addingReportingOverflow(amount)
                 guard !overflow else { return nil }
@@ -41,6 +49,7 @@ struct CustomerDocumentAmounts: Equatable {
         guard !overflow, final >= 0 else { return nil }
         subtotal = charges
         credits = adjustments
+        visibleCredits = visibleAdjustments
         total = final
         paid = amountPaid
         due = amountPaid >= final ? 0 : final - amountPaid

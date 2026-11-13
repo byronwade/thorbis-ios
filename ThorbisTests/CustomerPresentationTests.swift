@@ -124,16 +124,28 @@ final class CustomerPresentationTests: XCTestCase {
         XCTAssertTrue(customerSavingsRows([item], currency: "USD", isMember: true).isEmpty)
     }
 
-    func testCustomerSavingsOnlyIncludesExplicitVisibleCredits() {
+    func testCustomerSavingsOnlyIncludesExplicitVisibleCredits() throws {
         let charge = line("Work", 1, 10000)
         let visible = line("Courtesy credit", 1, -500)
         let hidden = FieldLine(id: "hidden", description: "Internal credit", quantity: 1,
                                unitPrice: FieldMoney(amount: -2000, currency: "USD"),
                                source: nil, showToCustomer: false)
-        let result = customerSavingsRows([charge, visible, hidden], currency: "USD", isMember: true)
-        XCTAssertEqual(result, [CustomerAmountRow(label: "Discounts and credits",
-                                                   amount: "−\(money(500, currency: "USD"))",
-                                                   emphasis: false)])
+        let lines = [charge, visible, hidden]
+        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: true),
+                       [CustomerAmountRow(label: "Discounts and credits",
+                                          amount: "−\(money(500, currency: "USD"))",
+                                          emphasis: false)])
+        let amounts = try XCTUnwrap(CustomerDocumentAmounts(lines: lines, currency: "USD"))
+        XCTAssertEqual(amounts.credits, -2_500)
+        XCTAssertEqual(amounts.visibleCredits, -500)
+        XCTAssertEqual(customerAmountRows(amounts, currency: "USD").filter { $0.label == "Discounts and credits" },
+                       [CustomerAmountRow(label: "Discounts and credits",
+                                          amount: money(-500, currency: "USD"),
+                                          emphasis: false)])
+        let hiddenOnly = try XCTUnwrap(CustomerDocumentAmounts(lines: [charge, hidden], currency: "USD"))
+        XCTAssertEqual(hiddenOnly.visibleCredits, 0)
+        XCTAssertTrue(customerSavingsRows([charge, hidden], currency: "USD", isMember: true).isEmpty)
+        XCTAssertFalse(customerAmountRows(hiddenOnly, currency: "USD").contains { $0.label == "Discounts and credits" })
     }
 
     func testSavingsCountOnlyPriceBookLinesChargedBelowList() {
@@ -145,10 +157,9 @@ final class CustomerPresentationTests: XCTestCase {
                                  source: FieldLineSource(kind: "estimate", estimateLineSource: FieldEstimateLineSourceSnapshot(
                                      kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD"))))
         let lines = [member, marked, invoiced, line("x", 1, 9_000)]
-        XCTAssertEqual(customerSavings(lines), 9_000)
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: true),
-                       [CustomerAmountRow(label: "Member savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false).first?.label, "Savings")
+        XCTAssertEqual(customerSavings(lines), 0)
+        XCTAssertTrue(customerSavingsRows(lines, currency: "USD", isMember: true).isEmpty)
+        XCTAssertTrue(customerSavingsRows(lines, currency: "USD", isMember: false).isEmpty)
         XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD", isMember: true).isEmpty)
     }
 }

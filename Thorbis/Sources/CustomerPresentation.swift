@@ -811,7 +811,6 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
-    @State private var isMember = false
     /// The invoice as re-read after the lender funded it while this screen was open.
     @State private var reloadedInvoice: InvoiceRecord?
     private var invoice: InvoiceRecord { reloadedInvoice ?? openedInvoice }
@@ -867,7 +866,6 @@ struct CustomerInvoicePresentation: View {
         .animation(.easeOut(duration: 0.2), value: payChoice)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadFinancing() }
-        .task { isMember = await api.customerIsMember(invoice.customerId) }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -907,12 +905,11 @@ struct CustomerInvoicePresentation: View {
         }
     }
 
-    /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest; savings sit
-    /// above them as their own labelled row (CP-06).
+    /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest. Issued
+    /// discounts sit in the amounts breakdown; they are not prepended again as savings.
     private var amountRows: [CustomerAmountRow] {
-        customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
-            + (CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
-                .map { customerAmountRows($0, currency: invoice.currency) } ?? [])
+        CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+            .map { customerAmountRows($0, currency: invoice.currency) } ?? []
     }
 
     // MARK: Choose how to pay (CP-15, CP-16)
@@ -1190,18 +1187,17 @@ struct CustomerInvoicePresentation: View {
     }
 }
 
-/// What the customer saves off list price on these lines: each price book line records the list
-/// price it came from, and the server charges a member the member price (CP: savings show only
-/// when the amount already includes them). Invoice lines carry the estimate line's provenance.
-func customerSavings(_ lines: [FieldLine]) -> Int {
+/// Issued customer-facing credits. Price-book list-minus-unit is provenance, not a saving.
+func customerVisibleCredits(_ lines: [FieldLine], currency: String) -> Int {
     lines.reduce(0) { sum, line in
-        let source = line.source?.kind == "price_book" ? line.source?.originalUnitPrice
-            : line.source?.estimateLineSource?.kind == "price_book" ? line.source?.estimateLineSource?.originalUnitPrice : nil
-        guard let list = source, list.currency == line.unitPrice.currency, list.amount > line.unitPrice.amount,
-              line.unitPrice.amount >= 0 else { return sum }
-        return sum + line.quantity * (list.amount - line.unitPrice.amount)
+        guard line.showToCustomer != false, line.unitPrice.currency == currency,
+              line.quantity > 0, line.unitPrice.amount < 0 else { return sum }
+        return sum + line.quantity * line.unitPrice.amount
     }
 }
+
+/// Price-book markdown is not an issued customer saving.
+func customerSavings(_: [FieldLine]) -> Int { 0 }
 
 func customerSavingsText(_ lines: [FieldLine], currency: String) -> String? {
     let saved = customerSavings(lines)
@@ -1211,10 +1207,14 @@ func customerSavingsText(_ lines: [FieldLine], currency: String) -> String? {
 /// "Member savings" when the customer holds a membership; otherwise the plain word.
 func savingsLabel(_ isMember: Bool) -> String { isMember ? "Member savings" : "Savings" }
 
-/// A labelled savings row (CP-06), shown above the total and never as a strike-through alone.
-func customerSavingsRows(_ lines: [FieldLine], currency: String, isMember: Bool) -> [CustomerAmountRow] {
-    guard let saved = customerSavingsText(lines, currency: currency) else { return [] }
-    return [CustomerAmountRow(label: savingsLabel(isMember), amount: "−\(saved)", emphasis: false)]
+/// Issued discounts the customer can see (CP-06). Membership and price-book provenance do not
+/// invent a second saving.
+func customerSavingsRows(_ lines: [FieldLine], currency: String, isMember _: Bool) -> [CustomerAmountRow] {
+    let credits = customerVisibleCredits(lines, currency: currency)
+    guard credits < 0 else { return [] }
+    return [CustomerAmountRow(label: "Discounts and credits",
+                              amount: "−\(money(-credits, currency: currency))",
+                              emphasis: false)]
 }
 
 @MainActor
@@ -1325,9 +1325,9 @@ struct CustomerLinesCard: View {
 
 func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true) -> [CustomerAmountRow] {
     var rows: [CustomerAmountRow] = []
-    if amounts.credits < 0 {
+    if amounts.visibleCredits < 0 {
         rows.append(.init(label: "Subtotal", amount: money(amounts.subtotal, currency: currency), emphasis: false))
-        rows.append(.init(label: "Discounts and credits", amount: money(amounts.credits, currency: currency), emphasis: false))
+        rows.append(.init(label: "Discounts and credits", amount: money(amounts.visibleCredits, currency: currency), emphasis: false))
     }
     rows.append(.init(label: "Total", amount: money(amounts.total, currency: currency), emphasis: !invoice))
     if invoice {
