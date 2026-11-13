@@ -15,6 +15,7 @@ final class JobDocumentsUITests: XCTestCase {
         findOverviewElement(collect, in: app)
         XCTAssertTrue(collect.exists)
         let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 10))
         let scroll = app.scrollViews.firstMatch
         for _ in 0..<20 {
             let top = chooser.frame.maxY, bottom = app.frame.maxY - 12
