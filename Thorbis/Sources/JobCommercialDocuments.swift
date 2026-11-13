@@ -101,10 +101,20 @@ final class JobInvoicePaymentLoads {
 final class JobDocumentCollections: ObservableObject {
     @Published private(set) var estimates: JobDocumentRead<EstimateRecord>?
     @Published private(set) var invoices: JobDocumentRead<InvoiceRecord>?
+    @Published private(set) var canLoadMoreEstimates = false
+    @Published private(set) var loadingEstimatePage = false
+    @Published private(set) var estimatePageError: String?
+    @Published private(set) var estimatePageNeedsRefresh = false
+    private var estimatePager: JobEstimateMembershipPager?
+    private var estimatePagerScope: JobDocumentScope?
+    private var estimatePageCommitted = false
     private var estimateRequest = UUID()
     private var invoiceRequest = UUID()
+    func isLoadingEstimates(for scope: JobDocumentScope?) -> Bool {
+        loadingEstimatePage && estimatePagerScope == scope
+    }
 
-    func clearEstimates() { estimateRequest = UUID(); estimates = nil }
+    func clearEstimates() { estimateRequest = UUID(); estimates = nil; estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false }
     func clearInvoices() { invoiceRequest = UUID(); invoices = nil }
     func reset() { clearEstimates(); clearInvoices() }
     func replaceInvoice(_ invoice: InvoiceRecord) { invoices = invoices?.replacing(invoice) }
@@ -113,6 +123,7 @@ final class JobDocumentCollections: ObservableObject {
     func markEstimatesStale(scope: JobDocumentScope, updated: EstimateRecord? = nil, requestedID: String? = nil) {
         guard let read = estimates, read.scope == scope else { return }
         estimateRequest = UUID()
+        estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false
         var records = read.records
         if let updated, let requestedID, scope.contains(updated, requestedID: requestedID),
            let index = records.firstIndex(where: { $0.id == requestedID }) {
@@ -124,15 +135,92 @@ final class JobDocumentCollections: ObservableObject {
 
     @discardableResult
     func loadEstimates(scope: JobDocumentScope, api: APIClient,
+                       onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void = { _ in },
                        isCurrent: @escaping @MainActor () -> Bool) async -> Bool {
         guard isCurrent(), !Task.isCancelled else { return false }
+        estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false
         let request = UUID()
         estimateRequest = request
         let current: @MainActor () -> Bool = { self.estimateRequest == request && isCurrent() }
-        guard let read = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: estimates, isCurrent: current),
+        guard let read = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: estimates, isCurrent: current, onPartial: { partial in
+            guard current(), !Task.isCancelled, partial.scope == scope else { return }
+            onPartial(partial)
+        }),
               current(), !Task.isCancelled else { return false }
         estimates = read
         return true
+    }
+
+    /// The job sheet reads one membership page at a time. A partial scan is never
+    /// a complete set for creation, totals, or customer authorization.
+    @discardableResult
+    func loadFirstEstimatePage(scope: JobDocumentScope, api: APIClient,
+                               retainExisting: Bool = false,
+                               isCurrent: @escaping @MainActor () -> Bool) async -> Bool {
+        guard isCurrent(), !Task.isCancelled else { return false }
+        estimateRequest = UUID()
+        estimatePager = JobEstimateMembershipPager(jobID: scope.jobID); estimatePagerScope = scope
+        canLoadMoreEstimates = true; loadingEstimatePage = false; estimatePageError = nil; estimatePageNeedsRefresh = false
+        // Retain only this job's old rows as read-only until the new first page commits.
+        let retained = retainExisting && estimates?.scope == scope ? estimates : nil
+        estimatePageCommitted = false
+        estimates = retained.map { .init(scope: scope, records: $0.records, freshIDs: [], isComplete: false,
+                                         unavailableIDs: $0.unavailableIDs, kind: "estimates") }
+        return await loadNextEstimatePage(scope: scope, api: api, isCurrent: isCurrent)
+    }
+
+    @discardableResult
+    func loadNextEstimatePage(scope: JobDocumentScope, api: APIClient,
+                              isCurrent: @escaping @MainActor () -> Bool) async -> Bool {
+        guard isCurrent(), !Task.isCancelled, !loadingEstimatePage, canLoadMoreEstimates, !estimatePageNeedsRefresh,
+              estimatePagerScope == scope, let pager = estimatePager else { return false }
+        let request = estimateRequest
+        let current: @MainActor () -> Bool = { self.estimateRequest == request && self.estimatePagerScope == scope && isCurrent() }
+        loadingEstimatePage = true; estimatePageError = nil
+        defer { if estimateRequest == request { loadingEstimatePage = false } }
+        var prepared: JobDocumentRead<EstimateRecord>?
+        do {
+            try await pager.loadNext(isCurrent: current, beforeCommit: { candidate in
+                var ids = candidate.estimateIDs
+                if let origin = scope.originEstimateID, !ids.contains(where: { $0.caseInsensitiveCompare(origin) == .orderedSame }) { ids.insert(origin, at: 0) }
+                guard let read = await JobDocumentsLoader.estimatesForPage(scope: scope, api: api, ids: ids,
+                    previous: self.estimatePageCommitted ? self.estimates : nil, membershipFresh: candidate.pagesUsedOnlyFreshResponses,
+                    membershipComplete: candidate.scanReachedEnd && candidate.pagesUsedOnlyFreshResponses,
+                    retainingOnFailure: self.estimatePageCommitted ? [] : (self.estimates?.records ?? []),
+                    isCurrent: current), current(), !Task.isCancelled else { throw CancellationError() }
+                prepared = read
+            }, onCommit: { candidate in
+                guard let read = prepared else { return }
+                let more = !candidate.scanReachedEnd
+                let healthy = candidate.pagesUsedOnlyFreshResponses && read.unavailableIDs.isEmpty && read.records.allSatisfy { read.freshIDs.contains($0.id) }
+                self.estimates = .init(scope: scope, records: read.records, freshIDs: read.freshIDs,
+                    isComplete: read.isComplete, unavailableIDs: read.unavailableIDs, kind: "estimates", pendingPage: more && healthy)
+                self.canLoadMoreEstimates = more
+                self.estimatePageCommitted = true
+                self.estimatePageNeedsRefresh = !healthy
+                if !healthy { self.estimatePageError = read.issue ?? "Some estimates need a refresh." }
+            }) { cursor in
+                let response: APIRead<JobEstimateLinkPage>
+                do { response = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await api.fieldJobEstimateLinkPage(scope.jobID, cursor: cursor, isCurrent: current)
+                } }
+                catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                    response = try await api.fieldJobEstimateLinkPage(scope.jobID, cursor: cursor, isCurrent: current)
+                }
+                return .init(links: response.value.items, nextCursor: response.value.nextCursor,
+                             isAuthoritative: response.provenance.source == .urlSession(cacheBypassed: true))
+            }
+            return true
+        } catch {
+            if estimateRequest == request && !isCurrent() { clearEstimates(); return false }
+            if current() {
+                if let problem = error as? Problem, problem.status == 401 || problem.status == 403 {
+                    estimates = nil; estimatePager = nil; estimatePagerScope = nil; canLoadMoreEstimates = false
+                }
+                estimatePageError = "Couldn't load estimates. Try again."
+            }
+            return false
+        }
     }
 
     @discardableResult
@@ -176,6 +264,10 @@ struct JobDocumentScope: Equatable {
 enum JobEstimateCreation {
     static func canOpen(canCreate: Bool, canView: Bool, estimatesComplete: Bool) -> Bool {
         canCreate && (!canView || estimatesComplete)
+    }
+    static func currentComplete(scope: JobDocumentScope?, readScope: JobDocumentScope?, complete: Bool, authorityCurrent: Bool) -> Bool {
+        guard let scope, let readScope else { return false }
+        return scope == readScope && complete && authorityCurrent
     }
 }
 
@@ -227,18 +319,20 @@ struct JobDocumentRead<Record> {
     /// Successfully read, identity-checked documents with a currently verified association.
     let freshIDs: Set<String>
     let isComplete: Bool
+    let isLoadingMore: Bool
     let issue: String?
     /// Verified association, but no safe document contents were available to display.
     let unavailableIDs: [String]
 
     fileprivate init(scope: JobDocumentScope, records: [Record], freshIDs: Set<String>, isComplete: Bool,
-                     unavailableIDs: [String] = [], kind: String) {
+                     unavailableIDs: [String] = [], kind: String, loadingMore: Bool = false, pendingPage: Bool = false) {
         self.scope = scope
         self.records = records
         self.freshIDs = freshIDs
         self.isComplete = isComplete
+        self.isLoadingMore = loadingMore
         self.unavailableIDs = unavailableIDs
-        issue = isComplete ? nil : "Couldn't load all \(kind) for this job. Some records may need a refresh."
+        issue = isComplete || loadingMore || pendingPage ? nil : "Couldn't load all \(kind) for this job. Some records may need a refresh."
     }
 }
 
@@ -272,9 +366,142 @@ extension JobDocumentRead where Record == InvoiceRecord {
 
 @MainActor
 enum JobDocumentsLoader {
+    /// Actor-isolated per-index slots preserve link order even when reads finish out of order.
+    @MainActor private final class EstimateDetails {
+        struct Slot {
+            let record: EstimateRecord?
+            let fresh: Bool
+            let failed: Bool
+            let rejected: Bool
+        }
+        let ids: [String]
+        let scope: JobDocumentScope
+        let api: APIClient
+        let retained: [EstimateRecord]
+        let retainedByID: [String: EstimateRecord]
+        let linksSaved: Bool
+        let isCurrent: @MainActor () -> Bool
+        let onPartial: @MainActor (JobDocumentRead<EstimateRecord>) -> Void
+        let includeRetained: Bool
+        var slots: [Slot?]
+        var completed = 0
+
+        init(ids: [String], scope: JobDocumentScope, api: APIClient, retained: [EstimateRecord],
+             linksSaved: Bool, includeRetained: Bool, isCurrent: @escaping @MainActor () -> Bool,
+             onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void) {
+            self.ids = ids; self.scope = scope; self.api = api; self.retained = retained
+            self.retainedByID = retained.reduce(into: [:]) { result, record in
+                if result[record.id] == nil, scope.contains(record, requestedID: record.id) { result[record.id] = record }
+            }
+            self.linksSaved = linksSaved; self.isCurrent = isCurrent
+            self.includeRetained = includeRetained; self.onPartial = onPartial
+            self.slots = Array(repeating: nil, count: ids.count)
+        }
+
+        func fetch(_ index: Int) async {
+            guard isCurrent(), !Task.isCancelled else { return }
+            let id = ids[index]
+            do {
+                let response: APIRead<EstimateRecord>
+                do {
+                    response = try await SavedCopies.$liveOnly.withValue(true) { try await api.fieldEstimateWithProvenance(id, saveIfCurrent: isCurrent) }
+                } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                    // A previously saved record may still be shown, but never authorizes a decision.
+                    guard isCurrent(), !Task.isCancelled else { return }
+                    response = try await api.fieldEstimateWithProvenance(id, saveIfCurrent: isCurrent)
+                }
+                let record = response.value
+                guard isCurrent(), !Task.isCancelled else { return }
+                guard scope.contains(record, requestedID: id) else {
+                    slots[index] = .init(record: nil, fresh: false, failed: true, rejected: true)
+                    publishPartial(); return
+                }
+                let fresh: Bool
+                if case .urlSession(cacheBypassed: true) = response.provenance.source { fresh = !linksSaved }
+                else { fresh = false }
+                slots[index] = .init(record: record, fresh: fresh, failed: false, rejected: false)
+                publishPartial()
+            } catch is CancellationError { return }
+            catch {
+                guard isCurrent(), !Task.isCancelled else { return }
+                let mayRetain = JobDocumentsLoader.canRetain(after: error)
+                let old = mayRetain ? retainedByID[id] : nil
+                slots[index] = .init(record: old, fresh: false, failed: true, rejected: !mayRetain)
+                publishPartial()
+            }
+        }
+
+        private func publishPartial() {
+            completed += 1
+            guard completed < ids.count, (completed == 4 || completed.isMultiple(of: 20)),
+                  isCurrent(), !Task.isCancelled else { return }
+            var rows: [EstimateRecord] = []; var fresh = Set<String>(); var unavailable: [String] = []
+            var rejected = Set<String>()
+            for (index, slot) in slots.enumerated() {
+                if let slot {
+                    if slot.rejected { rejected.insert(ids[index]) }
+                    if let record = slot.record {
+                        rows.append(record); if slot.fresh { fresh.insert(record.id) }
+                    } else { unavailable.append(ids[index]) }
+                } else if let old = retainedByID[ids[index]] {
+                    rows.append(old)
+                }
+            }
+            if includeRetained {
+                let present = Set(rows.map(\.id))
+                rows += retained.filter { !present.contains($0.id) && !rejected.contains($0.id) && scope.contains($0, requestedID: $0.id) }
+            }
+            onPartial(.init(scope: scope, records: rows, freshIDs: fresh, isComplete: false,
+                            unavailableIDs: unavailable, kind: "estimates", loadingMore: true))
+        }
+    }
+
+    /// Fetch only the newly requested membership page; keep previously loaded pages in order.
+    static func estimatesForPage(scope: JobDocumentScope, api: APIClient, ids: [String],
+                                 previous: JobDocumentRead<EstimateRecord>?, membershipFresh: Bool,
+                                 membershipComplete: Bool,
+                                 retainingOnFailure: [EstimateRecord] = [],
+                                 isCurrent: @escaping @MainActor () -> Bool,
+                                 onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void = { _ in }) async -> JobDocumentRead<EstimateRecord>? {
+        guard isCurrent(), !Task.isCancelled else { return nil }
+        let old = previous?.scope == scope ? previous : nil
+        let present = Set((old?.records.map(\.id) ?? []) + (old?.unavailableIDs ?? []))
+        let incoming = unique(ids).filter { !present.contains($0) }
+        let details = EstimateDetails(ids: incoming, scope: scope, api: api, retained: retainingOnFailure,
+                                      linksSaved: !membershipFresh, includeRetained: false,
+                                      isCurrent: isCurrent, onPartial: { page in
+            guard isCurrent(), !Task.isCancelled else { return }
+            let records = (old?.records ?? []) + page.records
+            let fresh = membershipFresh ? (old?.freshIDs ?? []).union(page.freshIDs) : []
+            onPartial(.init(scope: scope, records: records, freshIDs: fresh, isComplete: false,
+                            unavailableIDs: (old?.unavailableIDs ?? []) + page.unavailableIDs,
+                            kind: "estimates", loadingMore: true))
+        })
+        await runBoundedMainActorOperations(count: incoming.count, limit: 4) { index in await details.fetch(index) }
+        guard isCurrent(), !Task.isCancelled else { return nil }
+        var records = old?.records ?? []
+        var fresh = old?.freshIDs ?? []
+        var unavailable = old?.unavailableIDs ?? []
+        var failed = false
+        for (index, slot) in details.slots.enumerated() {
+            guard let slot else { return nil }
+            if slot.failed { failed = true }
+            if let record = slot.record {
+                records.append(record)
+                if slot.fresh { fresh.insert(record.id) }
+            } else { unavailable.append(incoming[index]) }
+        }
+        if !membershipFresh { fresh.removeAll() }
+        return .init(scope: scope, records: records, freshIDs: fresh,
+                     isComplete: membershipComplete && membershipFresh && !failed && unavailable.isEmpty &&
+                         records.allSatisfy { fresh.contains($0.id) },
+                     unavailableIDs: unavailable, kind: "estimates")
+    }
+
     static func estimates(scope: JobDocumentScope, api: APIClient,
                           retaining previous: JobDocumentRead<EstimateRecord>?,
-                          isCurrent: @escaping @MainActor () -> Bool) async -> JobDocumentRead<EstimateRecord>? {
+                          isCurrent: @escaping @MainActor () -> Bool,
+                          onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void = { _ in }) async -> JobDocumentRead<EstimateRecord>? {
         guard isCurrent(), !Task.isCancelled else { return nil }
         let retained = previous?.scope == scope ? previous?.records ?? [] : []
         var ids = scope.originEstimateID.map { [$0] } ?? []
@@ -282,15 +509,20 @@ enum JobDocumentsLoader {
         var linksRead = false
         var linksSaved = false
         do {
-            let links = try await api.fieldJobEstimateLinks(scope.jobID)
-            guard isCurrent(), !Task.isCancelled else { return nil }
-            linksRead = true
-            // A list saved on this phone (no signal) shows the job's estimates, but it can't vouch for
-            // what belongs to the job now, so none of them is fresh enough to decide on.
-            if api.savedCopyDate("/v1/jobs/\(scope.jobID)/estimates") != nil {
+            let links: [JobEstimateLink]
+            do {
+                links = try await SavedCopies.$liveOnly.withValue(true) {
+                    try await api.fieldJobEstimateLinks(scope.jobID, isCurrent: isCurrent)
+                }
+            } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                guard isCurrent(), !Task.isCancelled else { return nil }
+                // Offline membership is useful for reading but cannot authorize a complete set.
+                links = try await api.fieldJobEstimateLinks(scope.jobID, isCurrent: isCurrent)
                 linksSaved = true
                 complete = false
             }
+            guard isCurrent(), !Task.isCancelled else { return nil }
+            linksRead = true
             for link in links {
                 guard link.jobId == scope.jobID else { complete = false; continue }
                 ids.append(link.estimateId)
@@ -307,27 +539,22 @@ enum JobDocumentsLoader {
         var records: [EstimateRecord] = []
         var fresh = Set<String>()
         var rejected = Set<String>()
-        for id in unique(ids) {
-            guard isCurrent(), !Task.isCancelled else { return nil }
-            do {
-                let record = try await api.fieldEstimate(id)
-                guard isCurrent(), !Task.isCancelled else { return nil }
-                guard scope.contains(record, requestedID: id) else {
-                    complete = false
-                    rejected.insert(id)
-                    continue
-                }
+        let orderedIDs = unique(ids)
+        let details = EstimateDetails(ids: orderedIDs, scope: scope, api: api, retained: retained,
+                                      linksSaved: linksSaved, includeRetained: !linksRead,
+                                      isCurrent: isCurrent, onPartial: onPartial)
+        await runBoundedMainActorOperations(count: orderedIDs.count, limit: 4) { index in
+            await details.fetch(index)
+        }
+        guard isCurrent(), !Task.isCancelled else { return nil }
+        for (index, slot) in details.slots.enumerated() {
+            guard let slot else { return nil }
+            if slot.failed { complete = false }
+            if !slot.fresh { complete = false }
+            if slot.rejected { rejected.insert(orderedIDs[index]) }
+            if let record = slot.record {
                 records.append(record)
-                // A copy saved on this phone is shown, but is not a fresh read to act on.
-                if !linksSaved, api.savedCopyDate("/v1/estimates/\(id)") == nil { fresh.insert(record.id) }
-            } catch is CancellationError { return nil }
-            catch {
-                guard isCurrent(), !Task.isCancelled else { return nil }
-                complete = false
-                if !canRetain(after: error) { rejected.insert(id) }
-                if canRetain(after: error), let old = retained.first(where: { $0.id == id && scope.contains($0, requestedID: id) }) {
-                    records.append(old)
-                }
+                if slot.fresh { fresh.insert(record.id) }
             }
         }
         if !linksRead {

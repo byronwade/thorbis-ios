@@ -154,6 +154,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     @Published private(set) var unavailableIDs: [String] = []
     @Published private(set) var complete = false
     @Published private(set) var loading = false
+    @Published private(set) var canLoadMoreEstimates = false
     @Published private(set) var error: String?
     @Published private(set) var retired = false
     @Published private(set) var selection = JobEstimateHandoffSelection()
@@ -169,6 +170,9 @@ final class JobEstimateHandoffModel: ObservableObject {
     private var freshIDs: Set<String> = []
     private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
     private var request = UUID()
+    private var membershipPager: JobEstimateMembershipPager?
+    private var pageRead: JobDocumentRead<EstimateRecord>?
+    private var retryingPage = false
     private var reviewedGeneration: UUID?
     private var lastSignerName: String?
     var isCurrent: Bool { isCurrentJob && session.can("estimate.view", feature: "estimates") }
@@ -275,21 +279,78 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     func refresh() async {
         guard isCurrent, !loading else { if !isCurrent { retire() }; return }
+        retryingPage = false
         let ticket = UUID(); request = ticket; loading = true; error = nil
         defer { if request == ticket { loading = false } }
         do {
             let fresh = try await api.liveFieldJob(scope.jobID)
             guard isCurrent, request == ticket, !Task.isCancelled else { return }
             guard sameJob(fresh) else { retire(); return }
-            let published = await documents.loadEstimates(scope: scope, api: api) { [weak self] in
-                self?.isCurrent == true && self?.request == ticket
-            }
-            guard isCurrent, published, request == ticket, let read = documents.estimates, read.scope == scope else { return }
-            records = read.records; freshIDs = read.freshIDs; complete = read.isComplete; unavailableIDs = read.unavailableIDs; error = read.issue
-            selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
-        } catch is CancellationError {} catch {
+            membershipPager = JobEstimateMembershipPager(jobID: scope.jobID)
+            pageRead = nil; complete = false; canLoadMoreEstimates = false
+            try await loadPage(ticket: ticket)
+        } catch is CancellationError {
+            if isCurrent, request == ticket { complete = false; error = "Couldn't finish loading estimates. Your previous selections are still here." }
+        } catch {
             guard isCurrent, request == ticket else { return }
             complete = false; self.error = "Couldn't refresh all estimates. Your previous selections are still here."
+        }
+    }
+    func loadMoreEstimates() async {
+        guard isCurrent, !loading, canLoadMoreEstimates else { return }
+        retryingPage = false
+        let ticket = request
+        loading = true; error = nil
+        defer { if request == ticket { loading = false } }
+        do { try await loadPage(ticket: ticket) }
+        catch is CancellationError {
+            if isCurrent, request == ticket { complete = false; retryingPage = true; error = "Couldn't load more estimates. Your selections are still here." }
+        }
+        catch {
+            guard isCurrent, request == ticket else { return }
+            complete = false; retryingPage = true; self.error = "Couldn't load more estimates. Your selections are still here."
+        }
+    }
+    func retryEstimateLoading() async {
+        if retryingPage && canLoadMoreEstimates { await loadMoreEstimates() }
+        else { await refresh() }
+    }
+    private func loadPage(ticket: UUID) async throws {
+        guard let pager = membershipPager, isCurrent, request == ticket else { throw CancellationError() }
+        var preparedRead: JobDocumentRead<EstimateRecord>?
+        try await pager.loadNext(isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, beforeCommit: { [weak self] candidate in
+            guard let self, self.isCurrent, self.request == ticket, !Task.isCancelled else { throw CancellationError() }
+            var ids = candidate.estimateIDs
+            if let origin = self.scope.originEstimateID, !ids.contains(where: { $0.caseInsensitiveCompare(origin) == .orderedSame }) { ids.insert(origin, at: 0) }
+            guard let read = await JobDocumentsLoader.estimatesForPage(scope: self.scope, api: self.api, ids: ids,
+                previous: self.pageRead, membershipFresh: candidate.pagesUsedOnlyFreshResponses,
+                membershipComplete: candidate.scanReachedEnd && candidate.pagesUsedOnlyFreshResponses,
+                isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, onPartial: { [weak self] partial in
+                    guard let self, self.isCurrent, self.request == ticket, self.pageRead == nil else { return }
+                    self.records = partial.records; self.freshIDs = partial.freshIDs
+                    self.unavailableIDs = partial.unavailableIDs; self.complete = false
+                }) else { throw CancellationError() }
+            guard self.isCurrent, self.request == ticket, !Task.isCancelled else { throw CancellationError() }
+            preparedRead = read
+        }, onCommit: { [weak self] candidate in
+            guard let self, let read = preparedRead else { return }
+            self.pageRead = read; self.records = read.records; self.freshIDs = read.freshIDs
+            self.unavailableIDs = read.unavailableIDs; self.complete = read.isComplete
+            self.canLoadMoreEstimates = !candidate.scanReachedEnd
+            self.error = (!read.isComplete && !self.canLoadMoreEstimates) ? read.issue : nil
+            self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
+        }) { [weak self] cursor in
+            guard let self else { throw CancellationError() }
+            let current: @MainActor () -> Bool = { [weak self] in self?.isCurrent == true && self?.request == ticket }
+            let page: APIRead<JobEstimateLinkPage>
+            do {
+                page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, requireFresh: true, isCurrent: current)
+            } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                // A scoped saved page is readable but cannot authorize a signature.
+                page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, isCurrent: current)
+            }
+            return .init(links: page.value.items, nextCursor: page.value.nextCursor,
+                         isAuthoritative: page.provenance.source == .urlSession(cacheBypassed: true))
         }
     }
     func setSelected(_ id: String, selected: Bool) {
@@ -382,8 +443,8 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     /// Reading one estimate never selects it or prepares an approval.
     func detailsCurrent(_ record: EstimateRecord, authority: UUID) -> Bool {
-        isCurrent && session.authorityRevision == authority && complete && freshIDs.contains(record.id)
-            && record.status == "sent" && records.contains(record)
+        isCurrent && session.authorityRevision == authority && freshIDs.contains(record.id)
+            && (record.status == "sent" || record.status == "approved") && records.contains(record)
             && scope.contains(record, requestedID: record.id)
     }
 
@@ -395,23 +456,38 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard sameJob(fresh) else {
             throw Problem(title: "This job changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
-        let links = try await api.liveFieldJobEstimateLinks(scope.jobID)
-        guard current() else { throw CancellationError() }
-        guard links.allSatisfy({ $0.jobId == scope.jobID }),
-              links.contains(where: { $0.estimateId == record.id }) || fresh.estimateId == record.id else {
-            throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
-        }
-        let revision = try await api.customerIssuedEstimateRevision(for: record, currentAuthority: current)
+        try await verifyDetailMembership(record, job: fresh, current: current)
+        let revision = try await api.customerIssuedEstimateRevision(for: record, allowApprovedForReading: true, currentAuthority: current)
         guard current() else { throw CancellationError() }
         let verifiedJob = try await api.liveFieldJob(scope.jobID)
         guard current() else { throw CancellationError() }
-        let verifiedLinks = try await api.liveFieldJobEstimateLinks(scope.jobID)
         guard current() else { throw CancellationError() }
-        guard sameJob(verifiedJob), verifiedLinks.allSatisfy({ $0.jobId == scope.jobID }),
-              verifiedLinks.contains(where: { $0.estimateId == record.id }) || verifiedJob.estimateId == record.id else {
+        guard sameJob(verifiedJob) else {
             throw Problem(title: "This job's estimates changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
+        try await verifyDetailMembership(record, job: verifiedJob, current: current)
         return revision
+    }
+    func approvedReceipt(_ record: EstimateRecord, revision: CustomerIssuedEstimateRevision, authority: UUID) async throws -> CustomerEstimateAcceptanceReceipt? {
+        func current() -> Bool { detailsCurrent(record, authority: authority) && !Task.isCancelled }
+        guard current(), record.status == "approved" else { throw CancellationError() }
+        let receipt = try await api.customerEstimateAcceptanceReceipt(for: revision, currentAuthority: current)
+        guard current() else { throw CancellationError() }
+        // Recheck job membership and the live revision after the receipt request.
+        let checked = try await issuedDetails(record, authority: authority)
+        guard current(), checked == revision else { throw CancellationError() }
+        return receipt
+    }
+    private func verifyDetailMembership(_ record: EstimateRecord, job: JobRecord,
+                                        current: @MainActor () -> Bool) async throws {
+        do {
+            try await JobEstimateDetailMembership.verify(jobID: scope.jobID, estimateID: record.id,
+                originID: job.estimateId, isCurrent: current,
+                read: { try await self.api.liveFieldJobEstimateLink(self.scope.jobID, estimateID: record.id) },
+                list: { try await self.api.liveFieldJobEstimateLinks(self.scope.jobID) })
+        } catch is JobEstimateDetailMembership.InvalidMembership {
+            throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
+        }
     }
     func verifyMembership(_ item: JobEstimateReviewedItem) async throws {
         guard isCurrent, approvalAllowed(item) else { throw CancellationError() }
@@ -492,6 +568,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard !retired else { return }
         if clearDocuments { documents.reset() }
         retired = true; request = UUID(); loading = false
+        membershipPager = nil; pageRead = nil; canLoadMoreEstimates = false
         records = []; freshIDs = []; unavailableIDs = []; reviewed = []; revisions = [:]
         jobTitle = ""; customerName = ""; lastSignerName = nil; error = nil
         for context in contexts.values { context.retire() }

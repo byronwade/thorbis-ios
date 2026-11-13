@@ -21,6 +21,39 @@ final class CustomerEstimateReviewTests: XCTestCase {
         ])
     }
 
+    func testIssuedRevisionDoesNotUseSavedCopyAfterConnectionDrops() async throws {
+        let api = client([.init(200, try json(aggregate)), URLProtocolFixture.offline])
+        let scope = "revision-review-\(UUID().uuidString)"
+        api.savedCopyScope = scope
+        let path = "/v1/estimates/\(estimateID)/revisions/2"
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        let saved = Data(try json(revision).utf8)
+        SavedCopyStore.shared.write(saved, scope: scope, key: key)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        XCTAssertEqual(SavedCopyStore.shared.read(scope: scope, key: key)?.data, saved)
+        do { _ = try await api.customerIssuedEstimateRevision(for: localEstimate()); XCTFail("A saved revision cannot satisfy a live review") }
+        catch let problem as Problem { XCTAssertEqual(problem.title, "Network error"); XCTAssertNil(problem.status) }
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.url?.path), ["/v1/estimates/\(estimateID)", path])
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
+    func testIssuedRevisionDenialCannotFallBackToSavedCopy() async throws {
+        let api = client([.init(200, try json(aggregate)), .init(403, #"{"status":403,"title":"Forbidden"}"#)])
+        let scope = "revision-denied-\(UUID().uuidString)"
+        api.savedCopyScope = scope
+        let path = "/v1/estimates/\(estimateID)/revisions/2"
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        let saved = Data(try json(revision).utf8)
+        SavedCopyStore.shared.write(saved, scope: scope, key: key)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        XCTAssertEqual(SavedCopyStore.shared.read(scope: scope, key: key)?.data, saved)
+        do { _ = try await api.customerIssuedEstimateRevision(for: localEstimate()); XCTFail("A denied revision cannot fall back to a saved copy") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 403) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, path)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
     func testRetainedDetailsRejectSameEstimateAfterRevisionChanges() throws {
         let issued = try decodedRevision()
         XCTAssertTrue(issued.matchesDetails(for: try localEstimate()))

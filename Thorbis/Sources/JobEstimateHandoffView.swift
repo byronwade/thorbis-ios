@@ -8,6 +8,8 @@ private struct CustomerHandoffEstimateDetails: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var revision: CustomerIssuedEstimateRevision?
     @State private var loading = false
+    @State private var receipt: CustomerEstimateAcceptanceReceipt?
+    @State private var unsigned = false
     @State private var error: String?
 
     init(model: JobEstimateHandoffModel, record: EstimateRecord) {
@@ -44,7 +46,22 @@ private struct CustomerHandoffEstimateDetails: View {
                 } else if let revision, revisionMatches {
                     Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    if let options = revision.options, !options.isEmpty {
+                    if record.status == "approved", let receipt {
+                        Text("Approved · Signed by \(receipt.signerName)")
+                            .font(Theme.customerFont(type.body, weight: .medium))
+                        if let title = receipt.optionTitle {
+                            Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                        }
+                        if let option = revision.options?.first(where: { $0.id == receipt.optionId }), !option.description.isEmpty {
+                            ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: access,
+                                                        customerFacing: true, accessibilityContext: "Estimate EST-\(record.id.suffix(4).uppercased()), approved package")
+                        }
+                        lines(receipt.lines, currency: receipt.currency, total: receipt.totalAmount,
+                              context: "Estimate EST-\(record.id.suffix(4).uppercased()), approved work")
+                    } else if record.status == "approved", unsigned {
+                        Text("No signed customer receipt is available for this approval. Ask your technician for details.")
+                            .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    } else if let options = revision.options, !options.isEmpty {
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
@@ -101,11 +118,17 @@ private struct CustomerHandoffEstimateDetails: View {
 
     private func load() async {
         guard current, !loading else { return }
-        loading = true; revision = nil; error = nil
+        loading = true; revision = nil; receipt = nil; unsigned = false; error = nil
         defer { loading = false }
         do {
             let issued = try await model.issuedDetails(record, authority: authority)
             guard current, !Task.isCancelled else { return }
+            if record.status == "approved" {
+                let signed = try await model.approvedReceipt(record, revision: issued, authority: authority)
+                guard current, !Task.isCancelled else { return }
+                receipt = signed
+                unsigned = signed == nil
+            }
             revision = issued
         } catch is CancellationError {} catch {
             guard current else { return }
@@ -124,6 +147,7 @@ struct JobEstimateHandoffView: View {
     @State private var reviewing = false
     @State private var checkpointID: String?
     @State private var detailsID: String?
+    @State private var footerHeight: CGFloat = 0
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -133,10 +157,13 @@ struct JobEstimateHandoffView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         if reviewing { selectedReview } else { overview }
                     }
-                    .padding(Theme.gutter).frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
+                    .padding(Theme.gutter).padding(.bottom, footerHeight)
+                    .frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("job-estimate-handoff")
-                .safeAreaInset(edge: .bottom) { footer }
+                .safeAreaInset(edge: .bottom) {
+                    footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                }
             } else {
                 VStack(spacing: 20) {
                     Text("Hand the device back to your technician").font(Theme.customerFont(type.heading, weight: .medium))
@@ -173,22 +200,29 @@ struct JobEstimateHandoffView: View {
     }
 
     private var overview: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        LazyVStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.jobTitle).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : "Some estimates still need a refresh")
+                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : model.loading ? "Loading estimates…" : model.canLoadMoreEstimates ? "More estimates are available for this job." : "Some estimates still need a refresh")
                     .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
             if !model.approvalAuthority {
                 Text("You can review these estimates. Your current access doesn't allow approvals.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             }
             if model.hasResults { results }
-            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.refresh() } }
+            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.retryEstimateLoading() } }
             if model.loading {
                 if model.records.isEmpty { CustomerSkeleton(caption: "Opening current job estimates…", lines: 2) }
                 else { Text("Opening current job estimates…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
             }
             ForEach(model.records) { record in estimateCard(record) }
+            if model.canLoadMoreEstimates {
+                CustomerSecondaryButton(title: "Load more estimates", type: type) {
+                    Task { await model.loadMoreEstimates() }
+                }
+                .disabled(model.loading)
+                .accessibilityIdentifier("handoff-load-more-estimates")
+            }
             ForEach(model.unavailableIDs, id: \.self) { id in
                 VStack(alignment: .leading, spacing: 8) {
                     Text("EST-\(id.suffix(4).uppercased()) · Unavailable").font(Theme.customerFont(type.body, weight: .medium))
@@ -414,6 +448,13 @@ struct JobEstimateHandoffView: View {
     @ViewBuilder private var footer: some View {
         if reviewing || !model.complete || !model.eligibleIDs.isEmpty {
         VStack(spacing: 8) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-paging-diagnostic") {
+                Text("Paging diagnostic").font(.system(size: 1))
+                    .accessibilityIdentifier("handoff-paging-diagnostic")
+                    .accessibilityValue("count=\(model.records.count); loading=\(model.loading); complete=\(model.complete); more=\(model.canLoadMoreEstimates); error=\(model.error ?? "none"); requests=\(JobEstimateHandoffPreview.shared.receipt)")
+            }
+            #endif
             if reviewing {
                 if let next = nextPending(after: nil) {
                     CustomerPresentationCommit(title: "Continue to signatures", enabled: true, busy: false, type: type) { checkpointID = next }
