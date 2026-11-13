@@ -137,6 +137,73 @@ private struct CustomerHandoffEstimateDetails: View {
     }
 }
 
+/// Browse only fresh, verified estimates already loaded for this job. Each destination
+/// retains the existing issued-revision read and never changes the selected work.
+private struct CustomerHandoffEstimateBrowser: View {
+    @ObservedObject var model: JobEstimateHandoffModel
+    @State private var currentID: String
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    init(model: JobEstimateHandoffModel, initial: EstimateRecord) {
+        self.model = model
+        _currentID = State(initialValue: initial.id)
+    }
+
+    private var type: CustomerType { CustomerType(sizeClass) }
+    private var readable: [EstimateRecord] {
+        model.records.filter { model.detailsCurrent($0, authority: model.session.authorityRevision) }
+    }
+    private var index: Int? { readable.firstIndex { $0.id == currentID } }
+
+    var body: some View {
+        Group {
+            if let record = readable.first(where: { $0.id == currentID }) {
+                CustomerHandoffEstimateDetails(model: model, record: record)
+                    .id(record)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 50).onEnded { value in
+                            let horizontal = value.translation.width
+                            guard value.startLocation.x > 30,
+                                  abs(horizontal) > 70,
+                                  abs(horizontal) > abs(value.translation.height) * 2 else { return }
+                            move(horizontal < 0 ? 1 : -1)
+                        }
+                    )
+            } else {
+                CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                     message: "Hand the device back to your technician to reopen this estimate.")
+                    .padding(Theme.gutter)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let index, readable.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { browseControls(index: index) }
+                    VStack(spacing: 8) { browseControls(index: index) }
+                }
+                .padding(Theme.gutter)
+                .background(Theme.canvas)
+            }
+        }
+    }
+
+    @ViewBuilder private func browseControls(index: Int) -> some View {
+        CustomerSecondaryButton(title: "Previous estimate", type: type) { move(-1) }
+            .disabled(index == 0)
+            .accessibilityIdentifier("handoff-previous-estimate")
+        CustomerSecondaryButton(title: "Next estimate", type: type) { move(1) }
+            .disabled(index + 1 >= readable.count)
+            .accessibilityIdentifier("handoff-next-estimate")
+    }
+
+    private func move(_ offset: Int) {
+        let current = readable
+        guard let index = current.firstIndex(where: { $0.id == currentID }),
+              current.indices.contains(index + offset) else { return }
+        currentID = current[index + offset].id
+    }
+}
+
 /// Customer-only destinations inside the existing protected customer navigation owner.
 struct JobEstimateHandoffView: View {
     @ObservedObject var model: JobEstimateHandoffModel
@@ -193,8 +260,8 @@ struct JobEstimateHandoffView: View {
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
         .thorbisDestination(item: $detailsID) { id in
             if let record = model.records.first(where: { $0.id == id }) {
-                CustomerHandoffEstimateDetails(model: model, record: record)
-                    .id(record)
+                CustomerHandoffEstimateBrowser(model: model, initial: record)
+                    .id(record.id)
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             }
         }
