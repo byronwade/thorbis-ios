@@ -127,13 +127,34 @@ final class CustomerPresentationTests: XCTestCase {
     func testCustomerSavingsOnlyIncludesExplicitVisibleCredits() {
         let charge = line("Work", 1, 10000)
         let visible = line("Courtesy credit", 1, -500)
+        let hiddenCharge = FieldLine(id: "hidden-charge", description: "Internal material", quantity: 1,
+                                     unitPrice: FieldMoney(amount: 3000, currency: "USD"),
+                                     source: nil, showToCustomer: false)
         let hidden = FieldLine(id: "hidden", description: "Internal credit", quantity: 1,
                                unitPrice: FieldMoney(amount: -2000, currency: "USD"),
                                source: nil, showToCustomer: false)
-        let result = customerSavingsRows([charge, visible, hidden], currency: "USD", isMember: true)
+        let result = customerSavingsRows([charge, visible, hiddenCharge, hidden], currency: "USD", isMember: true)
         XCTAssertEqual(result, [CustomerAmountRow(label: "Discounts and credits",
                                                    amount: "−\(money(500, currency: "USD"))",
                                                    emphasis: false)])
+    }
+
+    func testNetNegativeProjectedMaterialsAreShownAsCreditWithoutStaffBreakdown() {
+        let charge = line("Work", 1, 10000)
+        let hiddenCharge = FieldLine(id: "material", description: "Private material", quantity: 1,
+                                     unitPrice: FieldMoney(amount: 1000, currency: "USD"),
+                                     source: nil, showToCustomer: false)
+        let hiddenCredit = FieldLine(id: "credit", description: "Private credit", quantity: 1,
+                                     unitPrice: FieldMoney(amount: -2000, currency: "USD"),
+                                     source: nil, showToCustomer: false)
+        let lines = [charge, hiddenCharge, hiddenCredit]
+        let projected = customerEstimateProjection(lines, currency: "USD")!
+        let breakdown = CustomerDocumentAmounts(lines: projected, currency: "USD")!
+        XCTAssertEqual(projected.map(\.description), ["Work", "Materials"])
+        XCTAssertEqual(breakdown.credits, -1000)
+        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false),
+                       [CustomerAmountRow(label: "Discounts and credits",
+                                          amount: "−\(money(1000, currency: "USD"))", emphasis: false)])
     }
 
     func testInvalidAmountsDoNotCreateSavingsOrOverflow() {
