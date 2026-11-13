@@ -1,8 +1,33 @@
 import SwiftUI
 
-private enum CustomerJobPaper: Hashable {
+enum CustomerJobPaper: Hashable {
     case estimate(EstimateRecord)
     case invoice(InvoiceRecord, signing: Bool)
+}
+
+/// Stable navigation owner for async rechecks and destination callbacks.
+@MainActor final class CustomerJobPaperNavigation: ObservableObject {
+    @Published var paper: CustomerJobPaper?
+    @Published var generation = UUID()
+    @Published var book: CustomerJobDocumentID?
+    @Published var openingID: String?
+    var selectionRevision = UUID()
+    private(set) var requestRevision = UUID()
+
+    func beginOpen(_ id: String) -> UUID? {
+        guard openingID == nil else { return nil }
+        let request = UUID()
+        requestRevision = request
+        openingID = id
+        return request
+    }
+    func finishOpen(_ request: UUID) {
+        if requestRevision == request { openingID = nil }
+    }
+    func invalidatePendingOpen() {
+        requestRevision = UUID()
+        openingID = nil
+    }
 }
 
 /// Customer view's home. Lives inside one CustomerModeContainer: the job's estimates (select and
@@ -31,13 +56,35 @@ struct JobCustomerDocumentsView: View {
     @EnvironmentObject private var session: SessionController
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
-    @State private var paper: CustomerJobPaper?
-    @State private var paperGeneration = UUID()
-    @State private var book: CustomerJobDocumentID?
-    @State private var openingID: String?
+    @StateObject private var paperNavigation = CustomerJobPaperNavigation()
+    private var paper: CustomerJobPaper? {
+        get { paperNavigation.paper }
+        nonmutating set { paperNavigation.paper = newValue }
+    }
+    private var paperGeneration: UUID {
+        get { paperNavigation.generation }
+        nonmutating set { paperNavigation.generation = newValue }
+    }
+    private var book: CustomerJobDocumentID? {
+        get { paperNavigation.book }
+        nonmutating set {
+            if paperNavigation.book != newValue { paperNavigation.invalidatePendingOpen() }
+            paperNavigation.book = newValue
+        }
+    }
+    private var openingID: String? {
+        get { paperNavigation.openingID }
+        nonmutating set { paperNavigation.openingID = newValue }
+    }
+    private var documentSelectionRevision: UUID {
+        get { paperNavigation.selectionRevision }
+        nonmutating set {
+            paperNavigation.invalidatePendingOpen()
+            paperNavigation.selectionRevision = newValue
+        }
+    }
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var error: String?
-    @State private var documentSelectionRevision = UUID()
     @State private var unlocking = false
     @State private var approving = false
     @State private var editingDetails = false
@@ -80,10 +127,10 @@ struct JobCustomerDocumentsView: View {
         }
         .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
-            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: handBack)
+            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: beginHandBack)
                 .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
         }
-        .thorbisDestination(item: $book) { initial in
+        .thorbisDestination(item: Binding(get: { book }, set: { book = $0 })) { initial in
             if currentWorkspace {
                 CustomerJobDocumentBook(scope: scope, sourceGeneration: sourceGeneration,
                     estimates: canViewEstimates && estimates?.scope == scope ? estimates?.records ?? [] : [],
@@ -106,6 +153,7 @@ struct JobCustomerDocumentsView: View {
                     canPayInvoice: session.can("invoice.payment.create", feature: "payments"),
                     onSelectionChanged: { documentSelectionRevision = UUID(); error = nil })
                     .disabled(unlocking || openingID != nil)
+                    .onDisappear { paperNavigation.invalidatePendingOpen() }
                     .thorbisDestination(item: Binding(get: { paper }, set: { next in
                         if paper != next { paperGeneration = UUID() }
                         paper = next
@@ -301,10 +349,11 @@ struct JobCustomerDocumentsView: View {
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
                         ? { Task { await pay(invoice.id) } } : nil, initiallySigning: signing,
-                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && scope.contains(invoice) },
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && (!signing || session.can("invoice.edit", feature: "invoicing")) && scope.contains(invoice) },
                     onSigned: { updated in
                         guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true,
-                              canViewInvoices, scope.contains(updated), updated.id == invoice.id else { return }
+                              canViewInvoices, session.can("invoice.edit", feature: "invoicing"),
+                              scope.contains(updated), updated.id == invoice.id else { return }
                         documents.replaceInvoice(updated)
                         paymentModel?.acceptInvoiceMutationResponse(updated)
                         paperGeneration = UUID(); paper = .invoice(updated, signing: false)
@@ -324,6 +373,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func beginHandBack() {
+        paperNavigation.invalidatePendingOpen()
         paperGeneration = UUID(); paper = nil
         book = nil
         approving = false
@@ -381,14 +431,14 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func openEstimate(_ id: String, decision: Bool = false) async {
-        guard openingID == nil, currentWorkspace, canViewEstimates else { return }
-        openingID = id
-        defer { openingID = nil }
+        guard currentWorkspace, canViewEstimates, let request = paperNavigation.beginOpen(id) else { return }
+        defer { paperNavigation.finishOpen(request) }
         let generation = session.generation
         let published = await documents.loadEstimates(scope: scope, api: api) {
-            session.generation == generation && currentWorkspace && canViewEstimates
+            paperNavigation.requestRevision == request && session.generation == generation && currentWorkspace && canViewEstimates
         }
-        guard session.generation == generation, currentWorkspace, published, let read = estimates else { return }
+        guard paperNavigation.requestRevision == request, session.generation == generation,
+              currentWorkspace, published, let read = estimates else { return }
         guard read.freshIDs.contains(id), let estimate = read.records.first(where: { $0.id == id }) else {
             error = "This estimate couldn't be refreshed. Try again in a moment."
             return
@@ -398,20 +448,47 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
-        guard openingID == nil, currentWorkspace, canViewInvoices else { return }
+        guard currentWorkspace, canViewInvoices,
+              !sign || session.can("invoice.edit", feature: "invoicing"),
+              !decision || book != nil,
+              let request = paperNavigation.beginOpen(id) else { return }
         error = nil
-        openingID = id
-        defer { openingID = nil }
+        defer { paperNavigation.finishOpen(request) }
         let generation = session.generation
+        let authority = session.authorityRevision
+        let apiGeneration = api.requestGeneration
+        let originatingBook = book
+        let selection = documentSelectionRevision
+        let presentation = paperGeneration
+        let originalPaper = paper
+        func isCurrentOpen() -> Bool {
+            !Task.isCancelled && paperNavigation.requestRevision == request &&
+            session.generation == generation && session.authorityRevision == authority &&
+            api.requestGeneration == apiGeneration && currentWorkspace && canViewInvoices &&
+            (!sign || session.can("invoice.edit", feature: "invoicing")) &&
+            (!(decision || payment) || handoff?.isCurrentJob == true) &&
+            book == originatingBook && documentSelectionRevision == selection &&
+            paperGeneration == presentation && paper == originalPaper
+        }
         do {
+            #if DEBUG
+            if sign && PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-revoke-invoice-edit-on-sign") {
+                PaperPreviewProtocol.revokeInvoiceEditForSigning()
+                await session.revalidate()
+            }
+            if sign && PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-delay-invoice-signing") {
+                try await Task.sleep(for: .seconds(15))
+            }
+            #endif
+            guard isCurrentOpen() else { return }
             let invoice = try await api.liveFieldInvoice(id)
-            guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
+            guard isCurrentOpen() else { return }
             guard invoice.id == id, scope.contains(invoice) else {
                 throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
             }
             let model = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: scope)
             await model.load()
-            guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
+            guard isCurrentOpen() else { return }
             if let latest = model.invoice {
                 guard latest.id == id, scope.contains(latest) else {
                     throw Problem(title: "This invoice couldn't be verified for this job", status: nil, detail: nil)
@@ -429,7 +506,11 @@ struct JobCustomerDocumentsView: View {
                 paymentModel = nil
                 throw Problem(title: model.loadError ?? "This invoice couldn't be refreshed", status: nil, detail: nil)
             }
-        } catch is CancellationError { } catch { self.error = error.customerSentence(.openInvoice) }
+        } catch is CancellationError {
+        } catch {
+            guard isCurrentOpen() else { return }
+            self.error = error.customerSentence(.openInvoice)
+        }
     }
 
     private func pay(_ invoiceID: String) async {
@@ -469,6 +550,7 @@ struct JobCustomerDocumentsView: View {
 
     private func unlock() async {
         guard !unlocking else { return }
+        paperNavigation.invalidatePendingOpen()
         unlocking = true
         defer { unlocking = false }
         if await authenticateOwner("Unlock to leave customer mode") { onUnlocked() }
