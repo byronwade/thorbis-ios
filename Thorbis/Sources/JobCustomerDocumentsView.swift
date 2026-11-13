@@ -349,10 +349,11 @@ struct JobCustomerDocumentsView: View {
                     canSign: session.can("invoice.edit", feature: "invoicing"),
                     onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments")
                         ? { Task { await pay(invoice.id) } } : nil, initiallySigning: signing,
-                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && scope.contains(invoice) },
+                    currentAuthority: { paperGeneration == presentation && currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && (!signing || session.can("invoice.edit", feature: "invoicing")) && scope.contains(invoice) },
                     onSigned: { updated in
                         guard paperGeneration == presentation, currentWorkspace, handoff?.isCurrentJob == true,
-                              canViewInvoices, scope.contains(updated), updated.id == invoice.id else { return }
+                              canViewInvoices, session.can("invoice.edit", feature: "invoicing"),
+                              scope.contains(updated), updated.id == invoice.id else { return }
                         documents.replaceInvoice(updated)
                         paymentModel?.acceptInvoiceMutationResponse(updated)
                         paperGeneration = UUID(); paper = .invoice(updated, signing: false)
