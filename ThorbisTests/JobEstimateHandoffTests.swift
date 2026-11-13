@@ -165,7 +165,13 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         let c = "00000000-0000-4000-8000-000000000013"
         var third = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(record(c).utf8)) as? [String: Any]); third["options"] = try packageOptions()
         let thirdJSON = String(decoding: try JSONSerialization.data(withJSONObject: third), as: UTF8.self)
-        let model = try await ready([.init(200, jobJSON), .init(200, membership([a,b,c])), .init(200, record(a)), .init(200, record(b)), .init(200, thirdJSON), .init(200, record(a)), .init(200, revision(a)), .init(200, record(b)), .init(200, revision(b)), .init(200, record(b)), .init(200, record(b)), .init(200, revision(b)), .init(200, jobJSON), .init(200, membership([a,b,c]))])
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), "/v1/jobs/\(jobID)/estimates": .init(200, membership([a,b,c])),
+            "/v1/estimates/\(a)": .init(200, record(a)), "/v1/estimates/\(b)": .init(200, record(b)),
+            "/v1/estimates/\(c)": .init(200, thirdJSON),
+            "/v1/estimates/\(a)/revisions/1": .init(200, revision(a)), "/v1/estimates/\(b)/revisions/1": .init(200, revision(b))
+        ])
         await model.refresh(); model.setSelected(a, selected: true); model.setSelected(b, selected: true); await model.reviewSelected()
         let first = try XCTUnwrap(model.context(for: a)), second = try XCTUnwrap(model.context(for: b))
         first.report(await first.confirmed(try JSONDecoder().decode(EstimateRecord.self, from: Data(record(a, status: "approved").utf8))))
@@ -543,13 +549,22 @@ final class JobEstimateHandoffModelTests: XCTestCase {
     }
 
     func testRefreshingPartialSuccessKeepsUnknownAttemptAndReviewedSelection() async throws {
-        let model = try await ready([.init(200, jobJSON), .init(200, membership([a,b])), .init(200, record(a)), .init(200, record(b)), .init(200, record(a)), .init(200, revision(a)), .init(200, record(b)), .init(200, revision(b)), .init(200, jobJSON), .init(200, membership([a,b])), .init(200, record(a, status: "approved")), .init(200, record(b))])
+        let model = try await ready([])
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), "/v1/jobs/\(jobID)/estimates": .init(200, membership([a,b])),
+            "/v1/estimates/\(a)": .init(200, record(a)), "/v1/estimates/\(b)": .init(200, record(b)),
+            "/v1/estimates/\(a)/revisions/1": .init(200, revision(a)), "/v1/estimates/\(b)/revisions/1": .init(200, revision(b))
+        ])
         await model.refresh(); model.setSelected(a, selected: true); model.setSelected(b, selected: true); await model.reviewSelected()
         let first = try XCTUnwrap(model.context(for: a)), second = try XCTUnwrap(model.context(for: b))
         let approved = try JSONDecoder().decode(EstimateRecord.self, from: Data(record(a, status: "approved").utf8))
         first.report(await first.confirmed(approved))
         let intent = try second.freezeSignature(signerName: "Sample signer", png: Data([1,2,3]), signedAt: "2026-10-29T12:00:00Z")
         second.submissionStarted = true; second.report(.unknown)
+        URLProtocolFixture.setRoutes([
+            "/v1/jobs/\(jobID)": .init(200, jobJSON), "/v1/jobs/\(jobID)/estimates": .init(200, membership([a,b])),
+            "/v1/estimates/\(a)": .init(200, record(a, status: "approved")), "/v1/estimates/\(b)": .init(200, record(b))
+        ])
         await model.refresh()
         XCTAssertEqual(model.selectedIDs, [a,b], "Confirmed work stays part of this reviewed handoff; it is not sent again")
         XCTAssertTrue(model.context(for: b) === second)

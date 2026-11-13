@@ -262,10 +262,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testEstimateMembershipDeduplicatesAndRejectsAnotherJobForSameCustomer() async throws {
-        let client = api([
-            .init(200, page([link(11), link(11), link(12, job: 101)])),
-            .init(200, estimate(10)), .init(200, estimate(11))
-        ])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(11), link(12, job: 101)])),
+            "/v1/estimates/\(id(10))": .init(200, estimate(10)),
+            "/v1/estimates/\(id(11))": .init(200, estimate(11))
+        ]), baseURL: "https://app.thorbis.com")
         let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: client, retaining: nil, isCurrent: { true })
         let read = try XCTUnwrap(result)
         XCTAssertEqual(read.records.map(\.id), [id(10), id(11)])
@@ -407,8 +408,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testInitiallyUnavailableLinkedEstimateKeepsItsOwnVisibleReference() async throws {
-        let client = api([.init(200, page([link(11), link(12, job: 101)])),
-                          .init(200, estimate(10)), .init(503, problem(503))])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(12, job: 101)])),
+            "/v1/estimates/\(id(10))": .init(200, estimate(10)),
+            "/v1/estimates/\(id(11))": .init(503, problem(503))
+        ]), baseURL: "https://app.thorbis.com")
         let result = await JobDocumentsLoader.estimates(scope: scope(origin: 10), api: client, retaining: nil, isCurrent: { true })
         let read = try XCTUnwrap(result)
         XCTAssertEqual(read.records.map(\.id), [id(10)])
@@ -583,7 +587,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testMarkingEstimateReadStaleKeepsKnownRowsAndUnavailableReferences() async throws {
-        let client = api([.init(200, page([link(11), link(12)])), .init(200, estimate(11)), .init(503, problem(503))])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(12)])),
+            "/v1/estimates/\(id(11))": .init(200, estimate(11)),
+            "/v1/estimates/\(id(12))": .init(503, problem(503))
+        ]), baseURL: "https://app.thorbis.com")
         let documents = JobDocumentCollections()
         let loaded = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
         XCTAssertTrue(loaded)
@@ -597,7 +605,11 @@ final class JobCommercialDocumentsTests: XCTestCase {
     }
 
     func testApprovalResultOnlyReplacesTheMatchingLinkedEstimateAndIsNotFresh() async throws {
-        let client = api([.init(200, page([link(11), link(12)])), .init(200, estimate(11)), .init(200, estimate(12))])
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(id(100))/estimates": .init(200, page([link(11), link(12)])),
+            "/v1/estimates/\(id(11))": .init(200, estimate(11)),
+            "/v1/estimates/\(id(12))": .init(200, estimate(12))
+        ]), baseURL: "https://app.thorbis.com")
         let documents = JobDocumentCollections()
         let loaded = await documents.loadEstimates(scope: scope(), api: client, isCurrent: { true })
         XCTAssertTrue(loaded)
