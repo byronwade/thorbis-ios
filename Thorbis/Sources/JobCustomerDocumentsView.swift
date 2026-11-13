@@ -20,6 +20,49 @@ private struct CustomerInvoiceOverviewEntry {
     let authority: CustomerHandoffExitAuthority
 }
 
+/// Bounded overview fetches live off the view, using the same structured task-group
+/// pattern as the estimate handoff. Results are always scoped to one load token.
+@MainActor
+private final class CustomerInvoiceOverviewLoader: ObservableObject {
+    @Published private(set) var entries: [String: CustomerInvoiceOverviewEntry] = [:]
+    private var token = UUID()
+    private var current: (@MainActor (InvoiceRecord) -> Bool)?
+    private var api: APIClient?
+    private var scope: JobDocumentScope?
+    private var authority: CustomerHandoffExitAuthority?
+
+    func retire() { token = UUID(); entries = [:]; current = nil; api = nil; scope = nil; authority = nil }
+
+    func load(records: [InvoiceRecord], api: APIClient, scope: JobDocumentScope,
+              authority: CustomerHandoffExitAuthority, current: @escaping @MainActor (InvoiceRecord) -> Bool) async {
+        retire()
+        let generation = token
+        self.api = api; self.scope = scope; self.authority = authority; self.current = current
+        let candidates = Array(records.prefix(20))
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = candidates.makeIterator()
+            for _ in 0..<3 {
+                if let record = iterator.next() { group.addTask { await self.fetch(record, generation: generation) } }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled, token == generation else { group.cancelAll(); break }
+                if let record = iterator.next() { group.addTask { await self.fetch(record, generation: generation) } }
+            }
+        }
+    }
+
+    private func fetch(_ record: InvoiceRecord, generation: UUID) async {
+        func valid() -> Bool { !Task.isCancelled && token == generation && current?(record) == true }
+        guard valid(), let api, let scope, let authority else { return }
+        do {
+            let summary = try await api.customerInvoiceSummary(scope: scope, invoiceID: record.id,
+                linesRevision: record.linesRevision, currentAuthority: valid)
+            guard valid() else { return }
+            entries[record.id] = .init(record: record, summary: summary, authority: authority)
+        } catch { }
+    }
+}
+
 /// Stable navigation owner for async rechecks and destination callbacks.
 @MainActor final class CustomerJobPaperNavigation: ObservableObject {
     @Published var paper: CustomerJobPaper?
@@ -104,8 +147,7 @@ struct JobCustomerDocumentsView: View {
     @State private var approving = false
     @State private var editingDetails = false
     @State private var started = false
-    @State private var invoiceOverview: [String: CustomerInvoiceOverviewEntry] = [:]
-    @State private var invoiceOverviewToken = UUID()
+    @StateObject private var invoiceOverview = CustomerInvoiceOverviewLoader()
 
     private var currentWorkspace: Bool { sourceGeneration == session.generation && session.user != nil && session.activeOrganization?.id == scope.organizationID }
     private var canViewEstimates: Bool { session.can("estimate.view", feature: "estimates") }
@@ -340,7 +382,7 @@ struct JobCustomerDocumentsView: View {
             } else { SkeletonRows(count: 2, leading: false, inset: 0) }
         }
         .task(id: invoiceOverviewKey) { await loadInvoiceOverview() }
-        .onDisappear { invoiceOverviewToken = UUID(); invoiceOverview = [:] }
+        .onDisappear { invoiceOverview.retire() }
     }
 
     private var invoiceOverviewKey: CustomerInvoiceOverviewKey {
@@ -350,7 +392,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func overviewSummary(for invoice: InvoiceRecord) -> CustomerInvoiceSummary? {
-        guard currentWorkspace, canViewInvoices, let entry = invoiceOverview[invoice.id], entry.record == invoice,
+        guard currentWorkspace, canViewInvoices, let entry = invoiceOverview.entries[invoice.id], entry.record == invoice,
               invoices?.scope == scope, invoices?.freshIDs.contains(invoice.id) == true,
               entry.authority.isCurrent(api: api, session: session),
               entry.summary.matches(scope: scope, invoiceID: invoice.id, linesRevision: invoice.linesRevision) else { return nil }
@@ -359,32 +401,15 @@ struct JobCustomerDocumentsView: View {
 
     /// Bound the eager work in long jobs; the remaining rows open directly for a fresh check.
     private func loadInvoiceOverview() async {
-        let token = UUID(); invoiceOverviewToken = token; invoiceOverview = [:]
         guard currentWorkspace, canViewInvoices, invoices?.scope == scope,
-              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
-        let records = Array((invoices?.records ?? []).filter { scope.contains($0) && invoices?.freshIDs.contains($0.id) == true }.prefix(20))
-        func current(_ record: InvoiceRecord) -> Bool {
-            !Task.isCancelled && invoiceOverviewToken == token && currentWorkspace && canViewInvoices &&
-            authority.isCurrent(api: api, session: session) && invoices?.scope == scope &&
-            invoices?.freshIDs.contains(record.id) == true && invoices?.records.contains(record) == true
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else {
+            invoiceOverview.retire(); return
         }
-        func fetch(_ record: InvoiceRecord?) async -> (InvoiceRecord, CustomerInvoiceSummary)? {
-            guard let record, current(record) else { return nil }
-            do {
-                let summary = try await api.customerInvoiceSummary(scope: scope, invoiceID: record.id,
-                    linesRevision: record.linesRevision, currentAuthority: { current(record) })
-                return current(record) ? (record, summary) : nil
-            } catch { return nil }
-        }
-        for start in stride(from: 0, to: records.count, by: 3) {
-            guard !Task.isCancelled, invoiceOverviewToken == token else { return }
-            async let first = fetch(records[start])
-            async let second = fetch(start + 1 < records.count ? records[start + 1] : nil)
-            async let third = fetch(start + 2 < records.count ? records[start + 2] : nil)
-            for result in await [first, second, third] {
-                guard let (record, summary) = result, current(record) else { continue }
-                invoiceOverview[record.id] = .init(record: record, summary: summary, authority: authority)
-            }
+        let records = (invoices?.records ?? []).filter { scope.contains($0) && invoices?.freshIDs.contains($0.id) == true }
+        await invoiceOverview.load(records: records, api: api, scope: scope, authority: authority) { record in
+            currentWorkspace && canViewInvoices && authority.isCurrent(api: api, session: session) &&
+            invoices?.scope == scope && invoices?.freshIDs.contains(record.id) == true &&
+            invoices?.records.contains(record) == true
         }
     }
 
