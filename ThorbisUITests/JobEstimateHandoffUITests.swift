@@ -130,7 +130,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
             let footerIDs = ["handoff-review-selected", "handoff-previous-estimate", "handoff-next-estimate"]
             let footerTop = footerIDs.flatMap { app.buttons.matching(identifier: $0).allElementsBoundByIndex }
                 .filter { $0.exists && $0.isHittable }.map { $0.frame.minY }.min() ?? app.frame.maxY
-            let top = app.frame.minY + 105
+            let top = app.navigationBars.allElementsBoundByIndex.filter { $0.isHittable }.map { $0.frame.maxY }.max() ?? app.frame.minY + 70
             let point = element.frame.midY
             if element.isHittable && point > top && point < footerTop { return }
             let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
