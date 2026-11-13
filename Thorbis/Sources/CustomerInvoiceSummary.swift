@@ -437,14 +437,18 @@ final class CustomerSummarySigningCoordinator: ObservableObject {
 /// including when an unsigned lookup races a prior in-flight POST.
 @MainActor
 final class CustomerSummaryDurableCoordinator: ObservableObject {
-    enum Phase: Equatable { case idle, checking, ready, needsRecovery, recovering, signed, previousResolved, unavailable }
+    enum Phase: Equatable { case idle, checking, ready, preparing, needsRecovery, recovering, signed, previousResolved, unavailable }
     @Published private(set) var phase: Phase = .idle
+    @Published private(set) var hasFrozenSignature = false
+    @Published private(set) var errorMessage: String?
     private(set) var receipt: CustomerInvoiceSummaryReceipt?
     private let summary: CustomerInvoiceSummary
+    private let context: CustomerSummarySigningContext
     private let scope: CustomerSummaryPendingScope
     private let store: any CustomerSummaryPendingStoring
     private let current: @MainActor () -> Bool
     private let lookup: @MainActor () async throws -> CustomerSummaryAuthorizationState
+    private let upload: @MainActor (CustomerSummaryFrozenSignature) async throws -> MediaAssetRecord
     private let replay: @MainActor (CustomerSummaryPendingAttempt) async throws -> CustomerSummaryReplayProof
     private var generation = UUID()
     private var running = false
@@ -452,13 +456,15 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
 
     init(summary: CustomerInvoiceSummary, scope: CustomerSummaryPendingScope, store: any CustomerSummaryPendingStoring,
          current: @escaping @MainActor () -> Bool, lookup: @escaping @MainActor () async throws -> CustomerSummaryAuthorizationState,
+         upload: @escaping @MainActor (CustomerSummaryFrozenSignature) async throws -> MediaAssetRecord,
          replay: @escaping @MainActor (CustomerSummaryPendingAttempt) async throws -> CustomerSummaryReplayProof) {
-        self.summary = summary; self.scope = scope; self.store = store; self.current = current; self.lookup = lookup; self.replay = replay
+        self.summary = summary; self.scope = scope; self.store = store; self.current = current; self.lookup = lookup; self.upload = upload; self.replay = replay
+        context = CustomerSummarySigningContext(summary: summary, actorID: scope.actorID, current: current)
     }
     private func valid(_ token: UUID) -> Bool { !Task.isCancelled && !retired && generation == token && current() }
     func inspect() async {
         guard !running, !retired, current() else { return }
-        running = true; let token = generation; phase = .checking; receipt = nil
+        running = true; let token = generation; phase = .checking; receipt = nil; errorMessage = nil
         defer { if generation == token { running = false } }
         do {
             guard let canonical = scope.canonical, summary.validatedConsent != nil,
@@ -479,9 +485,40 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
             }
         } catch { if valid(token) { phase = .unavailable } }
     }
-    /// Call only after explicit customer consent and a confirmed signature-media upload.
+    /// Capture and upload retain their original bytes and client asset ID through retries.
+    func sign(signerName: String, signedAt: String, png: Data) async {
+        guard !running, !retired, current(), phase == .ready else { return }
+        errorMessage = nil
+        do {
+            let signature = try context.freeze(signerName: signerName, signedAt: signedAt, png: png)
+            hasFrozenSignature = true
+            await prepare(signature)
+        } catch { if current(), !retired { errorMessage = (error as? Problem)?.title ?? "Check your signature and try again." } }
+    }
+    func retryCapture() async {
+        guard !running, !retired, current(), phase == .ready, let signature = try? context.signature() else { return }
+        await prepare(signature)
+    }
+    private func prepare(_ signature: CustomerSummaryFrozenSignature) async {
+        guard !running, !retired, current(), phase == .ready else { return }
+        running = true; let token = generation; phase = .preparing
+        defer { if generation == token { running = false } }
+        do {
+            if (try? context.attempt()) == nil {
+                let asset = try await upload(signature)
+                guard valid(token) else { return }
+                try context.acceptUploadedMedia(asset)
+            }
+            guard valid(token) else { return }
+            let attempt = try context.attempt()
+            running = false; phase = .ready
+            await stageAndSubmit(attempt)
+        } catch {
+            if valid(token) { running = false; phase = .ready; errorMessage = "The signature couldn't be uploaded. Try again." }
+        }
+    }
     /// Keychain insertion must finish before any financial POST is sent.
-    func stageAndSubmit(_ attempt: CustomerSummarySigningAttempt) async {
+    private func stageAndSubmit(_ attempt: CustomerSummarySigningAttempt) async {
         guard !running, !retired, current(), phase == .ready else { return }
         let pending = CustomerSummaryPendingAttempt(scope: scope, summary: summary, attempt: attempt)
         guard pending.isValid(for: scope) else { phase = .unavailable; return }
@@ -508,8 +545,8 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
             }
         } catch { if valid(token) { phase = .needsRecovery } }
     }
-    func deactivate() { generation = UUID(); running = false; receipt = nil; phase = .idle }
-    func retire() { retired = true; generation = UUID(); running = false; receipt = nil; phase = .idle }
+    func deactivate() { generation = UUID(); running = false; receipt = nil; errorMessage = nil; phase = .idle }
+    func retire() { retired = true; generation = UUID(); running = false; receipt = nil; errorMessage = nil; hasFrozenSignature = false; context.retire(); phase = .idle }
 }
 
 @MainActor
