@@ -51,6 +51,32 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Save draft"].exists)
     }
 
+    func testSendWithMailPreservesFieldsAndReturnsToDraft() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-section", "email", "--paper-preview-mail-handoff-test"])
+        app.buttons["New email"].firstMatch.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10)); to.tap(); to.typeText("customer@example.com")
+        app.buttons["Add Cc or Bcc"].tap()
+        let cc = app.textFields["Cc"]; XCTAssertTrue(cc.waitForExistence(timeout: 5)); cc.tap(); cc.typeText("copy@example.com")
+        let bcc = app.textFields["Bcc"]; bcc.tap(); bcc.typeText("private@example.com")
+        let subject = app.textFields["Subject"]; subject.tap(); subject.typeText("Visit")
+        let body = app.textFields["inbox-mail-body"]; body.tap(); body.typeText("Please review")
+        let send = app.buttons["Send with Mail"]
+        for _ in 0..<6 where !send.isHittable { app.swipeUp() }
+        XCTAssertTrue(send.isHittable && send.isEnabled); send.tap()
+        XCTAssertTrue(app.staticTexts["mail-handoff-preview"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["mail-handoff-to"].label, "customer@example.com")
+        XCTAssertEqual(app.staticTexts["mail-handoff-cc"].label, "copy@example.com")
+        XCTAssertEqual(app.staticTexts["mail-handoff-bcc"].label, "private@example.com")
+        XCTAssertEqual(app.staticTexts["mail-handoff-subject"].label, "Visit")
+        XCTAssertEqual(app.staticTexts["mail-handoff-body"].label, "Please review")
+        app.buttons["Close Mail preview"].tap()
+        XCTAssertTrue(body.waitForExistence(timeout: 10))
+        XCTAssertEqual(body.value as? String, "Please review")
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+    }
+
     func testSwitchToCallsAndOpenACallersThread() {
         let app = launch()
         choose(app, menu: "inbox-section-menu", row: "Calls")

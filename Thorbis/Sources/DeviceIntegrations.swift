@@ -215,7 +215,24 @@ private struct DeviceHandoffPresenter: ViewModifier {
                 switch handoff {
                 case .calendar(let draft): CalendarEventEditor(draft: draft).ignoresSafeArea()
                 case .contact(let draft): ContactCardEditor(draft: draft).ignoresSafeArea()
-                case .mail(let draft): MailComposer(draft: draft).ignoresSafeArea()
+                case .mail(let draft):
+                    #if DEBUG
+                    if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-mail-handoff-test") {
+                        VStack(spacing: 12) {
+                            Text("Mail handoff preview").accessibilityIdentifier("mail-handoff-preview")
+                            Text(draft.recipients.joined(separator: ", ")).accessibilityIdentifier("mail-handoff-to")
+                            Text(draft.cc.joined(separator: ", ")).accessibilityIdentifier("mail-handoff-cc")
+                            Text(draft.bcc.joined(separator: ", ")).accessibilityIdentifier("mail-handoff-bcc")
+                            Text(draft.subject ?? "").accessibilityIdentifier("mail-handoff-subject")
+                            Text(draft.body ?? "").accessibilityIdentifier("mail-handoff-body")
+                            Button("Close Mail preview") { presented = nil }
+                        }.padding()
+                    } else {
+                        MailComposer(draft: draft).ignoresSafeArea()
+                    }
+                    #else
+                    MailComposer(draft: draft).ignoresSafeArea()
+                    #endif
                 }
             }
             .thorbisConfirm("Calendar access is off",
@@ -232,6 +249,11 @@ private struct DeviceHandoffPresenter: ViewModifier {
         case .calendar:
             if await CalendarAccess.requestAddOnly() { presented = handoff } else { calendarDenied = true }
         case .mail(let draft):
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-mail-handoff-test") {
+                presented = handoff; return
+            }
+            #endif
             if MFMailComposeViewController.canSendMail() {
                 presented = handoff
             } else if let url = draft.mailtoURL {
