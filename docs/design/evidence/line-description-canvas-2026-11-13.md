@@ -25,3 +25,29 @@ process-death or root-replacement recovery. Do not merge or describe this as
 draft-safe until authority changes, transient refresh, save errors, cancellation,
 line removal/reorder, Dynamic Type and iPad have been verified. Preserve the
 existing confirmed edit/Price Book actions and current offline behavior.
+
+## Hosted checks and held scope (November 13)
+
+Run 43377867745 passed both direct draft-editing tests at product commit 82ed194e.
+Run 43378113208 failed the long-summary baseline because the disclosure was absent;
+commit f580cc51 adds the disclosure. Run 43379523298 passed the two direct editing
+checks but its summary check failed on an ambiguous repeated button label; commits
+dabcf622 and 9f463d40 add contextual accessibility labels and select the edited
+line in the test. Run 43379161770 failed the transport-retirement baseline as
+expected; commit 4892a225 closes the canvas when the API origin or request
+generation changes. Run 43380625802 exercises those four checks against 4892a225;
+its result must be checked separately, and it does not cover 9f463d40.
+
+A separate invoice editor test, run 43380735210, demonstrated that switching the
+API origin still permits the canvas to reopen under stale parent authority. The
+job document association scope does not carry API-origin or authorization
+provenance. An experimental parent gate is retained in the separate
+`codex/invoice-origin-scope-held-1113` worktree; it is incomplete and must not be
+merged. Source-bound provenance or an appropriately authorized read is needed,
+including offline handling, revocation and benign refresh. A request that was in
+flight when its scope changed may already have reached the server: its result is
+unknown and requires reconciliation before retry, rather than a claim that it was
+cancelled. Draft preservation across root replacement remains unverified.
+
+VoiceOver, large Dynamic Type, iPad, document/revision changes and the final
+integrated release have not been verified. This branch is not a TestFlight build.
