@@ -15,9 +15,9 @@ On the unchanged wrappers the host probe failed with observed live-only values
 actual wrapper bodies and request-policy fragment into a stub host client and
 checks the scoped state, constructed cache policy and header, and unwind on error.
 
-This is not an integrated URLSession test, iOS build, server freshness proof,
-permission check, or draft-recovery proof. The two URLProtocol fixture tests in
-`FieldAPITests.swift` remain unrun. Live financial reads intentionally fail when
+The host probe alone is not an integrated URLSession test, iOS build, server freshness
+proof, permission check, or draft-recovery proof. The integrated simulator results
+below cover the URLProtocol path. Live financial reads intentionally fail when
 offline; ordinary read-only field views retain their existing offline behavior.
 
 ## Integrated iPhone simulator check
