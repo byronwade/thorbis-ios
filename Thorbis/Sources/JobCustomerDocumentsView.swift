@@ -401,7 +401,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func openInvoice(_ id: String, decision: Bool = false, sign: Bool = false, payment: Bool = false) async {
-        diagnosticTrace = "invoice entered: \(openingID == nil), \(currentWorkspace), \(canViewInvoices)"
+        UserDefaults.standard.set("entered: \(openingID == nil), \(currentWorkspace), \(canViewInvoices)", forKey: "isolated-invoice-stage"); diagnosticTrace = "invoice entered: \(openingID == nil), \(currentWorkspace), \(canViewInvoices)"
         print("TRACE invoice enter", decision, sign, openingID == nil, currentWorkspace, canViewInvoices)
         guard openingID == nil, currentWorkspace, canViewInvoices else { print("TRACE invoice initial guard"); return }
         error = nil
@@ -410,7 +410,7 @@ struct JobCustomerDocumentsView: View {
         let generation = session.generation
         do {
             let invoice = try await api.liveFieldInvoice(id)
-            diagnosticTrace = "fresh invoice read"
+            UserDefaults.standard.set("fresh invoice read", forKey: "isolated-invoice-stage"); diagnosticTrace = "fresh invoice read"
             print("TRACE invoice fresh read")
             guard session.generation == generation, currentWorkspace, canViewInvoices else { print("TRACE invoice first authority guard"); return }
             guard invoice.id == id, scope.contains(invoice) else {
@@ -418,7 +418,7 @@ struct JobCustomerDocumentsView: View {
             }
             let model = InvoicePaymentCollectionModel(api: api, invoiceID: id, expectedJobScope: scope)
             await model.load()
-            diagnosticTrace = "model loaded: \(model.invoice != nil), \(model.historyComplete)"
+            UserDefaults.standard.set("model loaded: \(model.invoice != nil), \(model.historyComplete)", forKey: "isolated-invoice-stage"); diagnosticTrace = "model loaded: \(model.invoice != nil), \(model.historyComplete)"
             print("TRACE invoice model loaded", model.invoice != nil, model.historyComplete)
             guard session.generation == generation, currentWorkspace, canViewInvoices else { print("TRACE invoice second authority guard"); return }
             if let latest = model.invoice {
@@ -432,7 +432,7 @@ struct JobCustomerDocumentsView: View {
                     guard CustomerDocumentAmounts(lines: latest.lines, currency: latest.currency, amountPaid: latest.amountPaid) != nil else {
                         throw Problem(title: "These invoice amounts couldn't be verified. Refresh before continuing.", status: nil, detail: nil)
                     }
-                    diagnosticTrace = "setting paper: \(sign)"
+                    UserDefaults.standard.set("setting paper: \(sign)", forKey: "isolated-invoice-stage"); diagnosticTrace = "setting paper: \(sign)"
                     print("TRACE invoice setting paper", sign)
                     paperGeneration = UUID(); paper = .invoice(latest, signing: sign)
                 } else { book = .invoice(id) }
@@ -440,7 +440,7 @@ struct JobCustomerDocumentsView: View {
                 paymentModel = nil
                 throw Problem(title: model.loadError ?? "This invoice couldn't be refreshed", status: nil, detail: nil)
             }
-        } catch is CancellationError { diagnosticTrace = "cancelled"; print("TRACE invoice cancelled") } catch { diagnosticTrace = "failed: \(error.localizedDescription)"; print("TRACE invoice failed"); self.error = error.customerSentence(.openInvoice) }
+        } catch is CancellationError { UserDefaults.standard.set("cancelled", forKey: "isolated-invoice-stage"); diagnosticTrace = "cancelled"; print("TRACE invoice cancelled") } catch { UserDefaults.standard.set("failed", forKey: "isolated-invoice-stage"); diagnosticTrace = "failed: \(error.localizedDescription)"; print("TRACE invoice failed"); self.error = error.customerSentence(.openInvoice) }
     }
 
     private func pay(_ invoiceID: String) async {
