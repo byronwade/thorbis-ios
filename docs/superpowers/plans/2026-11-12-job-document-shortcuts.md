@@ -15,3 +15,7 @@
 - Independent source review found no confirmed route, permission or selection regression, but requires green simulator evidence, long-list reachability, permission-denial coverage, iPad, and safe-area/foot geometry.
 - At accessibility sizes the fixed section chooser remains above the scroll view. The shortcuts start below the job header and pin only when that header scrolls away; they are not claimed initially visible.
 - The worktree's `project.yml` local Stripe override is for this machine only and must not enter the commit.
+
+## Focused iPhone result
+
+A clean derived-data build of commit `e19c7a88` succeeded on the iPhone simulator. Four focused UI tests passed with zero failures: `testDirectCollectionOpensTheTappedJobInvoice`, `testMoneyShortcutsKeepTheSelectedInvoiceForCollection`, `testMoneyShortcutsRemainAvailableAtLargestTextAfterScrolling`, and `testMoneyShortcutsStayAvailableAfterScrollingToInvoices`. These verify invoice-specific direct collection, the retained selected invoice after switching both ways, and shortcut reachability and estimate target clearance at normal and largest text. Log: `/Users/byronwade/testflight-work/job-document-shortcuts-green-1112.log`; result bundle: `/Users/byronwade/testflight-work/derived-job-document-shortcuts-1112/Logs/Test/Test-Thorbis-2026.11.12_21-03-09--0500.xcresult`. This does not establish iPad, permission-denial, long-list, VoiceOver focus or bottom-action clearance coverage.
