@@ -78,6 +78,33 @@ final class CustomerJobCompilationTests: XCTestCase {
         }
     }
 
+    func testMoneySavedCopyRemainsScopedOffline() async throws {
+        let bodies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0,
+                             estimatesA: 1, estimatesB: 1, invoicesA: 1, invoicesB: 1, historyA: 0, historyB: 0)
+        let moneyBodies = [0, 1, 2, 3, 4, 7, 8, 11, 12].map { bodies[$0] }
+        let client = APIClient(session: URLProtocolFixture.session(moneyBodies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "money-saved-copy-A-\(UUID().uuidString)"
+        let live = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+        XCTAssertEqual(live.estimateCount, 2)
+        XCTAssertEqual(live.invoiceCount, 2)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        client.invalidateRequests()
+        client.knownOffline = true
+        URLProtocolFixture.setRoutes(["/v1/jobs": URLProtocolFixture.offline])
+        let saved = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+        XCTAssertEqual(saved.estimates, live.estimates)
+        XCTAssertEqual(saved.invoices, live.invoices)
+        client.savedCopyScope = "money-saved-copy-B-\(UUID().uuidString)"
+        do {
+            _ = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+            XCTFail("A different saved-copy scope must not read the prior account's Money")
+        } catch is CancellationError {
+            XCTFail("Expected offline failure for the empty scope")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.detail, "No connection. Check your signal and try again.")
+        }
+    }
+
     func testMoneyCompilationStopsAfterScopeBecomesStale() async throws {
         let bodies = fixture(photosA: 0, photosB: 0, notesA: 0, notesB: 0, documentsA: 0, documentsB: 0,
                              estimatesA: 1, estimatesB: 0, invoicesA: 1, invoicesB: 0, historyA: 0, historyB: 0)
@@ -108,6 +135,50 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertEqual(paths.filter { $0.hasSuffix("/estimates") && $0.hasPrefix("/v1/jobs/") }.count, 6)
         XCTAssertEqual(paths.filter { $0.hasSuffix("/invoices") && $0.hasPrefix("/v1/jobs/") }.count, 6)
         XCTAssertFalse(paths.contains { $0.hasSuffix("/media") || $0.hasSuffix("/photos") || $0.hasSuffix("/notes") || $0.hasSuffix("/history") })
+    }
+
+    func testMoneyCompilationKeepsDistinctJobDocumentsWhenJobsFinishOutOfOrder() async throws {
+        let jobIDs = (0..<6).map { uid(100 + $0) }
+        let estimateIDs = (0..<6).map { uid(7_000 + $0) }
+        let invoiceIDs = (0..<6).map { uid(9_000 + $0) }
+        let gate = URLProtocolFixture.Gate()
+        var routes: [String: URLProtocolFixture.Reply] = [
+            "/v1/jobs": .init(200, page(jobIDs.map { job(id: $0, title: "Job") })),
+            "/v1/customers/\(customer)/contacts": .init(200, page([contact()])),
+            "/v1/customers/\(customer)/locations": .init(200, page([location()])),
+            "/v1/estimates": .init(200, page(estimateIDs.map { estimate(id: $0, title: "Estimate") })),
+            "/v1/invoices": .init(200, page([]))
+        ]
+        for index in jobIDs.indices {
+            let jobID = jobIDs[index]
+            routes["/v1/jobs/\(jobID)/estimates"] = .init(
+                200, page([link(id: uid(11_000 + index), job: jobID, estimate: estimateIDs[index])]),
+                gate: index == 0 ? gate : nil
+            )
+            routes["/v1/jobs/\(jobID)/invoices"] = .init(200, page([invoice(id: invoiceIDs[index], jobID: jobID)]))
+        }
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let request = Task { @MainActor in
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+            return (compiled.estimates.map(\.jobID), compiled.estimates.map { $0.items.map(\.id) },
+                    compiled.invoices.map(\.jobID), compiled.invoices.map { $0.items.map(\.id) },
+                    compiled.estimatesOffJob.isEmpty, compiled.invoicesOffJob.isEmpty)
+        }
+        defer { gate.release(); request.cancel() }
+        let laterPath = "/v1/jobs/\(jobIDs[1])/invoices"
+        for _ in 0..<250 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == laterPath }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == laterPath }, "A later job should progress while the first job is held")
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/jobs/\(jobIDs[0])/invoices" })
+        gate.release()
+        let (estimateJobs, estimates, invoiceJobs, invoices, noOffJobEstimates, noOffJobInvoices) = try await request.value
+        XCTAssertEqual(estimateJobs, jobIDs)
+        XCTAssertEqual(estimates, estimateIDs.map { [$0] })
+        XCTAssertEqual(invoiceJobs, jobIDs)
+        XCTAssertEqual(invoices, invoiceIDs.map { [$0] })
+        XCTAssertTrue(noOffJobEstimates)
+        XCTAssertTrue(noOffJobInvoices)
     }
 
     func testMoneyCompilationKeepsJobGroupingAndSkipsUnrelatedCollections() async throws {
