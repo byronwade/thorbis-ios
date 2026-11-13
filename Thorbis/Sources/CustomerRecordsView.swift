@@ -142,8 +142,21 @@ struct CustomerRecordsView: View {
 
     private func mediaSection(_ title: String, total: Int, groups: [CustomerJobGroup<MediaAssetRecord>], symbol: String, incomplete: Bool = false) -> some View {
         section(title, total: total, symbol: symbol, groups: groups, incomplete: incomplete) { asset in
-            Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
-                .font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(2)
+            NavigationLink(value: PaperRoute.media(jobID: asset.jobId, assetID: asset.id)) {
+                HStack(spacing: 10) {
+                    Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                        .font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .disabled(asset.uploadState != "stored")
+            .accessibilityHint(asset.uploadState == "stored" ? "Opens the file" : "File is not ready yet")
+            .accessibilityIdentifier("customer-document-\(asset.id)")
         }
     }
 

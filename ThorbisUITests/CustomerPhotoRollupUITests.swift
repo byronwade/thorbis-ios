@@ -2,6 +2,34 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoRollupUITests: XCTestCase {
+    func testCustomerDocumentOpensItsJobFile() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup"]
+        app.launch()
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        for _ in 0..<25 where !file.isHittable { app.swipeUp() }
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        XCTAssertTrue(file.isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Customer document link"; shot.lifetime = .keepAlways; add(shot)
+        file.tap()
+        XCTAssertTrue(app.navigationBars["File"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Service report"].waitForExistence(timeout: 10))
+    }
+    func testCustomerDocumentOpensAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        for _ in 0..<25 where !file.isHittable { app.swipeUp() }
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        XCTAssertTrue(file.isHittable)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Customer document link largest text"; shot.lifetime = .keepAlways; add(shot)
+        file.tap()
+        XCTAssertTrue(app.navigationBars["File"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Service report"].waitForExistence(timeout: 10))
+    }
     func testLongJobTitleWrapsAndOpensItsJob() {
         continueAfterFailure = false
         let app = XCUIApplication()
