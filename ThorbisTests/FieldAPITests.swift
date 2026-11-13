@@ -104,6 +104,51 @@ final class FieldAPITests: XCTestCase {
         XCTAssertEqual(page.value.items.count, 0)
     }
 
+    func testLiveJobEstimateMembershipBypassesCacheOnEveryPage() async throws {
+        let cursor = "00000000-0000-4000-8000-000000000010"
+        let first = "{\"items\":[],\"nextCursor\":\"\(cursor)\"}"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, first), .init(200, #"{"items":[]}"#)]), baseURL: "https://app.thorbis.com")
+        _ = try await client.liveFieldJobEstimateLinks(jobID)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        for request in URLProtocolFixture.recorded {
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+            XCTAssertEqual(request.header("Cache-Control"), "no-cache")
+        }
+        let next = try XCTUnwrap(URLProtocolFixture.recorded.last?.url)
+        XCTAssertEqual(URLComponents(url: next, resolvingAgainstBaseURL: false)?.queryItems, [URLQueryItem(name: "cursor", value: cursor)])
+    }
+
+    func testLiveJobEstimateMembershipDoesNotUseSavedCopyOffline() async throws {
+        let linkID = "00000000-0000-4000-8000-000000000010"
+        let estimateID = "00000000-0000-4000-8000-000000000011"
+        let page = "{\"items\":[{\"id\":\"\(linkID)\",\"jobId\":\"\(jobID)\",\"estimateId\":\"\(estimateID)\"}]}"
+        let client = APIClient(session: URLProtocolFixture.session([.init(200, page), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
+        client.savedCopyScope = "job-membership-live-offline-" + UUID().uuidString
+        _ = try await client.fieldJobEstimateLinks(jobID)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        let scope = try XCTUnwrap(client.savedCopyScope)
+        let path = "/v1/jobs/\(jobID)/estimates"
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key), "The live page must actually be saved before checking offline behavior")
+        client.knownOffline = true
+        let offline = try await client.fieldJobEstimateLinks(jobID)
+        XCTAssertEqual(offline.map(\.id), [linkID])
+        XCTAssertNotNil(client.savedCopyDate(path), "Ordinary browsing should actually use the saved page")
+        do {
+            _ = try await client.liveFieldJobEstimateLinks(jobID)
+            XCTFail("A saved membership list must not establish live approval authority")
+        } catch let problem as Problem {
+            XCTAssertEqual(problem.title, "Network error")
+            XCTAssertNil(problem.status)
+        } catch {
+            XCTFail("Expected the offline network error, got \(error)")
+        }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, path)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.header("Cache-Control"), "no-cache")
+    }
+
     func testJobMediaFirstPageDoesNotEagerlyFetchTheRest() async throws {
         let fixture = URLProtocolFixture.session([.init(200, #"{"items":[],"nextCursor":"next"}"#), .init(200, #"{"items":[]}"#)])
         let client = APIClient(session: fixture, baseURL: "https://app.thorbis.com")

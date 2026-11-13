@@ -180,6 +180,9 @@ extension APIClient {
     /// (served when the read drops) must never stand in for the server's answer.
     func liveFieldJobEstimateLinks(_ jobID: String) async throws -> [JobEstimateLink] {
         // Every page must bypass local caches, including a 404 compatibility fallback.
+        // The task-local live scope prevents saved-copy fallback on every page.
+        // A shared path marker may belong to a concurrent ordinary read and is not
+        // provenance for this request, so it must not reject this live result.
         return try await SavedCopies.$liveOnly.withValue(true) { try await fieldJobEstimateLinks(jobID) }
     }
 
