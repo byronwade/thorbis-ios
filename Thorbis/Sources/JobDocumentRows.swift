@@ -141,8 +141,12 @@ struct JobDocumentRow: View {
                 Text(detail).font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            let metadataLayout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+            metadataLayout {
                 Text(reference).font(Theme.customerFont(17)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 if fresh {
                     CustomerStatusWord(status: status, type: CustomerType(nil))
                 } else {
