@@ -89,7 +89,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func status(_ id: String) -> String {
         if id == Self.c, flags.contains("--paper-preview-handoff-third-sent"), approved[id] == nil { return "sent" }
-        if approved[id] != nil || id == Self.c || (id == Self.a && flags.contains("--paper-preview-handoff-mixed")) { return "approved" }
+        if approved[id] != nil || id == Self.c || (id == Self.a && flags.contains("--paper-preview-handoff-mixed")) || (id == Self.b && flags.contains("--handoff-test-second-approved")) { return "approved" }
         return id == Self.d ? "draft" : "sent"
     }
     private func options(_ id: String) -> [[String: Any]] {
