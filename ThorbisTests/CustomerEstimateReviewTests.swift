@@ -9,6 +9,49 @@ final class CustomerEstimateReviewTests: XCTestCase {
     private let locationID = "00000000-0000-4000-8000-000000000104"
     private let paperHash = String(repeating: "a", count: 64)
 
+    func testIssuedRevisionRejectsEmptyBaseScope() throws {
+        var invalid = revision
+        invalid["lines"] = []
+        invalid["totalAmount"] = 0
+        XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionRejectsEmptyOptionScope() throws {
+        var invalid = revision
+        invalid["options"] = [["id": "00000000-0000-4000-8000-000000000201", "title": "Package",
+                               "description": "Example", "lines": [], "totalAmount": 0, "currency": "USD"]]
+        XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionAllowsNonemptyZeroPricedScope() throws {
+        var valid = revision
+        valid["lines"] = [["id": "line-1", "description": "No charge visit", "quantity": 1,
+                           "unitPrice": ["amount": 0, "currency": "USD"]]]
+        valid["totalAmount"] = 0
+        valid["options"] = [["id": "option-1", "title": "No charge", "description": "Included",
+                             "lines": valid["lines"]!, "totalAmount": 0, "currency": "USD"]]
+        XCTAssertNoThrow(try decodedRevision(valid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionRejectsUnsupportedCurrencyAndMismatchedBaseTotal() throws {
+        for mutation: [String: Any] in [["currency": "EUR"], ["totalAmount": 13_201]] {
+            var invalid = revision
+            invalid.merge(mutation) { _, new in new }
+            XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+        }
+    }
+
+    func testIssuedRevisionRejectsUnsupportedCurrencyAndMismatchedOptionTotal() throws {
+        for mutation: [String: Any] in [["currency": "EUR"], ["totalAmount": 13_201]] {
+            var option: [String: Any] = ["id": "option-1", "title": "Package", "description": "Example",
+                                         "lines": revision["lines"]!, "totalAmount": 13_200, "currency": "USD"]
+            option.merge(mutation) { _, new in new }
+            var invalid = revision
+            invalid["options"] = [option]
+            XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+        }
+    }
+
     func testReviewReadsCurrentAggregateThenExactImmutableTerms() async throws {
         let api = client([.init(200, try json(aggregate)), .init(200, try json(revision))])
         let review = try await api.customerIssuedEstimateRevision(for: localEstimate())

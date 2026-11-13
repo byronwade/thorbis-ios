@@ -141,8 +141,12 @@ struct JobDocumentRow: View {
                 Text(detail).font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
+            let metadataLayout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+            metadataLayout {
                 Text(reference).font(Theme.customerFont(17)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 if fresh {
                     CustomerStatusWord(status: status, type: CustomerType(nil))
                 } else {
@@ -167,6 +171,15 @@ extension JobDocumentRow {
         } else if let options = estimate.options, !options.isEmpty {
             amount = nil
             detail = estimate.status == "approved" ? (fresh ? "View estimate details" : nil) : "\(options.count) \(options.count == 1 ? "option" : "options")"
+        } else if customerFacing {
+            if let currency = estimate.lines.first?.unitPrice.currency,
+               let display = customerEstimateDisplay(estimate.lines, currency: currency) {
+                amount = money(display.amounts.total, currency: currency)
+                detail = nil
+            } else {
+                amount = nil
+                detail = "Amount needs verification"
+            }
         } else {
             amount = paperLinesTotal(estimate.lines).map { money($0, currency: estimate.lines.first?.unitPrice.currency ?? "USD") }
             detail = nil
@@ -180,11 +193,25 @@ extension JobDocumentRow {
         reference = invoiceReference ?? "INV-\(invoice.id.suffix(4).uppercased())"
         title = invoice.origin == "estimate_deposit" ? "Deposit" : "Invoice"
         status = invoice.status
-        amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }
-        if invoice.status == "issued", let total = paperLinesTotal(invoice.lines), invoice.amountPaid >= 0, total >= invoice.amountPaid {
-            detail = "\(money(total - invoice.amountPaid, currency: invoice.currency))\u{00A0}due"
+        if customerFacing {
+            if let verified = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) {
+                amount = money(verified.total, currency: invoice.currency)
+                if invoice.status == "issued", verified.total >= invoice.amountPaid {
+                    detail = "\(money(verified.due, currency: invoice.currency))\u{00A0}due"
+                } else {
+                    detail = nil
+                }
+            } else {
+                amount = nil
+                detail = "Amount needs verification"
+            }
         } else {
-            detail = nil
+            amount = paperLinesTotal(invoice.lines).map { money($0, currency: invoice.currency) }
+            if invoice.status == "issued", let total = paperLinesTotal(invoice.lines), invoice.amountPaid >= 0, total >= invoice.amountPaid {
+                detail = "\(money(total - invoice.amountPaid, currency: invoice.currency))\u{00A0}due"
+            } else {
+                detail = nil
+            }
         }
         self.fresh = fresh
         self.customerFacing = customerFacing

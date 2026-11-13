@@ -148,6 +148,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
                        "The old request must not reopen signing after the customer returns to the job book")
     }
 
+
     func testInvoiceSigningDoesNotOpenAfterEditPermissionIsRevoked() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -177,6 +178,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["customer-document-position"].exists)
     }
 
+
     func testInvoiceSigningDisablesRepeatedTapsWhileRechecking() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -204,6 +206,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
                        "The same invoice cannot start another recheck while one is running")
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 30))
     }
+
 
     func testEstimateReviewCanReturnToJobDocumentsAndChooseAnotherEstimate() {
         continueAfterFailure = false
@@ -238,6 +241,99 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.buttons["Next document"].tap()
         XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["customer-book-review-sign"].waitForExistence(timeout: 10))
+    }
+
+    func testApprovedBookShowsOnlySignedPackageReceipt() {
+        let app = jobEstimateFixture(withOptions: true, receiptFixture: true)
+        let choose = app.buttons["Choose Sample package"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 10)); choose.tap()
+        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review Sample package")).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); review.tap()
+        signFirstEstimate(app)
+        XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10))
+        app.buttons["Back to job documents"].tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(page.staticTexts["Selected package scope"].waitForExistence(timeout: 15))
+        XCTAssertTrue(page.staticTexts["Materials"].exists)
+        XCTAssertFalse(page.staticTexts["Private internal material"].exists)
+        XCTAssertFalse(page.staticTexts["Unselected package scope"].exists)
+        XCTAssertFalse(page.staticTexts["Other package"].exists)
+        XCTAssertFalse(page.staticTexts["Anonymized service scope"].exists)
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
+    }
+
+    func testApprovedBookHidesSignedTermsAfterAuthorityRetirement() {
+        let app = jobEstimateFixture(withOptions: true, receiptFixture: true, retireReceipt: true)
+        let choose = app.buttons["Choose Sample package"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 10)); choose.tap()
+        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review Sample package")).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); review.tap(); signFirstEstimate(app)
+        XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10)); app.buttons["Back to job documents"].tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000008101"]
+        let scope = page.staticTexts["Selected package scope"]
+        XCTAssertTrue(scope.waitForExistence(timeout: 15))
+        XCTAssertTrue(page.buttons["Retire receipt authority"].waitForExistence(timeout: 5))
+        page.buttons["Retire receipt authority"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: scope)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+        XCTAssertFalse(page.staticTexts["Private internal material"].exists)
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
+    }
+
+    func testApprovedBookDoesNotShowReceiptAfterJobLinkDisappears() {
+        let app = jobEstimateFixture(withOptions: true, receiptFixture: true, removeLinkAfterReceipt: true)
+        let choose = app.buttons["Choose Sample package"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 10)); choose.tap()
+        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review Sample package")).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); review.tap(); signFirstEstimate(app)
+        XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10)); app.buttons["Back to job documents"].tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(page.buttons["Try again"].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.staticTexts["Selected package scope"].exists)
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
+    }
+
+    func testReturningToApprovedBookRechecksRemovedJobLink() {
+        let app = jobEstimateFixture(withOptions: true, receiptFixture: true, removeLinkOnReturn: true)
+        let choose = app.buttons["Choose Sample package"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 10)); choose.tap()
+        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review Sample package")).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); review.tap(); signFirstEstimate(app)
+        XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10)); app.buttons["Back to job documents"].tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(page.staticTexts["Selected package scope"].waitForExistence(timeout: 15))
+        XCTAssertTrue(page.buttons["Remove sample link"].waitForExistence(timeout: 5)); page.buttons["Remove sample link"].tap()
+        app.buttons["Next document"].tap()
+        XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 10))
+        app.buttons["Previous document"].tap()
+        XCTAssertTrue(page.buttons["Try again"].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.staticTexts["Selected package scope"].exists)
+    }
+
+    func testApprovedBookWithWrongRevisionDoesNotShowTerms() {
+        let app = jobEstimateFixture(withOptions: true, receiptFixture: true, wrongReceipt: true)
+        let choose = app.buttons["Choose Sample package"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 10)); choose.tap()
+        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review Sample package")).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); review.tap()
+        signFirstEstimate(app)
+        XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10)); app.buttons["Back to job documents"].tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(page.buttons["Try again"].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.staticTexts["Selected package scope"].exists)
+        XCTAssertFalse(page.staticTexts["Unselected package scope"].exists)
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
+    }
+
+    func testApprovedBookWithMissingReceiptDoesNotShowAggregateScope() {
+        let app = jobEstimateFixture()
+        signFirstEstimate(app)
+        XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10))
+        app.buttons["Back to job documents"].tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(page.staticTexts["The signed estimate isn't available. Hand the device back to your technician."].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.staticTexts["Anonymized service scope"].exists)
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
     }
 
     func testFailedRefreshDoesNotPresentStaleEstimateAsReadyToSign() {
@@ -289,13 +385,18 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 15), .completed)
     }
 
-    private func jobEstimateFixture(failRefresh: Bool = false, withOptions: Bool = false) -> XCUIApplication {
+    private func jobEstimateFixture(failRefresh: Bool = false, withOptions: Bool = false, receiptFixture: Bool = false, wrongReceipt: Bool = false, retireReceipt: Bool = false, removeLinkAfterReceipt: Bool = false, removeLinkOnReturn: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-estimate-handoff"]
         app.launchArguments.append("--paper-preview-handoff-hide-controls")
         if failRefresh { app.launchArguments.append("--paper-preview-handoff-membership-fails-after-approval") }
         if withOptions { app.launchArguments.append("--paper-preview-handoff-options") }
+        if receiptFixture { app.launchArguments.append("--paper-preview-handoff-receipt") }
+        if wrongReceipt { app.launchArguments.append("--paper-preview-handoff-wrong-receipt") }
+        if retireReceipt { app.launchArguments.append("--paper-preview-handoff-receipt-retirement") }
+        if removeLinkAfterReceipt { app.launchArguments.append("--paper-preview-handoff-remove-link-after-receipt") }
+        if removeLinkOnReturn { app.launchArguments.append("--paper-preview-handoff-receipt-return") }
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()

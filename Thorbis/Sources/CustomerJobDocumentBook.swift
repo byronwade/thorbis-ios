@@ -190,7 +190,7 @@ struct CustomerJobDocumentBook: View {
                 let effectiveRecord = record
                 let effectiveFresh = freshEstimates.contains(value)
                 #endif
-                CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id,
+                CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id, activation: selection.activation,
                     refresh: refresh, review: { reviewEstimate(value) })
             } else {
                 ScrollView {
@@ -213,6 +213,13 @@ struct CustomerJobDocumentBook: View {
 private struct CustomerEstimateBookLoadID: Hashable {
     let estimate: EstimateRecord
     let fresh: Bool
+    let active: Bool
+    let activation: UUID
+    let sessionGeneration: UUID
+    let authorityRevision: UUID
+    let apiGeneration: UUID
+    let scopeRevision: UUID
+    let retry: UUID
 }
 
 private struct CustomerEstimateBookPage: View {
@@ -221,10 +228,17 @@ private struct CustomerEstimateBookPage: View {
     let estimate: EstimateRecord
     let fresh: Bool
     let active: Bool
+    let activation: UUID
     let refresh: () async -> Void
     let review: () -> Void
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var receipt: CustomerEstimateAcceptanceReceipt?
+    @State private var receiptAuthority: CustomerHandoffExitAuthority?
+    @State private var receiptActivation: UUID?
+    @State private var retry = UUID()
+    @State private var loadToken = UUID()
     @State private var issued: CustomerIssuedEstimateRevision?
     @State private var loading = false
     @State private var error: String?
@@ -235,27 +249,64 @@ private struct CustomerEstimateBookPage: View {
     }
     private var options: [FieldEstimateOption] { issued.map { $0.options ?? [] } ?? estimate.options ?? [] }
     private var lines: [FieldLine] { issued?.lines ?? estimate.lines }
-    private var currency: String { issued?.currency ?? lines.first?.unitPrice.currency ?? "USD" }
+    private var currency: String? { issued?.currency ?? lines.first?.unitPrice.currency }
+    // Issued revisions have an explicit USD currency and at least one base line. Drafts can be empty.
+    private var issuedStructureValid: Bool {
+        issued.map { !$0.lines.isEmpty && $0.currency == "USD" } ?? true
+    }
     private var moneyVerified: Bool {
-        if options.isEmpty { return CustomerDocumentAmounts(lines: lines, currency: currency) != nil }
-        return options.allSatisfy { CustomerDocumentAmounts(lines: $0.lines, currency: $0.currency) != nil }
+        guard issuedStructureValid else { return false }
+        if options.isEmpty {
+            guard !lines.isEmpty, let currency, let display = customerEstimateDisplay(lines, currency: currency) else { return false }
+            return issued.map { display.amounts.total == $0.totalAmount } ?? true
+        }
+        return options.allSatisfy { option in
+            guard !option.lines.isEmpty, option.currency == "USD",
+                  let display = customerEstimateDisplay(option.lines, currency: option.currency) else { return false }
+            return display.amounts.total == option.totalAmount
+        }
     }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if fresh { CustomerStatusWord(status: estimate.status, type: type) }
-                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
+                    if estimate.status != "approved" || (readingAccess.permits(session) &&
+                        receiptActivation == activation && receiptAuthority?.isCurrent(api: api, session: session) == true &&
+                        issued?.matchesDetails(for: estimate) == true) {
+                        Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
+                            .fixedSize(horizontal: false, vertical: true)
+                        if fresh { CustomerStatusWord(status: estimate.status, type: type) }
+                        else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
+                    }
                     if !fresh {
                         Text("This copy needs a refresh before you can decide.").font(Theme.customerFont(type.body))
                     } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
-                    if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() } }
-                    if estimate.status != "sent" || issued != nil {
-                        if options.isEmpty {
-                            estimateLines(lines, currency: currency, descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
+                    #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-receipt-return") {
+                        Button("Remove sample link") { JobEstimateHandoffPreview.shared.removeFirst() }
+                    }
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-receipt-retirement") {
+                        Button("Retire receipt authority") { api.invalidateRequests() }
+                    }
+                    #endif
+                    if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { retry = UUID() } }
+                    if estimate.status == "approved" {
+                        if fresh, readingAccess.permits(session), let issued, let receipt, let receiptAuthority,
+                           receiptActivation == activation, receiptAuthority.isCurrent(api: api, session: session), issued.matchesDetails(for: estimate), (try? receipt.validate(for: issued)) != nil {
+                            if let title = receipt.optionTitle {
+                                Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                            }
+                            estimateLines(receipt.lines, currency: receipt.currency, expectedTotal: receipt.totalAmount,
+                                          requireUSDCurrency: true, descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
+                        }
+                    } else if estimate.status != "sent" || issued != nil {
+                        if !issuedStructureValid {
+                            Text("These amounts couldn't be verified. Hand the device back to your technician.")
+                                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                        } else if options.isEmpty {
+                            estimateLines(lines, currency: currency, expectedTotal: issued?.totalAmount,
+                                          descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
                         } else {
                             if estimate.status == "approved" {
                                 Text("These are the quoted packages. The approved package selection isn't available here.")
@@ -265,7 +316,7 @@ private struct CustomerEstimateBookPage: View {
                                 Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
                                 if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess, customerFacing: true,
                                                                                               accessibilityContext: "EST-\(estimate.id.suffix(4).uppercased()), package \(index + 1)") }
-                                estimateLines(option.lines, currency: option.currency,
+                                estimateLines(option.lines, currency: option.currency, expectedTotal: option.totalAmount, requireUSDCurrency: true,
                                               descriptionContext: "EST-\(estimate.id.suffix(4).uppercased()), package \(index + 1)")
                             }
                         }
@@ -273,6 +324,7 @@ private struct CustomerEstimateBookPage: View {
                 }
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
+            .accessibilityIdentifier("customer-estimate-page-\(estimate.id)")
             if fresh, estimate.status == "sent", issued != nil, !loading, moneyVerified {
                 CustomerPresentationCommit(title: "Review and sign", enabled: true, busy: false, type: type, action: review)
                     .accessibilityIdentifier("customer-book-review-sign")
@@ -281,11 +333,16 @@ private struct CustomerEstimateBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
-        .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh)) { await load() }
+        .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh, active: active, activation: activation,
+            sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+            apiGeneration: api.requestGeneration, scopeRevision: api.savedCopyScopeRevision, retry: retry)) { await load() }
     }
 
-    @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, descriptionContext: String) -> some View {
-        if let display = customerEstimateDisplay(lines, currency: currency) {
+    @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String?, expectedTotal: Int?,
+                                            requireUSDCurrency: Bool = false, descriptionContext: String) -> some View {
+        if !lines.isEmpty, let currency, (!requireUSDCurrency || currency == "USD"),
+           let display = customerEstimateDisplay(lines, currency: currency),
+           expectedTotal.map({ $0 == display.amounts.total }) ?? true {
             CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: display.lines, type: type, rows: customerAmountRows(display.amounts, currency: currency, invoice: false), readingAccess: readingAccess, descriptionContext: descriptionContext)
         } else {
@@ -295,14 +352,55 @@ private struct CustomerEstimateBookPage: View {
     }
 
     private func load() async {
-        guard fresh, estimate.status == "sent" else { return }
-        loading = true; error = nil; issued = nil
-        defer { loading = false }
+        let token = UUID(); loadToken = token
+        receipt = nil; receiptAuthority = nil; receiptActivation = nil; issued = nil; error = nil; loading = false
+        guard fresh, active, scope.contains(estimate, requestedID: estimate.id),
+              estimate.status == "sent" || estimate.status == "approved",
+              sourceGeneration == session.generation,
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
+        let current: @MainActor () -> Bool = {
+            !Task.isCancelled && loadToken == token && authority.isCurrent(api: api, session: session) &&
+            session.can("estimate.view", feature: "estimates")
+        }
+        guard current() else { return }
+        loading = true
+        defer { if loadToken == token { loading = false } }
+        func verifyMembership() async throws {
+            let job = try await api.liveFieldJob(scope.jobID)
+            guard current() else { throw CancellationError() }
+            guard job.id == scope.jobID, job.organizationId == scope.organizationID,
+                  job.customerId == scope.customerID else {
+                throw Problem(title: "This job changed", status: 409, detail: nil)
+            }
+            if job.estimateId != estimate.id {
+                let link = try await api.liveFieldJobEstimateLink(scope.jobID, estimateID: estimate.id)
+                guard current() else { throw CancellationError() }
+                guard link.jobId == scope.jobID, link.estimateId == estimate.id else {
+                    throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
+                }
+            }
+        }
         do {
-            let revision = try await api.customerIssuedEstimateRevision(for: estimate)
-            try Task.checkCancellation()
+            if estimate.status == "approved" { try await verifyMembership() }
+            let revision = try await api.customerIssuedEstimateRevision(for: estimate,
+                allowApprovedForReading: estimate.status == "approved", currentAuthority: current)
+            if estimate.status == "approved" {
+                guard let signed = try await api.customerEstimateAcceptanceReceipt(for: revision, currentAuthority: current) else {
+                    if current() { error = "The signed estimate isn't available. Hand the device back to your technician." }
+                    return
+                }
+                try await verifyMembership()
+                guard current() else { return }
+                receipt = signed; receiptAuthority = authority; receiptActivation = activation
+            }
+            guard current() else { return }
             issued = revision
-        } catch is CancellationError {} catch { self.error = error.customerSentence(.openEstimate) }
+        } catch is CancellationError {
+        } catch is CustomerIssuedEstimateAmountsUnavailable {
+            if current() { self.error = "These amounts couldn't be verified. Hand the device back to your technician." }
+        } catch {
+            if current() { self.error = error.customerSentence(.openEstimate) }
+        }
     }
 }
 

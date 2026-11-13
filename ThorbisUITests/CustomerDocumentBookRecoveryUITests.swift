@@ -34,6 +34,86 @@ final class CustomerDocumentBookRecoveryUITests: XCTestCase {
         capture(app, name: "Stale estimate recovered on the same page")
     }
 
+    func testEmptyDraftDoesNotInventCurrencyOrShowZero() {
+        let app = launch(extra: "--paper-preview-job-estimate-empty-draft")
+        let draft = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
+        XCTAssertTrue(draft.waitForExistence(timeout: 10))
+        XCTAssertTrue(draft.label.contains("Amount needs verification"))
+        XCTAssertFalse(draft.label.contains("$0.00"))
+        draft.tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000002238"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(page.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].waitForExistence(timeout: 10))
+        XCTAssertFalse(page.staticTexts["$0.00"].exists)
+        XCTAssertFalse(app.buttons["Review and sign"].isHittable)
+    }
+
+    func testEmptyIssuedRevisionCannotOfferReviewEvenWithExplicitCurrency() {
+        let app = launch(extra: "--paper-preview-job-estimate-empty-issued")
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.label.contains("Amount needs verification"))
+        estimate.tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(page.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.staticTexts["$0.00"].exists)
+        XCTAssertFalse(app.buttons["Review and sign"].isHittable)
+    }
+
+    func testZeroIssuedRevisionWithARealLineRemainsReviewable() {
+        let app = launch(extra: "--paper-preview-job-estimate-zero-issued")
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.label.contains("$0.00"))
+        estimate.tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Review and sign"].waitForExistence(timeout: 15))
+        XCTAssertTrue(page.staticTexts["$0.00"].exists)
+    }
+
+    func testEmptyIssuedRevisionWithMismatchedTotalCannotShowZeroOrOfferReview() {
+        let app = launch(extra: "--paper-preview-job-estimate-empty-issued", additional: ["--paper-preview-job-estimate-empty-issued-mismatch"])
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(page.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.staticTexts["$0.00"].exists)
+        XCTAssertFalse(app.buttons["Review and sign"].isHittable)
+    }
+
+    func testValidIssuedPackagesRemainAvailableForReview() {
+        let app = launch(extra: "--paper-preview-job-estimate-multiple-options")
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Review and sign"].waitForExistence(timeout: 15))
+        XCTAssertFalse(page.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].exists)
+    }
+
+    func testIssuedPackageWithMismatchedTotalCannotOfferReview() {
+        let app = launch(extra: "--paper-preview-job-estimate-multiple-options", additional: ["--paper-preview-job-estimate-option-total-mismatch"])
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(page.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Review and sign"].isHittable)
+    }
+
+    func testEmptyIssuedPackageCannotOfferReview() {
+        let app = launch(extra: "--paper-preview-job-estimate-multiple-options", additional: ["--paper-preview-job-estimate-option-empty"])
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10)); estimate.tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(page.waitForExistence(timeout: 10))
+        XCTAssertTrue(page.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Review and sign"].isHittable)
+    }
+
     func testInvalidDraftAmountsShowAnExplicitUnavailableStateWithoutCrashing() {
         let app = launch(extra: "--paper-preview-job-estimate-invalid-money")
         let draft = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002238"]
@@ -47,11 +127,11 @@ final class CustomerDocumentBookRecoveryUITests: XCTestCase {
         capture(app, name: "Unverifiable draft estimate amounts")
     }
 
-    private func launch(extra: String) -> XCUIApplication {
+    private func launch(extra: String, additional: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job",
-                               "--paper-preview-job-documents", extra]
+                               "--paper-preview-job-documents", extra] + additional
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()

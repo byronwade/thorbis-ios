@@ -354,6 +354,61 @@ final class JobCommercialDocumentsTests: XCTestCase {
                                                   selected: second.invoice, loadedID: id(51), model: second, scope: scope()))
     }
 
+    func testCustomerInvoiceRowDoesNotAssertUnverifiableAmounts() throws {
+        let cases: [[String: Any]] = [
+            ["quantity": 1, "unitPrice": ["amount": 1000, "currency": "EUR"]],
+            ["quantity": 1, "unitPrice": ["amount": -20000, "currency": "USD"]],
+            ["quantity": 0, "unitPrice": ["amount": 1000, "currency": "USD"]]
+        ]
+        for (index, values) in cases.enumerated() {
+            var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(invoice(50).utf8)) as? [String: Any])
+            let extra = values.merging(["id": id(901 + index), "description": "Adjustment"]) { current, _ in current }
+            let first = try XCTUnwrap((payload["lines"] as? [[String: Any]])?.first)
+            payload["lines"] = [first, extra]
+            let record = try JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: payload))
+            XCTAssertNil(CustomerDocumentAmounts(lines: record.lines, currency: record.currency, amountPaid: record.amountPaid))
+            let row = JobDocumentRow(invoice: record, fresh: true, customerFacing: true)
+            XCTAssertNil(row.amount, "Unverifiable invoice amount must not appear on the customer overview")
+            XCTAssertEqual(row.detail, "Amount needs verification", "The customer should know why the amount is hidden")
+        }
+    }
+
+    func testCustomerEstimateRowDoesNotAssertMixedCurrencyAmount() throws {
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
+        payload["lines"] = [
+            ["id": id(901), "description": "Work", "quantity": 1, "unitPrice": ["amount": 10000, "currency": "USD"]],
+            ["id": id(902), "description": "Material", "quantity": 1, "unitPrice": ["amount": 1000, "currency": "EUR"]]
+        ]
+        let record = try JSONDecoder().decode(EstimateRecord.self, from: JSONSerialization.data(withJSONObject: payload))
+        XCTAssertNil(customerEstimateDisplay(record.lines, currency: "USD"))
+        let row = JobDocumentRow(estimate: record, fresh: true, customerFacing: true)
+        XCTAssertNil(row.amount, "Unverifiable estimate amount must not appear on the customer overview")
+        XCTAssertEqual(row.detail, "Amount needs verification")
+    }
+
+    func testCustomerInvoiceRowKeepsVerifiedAmountAndBalance() throws {
+        let record = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(50, paid: 2500).utf8))
+        let row = JobDocumentRow(invoice: record, fresh: true, customerFacing: true)
+        XCTAssertEqual(row.amount, "$100.00")
+        XCTAssertEqual(row.detail, "$75.00\u{00A0}due")
+    }
+
+    func testEmptyEstimateOverviewDoesNotInventCurrency() throws {
+        let record = try JSONDecoder().decode(EstimateRecord.self, from: Data(estimate(10).utf8))
+        let row = JobDocumentRow(estimate: record, fresh: true, customerFacing: true)
+        XCTAssertNil(row.amount)
+        XCTAssertEqual(row.detail, "Amount needs verification")
+    }
+
+    func testEmptyInvoiceUsesItsExplicitCurrencyForZero() throws {
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(invoice(50).utf8)) as? [String: Any])
+        payload["lines"] = []
+        let record = try JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: payload))
+        let row = JobDocumentRow(invoice: record, fresh: true, customerFacing: true)
+        XCTAssertEqual(row.amount, "$0.00")
+        XCTAssertEqual(row.detail, "$0.00\u{00A0}due")
+    }
+
     func testApprovedEstimateWithUnknownOptionsDoesNotAssertBaseAmount() throws {
         var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
         payload["status"] = "approved"
