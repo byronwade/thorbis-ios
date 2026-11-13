@@ -14,7 +14,7 @@ private struct CustomerInvoiceOverviewKey: Hashable {
     let savedScopeRevision: UUID
 }
 
-private struct CustomerInvoiceOverviewEntry {
+struct CustomerInvoiceOverviewEntry {
     let record: InvoiceRecord
     let summary: CustomerInvoiceSummary
     let authority: CustomerHandoffExitAuthority
@@ -23,7 +23,7 @@ private struct CustomerInvoiceOverviewEntry {
 /// Bounded overview fetches live off the view, using the same structured task-group
 /// pattern as the estimate handoff. Results are always scoped to one load token.
 @MainActor
-private final class CustomerInvoiceOverviewLoader: ObservableObject {
+final class CustomerInvoiceOverviewLoader: ObservableObject {
     @Published private(set) var entries: [String: CustomerInvoiceOverviewEntry] = [:]
     private var token = UUID()
     private var current: (@MainActor (InvoiceRecord) -> Bool)?
