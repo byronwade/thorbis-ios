@@ -27,7 +27,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
         XCTAssertEqual(pad.value as? String, "Signature entered")
         let submit = pages(app).buttons["Sign summary"]
-        reveal(submit, in: app); XCTAssertTrue(submit.isEnabled); submit.tap()
+        revealAboveSignature(submit, in: app); XCTAssertTrue(submit.isEnabled); submit.tap()
         let signed = pages(app).staticTexts["customer-summary-signed"]
         XCTAssertTrue(signed.waitForExistence(timeout: 20)); XCTAssertTrue(signed.label.contains("Alex"))
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
@@ -47,7 +47,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(pad.waitForExistence(timeout: 10)); reveal(pad, in: app)
         pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
         let submit = pages(app).buttons["Sign summary"]
-        reveal(submit, in: app); XCTAssertTrue(submit.isEnabled); submit.tap()
+        revealAboveSignature(submit, in: app); XCTAssertTrue(submit.isEnabled); submit.tap()
         XCTAssertTrue(pages(app).buttons["Check signature"].waitForExistence(timeout: 20))
         app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
         XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
@@ -142,7 +142,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(pad.isHittable)
         pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
         let submit = app.buttons["Sign summary"]
-        for _ in 0..<6 where !submit.isHittable { app.swipeUp() }
+        revealAboveSignature(submit, in: app)
         XCTAssertTrue(submit.isHittable && submit.isEnabled); submit.tap()
         let signed = app.staticTexts["customer-summary-signed"]
         XCTAssertTrue(signed.waitForExistence(timeout: 20)); XCTAssertTrue(signed.label.contains("Alex"))
@@ -589,6 +589,14 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
 
     private func text(_ value: String, in app: XCUIApplication) -> XCUIElement {
         pages(app).staticTexts.matching(NSPredicate(format: "label CONTAINS %@", value)).firstMatch
+    }
+
+    private func revealAboveSignature(_ element: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<6 where !element.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.25))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.75)))
+        }
+        XCTAssertTrue(element.isHittable)
     }
 
     private func reveal(_ element: XCUIElement, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {

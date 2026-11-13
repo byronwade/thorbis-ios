@@ -826,6 +826,12 @@ struct CustomerSummarySigningControls: View {
                         .font(Theme.customerFont(type.body)).padding(16)
                         .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
                         .accessibilityLabel("Your full name")
+                    CustomerPresentationCommit(title: "Sign summary", enabled: customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes)) == nil,
+                        busy: false, type: type) {
+                        guard let png = SignatureInk.png(strokes) else { return }
+                        let signedAt = ISO8601DateFormatter().string(from: Date())
+                        Task { await coordinator.sign(signerName: name, signedAt: signedAt, png: png) }
+                    }
                     ZStack(alignment: .bottomLeading) {
                         SignaturePad(strokes: $strokes)
                         if !SignatureInk.hasInk(strokes) {
@@ -838,12 +844,6 @@ struct CustomerSummarySigningControls: View {
                     .accessibilityIdentifier("customer-summary-signature-pad")
                     .accessibilityValue(SignatureInk.hasInk(strokes) ? "Signature entered" : "Signature required")
                     if SignatureInk.hasInk(strokes) { CustomerTextButton(title: "Clear signature", type: type) { strokes = [] } }
-                    CustomerPresentationCommit(title: "Sign summary", enabled: customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(strokes)) == nil,
-                        busy: false, type: type) {
-                        guard let png = SignatureInk.png(strokes) else { return }
-                        let signedAt = ISO8601DateFormatter().string(from: Date())
-                        Task { await coordinator.sign(signerName: name, signedAt: signedAt, png: png) }
-                    }
                     CustomerTextButton(title: "Back", type: type) { signing = false }
                 } else {
                     CustomerSecondaryButton(title: "Sign summary", type: type) { signing = true }
