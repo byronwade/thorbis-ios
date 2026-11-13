@@ -6,6 +6,7 @@ import CryptoKit
 private final class FailingSummaryPendingStore: CustomerSummaryPendingStoring {
     enum Failure: Error { case write }
     func load(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt? { nil }
+    func loadForRecovery(scope: CustomerSummaryPendingScope) throws -> CustomerSummaryPendingAttempt? { nil }
     func insert(_ pending: CustomerSummaryPendingAttempt) throws { throw Failure.write }
     func complete(scope: CustomerSummaryPendingScope, proof: CustomerSummaryReplayProof, currentAuthority: @MainActor () -> Bool) throws { XCTFail("Unexpected completion") }
 }
@@ -266,6 +267,18 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertNotNil(waitingLookup); try store.insert(restored)
         waitingLookup?.resume(returning: .unsigned); await race.value
         XCTAssertEqual(racingOwner.phase, .needsRecovery, "A pending write racing an unsigned lookup must block new signing")
+        let newJobID = "00000000-0000-4000-8000-000000000099"
+        let currentScope = CustomerSummaryPendingScope(origin: pendingScope.origin, actorID: pendingScope.actorID,
+            organizationID: organization, customerID: customer, jobID: newJobID, invoiceID: invoice)
+        var newJobFields = fields; newJobFields["jobId"] = newJobID
+        let newJobSummary = try decode(newJobFields)
+        let changedLinkAPI2 = APIClient(session: URLProtocolFixture.session([.init(404, "{}")]), baseURL: "https://app.thorbis.com")
+        let changedLinkOwner = CustomerSummaryDurableCoordinator(summary: newJobSummary, scope: currentScope, store: store, current: { true },
+            lookup: { XCTFail("Old pending attempt must block current unsigned lookup"); return .unsigned }, upload: { _ in durableAsset },
+            replay: { pending in try await changedLinkAPI2.replayCustomerSummaryPending(pending, scope: pending.scope, currentAuthority: { true }) })
+        await changedLinkOwner.inspect(); XCTAssertEqual(changedLinkOwner.phase, .needsRecovery)
+        await changedLinkOwner.recover(); XCTAssertEqual(changedLinkOwner.phase, .needsRecovery)
+        XCTAssertNil(changedLinkOwner.receipt); XCTAssertNotNil(try store.loadForRecovery(scope: currentScope))
         try store.complete(scope: pendingScope, proof: proof, currentAuthority: { true })
         let receiptJSON = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
         let api = APIClient(session: URLProtocolFixture.session([.init(201, receiptJSON), .init(201, receiptJSON)]), baseURL: "https://app.thorbis.com")

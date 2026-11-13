@@ -483,11 +483,11 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
                   UUID(uuidString: summary.customerId) == UUID(uuidString: canonical.customerID),
                   summary.jobId.flatMap(UUID.init(uuidString:)) == UUID(uuidString: canonical.jobID),
                   UUID(uuidString: summary.invoiceId) == UUID(uuidString: canonical.invoiceID) else { phase = .unavailable; return }
-            if try store.load(scope: scope) != nil { phase = .needsRecovery; return }
+            if try store.loadForRecovery(scope: scope) != nil { phase = .needsRecovery; return }
             let status = try await lookup()
             guard valid(token) else { return }
             // Another activation may have persisted an attempt while the lookup was in flight.
-            if try store.load(scope: scope) != nil { phase = .needsRecovery; return }
+            if try store.loadForRecovery(scope: scope) != nil { phase = .needsRecovery; return }
             switch status {
             case .unsigned: phase = .ready
             case .signed(let value):
@@ -544,7 +544,7 @@ final class CustomerSummaryDurableCoordinator: ObservableObject {
         running = true; let token = generation; phase = .recovering
         defer { if generation == token { running = false } }
         do {
-            guard let pending = try store.load(scope: scope) else { phase = .unavailable; return }
+            guard let pending = try store.loadForRecovery(scope: scope) else { phase = .unavailable; return }
             let proof = try await replay(pending)
             guard valid(token), pending.matches(proof.receipt) else { return }
             try store.complete(scope: scope, proof: proof, currentAuthority: { self.valid(token) })
