@@ -29,6 +29,66 @@ final class CustomerInvoiceSummaryContractTests: XCTestCase {
         XCTAssertFalse(try decode(["status": "paid", "totalAmount": 0, "amountPaid": 0, "balanceDue": 0, "lines": []]).matches(scope: scope, invoiceID: "invoice-1", linesRevision: 2))
         XCTAssertFalse(try decode(["status": "issued", "amountPaid": 10000, "balanceDue": 0]).matches(scope: scope, invoiceID: "invoice-1", linesRevision: 2))
     }
+    func testConsentAndSignedSummaryReceiptMatchOnlyTheShownTerms() async throws {
+        let digest = "sha256:" + String(repeating: "a", count: 64)
+        let version = "invoice-summary-consent-v1"
+        let text = "I approve the customer invoice summary shown above. Payment status is not part of this authorization."
+        let consent: [String: Any] = ["digest": digest, "consentVersion": version, "consentText": text]
+        let organization = "00000000-0000-4000-8000-000000000011"
+        let customer = "00000000-0000-4000-8000-000000000012"
+        let job = "00000000-0000-4000-8000-000000000013"
+        let invoice = "00000000-0000-4000-8000-000000000014"
+        let line = "00000000-0000-4000-8000-000000000015"
+        let fields: [String: Any] = ["organizationId": organization, "customerId": customer, "jobId": job, "invoiceId": invoice,
+            "presentationScopeId": "invoice:\(invoice):lines:2:customer:v1", "summaryConsent": consent,
+            "lines": [["id": line, "description": "Materials", "quantity": 1, "unitPrice": ["amount": 10000, "currency": "USD"]]]]
+        let summary = try decode(fields)
+        XCTAssertNotNil(summary.validatedConsent)
+        var unknown = fields; unknown["summaryConsent"] = ["digest": digest, "consentVersion": "v2", "consentText": text]
+        XCTAssertNil(try decode(unknown).validatedConsent)
+        unknown["summaryConsent"] = ["digest": "sha256:" + String(repeating: "A", count: 64), "consentVersion": version, "consentText": text]
+        XCTAssertNil(try decode(unknown).validatedConsent)
+        unknown["summaryConsent"] = ["digest": digest, "consentVersion": version, "consentText": "Different consent"]
+        XCTAssertNil(try decode(unknown).validatedConsent)
+        var receipt: [String: Any] = ["kind": "signed_customer_invoice_summary", "id": "00000000-0000-4000-8000-000000000010",
+            "organizationId": organization, "customerId": customer, "jobId": job, "invoiceId": invoice,
+            "linesRevision": 2, "issuedSnapshotId": "00000000-0000-4000-8000-000000000001", "digest": digest,
+            "consentVersion": version, "consentText": text, "signerName": "Alex", "signedAt": "2026-11-13T12:00:00Z",
+            "recordedAt": "2026-11-13T12:00:01Z", "currency": "USD", "totalAmount": 10000,
+            "lines": [["id": line, "description": "Materials", "quantity": 1, "unitPrice": ["amount": 10000, "currency": "USD"]]]]
+        func decoded() throws -> CustomerInvoiceSummaryReceipt { try JSONDecoder().decode(CustomerInvoiceSummaryReceipt.self, from: JSONSerialization.data(withJSONObject: receipt)) }
+        XCTAssertTrue(try decoded().matches(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z"))
+        XCTAssertFalse(try decoded().matches(summary: summary, signerName: "Other", signedAt: "2026-11-13T12:00:00Z"))
+        XCTAssertFalse(try decoded().matches(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:01Z"))
+        receipt["signedAt"] = "2026-11-13T12:00:00.000Z"
+        XCTAssertTrue(try decoded().matches(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z"))
+        receipt["signedAt"] = "2026-11-13T12:00:00Z"
+        let attempt = try XCTUnwrap(CustomerSummarySigningAttempt(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z", imageMediaId: "00000000-0000-4000-8000-000000000020", idempotencyKey: "00000000-0000-4000-8000-000000000021"))
+        let receiptJSON = String(decoding: try JSONSerialization.data(withJSONObject: receipt), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([.init(201, receiptJSON), .init(201, receiptJSON)]), baseURL: "https://app.thorbis.com")
+        _ = try await api.authorizeCustomerInvoiceSummary(summary, attempt: attempt, currentAuthority: { true })
+        _ = try await api.authorizeCustomerInvoiceSummary(summary, attempt: attempt, currentAuthority: { true })
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["POST", "POST"])
+        let bodies = try URLProtocolFixture.recorded.map { try XCTUnwrap($0.body) }
+        XCTAssertEqual(try JSONSerialization.jsonObject(with: bodies[0]) as? NSDictionary, try JSONSerialization.jsonObject(with: bodies[1]) as? NSDictionary)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: bodies[0]) as? [String: Any])
+        XCTAssertEqual(body["consentDigest"] as? String, digest)
+        XCTAssertEqual(body["idempotencyKey"] as? String, "00000000-0000-4000-8000-000000000021")
+        XCTAssertEqual(body["consent"] as? Bool, true)
+        let gate = URLProtocolFixture.Gate(); defer { gate.release() }
+        let gatedAPI = APIClient(session: URLProtocolFixture.session([.init(201, receiptJSON, gate: gate)]), baseURL: "https://app.thorbis.com")
+        var active = true
+        let task = Task { @MainActor in try await gatedAPI.authorizeCustomerInvoiceSummary(summary, attempt: attempt, currentAuthority: { active }) }
+        for _ in 0..<1500 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        active = false; gate.release()
+        do { _ = try await task.value; XCTFail("Retired authority must not receive a signing result") } catch is CancellationError { } catch { XCTFail("Expected cancellation, got \(error)") }
+        receipt["jobId"] = "other"; XCTAssertFalse(try decoded().matches(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z")); receipt["jobId"] = job
+        receipt["digest"] = "sha256:" + String(repeating: "b", count: 64); XCTAssertFalse(try decoded().matches(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z")); receipt["digest"] = digest
+        receipt["lines"] = [["id": line, "description": "Hidden internal material", "quantity": 1, "unitPrice": ["amount": 10000, "currency": "USD"]]]
+        XCTAssertFalse(try decoded().matches(summary: summary, signerName: "Alex", signedAt: "2026-11-13T12:00:00Z"))
+    }
+
     func testStandaloneSummaryRequiresNoJobAndMatchingCustomer() throws {
         let summary = try decode(["jobId": NSNull()])
         XCTAssertTrue(summary.matches(organizationID: "org-1", customerID: "customer-1", jobID: nil, invoiceID: "invoice-1", linesRevision: 2))
