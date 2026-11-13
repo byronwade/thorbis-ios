@@ -14,6 +14,15 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.waitForExistence(timeout: 15))
     }
 
+    func testUnsignedInvoiceWithoutEditStillAllowsPayment() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-deny-document-edit", "--paper-preview-owner-auth", "approved"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+    }
+
     func testVerifiedSummaryHandsBackToCorrectInvoicePayment() {
         let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved"])
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
@@ -328,6 +337,33 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         retry.tap()
         assertText("Card", in: app)
         assertMoneyRow("Paid", "$340.00", in: app)
+    }
+
+    func testPaymentMismatchDisablesPayUntilFreshBalanceAndKeepsInvoice() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-primary-payment-arrives", "--paper-preview-deny-document-edit", "--paper-preview-owner-auth", "approved"])
+        assertText("Payments are still updating", in: app)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.exists)
+        let refresh = pages(app).buttons["Refresh payments"]
+        reveal(refresh, in: app); XCTAssertTrue(refresh.isHittable); refresh.tap()
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $240.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15))
+        XCTAssertTrue(collecting.label.contains("INV-2209"), collecting.label)
+    }
+
+    func testPaymentArrivingBetweenReadsRefreshesSummaryAndHistory() {
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-payment-arrives"])
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        assertText("Payments are still updating", in: app)
+        let refresh = pages(app).buttons["Refresh payments"]
+        reveal(refresh, in: app); XCTAssertTrue(refresh.isHittable); refresh.tap()
+        let cleared = NSPredicate(format: "exists == false")
+        expectation(for: cleared, evaluatedWith: refresh)
+        waitForExpectations(timeout: 15)
+        assertMoneyRow("Paid", "$340.00", in: app)
+        assertText("Paid in full", in: app)
     }
 
     func testCollapsedHistoryStaysCollapsedAfterRefresh() {

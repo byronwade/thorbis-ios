@@ -25,22 +25,36 @@ struct CustomerInvoiceOverviewEntry {
 @MainActor
 final class CustomerInvoiceOverviewLoader: ObservableObject {
     @Published private(set) var entries: [String: CustomerInvoiceOverviewEntry] = [:]
+    @Published private(set) var loadedCount = 0
+    @Published private(set) var loading = false
+    private var candidates: [InvoiceRecord] = []
+    var canLoadMore: Bool { loadedCount < candidates.count }
     private var token = UUID()
     private var current: (@MainActor (InvoiceRecord) -> Bool)?
     private var api: APIClient?
     private var scope: JobDocumentScope?
     private var authority: CustomerHandoffExitAuthority?
 
-    func retire() { token = UUID(); entries = [:]; current = nil; api = nil; scope = nil; authority = nil }
+    func retire() { token = UUID(); entries = [:]; loadedCount = 0; loading = false; candidates = []; current = nil; api = nil; scope = nil; authority = nil }
 
     func load(records: [InvoiceRecord], api: APIClient, scope: JobDocumentScope,
               authority: CustomerHandoffExitAuthority, current: @escaping @MainActor (InvoiceRecord) -> Bool) async {
         retire()
-        let generation = token
         self.api = api; self.scope = scope; self.authority = authority; self.current = current
-        let candidates = Array(records.prefix(20))
+        candidates = records
+        await loadMore()
+    }
+
+    func loadMore() async {
+        guard !loading, canLoadMore, api != nil, scope != nil, authority != nil else { return }
+        let generation = token
+        loading = true
+        let end = min(loadedCount + 20, candidates.count)
+        let batch = Array(candidates[loadedCount..<end])
+        loadedCount = end
+        defer { if token == generation { loading = false } }
         await withTaskGroup(of: Void.self) { group in
-            var iterator = candidates.makeIterator()
+            var iterator = batch.makeIterator()
             for _ in 0..<3 {
                 if let record = iterator.next() { group.addTask { await self.fetch(record, generation: generation) } }
             }
@@ -370,6 +384,13 @@ struct JobCustomerDocumentsView: View {
             customerSectionLabel("Invoices", count: invoices?.records.count ?? 0)
             if let invoices {
                 if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
+                if invoiceOverview.canLoadMore {
+                    Button(invoiceOverview.loading ? "Loading amounts…" : "Show more invoice amounts") {
+                        Task { await invoiceOverview.loadMore() }
+                    }
+                    .disabled(invoiceOverview.loading)
+                    .frame(minHeight: CustomerModeStyle.target)
+                }
                 ForEach(invoices.records) { invoice in
                     Button { Task { await openInvoice(invoice.id) } } label: {
                         JobDocumentRow(invoice: invoice, fresh: invoices.freshIDs.contains(invoice.id), customerFacing: true,

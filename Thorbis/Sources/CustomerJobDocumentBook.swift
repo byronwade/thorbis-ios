@@ -510,6 +510,7 @@ private struct CustomerInvoiceBookPage: View {
                             if PaperPreview.isJobDocumentsPreview { PaperPreviewProtocol.restoreDocumentHistory() }
                             #endif
                             await model.load()
+                            summaryRetry = UUID()
                         }
                     } else {
                         paymentHistory
@@ -520,6 +521,7 @@ private struct CustomerInvoiceBookPage: View {
                                 if PaperPreview.isJobDocumentsPreview { PaperPreviewProtocol.restoreDocumentHistory() }
                                 #endif
                                 await model.load()
+                                summaryRetry = UUID()
                             }
                         }
                     }
@@ -527,7 +529,8 @@ private struct CustomerInvoiceBookPage: View {
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
             if let summary = verifiedSummary, let amounts, model.invoice != nil,
-               summary.status == "issued", signed, canPay, model.canRecordPayment, amounts.due > 0 {
+               summary.status == "issued", (signed || !canSign), canPay, model.canRecordPayment,
+               !model.isLoading, model.historyComplete, model.paymentTotalCents == summary.amountPaid, amounts.due > 0 {
                 CustomerPresentationCommit(title: "Pay \(money(amounts.due, currency: summary.currency))", enabled: true, busy: false, type: type, action: pay)
                     .padding(Theme.gutter)
             } else if !fresh {

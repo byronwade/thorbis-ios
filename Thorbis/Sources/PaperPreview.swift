@@ -1145,12 +1145,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-safe-invoice"),
                let record = invoices.first(where: { path == "/v1/invoices/\($0.id)/customer-presentation" }),
                let total = paperLinesTotal(record.lines) {
-                let paid = record.amountPaid
+                let oldSummary = ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-payment-arrives") &&
+                    record.id == invoices[1].id && scenario.lock.withLock { !scenario.documentHistoryRestored }
+                let partialPayment = ProcessInfo.processInfo.arguments.contains("--paper-preview-primary-payment-arrives") && record.id == invoices[0].id
+                let paid = partialPayment && scenario.lock.withLock({ scenario.documentHistoryRestored }) ? 10000 : (oldSummary ? 33000 : record.amountPaid)
+                let summaryStatus = oldSummary ? "issued" : record.status
                 return ["kind": "customer_invoice_presentation", "presentationVersion": 1,
                         "presentationScopeId": "invoice:\(record.id):lines:\(record.linesRevision):customer:v1",
                         "isSignedDocument": false, "issuedSnapshotId": record.status == "draft" ? NSNull() : "00000000-0000-4000-8000-000000000001" as Any,
                         "organizationId": record.organizationId, "customerId": record.customerId, "invoiceId": record.id,
-                        "jobId": record.jobId ?? "", "linesRevision": record.linesRevision, "status": record.status,
+                        "jobId": record.jobId ?? "", "linesRevision": record.linesRevision, "status": summaryStatus,
                         "currency": "USD", "totalAmount": total, "amountPaid": paid, "balanceDue": record.status == "void" ? 0 : total - paid,
                         "lines": [["id": "customer-safe-line", "description": ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-summary-long")
                                    ? "This customer-facing service description explains the full work in detail. The technician will complete and test the installation. Final summary detail: leave the work area clean."
@@ -1159,6 +1163,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
                 var object = jsonObject(record) as! [String: Any]
+                if record.id == invoices[0].id, ProcessInfo.processInfo.arguments.contains("--paper-preview-primary-payment-arrives"), scenario.lock.withLock({ scenario.documentHistoryRestored }) {
+                    object["amountPaid"] = 10000
+                }
                 if record.id == invoices[0].id, scenario.lock.withLock({ scenario.documentStatusesChanged }) {
                     object["status"] = "void"
                 }
@@ -1167,6 +1174,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     object["jobId"] = "00000000-0000-4000-8000-000000002215"
                 }
                 return object
+            }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-primary-payment-arrives"), path == "/v1/invoices/\(invoices[0].id)/payments" {
+                var payment = jsonObject(PaperPreview.refundPayment) as! [String: Any]
+                payment["invoiceId"] = invoices[0].id
+                payment["amount"] = ["amount": 10000, "currency": "USD"]
+                payment["netAmount"] = ["amount": 10000, "currency": "USD"]
+                payment["refundedAmount"] = 0
+                return ["items": [payment]]
             }
             if PaperPreview.isJobDocumentsMoneyPreview, path == "/v1/invoices/\(invoices[0].id)/payments" {
                 return ["items": PaperPreview.jobDocumentMoneyPayments.map { jsonObject($0)! }]

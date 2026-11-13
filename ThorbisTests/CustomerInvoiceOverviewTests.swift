@@ -18,7 +18,7 @@ final class CustomerInvoiceOverviewTests: XCTestCase {
                 "origin": "job_completion", "sourceOperationKey": job, "status": "issued", "lines": [],
                 "linesRevision": 1, "amountPaid": 0, "currency": "USD", "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
             records.append(try JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: invoice)))
-            if index < 20 {
+            if index < 40 {
                 let payload: [String: Any] = ["kind": "customer_invoice_presentation", "presentationVersion": 1,
                     "presentationScopeId": "invoice:\(id):lines:1:customer:v1", "isSignedDocument": false,
                     "issuedSnapshotId": "00000000-0000-4000-8000-000000000106", "organizationId": org,
@@ -39,6 +39,11 @@ final class CustomerInvoiceOverviewTests: XCTestCase {
         gate.release(); await task.value
         XCTAssertEqual(URLProtocolFixture.recorded.count, 20)
         XCTAssertEqual(loader.entries.count, 20)
+        XCTAssertTrue(loader.canLoadMore)
+        await loader.loadMore()
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 40)
+        XCTAssertEqual(loader.entries.count, 40, "The next page retains previously verified amounts")
+        XCTAssertTrue(loader.canLoadMore)
 
         // Leaving the screen retires its generation before delayed replies are released.
         let retiredGate = URLProtocolFixture.Gate(); defer { retiredGate.release() }
