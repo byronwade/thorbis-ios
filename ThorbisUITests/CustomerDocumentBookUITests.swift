@@ -84,7 +84,9 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
-        thorbisCustomerViewMenuItem(app).tap()
+        let customerView = thorbisCustomerViewMenuItem(app)
+        XCTAssertTrue(customerView.waitForExistence(timeout: 15))
+        customerView.tap()
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10))
         estimate.tap()
@@ -101,8 +103,10 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.buttons["INV-2209"].tap()
         let sign = app.buttons["Sign for the work"]
         XCTAssertTrue(sign.waitForExistence(timeout: 10))
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: sign)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 15), .completed)
         sign.tap()
-        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 15), "Invoice signing did not open: \(app.debugDescription)")
         XCTAssertFalse(app.collectionViews["customer-document-pages"].exists)
         XCTAssertTrue(app.navigationBars["INV-2209"].exists)
     }
