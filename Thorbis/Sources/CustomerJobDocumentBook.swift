@@ -235,10 +235,22 @@ private struct CustomerEstimateBookPage: View {
     }
     private var options: [FieldEstimateOption] { issued.map { $0.options ?? [] } ?? estimate.options ?? [] }
     private var lines: [FieldLine] { issued?.lines ?? estimate.lines }
-    private var currency: String { issued?.currency ?? lines.first?.unitPrice.currency ?? "USD" }
+    private var currency: String? { issued?.currency ?? lines.first?.unitPrice.currency }
+    // Issued revisions have an explicit USD currency and at least one base line. Drafts can be empty.
+    private var issuedStructureValid: Bool {
+        issued.map { !$0.lines.isEmpty && $0.currency == "USD" } ?? true
+    }
     private var moneyVerified: Bool {
-        if options.isEmpty { return CustomerDocumentAmounts(lines: lines, currency: currency) != nil }
-        return options.allSatisfy { CustomerDocumentAmounts(lines: $0.lines, currency: $0.currency) != nil }
+        guard issuedStructureValid else { return false }
+        if options.isEmpty {
+            guard !lines.isEmpty, let currency, let display = customerEstimateDisplay(lines, currency: currency) else { return false }
+            return issued.map { display.amounts.total == $0.totalAmount } ?? true
+        }
+        return options.allSatisfy { option in
+            guard !option.lines.isEmpty, option.currency == "USD",
+                  let display = customerEstimateDisplay(option.lines, currency: option.currency) else { return false }
+            return display.amounts.total == option.totalAmount
+        }
     }
 
     var body: some View {
@@ -254,8 +266,12 @@ private struct CustomerEstimateBookPage: View {
                     } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
                     if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await load() } }
                     if estimate.status != "sent" || issued != nil {
-                        if options.isEmpty {
-                            estimateLines(lines, currency: currency, descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
+                        if !issuedStructureValid {
+                            Text("These amounts couldn't be verified. Hand the device back to your technician.")
+                                .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
+                        } else if options.isEmpty {
+                            estimateLines(lines, currency: currency, expectedTotal: issued?.totalAmount,
+                                          descriptionContext: "EST-\(estimate.id.suffix(4).uppercased())")
                         } else {
                             if estimate.status == "approved" {
                                 Text("These are the quoted packages. The approved package selection isn't available here.")
@@ -265,7 +281,7 @@ private struct CustomerEstimateBookPage: View {
                                 Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
                                 if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess, customerFacing: true,
                                                                                               accessibilityContext: "EST-\(estimate.id.suffix(4).uppercased()), package \(index + 1)") }
-                                estimateLines(option.lines, currency: option.currency,
+                                estimateLines(option.lines, currency: option.currency, expectedTotal: option.totalAmount, requireUSDCurrency: true,
                                               descriptionContext: "EST-\(estimate.id.suffix(4).uppercased()), package \(index + 1)")
                             }
                         }
@@ -273,6 +289,7 @@ private struct CustomerEstimateBookPage: View {
                 }
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
+            .accessibilityIdentifier("customer-estimate-page-\(estimate.id)")
             if fresh, estimate.status == "sent", issued != nil, !loading, moneyVerified {
                 CustomerPresentationCommit(title: "Review and sign", enabled: true, busy: false, type: type, action: review)
                     .accessibilityIdentifier("customer-book-review-sign")
@@ -284,8 +301,11 @@ private struct CustomerEstimateBookPage: View {
         .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh)) { await load() }
     }
 
-    @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String, descriptionContext: String) -> some View {
-        if let display = customerEstimateDisplay(lines, currency: currency) {
+    @ViewBuilder private func estimateLines(_ lines: [FieldLine], currency: String?, expectedTotal: Int?,
+                                            requireUSDCurrency: Bool = false, descriptionContext: String) -> some View {
+        if !lines.isEmpty, let currency, (!requireUSDCurrency || currency == "USD"),
+           let display = customerEstimateDisplay(lines, currency: currency),
+           expectedTotal.map({ $0 == display.amounts.total }) ?? true {
             CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: display.lines, type: type, rows: customerAmountRows(display.amounts, currency: currency, invoice: false), readingAccess: readingAccess, descriptionContext: descriptionContext)
         } else {

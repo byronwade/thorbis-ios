@@ -393,6 +393,22 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(row.detail, "$75.00\u{00A0}due")
     }
 
+    func testEmptyEstimateOverviewDoesNotInventCurrency() throws {
+        let record = try JSONDecoder().decode(EstimateRecord.self, from: Data(estimate(10).utf8))
+        let row = JobDocumentRow(estimate: record, fresh: true, customerFacing: true)
+        XCTAssertNil(row.amount)
+        XCTAssertEqual(row.detail, "Amount needs verification")
+    }
+
+    func testEmptyInvoiceUsesItsExplicitCurrencyForZero() throws {
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(invoice(50).utf8)) as? [String: Any])
+        payload["lines"] = []
+        let record = try JSONDecoder().decode(InvoiceRecord.self, from: JSONSerialization.data(withJSONObject: payload))
+        let row = JobDocumentRow(invoice: record, fresh: true, customerFacing: true)
+        XCTAssertEqual(row.amount, "$0.00")
+        XCTAssertEqual(row.detail, "$0.00\u{00A0}due")
+    }
+
     func testApprovedEstimateWithUnknownOptionsDoesNotAssertBaseAmount() throws {
         var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(estimate(10).utf8)) as? [String: Any])
         payload["status"] = "approved"
