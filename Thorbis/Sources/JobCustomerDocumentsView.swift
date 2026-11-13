@@ -417,6 +417,11 @@ struct JobCustomerDocumentsView: View {
         defer { openingID = nil }
         let generation = session.generation
         do {
+            #if DEBUG
+            if sign && PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-delay-invoice-signing") {
+                try await Task.sleep(for: .seconds(6))
+            }
+            #endif
             let invoice = try await api.liveFieldInvoice(id)
             guard session.generation == generation, currentWorkspace, canViewInvoices else { return }
             guard invoice.id == id, scope.contains(invoice) else {
