@@ -54,6 +54,38 @@ func thorbisStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIEl
 
 @MainActor
 final class JobEstimateHandoffUITests: XCTestCase {
+    func testLongEstimateTitleAndStatusAtNormalText() {
+        let app = open(["--paper-preview-handoff-long-title", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let card = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(card.waitForExistence(timeout: 30)); visible(app, card)
+        XCTAssertTrue(card.label.contains("Replace the water heater and restore the service area"))
+        XCTAssertTrue((card.value as? String)?.contains("Sent") == true)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long estimate title and status, normal text"; shot.lifetime = .keepAlways; add(shot)
+        card.tap()
+        XCTAssertTrue((card.value as? String)?.hasPrefix("Selected,") == true)
+
+    }
+    func testLongEstimateTitleAndStatusAtLargestText() {
+        let app = open(["--paper-preview-handoff-long-title", "--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let card = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(card.waitForExistence(timeout: 30)); visible(app, card)
+        XCTAssertTrue(card.label.contains("Replace the water heater and restore the service area"))
+        XCTAssertTrue((card.value as? String)?.contains("Sent") == true)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long estimate title and status, largest text"; shot.lifetime = .keepAlways; add(shot)
+        card.tap()
+        XCTAssertTrue((card.value as? String)?.hasPrefix("Selected,") == true)
+        let review = app.buttons["handoff-review-selected"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); XCTAssertTrue(review.isEnabled)
+        XCTAssertTrue(review.label.contains("Review selected (1)"))
+        XCTAssertLessThan(review.frame.height, 100, "The review action should leave space for reading estimates")
+        let selectedShot = XCTAttachment(screenshot: app.screenshot()); selectedShot.name = "Selected estimate review action, largest text"; selectedShot.lifetime = .keepAlways; add(selectedShot)
+        review.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "separate estimates. You'll approve and sign each one.")).firstMatch.waitForExistence(timeout: 20))
+    }
     override func tearDown() { XCUIApplication().terminate(); super.tearDown() }
     private func open(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
