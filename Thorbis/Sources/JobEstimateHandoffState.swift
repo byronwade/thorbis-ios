@@ -456,6 +456,16 @@ final class JobEstimateHandoffModel: ObservableObject {
         try await verifyDetailMembership(record, job: verifiedJob, current: current)
         return revision
     }
+    func approvedReceipt(_ record: EstimateRecord, revision: CustomerIssuedEstimateRevision, authority: UUID) async throws -> CustomerEstimateAcceptanceReceipt? {
+        func current() -> Bool { detailsCurrent(record, authority: authority) && !Task.isCancelled }
+        guard current(), record.status == "approved" else { throw CancellationError() }
+        let receipt = try await api.customerEstimateAcceptanceReceipt(for: revision, currentAuthority: current)
+        guard current() else { throw CancellationError() }
+        // Recheck job membership and the live revision after the receipt request.
+        let checked = try await issuedDetails(record, authority: authority)
+        guard current(), checked == revision else { throw CancellationError() }
+        return receipt
+    }
     private func verifyDetailMembership(_ record: EstimateRecord, job: JobRecord,
                                         current: @MainActor () -> Bool) async throws {
         do {

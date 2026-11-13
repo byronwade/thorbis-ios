@@ -286,6 +286,35 @@ final class JobEstimateHandoffModelTests: XCTestCase {
         XCTAssertFalse(model.selectedIDs.contains(a))
         XCTAssertFalse(model.canReview)
     }
+    func testApprovedReceiptRequiresCurrentJobAndDistinguishesMissingFromDenied() async throws {
+        let model = try await ready([])
+        let estimatePath = "/v1/estimates/\(a)"
+        let membershipPath = "/v1/jobs/\(jobID)/estimates"
+        let link = #"{"id":"\#(a)","jobId":"\#(jobID)","estimateId":"\#(a)"}"#
+        let receiptPath = "\(estimatePath)/revisions/1/acceptance"
+        let valid = #"{"id":"receipt","estimateId":"\#(a)","revisionId":"00000000-0000-4000-8000-000000000099","revisionNumber":1,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","signerName":"Alex","acceptedAt":"2026-10-29T12:00:00Z","totalAmount":19000,"currency":"USD","lines":[{"id":"line","description":"Repair","quantity":1,"unitPrice":{"amount":19000,"currency":"USD"}}]}"#
+        func routes(_ status: Int, _ body: String) -> [String: URLProtocolFixture.Reply] {
+            ["/v1/jobs/\(jobID)": .init(200, jobJSON), membershipPath: .init(200, membership([a])),
+             "\(membershipPath)/\(a)": .init(200, link), estimatePath: .init(200, record(a, status: "approved")),
+             "\(estimatePath)/revisions/1": .init(200, revision(a, status: "approved")), receiptPath: .init(status, body)]
+        }
+        URLProtocolFixture.setRoutes(routes(200, valid)); await model.refresh()
+        let record = try XCTUnwrap(model.records.first)
+        let authority = model.session.authorityRevision
+        let revision = try await model.issuedDetails(record, authority: authority)
+        let receipt = try await model.approvedReceipt(record, revision: revision, authority: authority)
+        XCTAssertEqual(receipt?.signerName, "Alex")
+        XCTAssertEqual(receipt?.lines.first?.description, "Repair")
+        URLProtocolFixture.setRoutes(routes(404, #"{"status":404,"title":"Not found"}"#))
+        let absent = try await model.approvedReceipt(record, revision: revision, authority: authority)
+        XCTAssertNil(absent)
+        URLProtocolFixture.setRoutes(routes(403, #"{"status":403,"title":"Denied"}"#))
+        do { _ = try await model.approvedReceipt(record, revision: revision, authority: authority); XCTFail("A denied receipt must not be treated as unsigned") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 403) }
+        URLProtocolFixture.setRoutes(routes(200, valid.replacingOccurrences(of: "Repair", with: "Different")))
+        do { _ = try await model.approvedReceipt(record, revision: revision, authority: authority); XCTFail("Mismatched scope must be rejected") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 409) }
+    }
     func testIssuedDetailsUsesTargetedMembershipAndRefuses403OrRemovedLink() async throws {
         let model = try await ready([])
         let membershipPath = "/v1/jobs/\(jobID)/estimates"
