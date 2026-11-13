@@ -1313,13 +1313,13 @@ struct CustomerLinesCard: View {
     }
 }
 
-func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true) -> [CustomerAmountRow] {
+func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true, totalLabel: String = "Total") -> [CustomerAmountRow] {
     var rows: [CustomerAmountRow] = []
     if amounts.credits < 0 {
         rows.append(.init(label: "Subtotal", amount: money(amounts.subtotal, currency: currency), emphasis: false))
         rows.append(.init(label: "Discounts and credits", amount: money(amounts.credits, currency: currency), emphasis: false))
     }
-    rows.append(.init(label: "Total", amount: money(amounts.total, currency: currency), emphasis: !invoice))
+    rows.append(.init(label: totalLabel, amount: money(amounts.total, currency: currency), emphasis: !invoice))
     if invoice {
         if amounts.paid > 0 { rows.append(.init(label: "Paid", amount: money(amounts.paid, currency: currency), emphasis: false)) }
         rows.append(.init(label: "Amount due", amount: money(amounts.due, currency: currency), emphasis: true))
