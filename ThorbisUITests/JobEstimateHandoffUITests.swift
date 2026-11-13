@@ -271,6 +271,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(first.waitForExistence(timeout: 30))
         let initialPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
         XCTAssertEqual(XCTWaiter.wait(for: [initialPrice], timeout: 45), .completed)
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        let secondPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [secondPrice], timeout: 45), .completed, "Finish both initial prefetches before injecting the refresh failure")
         let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
         visible(app, details); details.tap()
         XCTAssertTrue(app.buttons["Fail sample refresh"].waitForExistence(timeout: 30))
