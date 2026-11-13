@@ -161,6 +161,24 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
     }
 
+    func testApprovedBookHidesSignedTermsAfterAuthorityRetirement() {
+        let app = jobEstimateFixture(withOptions: true, receiptFixture: true, retireReceipt: true)
+        let choose = app.buttons["Choose Sample package"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 10)); choose.tap()
+        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review Sample package")).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); review.tap(); signFirstEstimate(app)
+        XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10)); app.buttons["Back to job documents"].tap()
+        let page = app.scrollViews["customer-estimate-page-00000000-0000-4000-8000-000000008101"]
+        let scope = page.staticTexts["Selected package scope"]
+        XCTAssertTrue(scope.waitForExistence(timeout: 15))
+        XCTAssertTrue(page.buttons["Retire receipt authority"].waitForExistence(timeout: 5))
+        page.buttons["Retire receipt authority"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: scope)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+        XCTAssertFalse(page.staticTexts["Private internal material"].exists)
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
+    }
+
     func testApprovedBookWithWrongRevisionDoesNotShowTerms() {
         let app = jobEstimateFixture(withOptions: true, receiptFixture: true, wrongReceipt: true)
         let choose = app.buttons["Choose Sample package"]
@@ -236,7 +254,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [refreshed], timeout: 15), .completed)
     }
 
-    private func jobEstimateFixture(failRefresh: Bool = false, withOptions: Bool = false, receiptFixture: Bool = false, wrongReceipt: Bool = false) -> XCUIApplication {
+    private func jobEstimateFixture(failRefresh: Bool = false, withOptions: Bool = false, receiptFixture: Bool = false, wrongReceipt: Bool = false, retireReceipt: Bool = false) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-estimate-handoff"]
@@ -245,6 +263,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         if withOptions { app.launchArguments.append("--paper-preview-handoff-options") }
         if receiptFixture { app.launchArguments.append("--paper-preview-handoff-receipt") }
         if wrongReceipt { app.launchArguments.append("--paper-preview-handoff-wrong-receipt") }
+        if retireReceipt { app.launchArguments.append("--paper-preview-handoff-receipt-retirement") }
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap()
