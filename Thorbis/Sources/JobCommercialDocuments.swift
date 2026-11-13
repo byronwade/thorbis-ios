@@ -323,6 +323,9 @@ struct JobDocumentRead<Record> {
     let issue: String?
     /// Verified association, but no safe document contents were available to display.
     let unavailableIDs: [String]
+    /// True when this collection failed to load. A remaining membership page is
+    /// incomplete for creation, totals, and authorization, but it is not a failure.
+    var failed: Bool { issue != nil }
 
     fileprivate init(scope: JobDocumentScope, records: [Record], freshIDs: Set<String>, isComplete: Bool,
                      unavailableIDs: [String] = [], kind: String, loadingMore: Bool = false, pendingPage: Bool = false) {

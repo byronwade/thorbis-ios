@@ -61,7 +61,7 @@ struct JobCustomerDocumentsView: View {
                                 .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
                         }
                         if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await refresh() } }
-                        else if estimates?.isComplete == false || invoices?.isComplete == false {
+                        else if estimates?.failed == true || invoices?.failed == true {
                             CustomerProblemBanner(message: "Some documents couldn't be refreshed. Try again to see everything.",
                                                   actionTitle: "Try again") { await refresh() }
                         }

@@ -79,7 +79,7 @@ struct JobDetailView: View {
     }
     private var jobEstimates: [EstimateRecord] { estimateRead?.records ?? [] }
     private var estimatesLoaded: Bool { estimateRead != nil }
-    private var estimatesFailed: Bool { estimateRead?.isComplete == false }
+    private var estimatesFailed: Bool { estimateRead?.failed == true }
     @State private var showNewEstimate = false
     @State private var committed = 0
     /// Set when the person opens a wrap-up row; the next drop in rows left plays a light tap.

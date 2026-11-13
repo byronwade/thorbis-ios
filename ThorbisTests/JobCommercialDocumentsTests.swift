@@ -16,6 +16,7 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(documents.estimates?.records.map(\.id), [id(11)])
         XCTAssertFalse(documents.estimates?.isComplete ?? true)
         XCTAssertNil(documents.estimates?.issue)
+        XCTAssertEqual(documents.estimates?.failed, false)
         XCTAssertTrue(documents.canLoadMoreEstimates)
         XCTAssertEqual(URLProtocolFixture.recorded.filter { $0.url?.path == "/v1/jobs/\(id(100))/estimates" }.count, 1)
         let next = await documents.loadNextEstimatePage(scope: scope(), api: client, isCurrent: { true })
@@ -23,6 +24,26 @@ final class JobCommercialDocumentsTests: XCTestCase {
         XCTAssertEqual(documents.estimates?.records.map(\.id), [id(11), id(12)])
         XCTAssertTrue(documents.estimates?.isComplete ?? false)
         XCTAssertFalse(documents.canLoadMoreEstimates)
+    }
+    func testHealthyPagedEstimatesStayActionableBeforeTheLastPage() async throws {
+        let client = api([.init(200, page([link(11)], cursor: id(1011))), .init(200, estimate(11))])
+        let documents = JobDocumentCollections()
+        XCTAssertTrue(await documents.loadFirstEstimatePage(scope: scope(), api: client, isCurrent: { true }))
+        let estimates = try XCTUnwrap(documents.estimates)
+        XCTAssertFalse(estimates.isComplete)
+        XCTAssertFalse(estimates.failed)
+        XCTAssertNil(estimates.issue)
+        let ready = estimates.failed ? nil : estimates.records
+        XCTAssertEqual(ready?.map(\.id), [id(11)])
+        let billed = try JSONDecoder().decode(InvoiceRecord.self, from: Data(invoice(50).utf8))
+        XCTAssertEqual(
+            TechJobFlow.nextStep(status: "in_progress", transitions: [], estimates: ready, invoices: [billed], can: .all),
+            .collect(invoiceID: id(50), due: 10_000, currency: "USD"))
+        XCTAssertEqual(
+            TechJobFlow.nextStep(status: "in_progress", transitions: [], estimates: ready, invoices: [], can: .all),
+            .presentEstimates)
+        XCTAssertFalse(estimates.failed || documents.invoices?.failed == true,
+                       "Customer home must not treat a healthy remaining page as a failed refresh")
     }
     func testJobEstimatePageInterruptionRetriesSameCursorWithoutLosingFirstPage() async throws {
         let gate = URLProtocolFixture.Gate(); defer { gate.release() }
@@ -85,6 +106,7 @@ final class JobCommercialDocumentsTests: XCTestCase {
         let documents = JobDocumentCollections()
         _ = await documents.loadFirstEstimatePage(scope: scope(), api: client, isCurrent: { true })
         XCTAssertTrue(documents.estimatePageNeedsRefresh); XCTAssertNotNil(documents.estimatePageError)
+        XCTAssertTrue(documents.estimates?.failed == true)
         XCTAssertFalse(JobEstimateCreation.canOpen(canCreate: true, canView: true, estimatesComplete: documents.estimates?.isComplete == true))
         _ = await documents.loadFirstEstimatePage(scope: scope(), api: client, isCurrent: { true })
         XCTAssertEqual(documents.estimates?.records.map(\.id), [id(11)])
