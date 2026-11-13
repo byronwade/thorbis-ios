@@ -290,6 +290,7 @@ enum JobDocumentsLoader {
         let scope: JobDocumentScope
         let api: APIClient
         let retained: [EstimateRecord]
+        let retainedByID: [String: EstimateRecord]
         let linksSaved: Bool
         let isCurrent: @MainActor () -> Bool
         let onPartial: @MainActor (JobDocumentRead<EstimateRecord>) -> Void
@@ -301,6 +302,9 @@ enum JobDocumentsLoader {
              linksSaved: Bool, includeRetained: Bool, isCurrent: @escaping @MainActor () -> Bool,
              onPartial: @escaping @MainActor (JobDocumentRead<EstimateRecord>) -> Void) {
             self.ids = ids; self.scope = scope; self.api = api; self.retained = retained
+            self.retainedByID = retained.reduce(into: [:]) { result, record in
+                if result[record.id] == nil, scope.contains(record, requestedID: record.id) { result[record.id] = record }
+            }
             self.linksSaved = linksSaved; self.isCurrent = isCurrent
             self.includeRetained = includeRetained; self.onPartial = onPartial
             self.slots = Array(repeating: nil, count: ids.count)
@@ -323,7 +327,7 @@ enum JobDocumentsLoader {
             catch {
                 guard isCurrent(), !Task.isCancelled else { return }
                 let mayRetain = JobDocumentsLoader.canRetain(after: error)
-                let old = mayRetain ? retained.first(where: { $0.id == id && scope.contains($0, requestedID: id) }) : nil
+                let old = mayRetain ? retainedByID[id] : nil
                 slots[index] = .init(record: old, fresh: false, failed: true, rejected: !mayRetain)
                 publishPartial()
             }
@@ -341,7 +345,7 @@ enum JobDocumentsLoader {
                     if let record = slot.record {
                         rows.append(record); if slot.fresh { fresh.insert(record.id) }
                     } else { unavailable.append(ids[index]) }
-                } else if let old = retained.first(where: { $0.id == ids[index] && scope.contains($0, requestedID: ids[index]) }) {
+                } else if let old = retainedByID[ids[index]] {
                     rows.append(old)
                 }
             }
