@@ -123,6 +123,22 @@ final class JobEstimateHandoffUITests: XCTestCase {
         }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed, "Each real selection must stick before the next tap")
     }
+    func testCustomerCanBrowseJobEstimatesUsingAccessibleControls() {
+        let app = open(["--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        let previous = app.buttons["handoff-previous-estimate"]
+        let next = app.buttons["handoff-next-estimate"]
+        XCTAssertTrue(previous.exists); XCTAssertFalse(previous.isEnabled)
+        XCTAssertTrue(next.exists); XCTAssertTrue(next.isEnabled); next.tap()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        XCTAssertTrue(previous.isEnabled); previous.tap()
+        XCTAssertTrue(app.navigationBars["EST-8101"].waitForExistence(timeout: 15))
+    }
+
     func testCustomerSwipesBetweenJobEstimateDetailsWithoutChangingSelection() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
