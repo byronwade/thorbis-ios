@@ -168,7 +168,11 @@ final class JobEstimateHandoffModel: ObservableObject {
     private let apiGeneration: UUID
     private let origin: String?
     private var freshIDs: Set<String> = []
-    private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
+    @Published private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
+    @Published private(set) var overviewPriceFailures: Set<String> = []
+    @Published private(set) var overviewPriceGeneration = UUID()
+    @Published private var overviewReceipts: [String: CustomerEstimateAcceptanceReceipt] = [:]
+    private var overviewRequests: [String: UUID] = [:]
     private var request = UUID()
     private var membershipPager: JobEstimateMembershipPager?
     private var pageRead: JobDocumentRead<EstimateRecord>?
@@ -221,7 +225,8 @@ final class JobEstimateHandoffModel: ObservableObject {
         apiGeneration = api.requestGeneration; savedScopeRevision = api.savedCopyScopeRevision; origin = api.normalizedOrigin
     }
     func revision(for id: String) -> CustomerIssuedEstimateRevision? {
-        guard let current = records.first(where: { $0.id == id }), let revision = revisions[id],
+        guard let current = records.first(where: { $0.id == id }),
+              detailsCurrent(current, authority: authorityRevision), let revision = revisions[id],
               (try? revision.validate(for: current)) != nil else { return nil }
         return revision
     }
@@ -339,6 +344,9 @@ final class JobEstimateHandoffModel: ObservableObject {
             self.canLoadMoreEstimates = !candidate.scanReachedEnd
             self.error = (!read.isComplete && !self.canLoadMoreEstimates) ? read.issue : nil
             self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
+            self.revisions = [:]; self.overviewReceipts = [:]
+            self.overviewPriceFailures = []
+            self.overviewPriceGeneration = UUID()
         }) { [weak self] cursor in
             guard let self else { throw CancellationError() }
             let current: @MainActor () -> Bool = { [weak self] in self?.isCurrent == true && self?.request == ticket }
@@ -468,6 +476,70 @@ final class JobEstimateHandoffModel: ObservableObject {
         try await verifyDetailMembership(record, job: verifiedJob, current: current)
         return revision
     }
+    /// Prices are read from issued revisions, in a small bounded batch for the loaded page.
+    /// Every request uses the existing live job, membership and authority checks.
+    func loadOverviewPrices() async {
+        let generation = overviewPriceGeneration
+        let candidates = records.filter { ($0.status == "sent" || $0.status == "approved") && detailsCurrent($0, authority: authorityRevision) }
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = candidates.makeIterator()
+            for _ in 0..<3 {
+                if let record = iterator.next() {
+                    group.addTask { await self.loadOverviewPrice(record, generation: generation) }
+                }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled, overviewPriceGeneration == generation else { group.cancelAll(); break }
+                if let record = iterator.next() {
+                    group.addTask { await self.loadOverviewPrice(record, generation: generation) }
+                }
+            }
+        }
+    }
+
+    func retryOverviewPrice(_ record: EstimateRecord) async {
+        await loadOverviewPrice(record, generation: overviewPriceGeneration)
+    }
+
+    private func loadOverviewPrice(_ record: EstimateRecord, generation: UUID) async {
+        guard !Task.isCancelled, generation == overviewPriceGeneration,
+              detailsCurrent(record, authority: authorityRevision) else { return }
+        let ticket = UUID()
+        overviewRequests[record.id] = ticket
+        overviewPriceFailures.remove(record.id)
+        defer { if overviewRequests[record.id] == ticket { overviewRequests[record.id] = nil } }
+        do {
+            let issued = try await issuedDetails(record, authority: authorityRevision)
+            let receipt: CustomerEstimateAcceptanceReceipt?
+            if record.status == "approved" {
+                receipt = try await approvedReceipt(record, revision: issued, authority: authorityRevision)
+            } else {
+                receipt = nil
+            }
+            guard !Task.isCancelled, generation == overviewPriceGeneration, overviewRequests[record.id] == ticket,
+                  detailsCurrent(record, authority: authorityRevision) else { return }
+            revisions[record.id] = issued
+            if record.status == "approved" {
+                if let receipt { overviewReceipts[record.id] = receipt }
+                else { overviewReceipts[record.id] = nil; overviewPriceFailures.insert(record.id) }
+            }
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled, generation == overviewPriceGeneration, overviewRequests[record.id] == ticket,
+                  detailsCurrent(record, authority: authorityRevision) else { return }
+            revisions[record.id] = nil
+            overviewReceipts[record.id] = nil
+            overviewPriceFailures.insert(record.id)
+        }
+    }
+
+    func overviewReceipt(for record: EstimateRecord) -> CustomerEstimateAcceptanceReceipt? {
+        guard record.status == "approved", let revision = revision(for: record.id),
+              let receipt = overviewReceipts[record.id],
+              (try? receipt.validate(for: revision)) != nil else { return nil }
+        return receipt
+    }
+
     func approvedReceipt(_ record: EstimateRecord, revision: CustomerIssuedEstimateRevision, authority: UUID) async throws -> CustomerEstimateAcceptanceReceipt? {
         func current() -> Bool { detailsCurrent(record, authority: authority) && !Task.isCancelled }
         guard current(), record.status == "approved" else { throw CancellationError() }
@@ -570,6 +642,7 @@ final class JobEstimateHandoffModel: ObservableObject {
         retired = true; request = UUID(); loading = false
         membershipPager = nil; pageRead = nil; canLoadMoreEstimates = false
         records = []; freshIDs = []; unavailableIDs = []; reviewed = []; revisions = [:]
+        overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
         jobTitle = ""; customerName = ""; lastSignerName = nil; error = nil
         for context in contexts.values { context.retire() }
         contexts = [:]
