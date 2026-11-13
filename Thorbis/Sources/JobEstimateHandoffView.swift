@@ -142,6 +142,7 @@ struct JobEstimateHandoffView: View {
     @ObservedObject var model: JobEstimateHandoffModel
     let handBack: () -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @State private var reviewing = false
@@ -323,9 +324,12 @@ struct JobEstimateHandoffView: View {
 
     private func estimateSummary(_ record: EstimateRecord) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            let titleLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            titleLayout {
                 Text(record.title).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 CustomerStatusWord(status: record.status, type: type)
             }
             Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.customerMonoFont(type.small)).foregroundStyle(Theme.muted)
