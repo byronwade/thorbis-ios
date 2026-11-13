@@ -123,6 +123,22 @@ final class JobEstimateHandoffUITests: XCTestCase {
         }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed, "Each real selection must stick before the next tap")
     }
+    func testLongEstimateListKeepsSelectionsFromBothEnds() {
+        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls"])
+        let door = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 45)); door.tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 45)); selectEstimate(app, first)
+        let last = app.buttons["handoff-select-00000000-0000-4000-8000-000000082038"]
+        let list = app.scrollViews["job-estimate-handoff"]
+        for _ in 0..<60 where !last.isHittable { list.swipeUp() }
+        XCTAssertTrue(last.isHittable, "The last estimate must remain reachable without obscuring its control")
+        selectEstimate(app, last)
+        XCTAssertTrue(app.buttons["Review selected (2)"].waitForExistence(timeout: 10))
+        for _ in 0..<60 where !first.isHittable { list.swipeDown() }
+        XCTAssertTrue(first.isHittable)
+        XCTAssertTrue((first.value as? String)?.hasPrefix("Selected,") == true)
+    }
     func testSelectedReviewFoldsHiddenMaterialsWithoutExposingTheirDescription() {
         let app = open(["--paper-preview-handoff-hidden-material", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))

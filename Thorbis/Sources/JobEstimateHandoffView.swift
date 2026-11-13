@@ -174,10 +174,10 @@ struct JobEstimateHandoffView: View {
     }
 
     private var overview: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        LazyVStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.jobTitle).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : "Some estimates still need a refresh")
+                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : model.loading ? "Loading more estimates…" : "Some estimates still need a refresh")
                     .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
             if !model.approvalAuthority {

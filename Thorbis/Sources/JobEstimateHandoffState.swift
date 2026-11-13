@@ -281,7 +281,12 @@ final class JobEstimateHandoffModel: ObservableObject {
             let fresh = try await api.liveFieldJob(scope.jobID)
             guard isCurrent, request == ticket, !Task.isCancelled else { return }
             guard sameJob(fresh) else { retire(); return }
-            let published = await documents.loadEstimates(scope: scope, api: api) { [weak self] in
+            let published = await documents.loadEstimates(scope: scope, api: api, onPartial: { [weak self] read in
+                guard let self, self.isCurrent, self.request == ticket, read.scope == self.scope else { return }
+                self.records = read.records; self.freshIDs = read.freshIDs
+                self.complete = false; self.unavailableIDs = read.unavailableIDs; self.error = nil
+                self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: false)
+            }) { [weak self] in
                 self?.isCurrent == true && self?.request == ticket
             }
             guard isCurrent, published, request == ticket, let read = documents.estimates, read.scope == scope else { return }

@@ -35,7 +35,12 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private var flags: [String] { ProcessInfo.processInfo.arguments }
     private var org: String { workspaceChanged ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID }
     private var now: String { ISO8601DateFormatter().string(from: Date()) }
-    private var ids: [String] { flags.contains("--paper-preview-handoff-third-sent") ? [Self.a, Self.b, Self.c] : flags.contains("--paper-preview-handoff-all-statuses") ? [Self.a, Self.b, Self.c, Self.d] : [Self.a,Self.b] }
+    private var ids: [String] {
+        if flags.contains("--paper-preview-handoff-many-estimates") {
+            return [Self.a, Self.b] + (1...38).map { String(format: "00000000-0000-4000-8000-%012d", 82000 + $0) }
+        }
+        return flags.contains("--paper-preview-handoff-third-sent") ? [Self.a, Self.b, Self.c] : flags.contains("--paper-preview-handoff-all-statuses") ? [Self.a, Self.b, Self.c, Self.d] : [Self.a,Self.b]
+    }
     func reset() { lock.withLock { approved = [:]; acceptances = [:]; assets = [:]; clients = [:]; bytes = [:]; attempts = []; requests = []; lost = false; workspaceChanged = false; sessionEnded = false; choosingWorkspace = false; unlocks = 0; interruptMembership = false; interruptUpload = false; changedRevision = false; changedFirstRevision = false; removedFirst = false; unlockAllowed = !flags.contains("--paper-preview-handoff-denied-unlock") } }
     func changeWorkspace() { lock.withLock { workspaceChanged = true } }
     func endSession() { lock.withLock { sessionEnded = true } }
