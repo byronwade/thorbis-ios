@@ -22,6 +22,7 @@ enum CustomerJobDocumentID: Hashable, Identifiable {
 struct CustomerJobDocumentSelection {
     private(set) var ids: [CustomerJobDocumentID] = []
     private(set) var selected: CustomerJobDocumentID?
+    private(set) var activation = UUID()
     init(ids: [CustomerJobDocumentID], selected: CustomerJobDocumentID) {
         reconcile(ids)
         select(selected)
@@ -33,12 +34,12 @@ struct CustomerJobDocumentSelection {
         return "\(index + 1) of \(ids.count) \(ids.count == 1 ? "document" : "documents")"
     }
     mutating func select(_ id: CustomerJobDocumentID) {
-        if ids.contains(id) { selected = id }
+        if ids.contains(id), selected != id { selected = id; activation = UUID() }
     }
     mutating func reconcile(_ incoming: [CustomerJobDocumentID]) {
         var seen = Set<CustomerJobDocumentID>()
         ids = incoming.filter { seen.insert($0).inserted }
-        if let selected, !ids.contains(selected) { self.selected = nil }
+        if let selected, !ids.contains(selected) { self.selected = nil; activation = UUID() }
     }
     private func neighbor(_ offset: Int) -> CustomerJobDocumentID? {
         guard let selected, let index = ids.firstIndex(of: selected), ids.indices.contains(index + offset) else { return nil }

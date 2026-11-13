@@ -190,7 +190,7 @@ struct CustomerJobDocumentBook: View {
                 let effectiveRecord = record
                 let effectiveFresh = freshEstimates.contains(value)
                 #endif
-                CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id,
+                CustomerEstimateBookPage(scope: scope, sourceGeneration: sourceGeneration, estimate: effectiveRecord, fresh: effectiveFresh, active: selection.selected == id, activation: selection.activation,
                     refresh: refresh, review: { reviewEstimate(value) })
             } else {
                 ScrollView {
@@ -214,6 +214,7 @@ private struct CustomerEstimateBookLoadID: Hashable {
     let estimate: EstimateRecord
     let fresh: Bool
     let active: Bool
+    let activation: UUID
     let sessionGeneration: UUID
     let authorityRevision: UUID
     let apiGeneration: UUID
@@ -227,6 +228,7 @@ private struct CustomerEstimateBookPage: View {
     let estimate: EstimateRecord
     let fresh: Bool
     let active: Bool
+    let activation: UUID
     let refresh: () async -> Void
     let review: () -> Void
     @EnvironmentObject private var api: APIClient
@@ -234,6 +236,7 @@ private struct CustomerEstimateBookPage: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var receipt: CustomerEstimateAcceptanceReceipt?
     @State private var receiptAuthority: CustomerHandoffExitAuthority?
+    @State private var receiptActivation: UUID?
     @State private var retry = UUID()
     @State private var loadToken = UUID()
     @State private var issued: CustomerIssuedEstimateRevision?
@@ -269,7 +272,7 @@ private struct CustomerEstimateBookPage: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if estimate.status != "approved" || (readingAccess.permits(session) &&
-                        receiptAuthority?.isCurrent(api: api, session: session) == true &&
+                        receiptActivation == activation && receiptAuthority?.isCurrent(api: api, session: session) == true &&
                         issued?.matchesDetails(for: estimate) == true) {
                         Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
                             .fixedSize(horizontal: false, vertical: true)
@@ -280,6 +283,9 @@ private struct CustomerEstimateBookPage: View {
                         Text("This copy needs a refresh before you can decide.").font(Theme.customerFont(type.body))
                     } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
                     #if DEBUG
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-receipt-return") {
+                        Button("Remove sample link") { JobEstimateHandoffPreview.shared.removeFirst() }
+                    }
                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-receipt-retirement") {
                         Button("Retire receipt authority") { api.invalidateRequests() }
                     }
@@ -287,7 +293,7 @@ private struct CustomerEstimateBookPage: View {
                     if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { retry = UUID() } }
                     if estimate.status == "approved" {
                         if fresh, readingAccess.permits(session), let issued, let receipt, let receiptAuthority,
-                           receiptAuthority.isCurrent(api: api, session: session), issued.matchesDetails(for: estimate), (try? receipt.validate(for: issued)) != nil {
+                           receiptActivation == activation, receiptAuthority.isCurrent(api: api, session: session), issued.matchesDetails(for: estimate), (try? receipt.validate(for: issued)) != nil {
                             if let title = receipt.optionTitle {
                                 Text(title).font(Theme.customerFont(type.heading, weight: .medium))
                             }
@@ -327,7 +333,7 @@ private struct CustomerEstimateBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
-        .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh, active: active,
+        .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh, active: active, activation: activation,
             sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
             apiGeneration: api.requestGeneration, scopeRevision: api.savedCopyScopeRevision, retry: retry)) { await load() }
     }
@@ -347,7 +353,7 @@ private struct CustomerEstimateBookPage: View {
 
     private func load() async {
         let token = UUID(); loadToken = token
-        receipt = nil; receiptAuthority = nil; issued = nil; error = nil; loading = false
+        receipt = nil; receiptAuthority = nil; receiptActivation = nil; issued = nil; error = nil; loading = false
         guard fresh, active, scope.contains(estimate, requestedID: estimate.id),
               estimate.status == "sent" || estimate.status == "approved",
               sourceGeneration == session.generation,
@@ -385,7 +391,7 @@ private struct CustomerEstimateBookPage: View {
                 }
                 try await verifyMembership()
                 guard current() else { return }
-                receipt = signed; receiptAuthority = authority
+                receipt = signed; receiptAuthority = authority; receiptActivation = activation
             }
             guard current() else { return }
             issued = revision
