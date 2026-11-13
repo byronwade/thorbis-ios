@@ -223,7 +223,9 @@ struct JobEstimateHandoffView: View {
             if model.isCurrent {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if reviewing { selectedReview } else { overview }
+                        if reviewing { selectedReview } else {
+                            overview.task(id: model.overviewPriceGeneration) { await model.loadOverviewPrices() }
+                        }
                     }
                     .padding(Theme.gutter).padding(.bottom, footerHeight)
                     .frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
@@ -329,6 +331,11 @@ struct JobEstimateHandoffView: View {
                 .accessibilityHint("Read this estimate before choosing work")
                 .accessibilityIdentifier("handoff-details-\(record.id)")
             }
+            if model.overviewPriceFailures.contains(record.id) {
+                Button("Retry price") { Task { await model.retryOverviewPrice(record) } }
+                    .font(Theme.customerFont(type.body, weight: .medium))
+                    .accessibilityIdentifier("handoff-retry-price-\(record.id)")
+            }
             if record.status == "approved" {
                 Text("Already approved · no approval needed").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                 if let signer = model.context(for: record.id)?.approvedSignerName {
@@ -413,13 +420,16 @@ struct JobEstimateHandoffView: View {
                let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
                 Text(option.title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 Text(money(amount, currency: option.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
+            } else if let receipt = model.overviewReceipt(for: record) {
+                if let title = receipt.optionTitle { Text(title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
+                Text(money(receipt.totalAmount, currency: receipt.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
+            } else if record.status == "sent", let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
                 Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty {
-                Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Text(model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else if record.status == "approved" {
                 Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else {
