@@ -14,6 +14,28 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch.waitForExistence(timeout: 15))
     }
 
+    func testCustomerSignsSummaryAndPaysTheSelectedJobInvoice() {
+        continueAfterFailure = false
+        let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-summary-signing", "--paper-preview-owner-auth", "approved"])
+        XCTAssertTrue(text("Customer safe service", in: app).waitForExistence(timeout: 15))
+        let sign = pages(app).buttons["Sign summary"]
+        XCTAssertTrue(sign.waitForExistence(timeout: 15)); reveal(sign, in: app); sign.tap()
+        let name = pages(app).textFields["Your full name"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); reveal(name, in: app); name.tap(); name.typeText("Alex")
+        let pad = pages(app).descendants(matching: .any)["customer-summary-signature-pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 10)); reveal(pad, in: app)
+        pad.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.5)).press(forDuration: 0.05, thenDragTo: pad.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.3)))
+        XCTAssertEqual(pad.value as? String, "Signature entered")
+        let submit = pages(app).buttons["Sign summary"]
+        reveal(submit, in: app); XCTAssertTrue(submit.isEnabled); submit.tap()
+        let signed = pages(app).staticTexts["customer-summary-signed"]
+        XCTAssertTrue(signed.waitForExistence(timeout: 20)); XCTAssertTrue(signed.label.contains("Alex"))
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 15)); pay.tap()
+        let collecting = app.descendants(matching: .any)["collect-payment-invoice"]
+        XCTAssertTrue(collecting.waitForExistence(timeout: 15)); XCTAssertTrue(collecting.label.contains("INV-2209"))
+    }
+
     func testUnsignedInvoiceWithoutEditStillAllowsPayment() {
         let app = openPrimary(extra: ["--paper-preview-customer-safe-invoice", "--paper-preview-deny-document-edit", "--paper-preview-owner-auth", "approved"])
         let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $340.00")).firstMatch

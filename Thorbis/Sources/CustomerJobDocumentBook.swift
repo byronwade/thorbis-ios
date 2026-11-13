@@ -14,6 +14,8 @@ struct CustomerJobDocumentBook: View {
     let reviewEstimate: (String) -> Void
     let signInvoice: (String) -> Void
     let payInvoice: (String) -> Void
+    let signingRegistry: CustomerSummaryHandoffRegistry
+    let signingHandoffCurrent: @MainActor () -> Bool
     let canSignInvoice: Bool
     let canPayInvoice: Bool
     let onSelectionChanged: () -> Void
@@ -29,7 +31,8 @@ struct CustomerJobDocumentBook: View {
          freshEstimates: Set<String>, freshInvoices: Set<String>, unavailableEstimates: [String],
          initial: CustomerJobDocumentID, actionError: String?, refresh: @escaping () async -> Void,
          reviewEstimate: @escaping (String) -> Void, signInvoice: @escaping (String) -> Void,
-         payInvoice: @escaping (String) -> Void, canSignInvoice: Bool, canPayInvoice: Bool,
+         payInvoice: @escaping (String) -> Void, signingRegistry: CustomerSummaryHandoffRegistry,
+         signingHandoffCurrent: @escaping @MainActor () -> Bool, canSignInvoice: Bool, canPayInvoice: Bool,
          onSelectionChanged: @escaping () -> Void = {}) {
         self.scope = scope
         self.sourceGeneration = sourceGeneration
@@ -43,6 +46,7 @@ struct CustomerJobDocumentBook: View {
         self.reviewEstimate = reviewEstimate
         self.signInvoice = signInvoice
         self.payInvoice = payInvoice
+        self.signingRegistry = signingRegistry; self.signingHandoffCurrent = signingHandoffCurrent
         self.canSignInvoice = canSignInvoice
         self.canPayInvoice = canPayInvoice
         self.onSelectionChanged = onSelectionChanged
@@ -202,9 +206,12 @@ struct CustomerJobDocumentBook: View {
             }
         case .invoice(let value):
             if let record = invoices.first(where: { $0.id == value }) {
+                let pageActivation = selection.activation
                 CustomerInvoiceBookPage(invoice: record, scope: scope, sourceGeneration: sourceGeneration, api: api, fresh: freshInvoices.contains(value),
                     canSign: canSignInvoice, canPay: canPayInvoice, active: selection.selected == id, activation: selection.activation,
-                    refresh: refresh, sign: { signInvoice(value) }, pay: { payInvoice(value) })
+                    signingRegistry: signingRegistry, signingHandoffCurrent: {
+                        signingHandoffCurrent() && selection.selected == id && selection.activation == pageActivation
+                    }, refresh: refresh, sign: { signInvoice(value) }, pay: { payInvoice(value) })
             }
         }
     }
@@ -425,6 +432,8 @@ private struct CustomerInvoiceBookPage: View {
     let canPay: Bool
     let active: Bool
     let activation: UUID
+    let signingRegistry: CustomerSummaryHandoffRegistry
+    let signingHandoffCurrent: @MainActor () -> Bool
     let refresh: () async -> Void
     let sign: () -> Void
     let pay: () -> Void
@@ -439,14 +448,17 @@ private struct CustomerInvoiceBookPage: View {
     @State private var summaryRetry = UUID()
     @State private var summaryLoading = false
     @State private var summaryError: String?
+    @State private var signingActivation: CustomerSummaryHandoffRegistry.Activation?
     @State private var showPayments = false
     @State private var choseInitialPaymentVisibility = false
 
     init(invoice: InvoiceRecord, scope: JobDocumentScope, sourceGeneration: UUID?, api: APIClient, fresh: Bool,
-         canSign: Bool, canPay: Bool, active: Bool, activation: UUID, refresh: @escaping () async -> Void,
+         canSign: Bool, canPay: Bool, active: Bool, activation: UUID, signingRegistry: CustomerSummaryHandoffRegistry,
+         signingHandoffCurrent: @escaping @MainActor () -> Bool, refresh: @escaping () async -> Void,
          sign: @escaping () -> Void, pay: @escaping () -> Void) {
         original = invoice; self.scope = scope; self.sourceGeneration = sourceGeneration; self.fresh = fresh; self.canSign = canSign; self.canPay = canPay
-        self.active = active; self.activation = activation; self.refresh = refresh; self.sign = sign; self.pay = pay
+        self.active = active; self.activation = activation; self.signingRegistry = signingRegistry; self.signingHandoffCurrent = signingHandoffCurrent
+        self.refresh = refresh; self.sign = sign; self.pay = pay
         _model = StateObject(wrappedValue: InvoicePaymentCollectionModel(api: api, invoiceID: invoice.id, expectedJobScope: scope))
     }
 
@@ -490,9 +502,13 @@ private struct CustomerInvoiceBookPage: View {
                         CustomerIncludedLabel(type: type)
                         CustomerIncludedLines(lines: customerLines, type: type, rows: customerAmountRows(amounts, currency: summary.currency, invoice: summary.status != "void"), readingAccess: readingAccess,
                                               descriptionContext: "INV-\(invoice.id.suffix(4).uppercased())")
-                        if !signed && canSign && ["issued", "paid"].contains(summary.status) {
-                            Text("Signing this customer summary isn't available yet. Ask your technician for help.")
-                                .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                        if canSign && ["issued", "paid"].contains(summary.status) {
+                            if let consent = summary.validatedConsent, let signingActivation {
+                                CustomerSummarySigningControls(coordinator: signingActivation.coordinator, consent: consent, type: type)
+                            } else {
+                                Text("Signing this customer summary isn't available yet. Ask your technician for help.")
+                                    .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                            }
                         }
                     } else if summaryLoading {
                         CustomerSkeleton(caption: "Opening your invoice…", heading: false)
@@ -529,10 +545,15 @@ private struct CustomerInvoiceBookPage: View {
                 .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
             if let summary = verifiedSummary, let amounts, model.invoice != nil,
-               summary.status == "issued", (signed || !canSign), canPay, model.canRecordPayment,
+               summary.status == "issued", canPay, model.canRecordPayment,
                !model.isLoading, model.historyComplete, model.paymentTotalCents == summary.amountPaid, amounts.due > 0 {
-                CustomerPresentationCommit(title: "Pay \(money(amounts.due, currency: summary.currency))", enabled: true, busy: false, type: type, action: pay)
-                    .padding(Theme.gutter)
+                if let signingActivation {
+                    CustomerSummaryPayAction(coordinator: signingActivation.coordinator, allowedWithoutSummarySignature: signed || !canSign,
+                        title: "Pay \(money(amounts.due, currency: summary.currency))", type: type, pay: pay).padding(Theme.gutter)
+                } else if signed || !canSign {
+                    CustomerPresentationCommit(title: "Pay \(money(amounts.due, currency: summary.currency))", enabled: true, busy: false, type: type, action: pay)
+                        .padding(Theme.gutter)
+                }
             } else if !fresh {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
@@ -541,6 +562,8 @@ private struct CustomerInvoiceBookPage: View {
         .task(id: CustomerInvoiceBookLoadID(invoice: invoice, fresh: fresh, active: active, activation: activation,
             sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
             apiGeneration: api.requestGeneration, scopeRevision: api.savedCopyScopeRevision, retry: summaryRetry)) { await loadSummary() }
+        .onChange(of: active) { _, value in if !value { deactivateSigning() } }
+        .onDisappear { deactivateSigning() }
         .onChange(of: model.historyComplete) { _, complete in
             guard complete, !choseInitialPaymentVisibility else { return }
             // Show a short history immediately; keep large histories easy to scan.
@@ -549,8 +572,14 @@ private struct CustomerInvoiceBookPage: View {
         }
     }
 
+    private func deactivateSigning() {
+        if let signingActivation { signingRegistry.deactivate(signingActivation.token) }
+        signingActivation = nil
+    }
+
     private func loadSummary() async {
         let token = UUID(); summaryToken = token
+        deactivateSigning()
         customerSummary = nil; summaryAuthority = nil; summaryActivation = nil; summaryError = nil; summaryLoading = false
         guard fresh, active, scope.contains(invoice), sourceGeneration == session.generation,
               let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return }
@@ -571,6 +600,12 @@ private struct CustomerInvoiceBookPage: View {
                 linesRevision: latest.linesRevision, currentAuthority: current)
             guard current() else { return }
             customerSummary = value; summaryAuthority = authority; summaryActivation = activation
+            if canSign, ["issued", "paid"].contains(value.status), value.validatedConsent != nil,
+               let signing = signingRegistry.activate(summary: value, api: api, session: session, authority: authority,
+                   handoffCurrent: signingHandoffCurrent) {
+                signingActivation = signing
+                await signing.coordinator.inspect()
+            }
         } catch is CancellationError {
         } catch {
             if current() { summaryError = "Invoice details aren't available. Hand the device back to your technician." }
