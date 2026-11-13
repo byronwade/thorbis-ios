@@ -217,6 +217,35 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 10))
     }
 
+    func testSidebarOpensFromJobsOnIPadWithDiagnostics() throws {
+        guard XCUIApplication().usesTabletLayout else { throw XCTSkip("iPad sidebar") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "--paper-preview-menu-suite", UUID().uuidString]
+        app.launch()
+        let search = app.buttons["sidebar-search"]
+        if search.exists && search.isHittable { return }
+        let show = app.buttons["sidebar-show"]
+        XCTAssertTrue(show.waitForExistence(timeout: 30), "No Show sidebar button")
+        XCTAssertTrue(show.isHittable, "Show sidebar is not hittable")
+        let before = XCTAttachment(string: app.debugDescription)
+        before.name = "Sidebar before opening hierarchy"
+        before.lifetime = .keepAlways
+        add(before)
+        show.tap()
+        let opened = search.waitForExistence(timeout: 5)
+        let after = XCTAttachment(string: app.debugDescription)
+        after.name = "Sidebar after opening hierarchy"
+        after.lifetime = .keepAlways
+        add(after)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Sidebar after opening screenshot"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        XCTAssertTrue(opened, "Show sidebar did not reveal search")
+    }
+
     func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
         continueAfterFailure = false
         let app = XCUIApplication()
