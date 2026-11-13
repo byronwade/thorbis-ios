@@ -64,6 +64,27 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertTrue(SavedCopyStore.shared.exists(scope: scope, key: key), "The first live response must be saved before testing offline fallback")
     }
 
+    func testMoneyCompilationKeepsJobGroupingAndSkipsUnrelatedCollections() async throws {
+        var bodies = fixture(photosA: 1, photosB: 1, notesA: 1, notesB: 1, documentsA: 1, documentsB: 1,
+                             estimatesA: 1, estimatesB: 1, invoicesA: 1, invoicesB: 1, historyA: 1, historyB: 1)
+        var foreign = invoice(id: uid(99999), jobID: jobA)
+        foreign["organizationId"] = uid(999)
+        bodies[4] = page([invoice(id: uid(9_000), jobID: jobA), invoice(id: uid(10_000), jobID: jobB), foreign])
+        let moneyBodies = [0, 1, 2, 3, 4, 7, 8, 11, 12].map { bodies[$0] }
+        let client = APIClient(session: URLProtocolFixture.session(moneyBodies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
+
+        let compiled = try await CustomerJobCompilationLoader.load(customerID: customer, organizationID: org, api: client, moneyOnly: true)
+
+        XCTAssertEqual(compiled.estimateCount, 2)
+        XCTAssertEqual(compiled.invoiceCount, 2)
+        XCTAssertTrue(compiled.invoicesIncomplete, "Foreign workspace invoices must be excluded and marked incomplete")
+        assertGrouped(compiled.estimates, counts: (1, 1))
+        assertGrouped(compiled.invoices, counts: (1, 1))
+        let paths = URLProtocolFixture.recorded.compactMap { $0.url?.path }
+        XCTAssertEqual(paths.count, 9)
+        XCTAssertFalse(paths.contains { $0.hasSuffix("/media") || $0.hasSuffix("/photos") || $0.hasSuffix("/notes") || $0.hasSuffix("/history") })
+    }
+
     func testTwoJobsCompileToThirtyFiveAndStayGrouped() async throws {
         let replies = fixture(photosA: 15, photosB: 20, notesA: 15, notesB: 20, documentsA: 15, documentsB: 20, estimatesA: 15, estimatesB: 20, invoicesA: 15, invoicesB: 20, historyA: 15, historyB: 20)
         let client = APIClient(session: URLProtocolFixture.session(replies.map { .init(200, $0) }), baseURL: "https://app.thorbis.com")
