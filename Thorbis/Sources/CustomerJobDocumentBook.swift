@@ -321,6 +321,7 @@ private struct CustomerInvoiceBookPage: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var diagnosticSignTap = UserDefaults.standard.bool(forKey: "isolated-invoice-sign-tapped")
     @State private var diagnosticParentAfterSign = false
+    @State private var diagnosticStage = "not started"
     @State private var showPayments = false
     @State private var choseInitialPaymentVisibility = false
 
@@ -412,7 +413,8 @@ private struct CustomerInvoiceBookPage: View {
                 CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
             }
         }
-        .overlay(alignment: .top) { Text("CHILD TRACE: \(diagnosticSignTap ? "tapped" : "not tapped") · parent after call: \(diagnosticParentAfterSign)").font(.caption).accessibilityIdentifier("invoice-child-trace").allowsHitTesting(false) }
+        .overlay(alignment: .top) { Text("CHILD TRACE: \(diagnosticSignTap ? "tapped" : "not tapped") · parent after call: \(diagnosticParentAfterSign) · stage: \(diagnosticStage)").font(.caption).accessibilityIdentifier("invoice-child-trace").allowsHitTesting(false) }
+        .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in diagnosticStage = UserDefaults.standard.string(forKey: "isolated-invoice-stage") ?? "not started" }
         .task(id: original) { await model.load() }
         .onChange(of: model.historyComplete) { _, complete in
             guard complete, !choseInitialPaymentVisibility else { return }
