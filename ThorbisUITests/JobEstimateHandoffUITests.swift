@@ -274,12 +274,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         let secondPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: second)
         XCTAssertEqual(XCTWaiter.wait(for: [secondPrice], timeout: 45), .completed, "Finish both initial prefetches before injecting the refresh failure")
-        let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
-        visible(app, details); details.tap()
-        XCTAssertTrue(app.buttons["Fail sample refresh"].waitForExistence(timeout: 30))
-        app.buttons["Fail sample refresh"].tap()
-        XCTAssertTrue(app.staticTexts["Sample refresh failed"].waitForExistence(timeout: 30))
-        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let fail = app.buttons["Fail sample refresh"]
+        XCTAssertTrue(fail.waitForExistence(timeout: 30)); visible(app, fail); fail.tap()
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30), "The forced refresh must finish with an error")
         let unavailable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "Refresh to check price"), object: first)
         XCTAssertEqual(XCTWaiter.wait(for: [unavailable], timeout: 30), .completed)
         XCTAssertFalse((first.value as? String ?? "").contains("$190.00"))
