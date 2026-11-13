@@ -289,7 +289,12 @@ final class JobEstimateHandoffModel: ObservableObject {
             }) { [weak self] in
                 self?.isCurrent == true && self?.request == ticket
             }
-            guard isCurrent, published, request == ticket, let read = documents.estimates, read.scope == scope else { return }
+            guard isCurrent, request == ticket else { return }
+            guard published, let read = documents.estimates, read.scope == scope else {
+                complete = false
+                self.error = "Couldn't finish loading estimates. Your previous selections are still here."
+                return
+            }
             records = read.records; freshIDs = read.freshIDs; complete = read.isComplete; unavailableIDs = read.unavailableIDs; error = read.issue
             selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
         } catch is CancellationError {} catch {

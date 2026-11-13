@@ -16,6 +16,14 @@ partial. A scheduler probe passed bounded operation count and cancellation.
 The original serial loader was checked retrospectively against an earlier
 concurrency assertion and failed as expected; this was not strict test-first.
 
+Review found global partial publication falsely made other consumers report a
+load failure and could leave a stranded partial. Partial reads now go only to
+the requesting handoff, with an explicit loading marker; the shared collection
+publishes only completed or failed final reads. If the handoff's load returns
+without publishing while authority remains current, it shows a retryable error
+and keeps the previous selection. This revision is source-reviewed only and
+requires integrated cancellation, supersession and shared-consumer tests.
+
 The 40-estimate customer fixture and selection test are prepared but unrun.
 There is no iOS build, integrated URLProtocol test, real offline cache,
 server paging, realistic performance timing, accessibility, multi-estimate

@@ -20,11 +20,12 @@ struct JobDocumentRead<Record> {
     let records: [Record]
     let freshIDs: Set<String>
     let isComplete: Bool
+    let isLoadingMore: Bool
     let unavailableIDs: [String]
     init(scope: JobDocumentScope, records: [Record], freshIDs: Set<String>, isComplete: Bool,
          unavailableIDs: [String] = [], kind: String, loadingMore: Bool = false) {
         self.scope = scope; self.records = records; self.freshIDs = freshIDs
-        self.isComplete = isComplete; self.unavailableIDs = unavailableIDs
+        self.isComplete = isComplete; self.isLoadingMore = loadingMore; self.unavailableIDs = unavailableIDs
     }
 }
 struct Problem: Error { let status: Int? }
@@ -37,7 +38,7 @@ struct Problem: Error { let status: Int? }
     var foreign: String?
     var denied: String?
     init(ids: [String], failure: String? = nil) { self.ids = ids; self.failure = failure }
-    func fieldJobEstimateLinks(_ id: String, isCurrent: @MainActor () -> Bool) async throws -> [JobEstimateLink] {
+    func fieldJobEstimateLinks(_ id: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
         ids.map { .init(jobId: id, estimateId: $0) }
     }
     func fieldEstimate(_ id: String) async throws -> EstimateRecord {
@@ -63,6 +64,7 @@ struct Problem: Error { let status: Int? }
         precondition(!partials.isEmpty && !partials[0].isComplete, "First cards must publish before all details finish")
         precondition(partials[0].records.count < ids.count, "An early update must not wait for the full list")
         precondition(partials.allSatisfy { !$0.isComplete }, "Partial lists may never authorize complete-set actions")
+        precondition(partials.allSatisfy(\.isLoadingMore) && !result.isLoadingMore, "Active loading must be distinguishable from a failed result")
         precondition(api.peak == 4 && api.active == 0, "Reads must overlap with a maximum of four")
         precondition(result.records.map(\.id) == ids.filter { $0 != "5" }, "Out-of-order completion must preserve association order")
         precondition(result.unavailableIDs == ["5"] && !result.isComplete, "Failed detail must remain visible as unavailable")

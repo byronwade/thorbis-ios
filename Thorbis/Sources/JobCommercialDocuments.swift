@@ -132,7 +132,6 @@ final class JobDocumentCollections: ObservableObject {
         let current: @MainActor () -> Bool = { self.estimateRequest == request && isCurrent() }
         guard let read = await JobDocumentsLoader.estimates(scope: scope, api: api, retaining: estimates, isCurrent: current, onPartial: { partial in
             guard current(), !Task.isCancelled, partial.scope == scope else { return }
-            self.estimates = partial
             onPartial(partial)
         }),
               current(), !Task.isCancelled else { return false }
@@ -232,6 +231,7 @@ struct JobDocumentRead<Record> {
     /// Successfully read, identity-checked documents with a currently verified association.
     let freshIDs: Set<String>
     let isComplete: Bool
+    let isLoadingMore: Bool
     let issue: String?
     /// Verified association, but no safe document contents were available to display.
     let unavailableIDs: [String]
@@ -242,8 +242,9 @@ struct JobDocumentRead<Record> {
         self.records = records
         self.freshIDs = freshIDs
         self.isComplete = isComplete
+        self.isLoadingMore = loadingMore
         self.unavailableIDs = unavailableIDs
-        issue = isComplete ? nil : loadingMore ? "Loading more \(kind) for this job…" : "Couldn't load all \(kind) for this job. Some records may need a refresh."
+        issue = isComplete || loadingMore ? nil : "Couldn't load all \(kind) for this job. Some records may need a refresh."
     }
 }
 
