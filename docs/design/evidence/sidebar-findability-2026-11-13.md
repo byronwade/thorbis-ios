@@ -33,7 +33,10 @@ and passed its disclosure and Jobs navigation assertions:
 `/private/tmp/thorbis-sidebar-large-test-1113.log`. A phone UI fixture granting
 only job viewing passed a direct Jobs navigation check and verified the other
 Work destinations were absent: `/private/tmp/thorbis-sidebar-single-place-1113.log`.
-Actual VoiceOver activation remains unverified.
+Actual VoiceOver focus and activation remain unverified: the available Xcode
+26.3 simulator does not provide VoiceOver, and no physical iPhone is connected
+for testing. XCTest verifies accessible labels, state and button taps, not
+VoiceOver gestures. A physical-device VoiceOver check remains a follow-up.
 
 The five phone UI cases, including the largest-text test, subsequently passed
 together on the same release-based code:
