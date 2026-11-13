@@ -215,6 +215,21 @@ private struct CustomerEstimateBookLoadID: Hashable {
     let fresh: Bool
 }
 
+/// Cached signed terms stay until a fetch is actually allowed to start.
+struct CustomerEstimateBookCachedTerms: Equatable {
+    var receipt: CustomerEstimateAcceptanceReceipt?
+    var issued: CustomerIssuedEstimateRevision?
+    var error: String?
+
+    mutating func prepareFetch(fresh: Bool, inScope: Bool, status: String, sessionCurrent: Bool) -> Bool {
+        guard fresh, inScope, status == "sent" || status == "approved", sessionCurrent else { return false }
+        receipt = nil
+        issued = nil
+        error = nil
+        return true
+    }
+}
+
 private struct CustomerEstimateBookPage: View {
     let scope: JobDocumentScope
     let sourceGeneration: UUID?
@@ -326,9 +341,7 @@ private struct CustomerEstimateBookPage: View {
     }
 
     private func load() async {
-        receipt = nil; issued = nil; error = nil
-        guard fresh, scope.contains(estimate, requestedID: estimate.id),
-              estimate.status == "sent" || estimate.status == "approved" else { return }
+        var cached = CustomerEstimateBookCachedTerms(receipt: receipt, issued: issued, error: error)
         let authorityRevision = session.authorityRevision
         let generation = session.generation
         let current: @MainActor () -> Bool = {
@@ -337,7 +350,9 @@ private struct CustomerEstimateBookPage: View {
             sourceGeneration == generation && session.activeOrganization?.id == scope.organizationID &&
             session.can("estimate.view", feature: "estimates")
         }
-        guard current() else { return }
+        guard cached.prepareFetch(fresh: fresh, inScope: scope.contains(estimate, requestedID: estimate.id),
+                                  status: estimate.status, sessionCurrent: current()) else { return }
+        (receipt, issued, error) = (cached.receipt, cached.issued, cached.error)
         loading = true
         defer { loading = false }
         do {
