@@ -9,6 +9,117 @@ final class CustomerJobCompilationTests: XCTestCase {
     private let jobB = uid(2)
     private let author = uid(5)
 
+    func testNotesSectionDoesNotFetchUnrelatedCustomerData() async throws {
+        let routes: [String: URLProtocolFixture.Reply] = [
+            "/v1/jobs": .init(200, page([job(id: jobA, title: "Water heater")])),
+            "/v1/customers/\(customer)/contacts": .init(200, page([])),
+            "/v1/customers/\(customer)/locations": .init(200, page([])),
+            "/v1/jobs/\(jobA)/notes": .init(200, page([note(id: uid(5000), job: jobA, body: "Job note")])),
+            "/v1/jobs/\(jobA)/media": .init(200, page([])),
+            "/v1/jobs/\(jobA)/photos": .init(200, page([])),
+            "/v1/customers/\(customer)/history": .init(200, page([])),
+        ]
+        let client = APIClient(session: URLProtocolFixture.session(routes: routes), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let compiled = try await CustomerRecordSectionLoader.load(scope: scope, section: .notes, api: client, isCurrent: { true })
+        XCTAssertEqual(compiled.groups.first?.notes.first?.body, "Job note")
+        let requested = Set(URLProtocolFixture.recorded.compactMap { $0.url?.path })
+        XCTAssertEqual(requested, ["/v1/jobs", "/v1/jobs/\(jobA)/notes"], "Notes must not wait on photos, customer identity, or history")
+    }
+
+    func testDocumentsLoadOneJobPageAndOneMediaPageWithAllNonPhotoKinds() async throws {
+        var foreignJob = job(id: uid(99), title: "Foreign"); foreignJob["customerId"] = uid(999)
+        var foreignMedia = media(id: uid(1004), job: jobB, kind: "document", archived: false)
+        foreignMedia["organizationId"] = uid(999)
+        let jobsBody = try jsonPage([job(id: jobA, title: "Water heater"), foreignJob], cursor: "next-jobs")
+        let mediaBody = try jsonPage([media(id: uid(1001), job: jobA, kind: "document", archived: false),
+                                      media(id: uid(1002), job: jobA, kind: "video", archived: false),
+                                      media(id: uid(1003), job: jobA, kind: "scan", archived: false),
+                                      media(id: uid(1005), job: jobA, kind: "photo", archived: false), foreignMedia], cursor: "next-media")
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs": .init(200, jobsBody), "/v1/jobs/\(jobA)/media": .init(200, mediaBody)
+        ]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let page = try await CustomerRecordSectionLoader.load(scope: scope, section: .documents, api: client, isCurrent: { true })
+        XCTAssertEqual(page.scope, scope)
+        XCTAssertEqual(page.nextJobCursor, "next-jobs")
+        XCTAssertTrue(page.identityIncomplete)
+        let group = try XCTUnwrap(page.groups.first)
+        XCTAssertEqual(group.documents.map(\.kind), ["document", "video", "scan"])
+        XCTAssertEqual(group.nextMediaCursor, "next-media")
+        XCTAssertTrue(group.incomplete)
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path.contains(uid(99)) == true })
+        XCTAssertEqual(Set(URLProtocolFixture.recorded.compactMap { $0.url?.path }), ["/v1/jobs", "/v1/jobs/\(jobA)/media"])
+        let jobQuery = try XCTUnwrap(URLComponents(url: try XCTUnwrap(URLProtocolFixture.recorded.first { $0.url?.path == "/v1/jobs" }?.url), resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertTrue(jobQuery.contains(URLQueryItem(name: "customerId", value: customer)))
+        XCTAssertTrue(jobQuery.contains(URLQueryItem(name: "limit", value: "5")))
+    }
+
+    func testOneJobNotesFailureKeepsOtherJobAndMarksPartial() async throws {
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs": .init(200, page([job(id: jobA, title: "First"), job(id: jobB, title: "Second")])),
+            "/v1/jobs/\(jobA)/notes": .init(200, page([note(id: uid(5000), job: jobA, body: "Available")])),
+            "/v1/jobs/\(jobB)/notes": .init(503, #"{"title":"Unavailable","status":503}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let page = try await CustomerRecordSectionLoader.load(scope: scope, section: .notes, api: client, isCurrent: { true })
+        XCTAssertEqual(page.groups.map(\.jobID), [jobA, jobB])
+        XCTAssertEqual(page.groups[0].notes.first?.body, "Available")
+        XCTAssertFalse(page.groups[0].incomplete)
+        XCTAssertTrue(page.groups[1].incomplete)
+        XCTAssertNotNil(page.groups[1].issue)
+    }
+
+    func testSectionRequestRejectsChangedAPIGenerationBeforePublishing() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs": .init(200, page([job(id: jobA, title: "First")]), gate: gate),
+            "/v1/jobs/\(jobA)/notes": .init(200, page([note(id: uid(5000), job: jobA, body: "Old workspace")]))
+        ]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let pending = Task { try await CustomerRecordSectionLoader.load(scope: scope, section: .notes, api: client, isCurrent: { true }) }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(URLProtocolFixture.recorded.isEmpty)
+        client.invalidateRequests()
+        gate.release()
+        do { _ = try await pending.value; XCTFail("An old API generation must never publish records") }
+        catch is CancellationError { }
+        XCTAssertFalse(URLProtocolFixture.recorded.contains { $0.url?.path.hasSuffix("/notes") == true })
+    }
+
+    func testRepeatedMediaCursorReturnsRetryablePartialWithoutClaimingEmpty() async throws {
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(jobA)/media": .init(200, try jsonPage([media(id: uid(1001), job: jobA, kind: "document", archived: false)], cursor: "same-cursor"))
+        ]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let record = try JSONDecoder().decode(JobRecord.self, from: JSONSerialization.data(withJSONObject: job(id: jobA, title: "First")))
+        let group = try await CustomerRecordSectionLoader.loadGroup(scope: scope, job: record, section: .documents,
+                                                                     mediaCursor: "same-cursor", api: client, isCurrent: { true })
+        XCTAssertTrue(group.incomplete)
+        XCTAssertNotNil(group.issue)
+        XCTAssertEqual(group.nextMediaCursor, "same-cursor", "A failed continuation must remain retryable")
+        XCTAssertTrue(group.documents.isEmpty, "A repeated cursor must not append duplicate results")
+    }
+
+    func testNotesRejectForeignJobAndWorkspaceRecords() async throws {
+        var foreign = note(id: uid(5001), job: jobA, body: "Wrong workspace")
+        foreign["organizationId"] = uid(999)
+        let wrongJob = note(id: uid(5002), job: jobB, body: "Wrong job")
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs": .init(200, page([job(id: jobA, title: "First")])),
+            "/v1/jobs/\(jobA)/notes": .init(200, page([note(id: uid(5000), job: jobA, body: "Valid"), foreign, wrongJob]))
+        ]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let page = try await CustomerRecordSectionLoader.load(scope: scope, section: .notes, api: client, isCurrent: { true })
+        XCTAssertEqual(page.groups.first?.notes.map(\.body), ["Valid"])
+        XCTAssertTrue(try XCTUnwrap(page.groups.first).incomplete)
+    }
+
+    private func jsonPage(_ items: [[String: Any]], cursor: String) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: ["items": items, "nextCursor": cursor])
+        return String(decoding: data, as: UTF8.self)
+    }
+
     func testLiveOnlyCustomerHistoryDoesNotFallBackToSavedCopyAfterNetworkFailure() async throws {
         let client = APIClient(session: URLProtocolFixture.session([.init(200, page([])), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "customer-history-test-\(UUID().uuidString)"

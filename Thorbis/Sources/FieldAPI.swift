@@ -999,6 +999,11 @@ struct JobMediaPage: Decodable {
     let nextCursor: String?
 }
 
+struct CustomerJobsPage: Decodable {
+    let items: [JobRecord]
+    let nextCursor: String?
+}
+
 @MainActor
 extension APIClient {
     private func fieldPath(_ base: String, id: String, suffix: String = "") throws -> String {
@@ -1030,6 +1035,14 @@ extension APIClient {
     }
 
     func fieldJobs() async throws -> [JobRecord] { try await allFieldPages("/v1/jobs") }
+    /// A bounded page for a single customer's job-scoped records. The server applies job.view scope.
+    func fieldCustomerJobsPage(_ customerID: String, cursor: String? = nil, limit: Int = 5) async throws -> CustomerJobsPage {
+        guard UUID(uuidString: customerID) != nil, (1...50).contains(limit), cursor.map({ !$0.isEmpty }) ?? true else {
+            throw Problem(title: "Invalid customer jobs page", status: nil, detail: "Use a valid customer, cursor and page size.")
+        }
+        return try await send("GET", "/v1/jobs", queryItems: [URLQueryItem(name: "customerId", value: customerID),
+                                                               URLQueryItem(name: "limit", value: String(limit))], cursor: cursor)
+    }
     func fieldJobs(customerID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobRecord] {
         guard UUID(uuidString: customerID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: customerID) }
         return try await allFieldPages("/v1/jobs", queryItems: [URLQueryItem(name: "customerId", value: customerID)], isCurrent: isCurrent)
@@ -1204,11 +1217,11 @@ extension APIClient {
         try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: includeArchived ? [URLQueryItem(name: "includeArchived", value: "true")] : [], isCurrent: isCurrent)
     }
 
-    func fieldMediaPage(_ jobID: String, cursor: String? = nil, kind: String? = nil) async throws -> JobMediaPage {
-        guard cursor.map({ !$0.isEmpty }) ?? true else {
+    func fieldMediaPage(_ jobID: String, cursor: String? = nil, kind: String? = nil, limit: Int = 50) async throws -> JobMediaPage {
+        guard (1...50).contains(limit), cursor.map({ !$0.isEmpty }) ?? true else {
             throw Problem(title: "Invalid media cursor", status: nil, detail: "The continuation is empty.")
         }
-        var query = [URLQueryItem(name: "limit", value: "50")]
+        var query = [URLQueryItem(name: "limit", value: String(limit))]
         if let kind { query.append(URLQueryItem(name: "kind", value: kind)) }
         return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), queryItems: query, cursor: cursor)
     }

@@ -403,3 +403,124 @@ enum CustomerJobCompilationLoader {
         }
     }
 }
+
+/// A bounded job-by-job page for the customer Records screen. The caller binds `isCurrent` to
+/// the active actor, organization, customer, permissions and authority revision.
+struct CustomerRecordSectionScope: Equatable, Sendable {
+    let customerID: String
+    let organizationID: String
+    let apiGeneration: UUID
+}
+
+enum CustomerRecordSection: Equatable, Sendable {
+    case notes, documents
+}
+
+struct CustomerRecordSectionGroup: Equatable, Sendable {
+    let job: JobRecord
+    let notes: [JobNoteRecord]
+    let documents: [MediaAssetRecord]
+    let nextMediaCursor: String?
+    /// True when records were rejected or this job's read failed. Retrying must not discard other groups.
+    let incomplete: Bool
+    let issue: String?
+    var jobID: String { job.id }
+    var title: String { job.title }
+}
+
+struct CustomerRecordSectionPage: Equatable, Sendable {
+    let scope: CustomerRecordSectionScope
+    let section: CustomerRecordSection
+    let groups: [CustomerRecordSectionGroup]
+    let nextJobCursor: String?
+    /// Foreign or duplicate jobs were rejected; counts must not be presented as complete.
+    let identityIncomplete: Bool
+}
+
+@MainActor
+enum CustomerRecordSectionLoader {
+    /// Fetches one page of this customer's authorized jobs, then just the requested section.
+    static func load(scope: CustomerRecordSectionScope, section: CustomerRecordSection, cursor: String? = nil,
+                     api: APIClient, isCurrent: @escaping @MainActor @Sendable () -> Bool) async throws -> CustomerRecordSectionPage {
+        try requireCurrent(scope, api: api, isCurrent: isCurrent)
+        let page = try await api.fieldCustomerJobsPage(scope.customerID, cursor: cursor)
+        try requireCurrent(scope, api: api, isCurrent: isCurrent)
+        if let next = page.nextCursor, next.isEmpty || next == cursor {
+            throw Problem(title: "Customer jobs pagination stopped", status: nil, detail: "The server repeated its cursor.")
+        }
+        var seen = Set<String>()
+        let jobs = page.items.filter {
+            $0.organizationId == scope.organizationID && $0.customerId == scope.customerID && seen.insert($0.id).inserted
+        }
+        let groups = try await withThrowingTaskGroup(of: (Int, CustomerRecordSectionGroup).self) { group in
+            var next = 0
+            var completed: [(Int, CustomerRecordSectionGroup)] = []
+            func submit(_ index: Int) {
+                let job = jobs[index]
+                group.addTask {
+                    (index, try await loadGroup(scope: scope, job: job, section: section, api: api, isCurrent: isCurrent))
+                }
+            }
+            while next < min(4, jobs.count) { submit(next); next += 1 }
+            while let result = try await group.next() {
+                try requireCurrent(scope, api: api, isCurrent: isCurrent)
+                completed.append(result)
+                if next < jobs.count { submit(next); next += 1 }
+            }
+            return completed.sorted { $0.0 < $1.0 }.map(\.1)
+        }
+        try requireCurrent(scope, api: api, isCurrent: isCurrent)
+        return CustomerRecordSectionPage(scope: scope, section: section, groups: groups, nextJobCursor: page.nextCursor,
+                                         identityIncomplete: jobs.count != page.items.count)
+    }
+
+    /// Retry one job, or fetch the next media page without reloading unrelated jobs.
+    static func loadGroup(scope: CustomerRecordSectionScope, job: JobRecord, section: CustomerRecordSection,
+                          mediaCursor: String? = nil, api: APIClient,
+                          isCurrent: @escaping @MainActor @Sendable () -> Bool) async throws -> CustomerRecordSectionGroup {
+        try requireCurrent(scope, api: api, isCurrent: isCurrent)
+        guard job.organizationId == scope.organizationID, job.customerId == scope.customerID else {
+            throw Problem(title: "Invalid customer job", status: nil, detail: "This job does not belong to the customer.")
+        }
+        do {
+            switch section {
+            case .notes:
+                guard mediaCursor == nil else { throw Problem(title: "Invalid notes page", status: nil, detail: "Notes cannot use a media cursor.") }
+                let received = try await api.fieldNotes(job.id)
+                try requireCurrent(scope, api: api, isCurrent: isCurrent)
+                var seen = Set<String>()
+                let notes = received.filter { $0.organizationId == scope.organizationID && $0.jobId == job.id && seen.insert($0.id).inserted }
+                return CustomerRecordSectionGroup(job: job, notes: notes, documents: [], nextMediaCursor: nil,
+                                                  incomplete: notes.count != received.count, issue: nil)
+            case .documents:
+                let received = try await api.fieldMediaPage(job.id, cursor: mediaCursor, limit: 20)
+                try requireCurrent(scope, api: api, isCurrent: isCurrent)
+                if let next = received.nextCursor, next.isEmpty || next == mediaCursor {
+                    throw Problem(title: "Job media pagination stopped", status: nil, detail: "The server repeated its cursor.")
+                }
+                var seen = Set<String>()
+                let valid = received.items.filter { $0.organizationId == scope.organizationID && $0.jobId == job.id && seen.insert($0.id).inserted }
+                let documents = valid.filter { $0.kind != "photo" && !$0.archived }
+                return CustomerRecordSectionGroup(job: job, notes: [], documents: documents, nextMediaCursor: received.nextCursor,
+                                                  incomplete: valid.count != received.items.count, issue: nil)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let problem as Problem where problem.status == 401 {
+            throw problem
+        } catch {
+            try requireCurrent(scope, api: api, isCurrent: isCurrent)
+            return CustomerRecordSectionGroup(job: job, notes: [], documents: [], nextMediaCursor: mediaCursor,
+                                              incomplete: true, issue: "Couldn't load this job's records. Try again.")
+        }
+    }
+
+    private static func requireCurrent(_ scope: CustomerRecordSectionScope, api: APIClient,
+                                       isCurrent: @MainActor () -> Bool) throws {
+        try Task.checkCancellation()
+        guard UUID(uuidString: scope.customerID) != nil, UUID(uuidString: scope.organizationID) != nil else {
+            throw Problem(title: "Invalid customer scope", status: nil, detail: "The customer or workspace could not be verified.")
+        }
+        guard api.requestGeneration == scope.apiGeneration, isCurrent() else { throw CancellationError() }
+    }
+}
