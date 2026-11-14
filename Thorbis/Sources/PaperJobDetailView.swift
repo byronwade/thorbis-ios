@@ -216,7 +216,7 @@ struct JobDetailView: View {
                     header(job, compact: selectedTab != "Overview")
                     // At accessibility sizes a fixed action can cover most of a small screen.
                     // Keep the same action early in the scrollable content instead.
-                    if typeSize.isAccessibilitySize { primaryAction }
+                    if typeSize.isAccessibilitySize && !(selectedTab == "Money" && moneyBarIsCustomerView) { primaryAction }
                     // Where the sections start; it reports when the tabs are pinned (scrolled past).
                     Color.clear.frame(height: 0).id("job-sections")
                         .onGeometryChange(for: Bool.self) { $0.frame(in: .scrollView).minY < -1 } action: { tabsPinned = $0 }
@@ -1136,6 +1136,11 @@ struct JobDetailView: View {
         }
     }
 
+    private var compactFinancialSectionLabel: String {
+        guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
+        return "Money · \(jobShortMoney(balance, currency: "USD"))"
+    }
+
     /// Job sections as Linear text tabs; a menu at accessibility sizes.
     private func tabBar(_ job: JobRecord) -> some View {
         Group {
@@ -1144,7 +1149,9 @@ struct JobDetailView: View {
                     ThorbisMenuItem(sectionLabel(tab, job: job), isSelected: tab == shownJobSection) { selectJobSection(tab) }
                 }, title: "Job sections", accessibilityLabel: "Job sections, \(spokenSectionLabel(shownJobSection, job: job))") {
                     HStack(spacing: 12) {
-                        Text(sectionLabel(shownJobSection, job: job)).font(Theme.font(15, weight: .medium))
+                        // Keep the balance visible while the full financial label stays spoken.
+                        Text(shownJobSection == "Money" ? compactFinancialSectionLabel : sectionLabel(shownJobSection, job: job))
+                            .font(Theme.font(15, weight: .medium))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.up.chevron.down")
@@ -1999,9 +2006,30 @@ struct JobDetailView: View {
 
     @ViewBuilder private func moneyJumps(proxy: ScrollViewProxy) -> some View {
         if session.can("estimate.view", feature: "estimates") && session.can("invoice.view", feature: "invoicing") {
-            FlowRow(spacing: 8, lineSpacing: 8) {
-                moneyJump("Estimates", id: "job-money-estimates", proxy: proxy)
-                moneyJump("Invoices", id: "job-money-invoices", proxy: proxy)
+            Group {
+                if typeSize.isAccessibilitySize {
+                    // One compact control keeps the pinned shortcuts from covering tall document cards.
+                    ThorbisMenu(items: [
+                        ThorbisMenuItem("Estimates") { proxy.scrollTo("job-money-estimates", anchor: .center) },
+                        ThorbisMenuItem("Invoices") { proxy.scrollTo("job-money-invoices", anchor: .center) }
+                    ], title: "Job documents", accessibilityLabel: "Jump to estimates or invoices") {
+                        HStack(spacing: 8) {
+                            Text("Documents").font(Theme.font(15, weight: .medium))
+                            Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 44)
+                        .background(Theme.fill, in: Capsule())
+                    }
+                    .accessibilityHint("Choose a document section on this job")
+                    .accessibilityIdentifier("job-money-jump-menu")
+                } else {
+                    FlowRow(spacing: 8, lineSpacing: 8) {
+                        moneyJump("Estimates", id: "job-money-estimates", proxy: proxy)
+                        moneyJump("Invoices", id: "job-money-invoices", proxy: proxy)
+                    }
+                }
             }
             .padding(.horizontal, Theme.gutter)
             .padding(.bottom, 8)
@@ -2039,6 +2067,20 @@ struct JobDetailView: View {
                     PaperEmptyState(symbol: "doc.text", title: "No estimates on this job",
                                     message: "Build one from the price book.")
                 }
+                // When the bar is busy with the invoice, keep the customer door before the estimate list.
+                if !jobEstimates.isEmpty, (!moneyBarIsCustomerView || typeSize.isAccessibilitySize), canOpenCustomerView {
+                    // A quiet text button: the screen's one ink commit stays the bar at the bottom.
+                    Button { openCustomerView(.estimates) } label: {
+                        Label("Customer view · Estimates", systemImage: "iphone")
+                            .font(Theme.font(15, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityHint("Shows this job's estimates to the customer")
+                    .accessibilityIdentifier("job-money-customer-view")
+                }
                 if !jobEstimates.isEmpty || !unavailable.isEmpty {
                     LazyVStack(alignment: .leading, spacing: 10) {
                         ForEach(jobEstimates) { estimate in
@@ -2071,20 +2113,6 @@ struct JobDetailView: View {
                     }
                     .disabled(documents.loadingEstimatePage)
                     .accessibilityIdentifier("job-load-more-estimates")
-                }
-                // When the bar is busy with the invoice, the estimates' customer door stays here, quieter.
-                if !jobEstimates.isEmpty, !moneyBarIsCustomerView, canOpenCustomerView {
-                    // A quiet text button: the screen's one ink commit stays the bar at the bottom.
-                    Button { openCustomerView(.estimates) } label: {
-                        Label("Customer view · Estimates", systemImage: "iphone")
-                            .font(Theme.font(15, weight: .medium))
-                            .foregroundStyle(Theme.foreground)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityHint("Shows this job's estimates to the customer")
-                    .accessibilityIdentifier("job-money-customer-view")
                 }
                 if let summary = JobEstimateSummary(records: jobEstimates, complete: estimateRead?.isComplete == true) {
                     DisclosureGroup {

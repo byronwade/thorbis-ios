@@ -1103,6 +1103,22 @@ final class JobEstimateHandoffUITests: XCTestCase {
         capture(app, "Job estimates at largest text")
     }
 
+    func testLargestTextCanReturnToCustomerPresentationFromInvoices() {
+        let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let jump = app.buttons["job-money-jump-menu"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 30))
+        jump.tap()
+        app.buttons["Invoices"].firstMatch.tap()
+        XCTAssertTrue(jump.waitForExistence(timeout: 10))
+        jump.tap()
+        app.buttons["Estimates"].firstMatch.tap()
+        let present = app.buttons["job-money-customer-view"]
+        XCTAssertTrue(present.waitForExistence(timeout: 10), "The estimate presentation action must remain in the estimates section at large text")
+        XCTAssertTrue(present.isHittable)
+        present.tap()
+        XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 15))
+    }
+
     func testAllEstimatesUseOnePrimaryEntryAndKeepAddVisible() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30), "Existing estimates need one obvious customer presentation action")

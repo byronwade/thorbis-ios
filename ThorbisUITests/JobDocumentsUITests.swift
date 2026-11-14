@@ -292,21 +292,62 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(estimate.frame.minY, estimates.frame.maxY, "The pinned shortcut must not cover the estimate")
     }
 
+    func testLargestTextFinancialSectionChooserLeavesRoomForDocuments() {
+        continueAfterFailure = false
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch.tap()
+        XCTAssertTrue(chooser.label.contains("Estimates"), chooser.label)
+        XCTAssertTrue(chooser.label.contains("invoices"), chooser.label)
+        XCTAssertTrue(chooser.label.contains("payments"), chooser.label)
+        XCTAssertTrue(chooser.label.contains("340"), chooser.label)
+        XCTAssertTrue(app.staticTexts["Money · $340.00"].exists, "The balance must remain visible at large text")
+        capture(app, "Large-text financial section with balance")
+        app.swipeUp()
+        let menu = app.buttons["job-money-jump-menu"]
+        let card = app.buttons["job-estimate-\(addonA)"]
+        for _ in 0..<8 where !card.exists { app.swipeUp() }
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(app.frame.maxY - menu.frame.maxY, card.frame.height,
+                                    "A complete estimate card must fit below the pinned document menu")
+    }
+
+    func testLargestTextDocumentJumpMenuKeepsBothSectionsReachableAndCardVisible() {
+        continueAfterFailure = false
+        let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch.tap()
+        let jump = app.buttons["job-money-jump-menu"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 15), "A compact document jump menu must replace the two oversized shortcuts")
+        XCTAssertTrue(jump.isHittable)
+        jump.tap()
+        app.buttons["Invoices"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["job-invoice-\(invoiceA)"].waitForExistence(timeout: 10))
+        XCTAssertTrue(jump.isHittable)
+        jump.tap()
+        app.buttons["Estimates"].firstMatch.tap()
+        let second = app.buttons["job-estimate-\(addonA)"]
+        XCTAssertTrue(second.waitForExistence(timeout: 10))
+        revealJobItem(second, in: app)
+        XCTAssertGreaterThanOrEqual(second.frame.minY, jump.frame.maxY, "The entire estimate must clear the pinned menu")
+        XCTAssertLessThanOrEqual(second.frame.maxY, app.frame.maxY, "The entire estimate must fit above the bottom edge")
+    }
+
     func testMoneyShortcutsRemainAvailableAtLargestTextAfterScrolling() {
         continueAfterFailure = false
         let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch.tap()
-        let invoices = app.buttons["job-money-jump-invoices"]
-        XCTAssertTrue(invoices.waitForExistence(timeout: 15)); invoices.tap()
-        let estimates = app.buttons["job-money-jump-estimates"]
-        XCTAssertTrue(estimates.isHittable, "The section switch stays reachable at large text")
-        estimates.tap()
+        jumpAtLargeText(app, to: "Invoices")
+        jumpAtLargeText(app, to: "Estimates")
         let estimate = app.buttons["job-estimate-\(estimateA)"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 10))
-        XCTAssertTrue(estimate.isHittable)
-        XCTAssertGreaterThanOrEqual(estimate.frame.minY, estimates.frame.maxY, "The pinned shortcut must not cover the estimate")
+        revealJobItem(estimate, in: app)
+        XCTAssertGreaterThanOrEqual(estimate.frame.minY, app.buttons["job-money-jump-menu"].frame.maxY, "The pinned menu must not cover the estimate")
     }
 
     func testMoneyShortcutsKeepTheSelectedInvoiceForCollection() {
@@ -440,11 +481,11 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(chooser.waitForExistence(timeout: 15))
         chooser.tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch.tap()
-        let jump = app.buttons["job-money-jump-invoices"]
-        for _ in 0..<8 where !jump.isHittable { app.swipeUp() }
+        let jump = app.buttons["job-money-jump-menu"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 15))
         XCTAssertTrue(jump.isHittable)
         XCTAssertGreaterThanOrEqual(jump.frame.height, 44)
-        jump.tap()
+        jumpAtLargeText(app, to: "Invoices")
         let invoice = app.buttons["job-invoice-\(depositA)"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
         let hierarchy = XCTAttachment(string: app.debugDescription)
@@ -469,14 +510,14 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(first.label.contains("EST-2218"))
         XCTAssertTrue(second.label.contains("EST-2238"))
         XCTAssertFalse(app.buttons["job-estimate-00000000-0000-4000-8000-000000002239"].exists, "Other jobs' estimates must not appear")
-        // The $340 owed takes Money's bar; the estimates' Customer view stays beneath them, quieter.
+        // The $340 owed takes Money's bar; Customer view remains before the estimate list.
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
         let present = app.buttons["job-money-customer-view"]
         XCTAssertTrue(present.waitForExistence(timeout: 5))
         XCTAssertEqual(present.label, "Customer view · Estimates")
         XCTAssertTrue(present.isHittable)
-        XCTAssertLessThanOrEqual(second.frame.maxY, present.frame.minY, "Both estimates should be visible above the presentation action")
+        XCTAssertLessThanOrEqual(present.frame.maxY, first.frame.minY, "The customer presentation action should precede the estimate list")
         XCTAssertLessThanOrEqual(present.frame.maxY, collect.frame.minY, "The estimates' door must not sit under the bar")
         for _ in 0..<5 where !first.isHittable { app.swipeUp() }
         XCTAssertTrue(first.isHittable)
@@ -534,9 +575,20 @@ final class JobDocumentsUITests: XCTestCase {
         second.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EST-2238")).firstMatch.waitForExistence(timeout: 10))
         app.navigationBars.buttons["Back"].firstMatch.tap()
+        jumpAtLargeText(app, to: "Estimates")
         let present = app.buttons["job-money-customer-view"]
         revealJobItem(present, in: app)
         XCTAssertTrue(present.isHittable)
+    }
+
+    private func jumpAtLargeText(_ app: XCUIApplication, to section: String) {
+        let menu = app.buttons["job-money-jump-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 15))
+        XCTAssertTrue(menu.isHittable)
+        menu.tap()
+        let choice = app.buttons[section].firstMatch
+        XCTAssertTrue(choice.waitForExistence(timeout: 10))
+        choice.tap()
     }
 
     private func revealJobItem(_ element: XCUIElement, in app: XCUIApplication) {
@@ -545,19 +597,27 @@ final class JobDocumentsUITests: XCTestCase {
         let moneyTab = app.buttons["job-section-money"]
         let footer = app.buttons["Collect payment"]
         let list = app.scrollViews.firstMatch
-        let topBoundary = chooser.exists ? chooser.frame.maxY : (moneyTab.exists ? moneyTab.frame.maxY : app.frame.minY)
-        let bottomBoundary = !chooser.exists && footer.exists ? footer.frame.minY : app.frame.maxY
-        for _ in 0..<10 {
-            let frame = element.frame
-            if element.isHittable && frame.minY >= topBoundary && frame.maxY <= bottomBoundary { break }
-            let down = frame.minY < topBoundary
+        let menu = app.buttons["job-money-jump-menu"]
+        func topBoundary() -> CGFloat {
+            let section = chooser.exists ? chooser.frame.maxY : (moneyTab.exists ? moneyTab.frame.maxY : app.frame.minY)
+            return menu.exists ? max(section, menu.frame.maxY) : section
+        }
+        func bottomBoundary() -> CGFloat { !chooser.exists && footer.exists ? footer.frame.minY : app.frame.maxY }
+        // The menu itself moves until pinned. Re-read its frame after each small drag so we
+        // neither use its stale position nor bounce past a card that just fits the viewport.
+        for _ in 0..<24 {
+            let frame = element.frame, top = topBoundary(), bottom = bottomBoundary()
+            if element.isHittable && frame.minY >= top && frame.maxY <= bottom { break }
+            let down = frame.minY < top
             let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.4 : 0.6))
             let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.6 : 0.4))
-            start.press(forDuration: 0.05, thenDragTo: end)
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.3)
         }
-        XCTAssertTrue(element.isHittable)
-        XCTAssertGreaterThanOrEqual(element.frame.minY, topBoundary)
-        XCTAssertLessThanOrEqual(element.frame.maxY, bottomBoundary)
+        let top = topBoundary(), bottom = bottomBoundary()
+        let context = "\(element.identifier), frame: \(element.frame), visible range: \(top)...\(bottom)"
+        XCTAssertTrue(element.isHittable, context)
+        XCTAssertGreaterThanOrEqual(element.frame.minY, top, context)
+        XCTAssertLessThanOrEqual(element.frame.maxY, bottom, context)
     }
 
     func testNarrowJobSectionsCanReachEverySectionWithoutScrollingTabs() {
