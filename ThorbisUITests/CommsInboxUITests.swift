@@ -493,6 +493,34 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertFalse(app.buttons["inbox-mail-send"].isEnabled)
     }
 
+    func testNewTextWhenStorageIsBlockedExplainsWhyItDidNotOpen() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-section", "texts", "--paper-preview-inbox-storage-failure"])
+        let thread = app.buttons["inbox-local-t-preview-text"]
+        XCTAssertTrue(thread.waitForExistence(timeout: 20), app.debugDescription)
+        thread.tap()
+        let field = app.descendants(matching: .any)["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), app.debugDescription)
+        field.tap()
+        field.typeText("Keep this text")
+        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.firstMatch.tap()
+        let compose = app.buttons["New text"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 10), app.debugDescription)
+        compose.tap()
+        let phone = app.textFields["inbox-new-text-phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["inbox-new-text-storage-error"].waitForExistence(timeout: 10), "The sheet must name the storage failure the list banner cannot show")
+        phone.tap()
+        phone.typeText("5550100100")
+        let start = app.buttons["Start text"].firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        if start.isHittable { start.tap() }
+        XCTAssertTrue(phone.exists, "A failed Start text must keep the compose sheet open")
+        XCTAssertTrue(app.staticTexts["inbox-new-text-storage-error"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["inbox-text-field"].exists)
+    }
+
     /// New text and New email open with the first field ready to type.
     func testComposeSheetsFocusTheirFirstField() {
         for (section, pencil, field) in [("texts", "New text", "inbox-new-text-phone"), ("email", "New email", "inbox-mail-to")] {

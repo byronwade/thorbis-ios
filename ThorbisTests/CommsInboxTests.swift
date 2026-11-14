@@ -112,6 +112,39 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
     }
 
+    func testDiscardingOnlyEmailDraftKeepsThreadWhenWriteFails() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        let id = try XCTUnwrap(store.commitMail(.init(to: ["a@example.com"], subject: "Visit", body: "Keep this draft"), send: false))
+        let messageID = try XCTUnwrap(store.thread(id)?.messages.first?.id)
+        let saved = try Data(contentsOf: active.appendingPathComponent("inbox.json"))
+        try FileManager.default.moveItem(at: active, to: retained)
+        XCTAssertFalse(store.discardDraft(id, messageID: messageID), "A failed discard must not close the conversation")
+        XCTAssertEqual(store.thread(id)?.messages.first?.id, messageID)
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
+    }
+
+    func testNewPhoneCannotOpenAfterInboxWriteFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        let id = try XCTUnwrap(store.threadForPhone("5550100100"))
+        let saved = try Data(contentsOf: active.appendingPathComponent("inbox.json"))
+        try FileManager.default.moveItem(at: active, to: retained)
+        XCTAssertFalse(store.commitText(id, body: "Keep this draft"))
+        XCTAssertTrue(store.storageBlocked)
+        XCTAssertNil(store.threadForPhone("5550100999"), "A blocked store must not open a new conversation")
+        XCTAssertEqual(store.threadForPhone("5550100100"), id, "An existing conversation stays available for recovery")
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
+    }
+
     func testEmailOpeningKeepsExistingDraftAndRetiresStaleIdentity() throws {
         let presenter = InboxEmailPresenter()
         var current = true

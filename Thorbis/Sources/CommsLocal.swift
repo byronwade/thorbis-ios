@@ -349,15 +349,16 @@ final class CommsLocalStore: ObservableObject {
     }
 
     /// Discards a draft message. A conversation that was only ever that draft goes with it.
-    func discardDraft(_ threadID: String, messageID: String) {
-        guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return }
+    @discardableResult
+    func discardDraft(_ threadID: String, messageID: String) -> Bool {
+        guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return false }
         if thread.messages.count == 1 && thread.channel == .email {
             let candidate = threads.filter { $0.id != threadID }
-            guard save(threads: candidate) else { return }
+            guard save(threads: candidate) else { return false }
             threads = candidate
-        } else {
-            patch(threadID) { $0.messages.removeAll { $0.id == messageID } }
+            return true
         }
+        return patch(threadID) { $0.messages.removeAll { $0.id == messageID } }
     }
 
     // MARK: Email
