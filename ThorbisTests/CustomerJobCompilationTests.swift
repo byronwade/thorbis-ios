@@ -115,6 +115,77 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(page.groups.first).incomplete)
     }
 
+    func testDeniedSectionReadExplicitlyMarksAccessDenied() async throws {
+        let client = APIClient(session: URLProtocolFixture.session(routes: [
+            "/v1/jobs/\(jobA)/media": .init(403, #"{"title":"Forbidden","status":403}"#)
+        ]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let record = try JSONDecoder().decode(JobRecord.self, from: JSONSerialization.data(withJSONObject: job(id: jobA, title: "First")))
+        let group = try await CustomerRecordSectionLoader.loadGroup(scope: scope, job: record, section: .documents, mediaCursor: "next", api: client, isCurrent: { true })
+        XCTAssertTrue(group.denied)
+        XCTAssertTrue(group.incomplete)
+        XCTAssertNil(group.nextMediaCursor)
+        XCTAssertTrue(group.documents.isEmpty)
+    }
+
+    func testSectionAccumulatorKeepsPagesDeduplicatesAndStopsCycles() throws {
+        let client = APIClient(session: URLProtocolFixture.session(routes: [:]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let record = try JSONDecoder().decode(JobRecord.self, from: JSONSerialization.data(withJSONObject: job(id: jobA, title: "First")))
+        let item = try JSONDecoder().decode(MediaAssetRecord.self, from: JSONSerialization.data(withJSONObject: media(id: uid(1001), job: jobA, kind: "document", archived: false)))
+        func group(_ documents: [MediaAssetRecord], _ cursor: String?, issue: String? = nil, denied: Bool = false) -> CustomerRecordSectionGroup {
+            CustomerRecordSectionGroup(job: record, notes: [], documents: documents, nextMediaCursor: cursor, incomplete: issue != nil, issue: issue, denied: denied)
+        }
+        var state = CustomerRecordSectionAccumulator(scope: scope, section: .documents)
+        XCTAssertTrue(state.apply(page: .init(scope: scope, section: .documents, groups: [group([item], "a")], nextJobCursor: "j1", identityIncomplete: false), requestedCursor: nil))
+        XCTAssertTrue(state.apply(group: group([], "b"), requestedCursor: "a"))
+        XCTAssertEqual(state.groups.first?.documents.count, 1, "A photo-only page keeps previous documents")
+        XCTAssertTrue(state.apply(group: group([item], "a"), requestedCursor: "b"))
+        XCTAssertEqual(state.groups.first?.documents.count, 1, "Documents across pages must be deduplicated")
+        XCTAssertTrue(state.groups.first?.incomplete == true, "A non-adjacent media cursor cycle must be partial")
+        XCTAssertNil(state.groups.first?.nextMediaCursor)
+        XCTAssertTrue(state.apply(page: .init(scope: scope, section: .documents, groups: [group([item], nil)], nextJobCursor: "j2", identityIncomplete: false), requestedCursor: "j1"))
+        XCTAssertTrue(state.apply(page: .init(scope: scope, section: .documents, groups: [], nextJobCursor: "j1", identityIncomplete: false), requestedCursor: "j2"))
+        XCTAssertEqual(state.groups.count, 1)
+        XCTAssertTrue(state.identityIncomplete)
+        XCTAssertNil(state.nextJobCursor)
+    }
+
+    func testSectionAccumulatorRetriesTransientErrorAndClearsDeniedJob() throws {
+        let client = APIClient(session: URLProtocolFixture.session(routes: [:]), baseURL: "https://app.thorbis.com")
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: client.requestGeneration)
+        let record = try JSONDecoder().decode(JobRecord.self, from: JSONSerialization.data(withJSONObject: job(id: jobA, title: "First")))
+        let item = try JSONDecoder().decode(MediaAssetRecord.self, from: JSONSerialization.data(withJSONObject: media(id: uid(1001), job: jobA, kind: "document", archived: false)))
+        var state = CustomerRecordSectionAccumulator(scope: scope, section: .documents)
+        func group(_ docs: [MediaAssetRecord], _ cursor: String?, issue: String? = nil, denied: Bool = false) -> CustomerRecordSectionGroup {
+            .init(job: record, notes: [], documents: docs, nextMediaCursor: cursor, incomplete: issue != nil, issue: issue, denied: denied)
+        }
+        XCTAssertTrue(state.apply(page: .init(scope: scope, section: .documents, groups: [group([item], "next")], nextJobCursor: nil, identityIncomplete: false), requestedCursor: nil))
+        XCTAssertTrue(state.apply(group: group([], "next", issue: "Offline"), requestedCursor: "next"))
+        XCTAssertEqual(state.groups.first?.documents.count, 1)
+        XCTAssertEqual(state.groups.first?.nextMediaCursor, "next")
+        XCTAssertTrue(state.apply(group: group([], "after-retry"), requestedCursor: "next"))
+        XCTAssertFalse(state.groups.first?.incomplete ?? true, "A successful retry clears the transient error")
+        XCTAssertEqual(state.groups.first?.documents.count, 1)
+        XCTAssertTrue(state.apply(group: group([], nil, issue: "Access denied", denied: true), requestedCursor: "after-retry"))
+        XCTAssertTrue(state.groups.first?.documents.isEmpty == true)
+        XCTAssertTrue(state.groups.first?.denied == true)
+        var duplicateState = CustomerRecordSectionAccumulator(scope: scope, section: .documents)
+        XCTAssertTrue(duplicateState.apply(page: .init(scope: scope, section: .documents, groups: [group([item], nil)], nextJobCursor: "jobs-next", identityIncomplete: false), requestedCursor: nil))
+        XCTAssertTrue(duplicateState.apply(page: .init(scope: scope, section: .documents, groups: [group([], nil, issue: "Access denied", denied: true)], nextJobCursor: nil, identityIncomplete: false), requestedCursor: "jobs-next"))
+        XCTAssertTrue(duplicateState.groups.first?.documents.isEmpty == true, "A denied duplicate must purge previous contents")
+        XCTAssertTrue(duplicateState.groups.first?.denied == true)
+    }
+
+    func testSectionAccumulatorRejectsOtherScopeAndSection() {
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: UUID())
+        var state = CustomerRecordSectionAccumulator(scope: scope, section: .notes)
+        let other = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: UUID())
+        XCTAssertFalse(state.apply(page: .init(scope: other, section: .notes, groups: [], nextJobCursor: nil, identityIncomplete: false), requestedCursor: nil))
+        XCTAssertFalse(state.apply(page: .init(scope: scope, section: .documents, groups: [], nextJobCursor: nil, identityIncomplete: false), requestedCursor: nil))
+        XCTAssertTrue(state.groups.isEmpty)
+    }
+
     private func jsonPage(_ items: [[String: Any]], cursor: String) throws -> String {
         let data = try JSONSerialization.data(withJSONObject: ["items": items, "nextCursor": cursor])
         return String(decoding: data, as: UTF8.self)
