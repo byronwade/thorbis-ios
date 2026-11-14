@@ -290,6 +290,94 @@ final class PriceBookCatalogTests: XCTestCase {
         XCTAssertEqual(catalog.items.map(\.id), [id(2)])
     }
 
+    func testExternalDenialRetiresMatchingCatalogAndItsSavedCopy() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "Formerly authorized")]))])
+        let catalog = PriceBookCatalog(markDenialOverride: { _, _, _ in false })
+        let context = PriceBookCatalogContext(organizationID: org, sessionGeneration: generation, authority: testAuthority)
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: testAuthority, force: true)
+        XCTAssertTrue(catalog.isCurrent(context, api: api))
+        XCTAssertTrue(catalog.recordExternalDenial(organizationID: org, origin: try XCTUnwrap(api.normalizedOrigin), authority: testAuthority, status: 403))
+        XCTAssertTrue(catalog.items.isEmpty)
+        XCTAssertFalse(catalog.isCurrent(context, api: api))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL(org).path))
+        let offline = client([URLProtocolFixture.offline])
+        let reopened = PriceBookCatalog()
+        await reopened.refresh(api: offline, organizationID: org, sessionGeneration: UUID(), authority: testAuthority, force: true)
+        XCTAssertTrue(reopened.items.isEmpty)
+    }
+
+    func testExternalDenialDoesNotRetireDifferentActorOrEraseItsCache() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "Other actor catalog")]))])
+        let catalog = PriceBookCatalog(markDenialOverride: { _, _, _ in true })
+        let context = PriceBookCatalogContext(organizationID: org, sessionGeneration: generation, authority: testAuthority)
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: testAuthority, force: true)
+        let saved = try Data(contentsOf: cacheURL(org))
+        let other = PriceBookAuthority(actorID: "another-actor", policyVersion: testAuthority.policyVersion, generation: testAuthority.generation, revision: UUID())
+        XCTAssertTrue(catalog.recordExternalDenial(organizationID: org, origin: try XCTUnwrap(api.normalizedOrigin), authority: other, status: 403))
+        XCTAssertTrue(catalog.isCurrent(context, api: api))
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertEqual(try Data(contentsOf: cacheURL(org)), saved)
+    }
+
+    func testExternalDenialDoesNotRetireOtherOrganizationOrOrigin() async throws {
+        let org = UUID().uuidString.lowercased(), otherOrg = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org); removeOwnCache(otherOrg) }
+        let api = client([.init(200, try page([(1, "Current item")]))])
+        let catalog = PriceBookCatalog(markDenialOverride: { _, _, _ in true })
+        let context = PriceBookCatalogContext(organizationID: org, sessionGeneration: generation, authority: testAuthority)
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: testAuthority, force: true)
+        let saved = try Data(contentsOf: cacheURL(org))
+        let origin = try XCTUnwrap(api.normalizedOrigin)
+        XCTAssertTrue(catalog.recordExternalDenial(organizationID: otherOrg, origin: origin, authority: testAuthority, status: 401))
+        XCTAssertTrue(catalog.recordExternalDenial(organizationID: org, origin: "http://localhost:4321", authority: testAuthority, status: 403))
+        XCTAssertTrue(catalog.isCurrent(context, api: api))
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertEqual(try Data(contentsOf: cacheURL(org)), saved)
+    }
+
+    func testExternalDenialCancelsInFlightMatchingCatalog() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID(), gate = URLProtocolFixture.Gate()
+        defer { gate.release(); removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "Late item")]), gate: gate)])
+        let catalog = PriceBookCatalog(markDenialOverride: { _, _, _ in false })
+        let task = Task { await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: testAuthority, force: true) }
+        try await waitForRequests(1)
+        XCTAssertTrue(catalog.recordExternalDenial(organizationID: org, origin: try XCTUnwrap(api.normalizedOrigin), authority: testAuthority, status: 403))
+        gate.release()
+        await task.value
+        XCTAssertTrue(catalog.items.isEmpty)
+        XCTAssertFalse(catalog.isCurrent(.init(organizationID: org, sessionGeneration: generation, authority: testAuthority), api: api))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cacheURL(org).path), "A denied in-flight response must not recreate the cache")
+    }
+
+    func testExternalDenialStorageFailureIsReportedAndRemainsBlockedInMemory() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "Old item")])), URLProtocolFixture.offline])
+        let catalog = PriceBookCatalog(removeCacheFile: { _ in false }, markDenialOverride: { _, _, _ in false })
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: testAuthority, force: true)
+        XCTAssertFalse(catalog.recordExternalDenial(organizationID: org, origin: try XCTUnwrap(api.normalizedOrigin), authority: testAuthority, status: 403))
+        XCTAssertTrue(catalog.denialPersistenceFailure)
+        XCTAssertTrue(catalog.items.isEmpty)
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: UUID(), authority: testAuthority, force: true)
+        XCTAssertTrue(catalog.items.isEmpty, "An unpersisted denial must not restore the old file in this process")
+    }
+
+    func testNonAuthorizationErrorDoesNotRetireCatalog() async throws {
+        let org = UUID().uuidString.lowercased(), generation = UUID()
+        defer { removeOwnCache(org) }
+        let api = client([.init(200, try page([(1, "Still authorized")]))])
+        let catalog = PriceBookCatalog()
+        await catalog.refresh(api: api, organizationID: org, sessionGeneration: generation, authority: testAuthority, force: true)
+        XCTAssertFalse(catalog.recordExternalDenial(organizationID: org, origin: try XCTUnwrap(api.normalizedOrigin), authority: testAuthority, status: 400))
+        XCTAssertEqual(catalog.items.map(\.id), [id(1)])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cacheURL(org).path))
+    }
+
     func testForbiddenRefreshHidesCompleteCacheAndBlocksSelection() async throws {
         let org = UUID().uuidString.lowercased(), generation = UUID()
         defer { removeOwnCache(org) }

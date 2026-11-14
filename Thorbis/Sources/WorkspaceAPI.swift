@@ -191,15 +191,40 @@ extension APIClient {
         try await send("GET", "/v1/reports/revenue")
     }
 
-    func priceBookItems(limit: Int = 50, cursor: String? = nil, requireFresh: Bool = false) async throws -> PriceBookPage {
+    func priceBookItems(limit: Int = 50, cursor: String? = nil, requireFresh: Bool = false, search: String? = nil, kind: String? = nil) async throws -> PriceBookPage {
         guard (1...200).contains(limit), cursor.map({ UUID(uuidString: $0) != nil }) ?? true else {
             throw Problem(title: "Invalid Price Book page", status: nil, detail: "Use a UUID cursor and 1–200 items.")
         }
-        let response: PriceBookQueryResponse = try await send("GET", "/v1/query", queryItems: [
+        var queryItems = [
             URLQueryItem(name: "resourceId", value: "price_book_items"),
             URLQueryItem(name: "purpose", value: "collection"),
             URLQueryItem(name: "limit", value: String(limit)),
-        ], cursor: cursor, requireFresh: requireFresh)
+        ]
+        if let needle = search?.trimmingCharacters(in: .whitespacesAndNewlines), !needle.isEmpty {
+            var conditions: [[String: Any]] = ["description", "unit"].map {
+                ["type": "condition", "field": "price_book_items.\($0)", "operator": "contains", "value": needle]
+            }
+            let kinds = ["service", "labor", "material", "assembly"].filter { $0.localizedCaseInsensitiveContains(needle) }
+            if !kinds.isEmpty {
+                conditions.append(["type": "condition", "field": "price_book_items.kind", "operator": "is_any_of", "value": kinds])
+            }
+            let matching: [String: Any] = ["type": "group", "operator": "or", "children": conditions]
+            let root: [String: Any]
+            if let kind, ["service", "labor", "material", "assembly"].contains(kind) {
+                root = ["type": "group", "operator": "and", "children": [matching,
+                    ["type": "condition", "field": "price_book_items.kind", "operator": "is", "value": kind]]]
+            } else {
+                root = matching
+            }
+            let filter: [String: Any] = ["schemaVersion": 1, "root": root]
+            let data = try JSONSerialization.data(withJSONObject: filter, options: [.sortedKeys])
+            guard let value = String(data: data, encoding: .utf8) else {
+                throw Problem(title: "Invalid Price Book search", status: nil, detail: "The search could not be encoded.")
+            }
+            queryItems.append(URLQueryItem(name: "filter", value: value))
+        }
+        let response: PriceBookQueryResponse = try await send("GET", "/v1/query", queryItems: queryItems,
+                                                             cursor: cursor, requireFresh: requireFresh)
         guard response.schemaVersion == 1, response.resourceId == "price_book_items",
               response.purpose == "collection", response.localMode == "complete",
               response.items.allSatisfy({ $0.resourceId == "price_book_items" && $0.id == $0.fields.id }) else {

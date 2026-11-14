@@ -2,6 +2,110 @@ import XCTest
 
 @MainActor
 final class PriceBookStandaloneUITests: XCTestCase {
+    func testSearchFindsAnItemBeyondTheFirstPageWithoutLoadingEverything() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-pages", "--paper-preview-pricebook-server-search"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["PEX copper crimp ring pack: 1-in."].waitForExistence(timeout: 30))
+        let search = app.searchFields["Search price book"]
+        search.tap()
+        search.typeText("Second loaded item")
+        XCTAssertTrue(app.staticTexts["Second loaded item."].waitForExistence(timeout: 15), "Search should find a match beyond the first browse page")
+    }
+
+    func testAccentedSearchCanLoadLaterBrowsePages() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-unicode-pages"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Pipe fitting"].waitForExistence(timeout: 30))
+        let search = app.searchFields["Search price book"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("évier")
+        let notice = app.staticTexts["Accented-text results may be incomplete. Load more items to search the rest."]
+        XCTAssertTrue(notice.waitForExistence(timeout: 20))
+        let more = app.buttons["Load more items"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        if app.keyboards.buttons["Search"].exists { app.keyboards.buttons["Search"].tap() }
+        for _ in 0..<6 where !more.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.isHittable); more.tap()
+        XCTAssertTrue(app.staticTexts["Évier de cuisine"].waitForExistence(timeout: 15), "A local case-insensitive match on a later browse page must remain findable")
+    }
+
+    func testOldSearchPageDoesNotAppendAfterSearchChangesAwayAndBack() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-aba-page"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Pipe fitting"].waitForExistence(timeout: 30))
+        let search = app.searchFields["Search price book"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("valve")
+        XCTAssertTrue(app.staticTexts["Current valve"].waitForExistence(timeout: 15))
+        let more = app.buttons["Load more items"]
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        if app.keyboards.buttons["Search"].exists { app.keyboards.buttons["Search"].tap() }
+        for _ in 0..<6 where !more.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.isHittable); more.tap()
+        XCTAssertFalse(more.isEnabled, "The old continuation must be in flight")
+        search.tap(); search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5)); search.typeText("pump")
+        XCTAssertTrue(app.staticTexts["Current pump"].waitForExistence(timeout: 15))
+        search.tap(); search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4)); search.typeText("valve")
+        XCTAssertTrue(app.staticTexts["Current valve"].waitForExistence(timeout: 15))
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        XCTAssertFalse(more.isEnabled, "The old continuation must still be pending after the new first page appears")
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: more)
+        waitForExpectations(timeout: 50)
+        XCTAssertFalse(app.staticTexts["Stale valve page"].exists, "A page from the prior search must not append to the new search")
+    }
+
+    func testStandaloneDenialRetiresEditorCatalogOnOfflineReopen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        func openEditor(offline: Bool) {
+            app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-many"]
+            if offline { app.launchArguments.append("--paper-preview-catalog-offline-only") }
+            app.launch()
+            let add = app.buttons["invoice-add-item"]
+            XCTAssertTrue(add.waitForExistence(timeout: 30))
+            for _ in 0..<8 where !add.isHittable { app.swipeUp() }
+            XCTAssertTrue(add.isHittable); add.tap()
+            XCTAssertTrue(app.textFields["invoice-catalog-search"].waitForExistence(timeout: 15))
+        }
+        let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009701"]
+        openEditor(offline: false)
+        XCTAssertTrue(item.waitForExistence(timeout: 20), "Seed the authorized catalog")
+        let complete = app.buttons["price-book-show-more"]
+        expectation(for: NSPredicate(format: "exists == true AND label CONTAINS %@", "23 remaining"), evaluatedWith: complete)
+        waitForExpectations(timeout: 20)
+        app.terminate()
+        openEditor(offline: true)
+        XCTAssertTrue(item.waitForExistence(timeout: 20), "Precondition: the saved catalog must actually reopen offline before denial")
+        app.terminate()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-catalog-search-denied"]
+        app.launch()
+        let prior = app.staticTexts["PEX copper crimp ring pack: 1-in."]
+        XCTAssertTrue(prior.waitForExistence(timeout: 30), "A previously authorized browse row must be present")
+        let search = app.searchFields["Search price book"]
+        XCTAssertTrue(search.waitForExistence(timeout: 30)); search.tap(); search.typeText("valve")
+        let denied = app.staticTexts["Price book access changed"]
+        XCTAssertTrue(denied.waitForExistence(timeout: 20))
+        XCTAssertFalse(prior.exists, "Denied rows must disappear along with their detail and copy actions")
+        XCTAssertFalse(app.buttons["Copy price"].exists)
+        XCTAssertFalse(app.buttons["Copy full description"].exists)
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10)); retry.tap()
+        XCTAssertTrue(denied.waitForExistence(timeout: 20))
+        XCTAssertFalse(prior.exists, "Retry must not resurrect a cached authorized row while the server still denies access")
+        app.terminate()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-catalog-denied-all"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Price book access changed"].waitForExistence(timeout: 30))
+        XCTAssertFalse(prior.exists, "Re-entry must not restore an old cached row after a fresh denial")
+        app.terminate()
+        openEditor(offline: true)
+        XCTAssertFalse(item.waitForExistence(timeout: 12), "A denied catalog must not return in an editor while offline")
+    }
+
     func testLongItemAndHighPriceRemainVisibleInNarrowList() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -244,6 +348,22 @@ final class PriceBookStandaloneUITests: XCTestCase {
 
     func testPermissionRevocationRetiresOpenLocalDetail() {
         assertAuthorityChangeRetiresDetail(switchWorkspace: false)
+    }
+
+    func testRetiredAPIGenerationHidesOldRowsWhenRefreshFails() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "price-book", "--paper-preview-pricebook-long", "--paper-preview-pricebook-authority", "--paper-preview-pricebook-retire-api"]
+        app.launch()
+        let old = app.staticTexts["PEX copper crimp ring pack: 1-in."]
+        XCTAssertTrue(old.waitForExistence(timeout: 30))
+        let change = app.buttons["Change sample access shortly"]
+        XCTAssertTrue(change.waitForExistence(timeout: 10)); change.tap()
+        XCTAssertTrue(app.staticTexts["The price book couldn't be loaded."].waitForExistence(timeout: 20))
+        XCTAssertFalse(old.exists, "A prior API generation's rows must not remain visible after failed revalidation")
+        XCTAssertFalse(app.staticTexts["Showing previously loaded items. Refresh to update."].exists)
+        XCTAssertFalse(app.buttons["Copy price"].exists)
+        XCTAssertFalse(app.buttons["Copy full description"].exists)
     }
 
     func testAuthorityRenewalReloadsListWithoutReusingOldItems() {

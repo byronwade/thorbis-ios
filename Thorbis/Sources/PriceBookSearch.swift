@@ -489,6 +489,43 @@ final class PriceBookCatalog: ObservableObject {
         self.markDenialOverride = markDenialOverride
     }
 
+    /// A fresh access denial from another price-book surface retires this same authorized scope.
+    /// Returns false if the denial could not be made durable (or the input is not an auth denial).
+    /// The caller must verify its request still belongs to the current session before reporting it.
+    @discardableResult
+    func recordExternalDenial(organizationID: String, origin: String, authority: PriceBookAuthority, status: Int) -> Bool {
+        guard status == 401 || status == 403, UUID(uuidString: organizationID) != nil,
+              APIClient.normalizedOrigin(origin) == origin, !authority.actorID.isEmpty,
+              authority.policyVersion > 0, !authority.generation.isEmpty else { return false }
+        let denied = PriceBookDenialScope(organizationID: organizationID, origin: origin, authority: authority)
+        let matchesCurrent: Bool = {
+            guard let current = context, let currentOrg = current.organizationID,
+                  let currentAuthority = current.authority, let currentOrigin = self.origin else { return false }
+            return PriceBookDenialScope(organizationID: currentOrg, origin: currentOrigin, authority: currentAuthority) == denied
+        }()
+        if matchesCurrent {
+            // A previously authorized request may finish after this denial. Retire it first.
+            loadingRequest?.task.cancel()
+            loadingRequest = nil
+            loading = false
+            accessDenied = true
+            hasCompleteSnapshot = false
+            isPartial = false
+            partialAPIGeneration = nil
+            lastRefresh = nil
+            lastAPIGeneration = nil
+            error = "Price book access changed. Refresh after access is restored."
+            apply([])
+        }
+        let marked = markDenialOverride?(organizationID, origin, authority) ??
+            PriceBookDenialMarker.mark(organizationID: organizationID, origin: origin, authority: authority)
+        let removed = removeCache(organizationID, origin: origin, authority: authority)
+        let persisted = marked || removed
+        if persisted { nonDurableDenials.remove(denied) } else { nonDurableDenials.insert(denied) }
+        if matchesCurrent { denialPersistenceFailure = !persisted }
+        return persisted
+    }
+
     /// Shows the cached catalog for `organizationID` right away, then reloads every page.
     func refresh(api: APIClient, organizationID: String?, sessionGeneration: UUID,
                  authority: PriceBookAuthority? = nil, force: Bool = false) async {

@@ -1,0 +1,15 @@
+# Standalone price-book search — held, 14 November 2026
+
+The candidate searches the existing server Query Platform in bounded pages, preserves loaded-item fallback on unavailable search, and separates explicit authorization denial from availability failures. Category is included in filtered pages; non-ASCII queries also search loaded browse pages because the server filter normalizes ASCII only. A shared, scope-bound denial handler retires the editor catalog after a standalone denial. This is an experimental local branch, not deployed or release-qualified.
+
+- Before implementation, `/private/tmp/thorbis-pricebook-search-red-1114.xcresult` executed 1 UI test and failed at the intended beyond-first-page search assertion. An earlier zero-test result is not evidence.
+- `/private/tmp/thorbis-pricebook-search-green-1114.xcresult` executed 11 checks, all passing, including the beyond-first-page search and Workspace API tests.
+- `pricebook-cross-denial-red-1114.xcresult` executed 1 UI test and failed at the intended editor-offline-after-denial assertion, after proving the saved catalog reopened offline before denial. `pricebook-cross-denial-green-1114.xcresult` executed 8 checks, all passing, including that journey, scoped denial/race/storage cases and API-generation retirement.
+- `pricebook-unicode-aba-1114.xcresult` executed 2 UI tests, both passing: accented match on a later browse page and a delayed continuation after query changes away and back.
+- `/private/tmp/thorbis-pricebook-existing-flows-1114.xcresult` executed 5 UI checks, all passing, covering partial search failure, group disclosure, and authority/session retirement. The partial-search preview was extended to return 503 for its filtered request; it is a simulated unavailable server, not a live network test.
+- All checks used iPhone SE simulator iOS 26.3.1. These are focused checks, not full scheme, physical-device, iPad, VoiceOver, real catalog, deployed-header, or performance qualification. Fixture changes were added incrementally, so earlier results apply to the source as it existed at their run; rerun the final suite on the final integrated source.
+- The current tracked source/test diff SHA-256 after the final partial-search fixture adjustment is `f01ce9be627c2608e9820125a66744814dce3b577c98d2b87073db208a1906dc`. `git diff --check` passed.
+
+## Hold
+
+If both the secure denial marker and verified cached-catalog deletion fail, the denial remains blocked only in the current process. It cannot be guaranteed to survive process death while preserving offline catalog access. The UI reports inability to secure the saved catalog, but this does not make the cross-relaunch path safe. Design and verify a durable fail-closed recovery or make an explicitly approved tradeoff before shipping. Search has no authoritative Unicode-aware server contract: accented queries report partial coverage and can load remaining browse pages. This candidate is based on release `3a75850b`, before the later merged inbox and job changes, and has not been rebased, independently reviewed as a final combined diff, merged, built for release, or uploaded.

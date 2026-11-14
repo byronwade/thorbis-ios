@@ -394,6 +394,17 @@ struct WorkspacePriceBookView: View {
     @State private var localDetail: PriceBookLocalSelection?
     @State private var displayedScope: PriceBookLocalScope?
     @State private var requestEpoch = UUID()
+    @State private var searchEpoch = UUID()
+    @State private var searchRefresh = UUID()
+    @State private var searchedItems: [PriceBookListItem]?
+    @State private var searchedCursor: String?
+    @State private var searchedQuery = ""
+    @State private var searchedCategory = "All"
+    @State private var searchedScope: PriceBookLocalScope?
+    @State private var searching = false
+    @State private var searchError: String?
+    @State private var deniedScope: PriceBookLocalScope?
+    @State private var denialMessage = "Price book access could not be verified."
     /// pricebook.edit is the server's capability for Price Book changes; organization.settings.edit
     /// covers servers that predate it.
     private var canEdit: Bool {
@@ -405,19 +416,41 @@ struct WorkspacePriceBookView: View {
               let actor = session.user?.id, let organization = session.activeOrganization?.id,
               let origin = api.normalizedOrigin else { return nil }
         return PriceBookLocalScope(actor: actor, organization: organization, origin: origin,
-                                   generation: session.generation, authorityRevision: session.authorityRevision)
+                                   generation: session.generation, authorityRevision: session.authorityRevision,
+                                   apiGeneration: api.requestGeneration)
     }
 
+    private var isDenied: Bool { localScope != nil && deniedScope == localScope }
     private var hasCurrentOwner: Bool {
         guard let displayedScope, let localScope else { return false }
         return displayedScope.sameOwner(as: localScope)
     }
     private var showingPreviousItems: Bool { hasCurrentOwner && displayedScope != localScope }
-    private var currentItems: [PriceBookListItem] { hasCurrentOwner ? items : [] }
-    private var currentCursor: String? { hasCurrentOwner ? nextCursor : nil }
+    private var searchText: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var needsUnicodeBrowse: Bool {
+        hasSearchResults && searchText.unicodeScalars.contains(where: { !$0.isASCII }) && searchedCursor == nil && nextCursor != nil
+    }
+    private var hasSearchResults: Bool {
+        !searchText.isEmpty && searchedQuery == searchText && searchedCategory == category && searchedScope == localScope && searchedItems != nil
+    }
+    private var currentItems: [PriceBookListItem] {
+        guard hasCurrentOwner else { return [] }
+        guard hasSearchResults else { return items }
+        let remote = searchedItems ?? []
+        guard searchText.unicodeScalars.contains(where: { !$0.isASCII }) else { return remote }
+        let remoteIDs = Set(remote.map(\.id))
+        return remote + items.filter { !remoteIDs.contains($0.id) &&
+            ($0.description.localizedCaseInsensitiveContains(searchText) || $0.unit.localizedCaseInsensitiveContains(searchText) ||
+             $0.kind.localizedCaseInsensitiveContains(searchText)) }
+
+    }
+    private var currentCursor: String? {
+        guard hasCurrentOwner else { return nil }
+        return hasSearchResults && !needsUnicodeBrowse ? searchedCursor : nextCursor
+    }
 
     private var categories: [String] {
-        ["All"] + Array(Set(currentItems.map { $0.kind.capitalized })).sorted()
+        ["All", "Assembly", "Labor", "Material", "Service"]
     }
 
     /// The first group with rows on screen; its label sits closer to the search field.
@@ -430,9 +463,9 @@ struct WorkspacePriceBookView: View {
     private var visibleItems: [PriceBookListItem] {
         currentItems.filter { item in
             (category == "All" || item.kind.capitalized == category) &&
-            (search.isEmpty || item.description.localizedCaseInsensitiveContains(search) ||
-             item.kind.localizedCaseInsensitiveContains(search) ||
-             item.unit.localizedCaseInsensitiveContains(search))
+            (searchText.isEmpty || hasSearchResults || item.description.localizedCaseInsensitiveContains(searchText) ||
+             item.kind.localizedCaseInsensitiveContains(searchText) ||
+             item.unit.localizedCaseInsensitiveContains(searchText))
         }
     }
 
@@ -441,11 +474,19 @@ struct WorkspacePriceBookView: View {
             if !canList || localScope == nil {
                 PaperEmptyState(symbol: "book.closed", title: "You can't see the price book",
                                 message: "Your role doesn't have the price book permission. An owner can turn it on in Team.")
+            } else if isDenied {
+                PaperEmptyState(symbol: "lock", title: "Price book access changed", message: denialMessage,
+                                actionTitle: "Try again") {
+                    guard let scope = localScope else { return }
+                    deniedScope = nil
+                    displayedScope = scope
+                    Task { await refresh() }
+                }
             } else {
                 // design 2026-10-30: one selector per screen — the category chips moved behind the
                 // header's filter circle; the count and the chosen category read in the subtitle.
                 PaperHeader(title: "Price book",
-                            subtitle: "\(currentItems.count) item\(currentItems.count == 1 ? "" : "s")\(currentCursor == nil ? "" : " loaded")\(category == "All" ? "" : " · showing \(category.lowercased())")",
+                            subtitle: "\(currentItems.count) \(hasSearchResults ? (currentItems.count == 1 ? "match" : "matches") : (currentItems.count == 1 ? "item" : "items"))\(currentCursor == nil && !(hasSearchResults && searchText.unicodeScalars.contains(where: { !$0.isASCII })) ? "" : " loaded")\(category == "All" ? "" : " · showing \(category.lowercased())")",
                             filterMenu: categories.map { option in
                                 ThorbisMenuItem(option == "All" ? "All · \(currentItems.count)\(currentCursor == nil ? "" : " loaded")" : option,
                                                 isSelected: category == option) {
@@ -459,6 +500,20 @@ struct WorkspacePriceBookView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if hasCurrentOwner, let error { ErrorBanner(message: error) { await refresh() } }
+                        if hasSearchResults && searchText.unicodeScalars.contains(where: { !$0.isASCII }) {
+                            Text(nextCursor == nil ? "Matching loaded items are included." : "Accented-text results may be incomplete. Load more items to search the rest.")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, ListRoom.gutter).padding(.vertical, 8)
+                        }
+                        if !searchText.isEmpty && searching {
+                            Text("Searching the price book…").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, ListRoom.gutter).padding(.vertical, 8)
+                        }
+                        if !searchText.isEmpty, let searchError {
+                            ErrorBanner(message: "Couldn't search the whole price book. Showing loaded items. \(searchError)") {
+                                searchRefresh = UUID()
+                            }
+                        }
                         if showingPreviousItems {
                             HStack {
                                 Text("Showing previously loaded items. Refresh to update.")
@@ -524,14 +579,14 @@ struct WorkspacePriceBookView: View {
                                 .disabled(loading)
                                 .padding(.horizontal, ListRoom.gutter).padding(.top, 16)
                         }
-                        if hasCurrentOwner && visibleItems.isEmpty && !loading && error == nil {
-                            if currentItems.isEmpty {
+                        if hasCurrentOwner && visibleItems.isEmpty && !loading && !searching && error == nil {
+                            if currentItems.isEmpty && searchText.isEmpty {
                                 ListRoomEmpty(title: "No price book items.",
                                               message: canEdit ? "Services, parts and fees you add here fill estimates and invoices." : "Services, parts and fees your office adds show up here.",
                                               actionTitle: canEdit ? "Add an item" : nil, action: { creating = true })
                             } else {
                                 PaperEmptyState(symbol: "magnifyingglass", title: "No matching items",
-                                                message: showingPreviousItems ? "No previously loaded items match. Refresh to search the current price book." : (currentCursor == nil ? "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search." : "No loaded items match. Load more items to search the rest."),
+                                                message: showingPreviousItems ? "No previously loaded items match. Refresh to search the current price book." : (hasSearchResults && currentCursor == nil && !searchText.unicodeScalars.contains(where: { !$0.isASCII }) ? "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search." : (currentCursor == nil ? (searchError == nil && !searchText.unicodeScalars.contains(where: { !$0.isASCII }) ? "Nothing in \(category == "All" ? "the price book" : category.lowercased()) matches that search." : (searchError == nil ? "No loaded items match. Accented-text search may be incomplete." : "No loaded items match. Try searching again when connected.")) : "No loaded items match. Load more items to search the rest.")),
                                                 actionTitle: "Clear filters") { search = ""; category = "All" }
                             }
                         }
@@ -542,6 +597,9 @@ struct WorkspacePriceBookView: View {
                 .task(id: localScope) {
                     guard let scope = localScope else { return }
                     await activate(scope: scope)
+                }
+                .task(id: PriceBookSearchTask(scope: localScope, query: searchText, category: category, refresh: searchRefresh)) {
+                    await searchPriceBook(scope: localScope, query: searchText, category: category)
                 }
                 .onChange(of: search) { _, _ in collapsedGroups.removeAll() }
                 .onChange(of: localScope) { _, _ in localDetail = nil }
@@ -563,6 +621,11 @@ struct WorkspacePriceBookView: View {
                                 Task { @MainActor in
                                     try? await Task.sleep(for: .seconds(5))
                                     guard !Task.isCancelled else { return }
+                                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-retire-api") {
+                                        PaperPreviewProtocol.failPriceBookQuery()
+                                        api.invalidateRequests()
+                                        return
+                                    }
                                     if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-switch") {
                                         PaperPreviewProtocol.switchSavedWorkWorkspace()
                                     } else if !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") {
@@ -663,6 +726,33 @@ struct WorkspacePriceBookView: View {
         await refresh()
     }
 
+    private func rejectDeniedAccess(_ error: Error, scope: PriceBookLocalScope) -> Bool {
+        guard let status = (error as? Problem)?.status, status == 401 || status == 403 else { return false }
+        let secured: Bool
+        if let authority = session.priceBookAuthority, authority.actorID == scope.actor,
+           authority.revision == scope.authorityRevision, api.normalizedOrigin == scope.origin,
+           api.requestGeneration == scope.apiGeneration {
+            secured = PriceBookCatalog.shared.recordExternalDenial(organizationID: scope.organization, origin: scope.origin,
+                                                                    authority: authority, status: status)
+        } else {
+            secured = false
+        }
+        denialMessage = secured ? PriceBookLoadError.message(for: error) :
+            "Access changed, and the saved price book could not be secured. Connect and contact your office."
+        deniedScope = scope
+        requestEpoch = UUID()
+        searchEpoch = UUID()
+        items = []
+        nextCursor = nil
+        searchedItems = nil
+        searchedCursor = nil
+        searchedScope = nil
+        localDetail = nil
+        loading = false
+        searching = false
+        return true
+    }
+
     private func refresh() async {
         guard let scope = localScope, let oldScope = displayedScope, oldScope.sameOwner(as: scope), !loading else { return }
         let epoch = UUID()
@@ -670,15 +760,47 @@ struct WorkspacePriceBookView: View {
         loading = true
         defer { if requestEpoch == epoch { loading = false } }
         do {
-            let page = try await api.priceBookItems(requireFresh: oldScope != scope)
+            let page = try await api.priceBookItems(requireFresh: true)
             guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
             items = page.items
             nextCursor = page.nextCursor
             displayedScope = scope
             error = nil
+            if !searchText.isEmpty { searchRefresh = UUID() }
         } catch {
             guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
-            self.error = PriceBookLoadError.message(for: error)
+            if !rejectDeniedAccess(error, scope: scope) { self.error = PriceBookLoadError.message(for: error) }
+        }
+    }
+
+    private func searchPriceBook(scope: PriceBookLocalScope?, query: String, category selectedCategory: String) async {
+        let epoch = UUID()
+        searchEpoch = epoch
+        searchedItems = nil
+        searchedCursor = nil
+        searchedScope = nil
+        searchedQuery = ""
+        searchError = nil
+        searching = false
+        guard let scope, displayedScope == scope, !query.isEmpty else { return }
+        searching = true
+        do {
+            try await Task.sleep(for: .milliseconds(300))
+            let page = try await api.priceBookItems(requireFresh: true, search: query,
+                                                    kind: selectedCategory == "All" ? nil : selectedCategory.lowercased())
+            guard !Task.isCancelled, searchEpoch == epoch, localScope == scope, displayedScope == scope, searchText == query, category == selectedCategory else { return }
+            searchedItems = page.items
+            searchedCursor = page.nextCursor
+            searchedScope = scope
+            searchedQuery = query
+            searchedCategory = selectedCategory
+            searching = false
+        } catch {
+            guard !Task.isCancelled, searchEpoch == epoch, localScope == scope, displayedScope == scope, searchText == query, category == selectedCategory else { return }
+            if !rejectDeniedAccess(error, scope: scope) {
+                searchError = PriceBookLoadError.message(for: error)
+                searching = false
+            }
         }
     }
 
@@ -686,22 +808,42 @@ struct WorkspacePriceBookView: View {
         guard let scope = localScope, let oldScope = displayedScope, oldScope.sameOwner(as: scope), !loading, let cursor = currentCursor else { return }
         let epoch = UUID()
         requestEpoch = epoch
+        let query = hasSearchResults && !needsUnicodeBrowse ? searchText : nil
+        let selectedCategory = category
+        let pageSearchEpoch = searchEpoch
         loading = true
         defer { if requestEpoch == epoch { loading = false } }
         do {
-            let page = try await api.priceBookItems(cursor: cursor)
-            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
+            let page = try await api.priceBookItems(cursor: cursor, search: query,
+                                                    kind: query == nil || selectedCategory == "All" ? nil : selectedCategory.lowercased())
+            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch,
+                  query == nil || (hasSearchResults && searchText == query && category == selectedCategory &&
+                                   searchEpoch == pageSearchEpoch && searchedCursor == cursor) else { return }
             guard page.nextCursor != cursor else {
                 throw Problem(title: "Price Book pagination stopped", status: nil, detail: "The server repeated its cursor.")
             }
-            items.append(contentsOf: page.items)
-            nextCursor = page.nextCursor
+            if query != nil {
+                searchedItems?.append(contentsOf: page.items)
+                searchedCursor = page.nextCursor
+            } else {
+                items.append(contentsOf: page.items)
+                nextCursor = page.nextCursor
+            }
             error = nil
         } catch {
-            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch else { return }
-            self.error = PriceBookLoadError.message(for: error)
+            guard localScope == scope, displayedScope == oldScope, requestEpoch == epoch,
+                  query == nil || (hasSearchResults && searchText == query && category == selectedCategory &&
+                                   searchEpoch == pageSearchEpoch && searchedCursor == cursor) else { return }
+            if !rejectDeniedAccess(error, scope: scope) { self.error = PriceBookLoadError.message(for: error) }
         }
     }
+}
+
+private struct PriceBookSearchTask: Equatable {
+    let scope: PriceBookLocalScope?
+    let query: String
+    let category: String
+    let refresh: UUID
 }
 
 private struct PriceBookLocalScope: Equatable {
@@ -710,9 +852,11 @@ private struct PriceBookLocalScope: Equatable {
     let origin: String
     let generation: UUID
     let authorityRevision: UUID
+    let apiGeneration: UUID
 
     func sameOwner(as other: Self) -> Bool {
-        actor == other.actor && organization == other.organization && origin == other.origin && generation == other.generation
+        actor == other.actor && organization == other.organization && origin == other.origin && generation == other.generation &&
+            apiGeneration == other.apiGeneration
     }
 }
 

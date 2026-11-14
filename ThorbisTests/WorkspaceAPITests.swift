@@ -67,6 +67,36 @@ final class WorkspaceAPITests: XCTestCase {
         XCTAssertEqual(query.first(where: { $0.name == "limit" })?.value, "50")
     }
 
+    func testPriceBookSearchEncodesUserTextAndPreservesPagination() async throws {
+        let payload = #"{"schemaVersion":1,"items":[],"nextCursor":null,"planId":"plan","resourceId":"price_book_items","viewId":null,"purpose":"collection","localMode":"complete"}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")
+        let needle = "Valve \"A\" & pipe"
+        _ = try await api.priceBookItems(cursor: itemID, search: needle)
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertEqual(query.first(where: { $0.name == "cursor" })?.value, itemID)
+        let raw = try XCTUnwrap(query.first(where: { $0.name == "filter" })?.value)
+        let filter = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        let root = try XCTUnwrap(filter["root"] as? [String: Any])
+        let conditions = try XCTUnwrap(root["children"] as? [[String: Any]])
+        XCTAssertEqual(root["operator"] as? String, "or")
+        XCTAssertEqual(conditions.compactMap { $0["value"] as? String }, [needle, needle])
+    }
+
+    func testPriceBookSearchScopesCategoryOnEveryPage() async throws {
+        let payload = #"{"schemaVersion":1,"items":[],"nextCursor":null,"planId":"plan","resourceId":"price_book_items","viewId":null,"purpose":"collection","localMode":"complete"}"#
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")
+        _ = try await api.priceBookItems(cursor: itemID, search: "pipe", kind: "material")
+        let request = try XCTUnwrap(URLProtocolFixture.recorded.first)
+        let query = try XCTUnwrap(URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+        let raw = try XCTUnwrap(query.first(where: { $0.name == "filter" })?.value)
+        let filter = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any])
+        let root = try XCTUnwrap(filter["root"] as? [String: Any])
+        let conditions = try XCTUnwrap(root["children"] as? [[String: Any]])
+        XCTAssertEqual(root["operator"] as? String, "and")
+        XCTAssertTrue(conditions.contains { $0["field"] as? String == "price_book_items.kind" && $0["value"] as? String == "material" })
+    }
+
     func testFreshPriceBookCollectionBypassesLocalCache() async throws {
         let payload = #"{"schemaVersion":1,"items":[],"nextCursor":null,"planId":"plan","resourceId":"price_book_items","viewId":null,"purpose":"collection","localMode":"complete"}"#
         let api = APIClient(session: URLProtocolFixture.session([.init(200, payload)]), baseURL: "https://app.thorbis.com")

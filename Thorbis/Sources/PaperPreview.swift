@@ -774,13 +774,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var jobMediaViewRevoked = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
+        var priceBookDenied = false
         var savedWorkMutationCount = 0
         var answeredListPaths: Set<String> = []
     }
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.priceBookDenied = false; scenario.savedWorkMutationCount = 0 }
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -850,6 +851,26 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return
         }
         guard let url = request.url else { client?.urlProtocol(self, didFailWithError: URLError(.badURL)); return }
+        if PaperPreview.enabled, url.path == "/v1/query",
+           let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+           query.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }) {
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-offline-only") {
+                client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet)); return
+            }
+            let denying = Self.scenario.lock.withLock {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-denied-all") ||
+                    (ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-search-denied") && query.contains(where: { $0.name == "filter" })) {
+                    Self.scenario.priceBookDenied = true
+                }
+                return Self.scenario.priceBookDenied
+            }
+            if denying,
+               let response = HTTPURLResponse(url: url, statusCode: 403, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) {
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: Data(#"{"title":"Price book access denied","status":403}"#.utf8))
+                client?.urlProtocolDidFinishLoading(self); return
+            }
+        }
         // Keep the second catalog page pending to exercise honest partial search states.
         if PaperPreview.enabled, PaperPreview.screen == "invoice-editor",
            ProcessInfo.processInfo.arguments.contains("--paper-preview-catalog-partial"), url.path == "/v1/query",
@@ -935,6 +956,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             status = 503
             payload = ["status": 503, "title": "Sample estimate connection unavailable"]
         } else if PaperPreview.screen == "price-book", url.path == "/v1/query",
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-partial"),
+                  (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).contains(where: { $0.name == "filter" }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample search unavailable"]
+        } else if PaperPreview.screen == "price-book", url.path == "/v1/query",
                   Self.scenario.lock.withLock({ Self.scenario.priceBookQueryFailed }) {
             status = 503
             payload = ["status": 503, "title": "The price book couldn't be loaded."]
@@ -971,7 +997,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 self.client?.urlProtocol(self, didLoad: body)
                 self.client?.urlProtocolDidFinishLoading(self)
             }
-            if PaperPreview.isJobDocumentsPreview,
+            if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-aba-page"),
+               url.path == "/v1/query", let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+               query.contains(where: { $0.name == "filter" }), query.contains(where: { $0.name == "cursor" }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 35, execute: deliver)
+            } else if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
                request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: deliver)
@@ -1559,6 +1589,35 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
             return ["items": matchingCustomer([waiting], queryItems: queryItems)]
         case "/v1/query":
+            if PaperPreview.screen == "price-book", queryItems.contains(where: { $0.name == "resourceId" && $0.value == "price_book_items" }),
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-unicode-pages") || ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-aba-page") {
+                let filter = queryItems.first(where: { $0.name == "filter" })?.value
+                let cursor = queryItems.first(where: { $0.name == "cursor" })?.value
+                let next = "00000000-0000-4000-8000-000000009988"
+                func row(_ id: String, _ title: String) -> [String: Any] {
+                    ["id": id, "resourceId": "price_book_items", "label": title, "subtitle": "Material · each",
+                     "fields": ["price_book_items.id": id, "price_book_items.current_revision": 1,
+                                "price_book_items.description": title, "price_book_items.unit": "each",
+                                "price_book_items.sell_price_amount": 1000, "price_book_items.currency": "USD",
+                                "price_book_items.tax_classification": "taxable", "price_book_items.kind": "material"]]
+                }
+                let items: [[String: Any]]
+                let continuation: Any
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-unicode-pages") {
+                    if filter != nil { items = []; continuation = NSNull() }
+                    else if cursor != nil { items = [row("00000000-0000-4000-8000-000000009203", "Évier de cuisine")]; continuation = NSNull() }
+                    else { items = [row("00000000-0000-4000-8000-000000009201", "Pipe fitting")]; continuation = next }
+                } else if let filter {
+                    if cursor != nil { items = [row("00000000-0000-4000-8000-000000009204", "Stale valve page")]; continuation = NSNull() }
+                    else if filter.localizedCaseInsensitiveContains("valve") { items = [row("00000000-0000-4000-8000-000000009202", "Current valve")]; continuation = next }
+                    else if filter.localizedCaseInsensitiveContains("pump") { items = [row("00000000-0000-4000-8000-000000009203", "Current pump")]; continuation = NSNull() }
+                    else { items = []; continuation = NSNull() }
+                } else {
+                    items = [row("00000000-0000-4000-8000-000000009201", "Pipe fitting")]; continuation = NSNull()
+                }
+                return ["schemaVersion": 1, "resourceId": "price_book_items", "purpose": "collection", "localMode": "complete",
+                        "items": items, "nextCursor": continuation, "planId": "paper-preview", "viewId": NSNull()]
+            }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-long"),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
                 let id = "00000000-0000-4000-8000-000000009201"
@@ -1569,7 +1628,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 let renewed = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-renew") && !ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-stable") && readNumber > 1 && (!ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-cache-test") || isFresh)
                 let extreme = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-extreme")
                 let description = extreme ? "Commercial plumbing system inspection and complete replacement.\n\nAssess the existing supply and drainage equipment, document each issue, and explain the recommended work to the customer.\n\nProtect the surrounding area, complete the installation, test all connections, and clean the work area before leaving. Final paragraph of the complete description." : (renewed ? "Updated PEX rings. Latest catalog details. [thorbis-plumbing-demo-v1:material-049]" : "PEX copper crimp ring pack: 1-in. Ten rings for matching-size PEX; tool calibration remains required. [thorbis-plumbing-demo-v1:material-049]")
-                let later = queryItems.contains { $0.name == "cursor" }
+                let filteredSearch = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-server-search") && queryItems.contains { $0.name == "filter" }
+                let later = filteredSearch || queryItems.contains { $0.name == "cursor" }
                 let pages = ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-pages")
                 let firstRow = pages && later ? "Second loaded item. Additional details. [thorbis-plumbing-demo-v1:material-050]" : description
                 let rows: [(String, String, String, Int)] = [(firstRow, "10-pack", "material", extreme ? 123456789 : 1513)] +
