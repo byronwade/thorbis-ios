@@ -2,6 +2,28 @@ import XCTest
 
 @MainActor
 final class CustomerPhotoRollupUITests: XCTestCase {
+    func testCustomerRecordsFindDocumentsAndSeparateCustomerActivityWithoutScrollingPastJobs() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup"]
+        app.launch()
+        let records = app.buttons["Records"].firstMatch
+        XCTAssertTrue(records.waitForExistence(timeout: 20), "Customer records must be reachable from the customer section selector")
+        XCTAssertTrue(records.isHittable)
+        records.tap()
+        let documents = app.buttons["Documents"].firstMatch
+        XCTAssertTrue(documents.waitForExistence(timeout: 10))
+        documents.tap()
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        for _ in 0..<12 where !file.exists { app.swipeUp() }
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        let customerActivity = app.buttons["Customer activity"].firstMatch
+        for _ in 0..<12 where !customerActivity.isHittable { app.swipeDown() }
+        XCTAssertTrue(customerActivity.waitForExistence(timeout: 10))
+        customerActivity.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["customer-activity"].waitForExistence(timeout: 10))
+    }
+
     func testCustomerDocumentsKeepJobIdentityAndUnavailableFilesClosed() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -18,7 +40,11 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         XCTAssertTrue(failed.label.contains("File is not ready yet"))
         let other = app.buttons["customer-document-00000000-0000-4000-8000-000000031778"]
         for _ in 0..<25 where !other.isHittable { app.swipeUp() }
-        XCTAssertTrue(other.waitForExistence(timeout: 20)); XCTAssertTrue(other.isHittable)
+        XCTAssertTrue(other.waitForExistence(timeout: 20))
+        app.scrollClearOfFoot(other)
+        XCTAssertTrue(other.isHittable)
+        XCTAssertLessThanOrEqual(other.frame.maxY, app.buttons["customer-new-job-action"].frame.minY,
+                                 "The document must be clear of the fixed New job action")
         other.tap()
         XCTAssertTrue(app.navigationBars["File"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Drain report"].waitForExistence(timeout: 10))

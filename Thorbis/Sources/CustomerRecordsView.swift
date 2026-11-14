@@ -14,6 +14,7 @@ struct CustomerRecordsView: View {
     let customerID: String
     var retryMedia: () async -> Void = {}
     var parts: Set<CustomerRecordsPart> = Set(CustomerRecordsPart.allCases)
+    var activityTitle = "Activity"
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.paperGroupedWells) private var wells
     @State private var openedLegacy: LegacyCustomerPhoto?
@@ -232,7 +233,7 @@ struct CustomerRecordsView: View {
 
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            heading("Activity", count: compilation.activityCount + compilation.accountActivity.count, symbol: "clock", incomplete: compilation.activityIncomplete)
+            heading(activityTitle, count: compilation.activityCount + compilation.accountActivity.count, symbol: "clock", incomplete: compilation.activityIncomplete)
             if compilation.activityIncomplete {
                 ErrorBanner(message: "Some activity could not be loaded. Please try again.") { await retryMedia() }
             } else if compilation.activity.isEmpty && compilation.accountActivity.isEmpty {

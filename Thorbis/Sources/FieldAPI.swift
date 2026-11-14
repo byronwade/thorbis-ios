@@ -142,6 +142,7 @@ enum CustomerListScope: String, CaseIterable, Identifiable {
 struct CustomerHistoryPage: Decodable {
     let items: [CustomerHistoryEntry]
     let nextCursor: String?
+    let sourceIncomplete: Bool?
 }
 
 struct CustomerHistoryEntry: Decodable, Identifiable, Hashable {

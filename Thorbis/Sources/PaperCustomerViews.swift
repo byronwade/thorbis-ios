@@ -248,6 +248,64 @@ struct CustomerRecordsScope: Equatable, Sendable {
     }
 }
 
+struct CustomerActivityIdentity: Equatable {
+    let scope: CustomerRecordsScope
+    let origin: String
+    let requestGeneration: UUID
+    let savedCopyRevision: UUID
+}
+
+struct CustomerActivityPublication {
+    private(set) var identity: CustomerActivityIdentity?
+    private(set) var items: [CustomerHistoryEntry] = []
+    private(set) var cursor: String?
+    private(set) var loading = false
+    private(set) var error: String?
+    private(set) var partial = false
+    private var request: UUID?
+    private var resetting = true
+    private var seenCursors: Set<String> = []
+
+    mutating func begin(_ identity: CustomerActivityIdentity, reset: Bool) -> UUID? {
+        if self.identity != identity {
+            self.identity = identity
+            items = []; cursor = nil; error = nil; partial = false; loading = false; seenCursors = []
+        }
+        guard !loading, reset || cursor != nil else { return nil }
+        if reset { cursor = nil; seenCursors = [] }
+        let token = UUID()
+        request = token; resetting = reset; loading = true
+        return token
+    }
+
+    mutating func publish(_ page: CustomerHistoryPage, request: UUID, identity: CustomerActivityIdentity,
+                          current: CustomerActivityIdentity?) {
+        guard self.request == request, self.identity == identity, current == identity else { return }
+        if resetting { items = page.items; partial = page.sourceIncomplete != false }
+        else {
+            let existing = Set(items.map(\.id))
+            items.append(contentsOf: page.items.filter { !existing.contains($0.id) })
+            partial = partial || page.sourceIncomplete != false
+        }
+        if let next = page.nextCursor {
+            if next.isEmpty || !seenCursors.insert(next).inserted {
+                cursor = nil; partial = true
+            } else { cursor = next }
+        } else { cursor = nil }
+        error = nil; loading = false; self.request = nil
+    }
+
+    mutating func fail(_ message: String?, request: UUID, identity: CustomerActivityIdentity,
+                       current: CustomerActivityIdentity?) {
+        guard self.request == request, self.identity == identity, current == identity else { return }
+        error = message; loading = false; self.request = nil
+    }
+
+    func visible(_ identity: CustomerActivityIdentity?) -> [CustomerHistoryEntry] {
+        self.identity == identity && identity != nil ? items : []
+    }
+}
+
 struct CustomerDetailView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
@@ -261,11 +319,16 @@ struct CustomerDetailView: View {
     @State private var record: CustomerRecord?
     @State private var contactState = CustomerContactCollectionState()
     @State private var loadGeneration = 0
-    @State private var activity: [CustomerHistoryEntry] = []
-    @State private var activityCursor: String?
-    @State private var activityLoading = false
-    @State private var activityError: String?
-    @State private var activityLoadGeneration = 0
+    @State private var activityPublication = CustomerActivityPublication()
+    private var activityIdentity: CustomerActivityIdentity? {
+        guard let scope = recordsScope, let origin = api.normalizedOrigin else { return nil }
+        return CustomerActivityIdentity(scope: scope, origin: origin, requestGeneration: api.requestGeneration,
+                                        savedCopyRevision: api.savedCopyScopeRevision)
+    }
+    private var activity: [CustomerHistoryEntry] { activityPublication.visible(activityIdentity) }
+    private var activityCursor: String? { activityPublication.identity == activityIdentity ? activityPublication.cursor : nil }
+    private var activityLoading: Bool { activityPublication.identity == activityIdentity && activityPublication.loading }
+    private var activityError: String? { activityPublication.identity == activityIdentity ? activityPublication.error : nil }
     @State private var locationState = ServiceLocationCollectionState()
     @State private var error: String?
     @State private var showNewJob = false
@@ -278,6 +341,7 @@ struct CustomerDetailView: View {
     @State private var isRemovingLocation = false
     @State private var locationError: String?
     @State private var tab = "Overview"
+    @State private var recordPart = "Notes"
     @State private var records: CustomerJobCompilation?
     @State private var recordsLoading = false
     @State private var recordsError: String?
@@ -336,7 +400,7 @@ struct CustomerDetailView: View {
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/customers/\(customer.id)")).padding(.horizontal, -Theme.gutter)
                 customerIdentity
                 actionCircles
-                PaperTabs(options: ["Overview", jobsLabel, "Photos", "Money"], selection: tabBinding, wrapOverflow: true, textTabs: true)
+                PaperTabs(options: ["Overview", jobsLabel, "Records", "Photos", "Money"], selection: tabBinding, wrapOverflow: true, textTabs: true)
                     .padding(.horizontal, -Theme.gutter)
                 if let error {
                     ErrorBanner(message: error) { await load() }
@@ -346,6 +410,7 @@ struct CustomerDetailView: View {
                     if session.can("job.view", feature: "jobs") { jobsSection }
                     else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
                 case "Photos": recordsParts([.photos])
+                case "Records": customerRecordsSection
                 case "Money": moneySection
                 default: overview
                 }
@@ -394,7 +459,7 @@ struct CustomerDetailView: View {
         .task { await loadSmsConsent() }
         .task { await loadJobEmails() }
         .task(id: customer.id) { pricing = try? await api.memberPricing(customer.id) }
-        .task { await loadActivity(reset: true) }
+        .task(id: activityIdentity) { await loadActivity(reset: true) }
         .task(id: recordsScope) {
             if recordsPublishedScope != recordsScope {
                 records = nil
@@ -420,6 +485,11 @@ struct CustomerDetailView: View {
         .onChange(of: tab, initial: true) { _, selectedTab in
             if selectedTab != "Overview" { Task { await loadSelectedRecords() } }
             if selectedTab == "Jobs" { Task { await loadJobRecords() } }
+        }
+        .onChange(of: recordPart) { _, selectedPart in
+            if tab == "Records", selectedPart != "Customer activity", visibleRecords == nil {
+                Task { await loadRecords() }
+            }
         }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
@@ -1154,10 +1224,25 @@ struct CustomerDetailView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    /// Customer-wide records remain grouped by job. Customer activity is a separate feed.
+    private var customerRecordsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            PaperTabs(options: ["Notes", "Documents", "Job & account activity", "Customer activity"],
+                      selection: $recordPart, wrapOverflow: true, textTabs: true)
+                .padding(.horizontal, -Theme.gutter)
+            switch recordPart {
+            case "Documents": recordsParts([.documents])
+            case "Job & account activity": recordsParts([.activity], activityTitle: "Job & account activity")
+            case "Customer activity": activitySection
+            default: recordsParts([.notes])
+            }
+        }
+    }
+
     /// Money: the customer's estimates and invoices, on and off jobs.
     private var moneySection: some View { recordsParts([.estimates, .invoices], moneyOnly: true) }
 
-    private func recordsParts(_ parts: Set<CustomerRecordsPart>, moneyOnly: Bool = false) -> some View {
+    private func recordsParts(_ parts: Set<CustomerRecordsPart>, moneyOnly: Bool = false, activityTitle: String = "Activity") -> some View {
         let scope = recordsScope
         let visible = moneyOnly ? (scope != nil && moneyRecordsPublishedScope == scope ? moneyRecords : nil) : visibleRecords
         let visibleError = moneyOnly
@@ -1177,7 +1262,7 @@ struct CustomerDetailView: View {
                 } else if let visible {
                     CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: {
                         if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
-                    }, parts: parts)
+                    }, parts: parts, activityTitle: activityTitle)
                 }
             }
         }
@@ -1194,6 +1279,7 @@ struct CustomerDetailView: View {
         switch tab {
         case "Money": await loadMoneyRecords()
         case "Jobs", "Photos": await loadRecords()
+        case "Records": if recordPart != "Customer activity" { await loadRecords() }
         default: break
         }
     }
@@ -1269,7 +1355,7 @@ struct CustomerDetailView: View {
                     if activityLoading && activity.isEmpty {
                         SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset)
                     } else if activity.isEmpty {
-                        emptyText(activityError == nil ? "Nothing yet" : "Not loaded").padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 6)
+                        emptyText(activityError == nil ? "No activity loaded" : "Not loaded").padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 6)
                     } else {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(activity) { event in
@@ -1282,6 +1368,9 @@ struct CustomerDetailView: View {
                     }
                 }
                 .accessibilityIdentifier("customer-activity")
+                if activityPublication.identity == activityIdentity && activityPublication.partial {
+                    Text("Some activity may be missing.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
                 if activityCursor != nil {
                     Button {
                         Task { await loadActivity(reset: false) }
@@ -1299,31 +1388,20 @@ struct CustomerDetailView: View {
     }
 
     private func loadActivity(reset: Bool) async {
-        guard session.can("customer.view", feature: "core_crm"), !activityLoading else { return }
-        if reset {
-            activityLoadGeneration += 1
-            activityCursor = nil
-        } else if activityCursor == nil {
-            return
-        }
-        let request = activityLoadGeneration
-        let cursor = reset ? nil : activityCursor
-        activityLoading = true
-        defer { if activityLoadGeneration == request { activityLoading = false } }
+        guard let identity = activityIdentity, session.can("customer.view", feature: "core_crm"),
+              let request = activityPublication.begin(identity, reset: reset) else { return }
+        let cursor = reset ? nil : activityPublication.cursor
         do {
             let page = try await api.fieldCustomerHistory(customer.id, cursor: cursor)
-            guard activityLoadGeneration == request else { return }
-            if reset { activity = page.items }
-            else {
-                let existingIDs = Set(activity.map(\.id))
-                activity.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
+            guard !Task.isCancelled else {
+                activityPublication.fail(nil, request: request, identity: identity, current: activityIdentity)
+                return
             }
-            activityCursor = page.nextCursor
-            activityError = nil
+            activityPublication.publish(page, request: request, identity: identity, current: activityIdentity)
         } catch is CancellationError {
+            activityPublication.fail(nil, request: request, identity: identity, current: activityIdentity)
         } catch {
-            guard activityLoadGeneration == request else { return }
-            activityError = error.localizedDescription
+            activityPublication.fail(error.localizedDescription, request: request, identity: identity, current: activityIdentity)
         }
     }
 

@@ -24,6 +24,66 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "The fresh read must reach the network")
     }
 
+    func testActivityPublicationHidesOldScopeAndRejectsLateResults() {
+        let generation = UUID(), authority = UUID(), apiGeneration = UUID(), savedCopy = UUID()
+        let access = CustomerRecordAccess(jobs: true, estimates: true, invoices: true)
+        let original = CustomerRecordsScope(actorID: "actor", organizationID: "org", customerID: "customer",
+            generation: generation, authorityRevision: authority, policyVersion: 1, access: access)
+        let scopeA = CustomerActivityIdentity(scope: original, origin: "https://a.example", requestGeneration: apiGeneration, savedCopyRevision: savedCopy)
+        let other = CustomerRecordsScope(actorID: "actor", organizationID: "other", customerID: "customer",
+            generation: UUID(), authorityRevision: UUID(), policyVersion: 1, access: access)
+        let scopeB = CustomerActivityIdentity(scope: other, origin: "https://a.example", requestGeneration: apiGeneration, savedCopyRevision: savedCopy)
+        let entry = CustomerHistoryEntry(occurredAt: "2026-11-14T00:00:00Z", kind: "job", subjectId: "job", summary: "Private activity")
+        let page = CustomerHistoryPage(items: [entry], nextCursor: nil, sourceIncomplete: nil)
+        var publication = CustomerActivityPublication()
+        let first = publication.begin(scopeA, reset: true)!
+        publication.publish(page, request: first, identity: scopeA, current: scopeA)
+        XCTAssertEqual(publication.visible(scopeA), [entry])
+        XCTAssertTrue(publication.visible(scopeB).isEmpty, "Changing workspace must hide old rows immediately")
+        let changedOrigin = CustomerActivityIdentity(scope: original, origin: "https://b.example", requestGeneration: apiGeneration, savedCopyRevision: savedCopy)
+        let changedAPI = CustomerActivityIdentity(scope: original, origin: "https://a.example", requestGeneration: UUID(), savedCopyRevision: savedCopy)
+        let changedSavedCopy = CustomerActivityIdentity(scope: original, origin: "https://a.example", requestGeneration: apiGeneration, savedCopyRevision: UUID())
+        XCTAssertTrue(publication.visible(changedOrigin).isEmpty)
+        XCTAssertTrue(publication.visible(changedAPI).isEmpty)
+        XCTAssertTrue(publication.visible(changedSavedCopy).isEmpty)
+        let second = publication.begin(scopeB, reset: true)!
+        publication.publish(page, request: first, identity: scopeA, current: scopeB)
+        XCTAssertTrue(publication.visible(scopeB).isEmpty, "A former workspace response must not publish")
+        publication.publish(page, request: second, identity: scopeB, current: scopeA)
+        XCTAssertTrue(publication.visible(scopeB).isEmpty, "A response after authority changes must not publish")
+    }
+
+    func testActivityIncompleteMarkerPreservesUnknownAndAccumulatesAcrossPages() throws {
+        let decoder = JSONDecoder()
+        let unknown = try decoder.decode(CustomerHistoryPage.self, from: Data(#"{"items":[],"nextCursor":"next"}"#.utf8))
+        let incomplete = try decoder.decode(CustomerHistoryPage.self, from: Data(#"{"items":[],"nextCursor":null,"sourceIncomplete":true}"#.utf8))
+        let current = try decoder.decode(CustomerHistoryPage.self, from: Data(#"{"items":[],"nextCursor":null,"sourceIncomplete":false}"#.utf8))
+        XCTAssertNil(unknown.sourceIncomplete)
+        XCTAssertEqual(incomplete.sourceIncomplete, true)
+        XCTAssertEqual(current.sourceIncomplete, false)
+        let scope = CustomerRecordsScope(actorID: "a", organizationID: "o", customerID: "c", generation: UUID(),
+                                         authorityRevision: UUID(), policyVersion: 1,
+                                         access: .init(jobs: true, estimates: true, invoices: true))
+        let identity = CustomerActivityIdentity(scope: scope, origin: "https://a.example", requestGeneration: UUID(), savedCopyRevision: UUID())
+        var publication = CustomerActivityPublication()
+        let first = try XCTUnwrap(publication.begin(identity, reset: true))
+        publication.publish(unknown, request: first, identity: identity, current: identity)
+        XCTAssertTrue(publication.partial, "Older servers do not certify source completeness")
+        let next = try XCTUnwrap(publication.begin(identity, reset: false))
+        publication.publish(current, request: next, identity: identity, current: identity)
+        XCTAssertTrue(publication.partial, "A later complete-looking page must not erase an earlier unknown")
+        let reset = try XCTUnwrap(publication.begin(identity, reset: true))
+        publication.publish(incomplete, request: reset, identity: identity, current: identity)
+        XCTAssertTrue(publication.partial, "An explicit incomplete marker must remain visible")
+        let cyclic = CustomerHistoryPage(items: [], nextCursor: "same", sourceIncomplete: false)
+        let fresh = try XCTUnwrap(publication.begin(identity, reset: true))
+        publication.publish(cyclic, request: fresh, identity: identity, current: identity)
+        let repeated = try XCTUnwrap(publication.begin(identity, reset: false))
+        publication.publish(cyclic, request: repeated, identity: identity, current: identity)
+        XCTAssertNil(publication.cursor, "Repeated cursors cannot create an infinite load loop")
+        XCTAssertTrue(publication.partial)
+    }
+
     func testOrdinaryCustomerHistoryCanStillUseSavedCopyOffline() async throws {
         let client = APIClient(session: URLProtocolFixture.session([.init(200, page([])), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "customer-history-test-\(UUID().uuidString)"
