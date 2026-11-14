@@ -1208,8 +1208,8 @@ func customerSavingsText(_ lines: [FieldLine], currency: String) -> String? {
     return saved > 0 ? money(saved, currency: currency) : nil
 }
 
-/// "Member savings" when the customer holds a membership; otherwise the plain word.
-func savingsLabel(_ isMember: Bool) -> String { isMember ? "Member savings" : "Savings" }
+/// Membership alone does not prove a particular markdown came from member pricing.
+func savingsLabel(_: Bool) -> String { "Savings" }
 
 /// A labelled savings row (CP-06), shown above the total and never as a strike-through alone.
 func customerSavingsRows(_ lines: [FieldLine], currency: String, isMember: Bool) -> [CustomerAmountRow] {

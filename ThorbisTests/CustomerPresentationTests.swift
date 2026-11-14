@@ -82,7 +82,9 @@ final class CustomerPresentationTests: XCTestCase {
         var flow = CustomerEstimateFlow(estimate: estimate(options: options))
         flow.choose("better")
         flow.review()
-        try flow.useIssuedRevision(issued(options: [options[0]]))
+        let remaining = FieldEstimateOption(id: "good", title: "Repair", description: "",
+                                            lines: [line("repair", 1, 48_000)], totalAmount: 48_000, currency: "USD")
+        try flow.useIssuedRevision(issued(options: [remaining]))
         XCTAssertNil(flow.selectedOptionID)
         XCTAssertEqual(flow.step, .choose)
         XCTAssertFalse(flow.canReview)
@@ -128,8 +130,13 @@ final class CustomerPresentationTests: XCTestCase {
         let lines = [member, marked, invoiced, line("x", 1, 9_000)]
         XCTAssertEqual(customerSavings(lines), 9_000)
         XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: true),
-                       [CustomerAmountRow(label: "Member savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
+                       [CustomerAmountRow(label: "Savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
         XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false).first?.label, "Savings")
         XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD", isMember: true).isEmpty)
+    }
+
+    func testMembershipAloneDoesNotAttributeMarkdownToMembership() {
+        XCTAssertEqual(savingsLabel(true), "Savings")
+        XCTAssertEqual(savingsLabel(false), "Savings")
     }
 }
