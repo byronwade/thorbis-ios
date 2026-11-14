@@ -1,0 +1,25 @@
+# Customer savings label — 13 November 2026
+
+The estimate and invoice customer views calculate a price-book markdown from
+the captured original unit price and the charged unit price. The record does
+not prove that a particular markdown came from a membership, and a customer's
+current membership alone cannot establish that provenance. Label the existing
+amount as “Savings” for all customers; keep the calculation and amount intact.
+The customer presentation no longer fetches current membership solely to pick
+that label, removing a request that cannot establish markdown provenance.
+
+The new label regression failed on the release base because a member saw
+“Member savings”. After the change, 20 customer-presentation and What's New
+tests passed (`/private/tmp/thorbis-savings-label-green-fixed-1113.log`). The
+first combined run also found an existing removed-option fixture whose total
+did not match its empty lines; the fixture now supplies matching work and the
+selection behavior test passes. After removing the now-unused membership
+lookup, the same 20 tests passed again (`/private/tmp/thorbis-savings-label-final-1113.log`).
+No amounts or approval behavior were changed.
+
+This does not establish verified membership discount provenance or fix the
+separate held customer-invoice visibility issue. The generic savings amount is
+still a comparison with the captured price-book amount, not a newly calculated
+credit. Physical-device and VoiceOver behavior were not tested. The independent
+Codex GitHub review of source commit `206c1ad3` completed with no findings;
+the later evidence update does not change app or test code.
