@@ -3,6 +3,115 @@ import XCTest
 
 @MainActor
 final class CommsInboxTests: XCTestCase {
+    func testTextPresenterReportsUnavailableInboxInsteadOfFallingBackToMessages() {
+        let actor = UUID().uuidString, organization = UUID().uuidString
+        let store = CommsLocalStore.shared(actorID: actor, organizationID: organization)
+        store.invalidate()
+        let presenter = InboxTextPresenter()
+        presenter.bind(actorID: actor, organizationID: organization)
+        XCTAssertTrue(presenter.open(phone: "5550100100", name: nil), "The action is handled by the inbox, not handed off to Messages")
+        XCTAssertTrue(presenter.storageUnavailable)
+        XCTAssertNil(presenter.opening)
+    }
+    func testTextCommitDoesNotClaimSuccessWhenDiskWriteFails() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        let id = try XCTUnwrap(store.threadForPhone("5550100100"))
+        store.setComposing(id, "Keep this draft")
+        let saved = try Data(contentsOf: active.appendingPathComponent("inbox.json"))
+        try FileManager.default.moveItem(at: active, to: retained)
+
+        XCTAssertFalse(store.commitText(id, body: "Keep this draft"), "A failed write must never be reported as a saved draft")
+        XCTAssertEqual(store.thread(id)?.composing, "Keep this draft", "The text must remain recoverable in the open composer")
+        XCTAssertTrue(store.thread(id)?.messages.isEmpty == true, "A failed commit must not create a misleading saved message")
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
+    }
+
+    func testComposingWriteFailureKeepsTextInMemoryAndBlocksFurtherWrites() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        let id = try XCTUnwrap(store.threadForPhone("5550100100"))
+        let saved = try Data(contentsOf: active.appendingPathComponent("inbox.json"))
+        try FileManager.default.moveItem(at: active, to: retained)
+
+        store.setComposing(id, "Unsaved text")
+        XCTAssertEqual(store.thread(id)?.composing, "Unsaved text")
+        XCTAssertTrue(store.storageBlocked, "An uncertain disk write must stop subsequent writes")
+        XCTAssertFalse(store.commitText(id, body: "Unsaved text"))
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
+    }
+
+    func testCannedReplyWriteFailureDoesNotPublishAnUnsavedReply() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        _ = try XCTUnwrap(store.threadForPhone("5550100100"))
+        let saved = try Data(contentsOf: active.appendingPathComponent("inbox.json"))
+        try FileManager.default.moveItem(at: active, to: retained)
+        store.saveCannedReply(name: "Visit", body: "Keep these words")
+        XCTAssertTrue(store.storageBlocked)
+        XCTAssertFalse(store.cannedReplies.contains { $0.body == "Keep these words" })
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
+    }
+
+    func testClearingComposerAfterCommitDoesNotWriteAgain() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        let id = try XCTUnwrap(store.threadForPhone("5550100100"))
+        store.setComposing(id, "Saved once")
+        XCTAssertTrue(store.commitText(id, body: "Saved once"))
+        try FileManager.default.moveItem(at: active, to: retained)
+        store.setComposing(id, "")
+        XCTAssertFalse(store.storageBlocked, "Clearing the field after a successful commit is not another disk write")
+        XCTAssertEqual(store.thread(id)?.messages.last?.body, "Saved once")
+    }
+
+    func testNewTextWithUnavailableStorageStaysInMemoryWithoutClaimingSave() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("missing/inbox.json")
+        let store = CommsLocalStore(file: file, requiresPersistence: true)
+        let id = try XCTUnwrap(store.threadForPhone("5550100100"))
+        XCTAssertTrue(store.storageBlocked)
+        store.setComposing(id, "Copy these words")
+        XCTAssertEqual(store.thread(id)?.composing, "Copy these words")
+        XCTAssertEqual(store.threadForPhone("5550100100"), id, "An existing unsaved conversation must remain available for recovery")
+        XCTAssertFalse(store.commitText(id, body: "Copy these words"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
+    func testArchiveAndBinReportFailureWithoutChangingTheThread() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        let id = try XCTUnwrap(store.threadForPhone("5550100100"))
+        let saved = try Data(contentsOf: active.appendingPathComponent("inbox.json"))
+        try FileManager.default.moveItem(at: active, to: retained)
+        XCTAssertFalse(store.archive(id), "A fresh failed write must not dismiss the conversation")
+        XCTAssertEqual(store.flags(id).place, .inbox)
+        XCTAssertFalse(store.bin(id), "A blocked store must not dismiss the conversation")
+        XCTAssertEqual(store.flags(id).place, .inbox)
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
+    }
+
     func testEmailOpeningKeepsExistingDraftAndRetiresStaleIdentity() throws {
         let presenter = InboxEmailPresenter()
         var current = true

@@ -169,12 +169,12 @@ struct CommsThreadMenu: View {
             ThorbisMenuItem(unread ? "Mark read" : "Mark unread", icon: unread ? "envelope.open" : "envelope.badge") { store.setUnread(id, !unread) },
         ]
         if flags.place == .inbox {
-            items.append(ThorbisMenuItem("Archive", icon: "archivebox") { store.archive(id); onMoved() })
+            items.append(ThorbisMenuItem("Archive", icon: "archivebox") { if store.archive(id) { onMoved() } })
         } else {
             items.append(ThorbisMenuItem("Move to Inbox", icon: "tray") { store.moveToInbox(id) })
         }
         if flags.place != .bin {
-            items.append(ThorbisMenuItem("Move to Bin", icon: "trash", role: .destructive) { store.bin(id); onMoved() })
+            items.append(ThorbisMenuItem("Move to Bin", icon: "trash", role: .destructive) { if store.bin(id) { onMoved() } })
         }
         return ThorbisMenu(items: items, title: name, accessibilityLabel: "Conversation options") {
             PaperCircleLabel(symbol: "ellipsis", size: 36, fill: Theme.card, bordered: true)
@@ -213,6 +213,18 @@ private struct CommsThreadHeader: View {
 
 // MARK: - Call thread
 
+private struct CommsThreadStorageWarning: View {
+    var body: some View {
+        Text("Couldn't save changes on this device. Copy unsaved work before restarting the app, then check saved messages.")
+            .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+            .background(Theme.canvas)
+            .accessibilityIdentifier("inbox-thread-storage-error")
+    }
+}
+
 /// Every call from one number, newest first (web thread.tsx calls): each a card with when, how
 /// long, its status, the recording, what was said, and the job it is linked to.
 struct CommsCallThreadView: View {
@@ -243,6 +255,9 @@ struct CommsCallThreadView: View {
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
+        .safeAreaInset(edge: .top) {
+            if local.storageBlocked { CommsThreadStorageWarning() }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -533,6 +548,9 @@ struct CommsLocalThreadView: View {
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
+        .safeAreaInset(edge: .top) {
+            if store.storageBlocked && thread?.channel == .email { CommsThreadStorageWarning() }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -723,15 +741,31 @@ struct CommsTextComposer: View {
             }
             // A footnote, not content: capped so at the largest sizes it doesn't take the room the
             // conversation needs.
-            HStack {
-                Text("Drafts stay on this device").font(Theme.font(12)).foregroundStyle(Theme.muted)
-                Spacer(minLength: 8)
-                if let counter = CommsSMS.counter(body_) {
-                    Text(counter).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+            if store.storageBlocked {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Couldn't save this text on your device. Copy it before closing.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("inbox-text-storage-error")
+                    if !body_.isEmpty {
+                        Button("Copy text") { UIPasteboard.general.string = body_ }
+                            .font(Theme.font(14, weight: .medium))
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("inbox-text-copy-unsaved")
+                    }
                 }
+                .padding(.horizontal, 4)
+            } else {
+                HStack {
+                    Text("Drafts stay on this device").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    if let counter = CommsSMS.counter(body_) {
+                        Text(counter).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                    }
+                }
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                .padding(.horizontal, 4)
             }
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-            .padding(.horizontal, 4)
         }
         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
         .background(Theme.background)
@@ -835,14 +869,30 @@ private struct CommsCannedRepliesSheet: View {
             PaperFormField("New canned reply") {
                 VStack(spacing: 8) {
                     TextField("Name", text: $name, prompt: .placeholder("Name")).font(Theme.font(16)).fieldWell()
+                        .accessibilityIdentifier("inbox-canned-name")
                     TextField("Reply", text: $text, prompt: .placeholder("What it says"), axis: .vertical)
                         .lineLimit(2...5).font(Theme.font(16)).fieldWell()
+                        .accessibilityIdentifier("inbox-canned-reply")
+                }
+            }
+            if store.storageBlocked {
+                Text("Couldn't save this reply on your device. Copy it before closing.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("inbox-canned-storage-error")
+                if !name.isEmpty || !text.isEmpty {
+                    Button("Copy reply") {
+                        UIPasteboard.general.string = name.isEmpty ? text : "\(name)\n\(text)"
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("inbox-canned-copy-unsaved")
                 }
             }
             Button {
-                store.saveCannedReply(name: name, body: text)
-                name = ""
-                text = ""
+                if store.saveCannedReply(name: name, body: text) {
+                    name = ""
+                    text = ""
+                }
             } label: { Text("Save reply").inkCommit(enabled: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
                 .buttonStyle(PressStyle())
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

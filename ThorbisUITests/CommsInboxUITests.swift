@@ -220,6 +220,100 @@ final class CommsInboxUITests: XCTestCase {
         attach(app, "Text draft saved")
     }
 
+    func testTextStorageFailureKeepsWordsVisibleAndOffersCopy() {
+        let app = launch(["--paper-preview-inbox-thread", "text", "--paper-preview-inbox-storage-failure"])
+        let field = app.descendants(matching: .any)["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), app.debugDescription)
+        field.tap()
+        field.typeText("Keep this text")
+        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["inbox-text-copy-unsaved"].exists)
+        XCTAssertTrue((field.value as? String)?.contains("Keep this text") == true)
+        app.buttons["inbox-save-draft"].tap()
+        XCTAssertTrue((field.value as? String)?.contains("Keep this text") == true)
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+    }
+
+    func testCannedReplyFailureKeepsInputsAndOffersCopy() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-thread", "text", "--paper-preview-inbox-storage-failure"])
+        let field = app.descendants(matching: .any)["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), app.debugDescription)
+        field.tap(); field.typeText("Unsaved text")
+        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].waitForExistence(timeout: 10))
+        app.buttons["inbox-canned"].tap()
+        let manage = app.buttons["Manage canned replies"]
+        XCTAssertTrue(manage.waitForExistence(timeout: 10)); manage.tap()
+        let name = app.descendants(matching: .any)["inbox-canned-name"]
+        let reply = app.descendants(matching: .any)["inbox-canned-reply"]
+        XCTAssertTrue(name.waitForExistence(timeout: 10)); name.tap(); name.typeText("Visit")
+        XCTAssertTrue(reply.exists); reply.tap(); reply.typeText("Keep these words")
+        app.buttons["Save reply"].tap()
+        XCTAssertEqual(name.value as? String, "Visit")
+        XCTAssertTrue((reply.value as? String)?.contains("Keep these words") == true)
+        XCTAssertTrue(app.staticTexts["inbox-canned-storage-error"].exists)
+        XCTAssertTrue(app.buttons["inbox-canned-copy-unsaved"].exists)
+    }
+
+    func testFailedArchiveKeepsUnsavedTextOnScreen() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-thread", "text", "--paper-preview-inbox-storage-failure"])
+        let field = app.descendants(matching: .any)["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), app.debugDescription)
+        field.tap(); field.typeText("Keep this text")
+        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].waitForExistence(timeout: 10))
+        app.buttons["inbox-thread-menu"].tap()
+        let archive = app.buttons["Archive"]
+        XCTAssertTrue(archive.waitForExistence(timeout: 10)); archive.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "A failed archive must not close the only recoverable copy")
+        XCTAssertTrue((field.value as? String)?.contains("Keep this text") == true)
+    }
+
+    func testFreshArchiveWriteFailureKeepsConversationOpen() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-thread", "text", "--paper-preview-inbox-storage-failure", "--paper-preview-inbox-read-text"])
+        let field = app.descendants(matching: .any)["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertFalse(app.staticTexts["inbox-text-storage-error"].exists, "The write must fail on Archive, not while opening the thread")
+        app.buttons["inbox-thread-menu"].tap()
+        let archive = app.buttons["Archive"]
+        XCTAssertTrue(archive.waitForExistence(timeout: 10)); archive.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 10), "A failed archive must keep the conversation open")
+        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].exists)
+    }
+
+    func testEmailArchiveFailureShowsStorageWarning() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-thread", "email", "--paper-preview-inbox-storage-failure", "--paper-preview-inbox-long-thread"])
+        let menu = app.buttons["inbox-thread-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 20), app.debugDescription)
+        menu.tap()
+        let archive = app.buttons["Archive"]
+        XCTAssertTrue(archive.waitForExistence(timeout: 10)); archive.tap()
+        let warning = app.staticTexts["inbox-thread-storage-error"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 10))
+        app.swipeUp()
+        XCTAssertTrue(warning.isHittable, "Recovery remains visible while reading a long thread")
+        XCTAssertTrue(warning.label.contains("restarting the app"))
+    }
+
+    func testCallArchiveFailureShowsStorageWarning() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-storage-failure"])
+        choose(app, menu: "inbox-section-menu", row: "Calls")
+        let thread = app.buttons["inbox-call-call-thread-5550100100"]
+        XCTAssertTrue(thread.waitForExistence(timeout: 15)); thread.tap()
+        let menu = app.buttons["inbox-thread-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+        let archive = app.buttons["Archive"]
+        XCTAssertTrue(archive.waitForExistence(timeout: 10)); archive.tap()
+        let warning = app.staticTexts["inbox-thread-storage-error"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 10))
+        app.swipeUp()
+        XCTAssertTrue(warning.isHittable, "Recovery remains visible while reading a long call")
+        XCTAssertTrue(warning.label.contains("restarting the app"))
+    }
+
     func testEmailCloseProtectsChangesAndSavesDraft() {
         let app = launch(["--paper-preview-inbox-section", "email"])
         let compose = app.buttons["New email"].firstMatch
