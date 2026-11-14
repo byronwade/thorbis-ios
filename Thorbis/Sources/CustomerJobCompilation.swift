@@ -425,6 +425,7 @@ struct CustomerRecordSectionGroup: Equatable, Sendable {
     let incomplete: Bool
     let issue: String?
     var denied: Bool = false
+    var unavailable: Bool = false
     var jobID: String { job.id }
     var title: String { job.title }
 }
@@ -509,10 +510,11 @@ enum CustomerRecordSectionLoader {
             throw CancellationError()
         } catch let problem as Problem where problem.status == 401 {
             throw problem
-        } catch let problem as Problem where problem.status == 403 {
+        } catch let problem as Problem where problem.status == 403 || problem.status == 404 {
             try requireCurrent(scope, api: api, isCurrent: isCurrent)
             return CustomerRecordSectionGroup(job: job, notes: [], documents: [], nextMediaCursor: nil,
-                                              incomplete: true, issue: "You no longer have access to this job.", denied: true)
+                incomplete: true, issue: problem.status == 403 ? "You no longer have access to this job." : "This job is no longer available.",
+                denied: problem.status == 403, unavailable: problem.status == 404)
         } catch {
             try requireCurrent(scope, api: api, isCurrent: isCurrent)
             return CustomerRecordSectionGroup(job: job, notes: [], documents: [], nextMediaCursor: mediaCursor,
@@ -532,6 +534,13 @@ enum CustomerRecordSectionLoader {
 
 /// State is bound to one authority scope and section. The owner must discard it when its
 /// actor, permissions, authority revision, or API generation changes, and ignore stale tasks.
+struct CustomerRecordSectionRequest {
+    fileprivate let owner: UUID
+    fileprivate let request: UUID
+    fileprivate let jobID: String?
+    fileprivate let cursor: String?
+}
+
 struct CustomerRecordSectionAccumulator {
     let scope: CustomerRecordSectionScope
     let section: CustomerRecordSection
@@ -542,16 +551,46 @@ struct CustomerRecordSectionAccumulator {
     private var jobCursors = Set<String>()
     private var mediaCursors: [String: Set<String>] = [:]
     private var integrityIncomplete: [String: Bool] = [:]
+    private var owner = UUID()
+    private var pageRequest: UUID?
+    private var jobRequests: [String: UUID] = [:]
+    private(set) var denied = false
 
     init(scope: CustomerRecordSectionScope, section: CustomerRecordSection) {
         self.scope = scope
         self.section = section
     }
 
+    mutating func beginPage(cursor: String?) -> CustomerRecordSectionRequest? {
+        guard !denied, (!loadedJobs && cursor == nil) || (loadedJobs && cursor != nil && cursor == nextJobCursor) else { return nil }
+        let request = UUID(); pageRequest = request
+        return .init(owner: owner, request: request, jobID: nil, cursor: cursor)
+    }
+
+    mutating func beginGroup(jobID: String, cursor: String?) -> CustomerRecordSectionRequest? {
+        guard !denied, let group = groups.first(where: { $0.jobID == jobID }),
+              cursor == nil || (section == .documents && cursor == group.nextMediaCursor) else { return nil }
+        let request = UUID(); jobRequests[jobID] = request
+        return .init(owner: owner, request: request, jobID: jobID, cursor: cursor)
+    }
+
+    /// Call when the scoped customer job list returns 403. Recovery starts a new owner.
     @discardableResult
-    mutating func apply(page: CustomerRecordSectionPage, requestedCursor: String?) -> Bool {
+    mutating func denySection(token: CustomerRecordSectionRequest) -> Bool {
+        guard !denied, token.owner == owner, token.jobID == nil, pageRequest == token.request else { return false }
+        owner = UUID(); denied = true; pageRequest = nil; jobRequests.removeAll()
+        groups.removeAll(); nextJobCursor = nil; identityIncomplete = true
+        mediaCursors.removeAll(); integrityIncomplete.removeAll()
+        return true
+    }
+
+    @discardableResult
+    mutating func apply(page: CustomerRecordSectionPage, token: CustomerRecordSectionRequest) -> Bool {
+        let requestedCursor = token.cursor
+        guard !denied, token.owner == owner, token.jobID == nil, pageRequest == token.request else { return false }
         guard page.scope == scope, page.section == section,
               (!loadedJobs && requestedCursor == nil) || (loadedJobs && requestedCursor != nil && requestedCursor == nextJobCursor) else { return false }
+        pageRequest = nil
         if let requestedCursor { jobCursors.insert(requestedCursor) }
         loadedJobs = true
         identityIncomplete = identityIncomplete || page.identityIncomplete
@@ -559,7 +598,8 @@ struct CustomerRecordSectionAccumulator {
             guard valid(group) else { identityIncomplete = true; continue }
             if let index = groups.firstIndex(where: { $0.jobID == group.jobID }) {
                 identityIncomplete = true
-                if group.denied {
+                if group.denied || group.unavailable {
+                    jobRequests[group.jobID] = nil
                     groups[index] = group
                     mediaCursors[group.jobID] = nil
                     integrityIncomplete[group.jobID] = nil
@@ -579,11 +619,15 @@ struct CustomerRecordSectionAccumulator {
     /// Applies a retry or continuation. Failed reads retain earlier content; authorization
     /// denial purges it. Cursor cycles stop with a visible partial state.
     @discardableResult
-    mutating func apply(group: CustomerRecordSectionGroup, requestedCursor: String?) -> Bool {
+    mutating func apply(group: CustomerRecordSectionGroup, token: CustomerRecordSectionRequest) -> Bool {
+        let requestedCursor = token.cursor
+        guard !denied, token.owner == owner, token.jobID == group.jobID,
+              jobRequests[group.jobID] == token.request else { return false }
         guard valid(group), let index = groups.firstIndex(where: { $0.jobID == group.jobID }) else { return false }
         let old = groups[index]
         guard requestedCursor == nil || (section == .documents && requestedCursor == old.nextMediaCursor) else { return false }
-        if group.denied {
+        jobRequests[group.jobID] = nil
+        if group.denied || group.unavailable {
             groups[index] = group
             mediaCursors[group.jobID] = nil
             integrityIncomplete[group.jobID] = nil
