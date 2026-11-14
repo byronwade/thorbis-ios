@@ -170,7 +170,7 @@ final class CommsLocalStore: ObservableObject {
 
     private let file: URL?
     private let requiresPersistence: Bool
-    private var persistenceUncertain = false
+    @Published private var persistenceUncertain = false
     private let now: () -> Date
 
     private struct Snapshot: Codable {
@@ -258,20 +258,34 @@ final class CommsLocalStore: ObservableObject {
     private var canMutate: Bool { isActive && !storageBlocked }
     private var stamp: String { ISO8601DateFormatter().string(from: now()) }
 
-    private func save() {
-        guard canMutate, let file else { return }
-        let snapshot = Snapshot(threads: threads, callFlags: callFlags, cannedReplies: cannedReplies)
-        if let data = try? JSONEncoder().encode(snapshot) {
-            try? data.write(to: file, options: [.atomic, .completeFileProtection])
+    @discardableResult private func save(threads candidate: [CommsLocalThread]? = nil,
+                                         flags candidateFlags: [String: CommsThreadFlags]? = nil,
+                                         replies candidateReplies: [CommsCannedReply]? = nil) -> Bool {
+        guard canMutate else { return false }
+        guard let file else { return !requiresPersistence }
+        do {
+            let snapshot = Snapshot(threads: candidate ?? threads, callFlags: candidateFlags ?? callFlags,
+                                    cannedReplies: candidateReplies ?? cannedReplies)
+            let data = try JSONEncoder().encode(snapshot)
+            try data.write(to: file, options: [.atomic, .completeFileProtection])
+            return true
+        } catch {
+            // Atomic writes can fail with an unknown outcome. Preserve memory for recovery,
+            // and do not overwrite the last durable snapshot without reloading it first.
+            persistenceUncertain = true
+            return false
         }
     }
 
     func thread(_ id: String) -> CommsLocalThread? { threads.first { $0.id == id } }
 
-    private func patch(_ id: String, _ change: (inout CommsLocalThread) -> Void) {
-        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }) else { return }
-        change(&threads[index])
-        save()
+    @discardableResult private func patch(_ id: String, _ change: (inout CommsLocalThread) -> Void) -> Bool {
+        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }) else { return false }
+        var candidate = threads
+        change(&candidate[index])
+        guard save(threads: candidate) else { return false }
+        threads = candidate
+        return true
     }
 
     // MARK: Opening conversations
@@ -280,14 +294,15 @@ final class CommsLocalStore: ObservableObject {
     /// inbox if it was archived or binned, or a new empty one. Returns its id.
     @discardableResult
     func threadForPhone(_ phone: String, contactName: String? = nil) -> String? {
-        guard canMutate else { return nil }
+        guard isActive else { return nil }
         let wanted = CommsCallGrouping.key(phone)
         if let wanted, let existing = threads.first(where: { $0.channel == .sms && CommsCallGrouping.key($0.phone) == wanted }) {
-            if existing.flags.place != .inbox {
+            if existing.flags.place != .inbox && !storageBlocked {
                 patch(existing.id) { $0.flags.archivedAt = nil; $0.flags.binnedAt = nil }
             }
             return existing.id
         }
+        guard canMutate else { return nil }
         let name = contactName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let thread = CommsLocalThread(id: "t-\(UUID().uuidString.lowercased())", contactName: (name?.isEmpty == false ? name! : phone),
                                       phone: phone, email: nil, channel: .sms, subject: nil, unread: false,
@@ -301,9 +316,10 @@ final class CommsLocalStore: ObservableObject {
     // MARK: Texts
 
     func setComposing(_ id: String, _ body: String) {
-        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }), threads[index].composing != body else { return }
-        threads[index].composing = body
-        save()
+        let composing: String? = body.isEmpty ? nil : body
+        guard isActive, let index = threads.firstIndex(where: { $0.id == id }), threads[index].composing != composing else { return }
+        threads[index].composing = composing
+        if !storageBlocked { save() }
     }
 
     /// web commitDraft: the text lands as a Draft, or Queued with the time it was scheduled for.
@@ -314,7 +330,12 @@ final class CommsLocalStore: ObservableObject {
         let message = CommsLocalMessage(id: UUID().uuidString.lowercased(), channel: .sms, direction: .outbound, at: stamp, body: text,
                                         status: scheduledAt == nil ? .draft : .queued,
                                         scheduledAt: scheduledAt.map { ISO8601DateFormatter().string(from: $0) })
-        patch(id) { $0.messages.append(message); $0.composing = nil }
+        var candidate = threads
+        guard let index = candidate.firstIndex(where: { $0.id == id }) else { return false }
+        candidate[index].messages.append(message)
+        candidate[index].composing = nil
+        guard save(threads: candidate) else { return false }
+        threads = candidate
         return true
     }
 
@@ -331,8 +352,9 @@ final class CommsLocalStore: ObservableObject {
     func discardDraft(_ threadID: String, messageID: String) {
         guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return }
         if thread.messages.count == 1 && thread.channel == .email {
-            threads.removeAll { $0.id == threadID }
-            save()
+            let candidate = threads.filter { $0.id != threadID }
+            guard save(threads: candidate) else { return }
+            threads = candidate
         } else {
             patch(threadID) { $0.messages.removeAll { $0.id == messageID } }
         }
@@ -420,19 +442,23 @@ final class CommsLocalStore: ObservableObject {
 
     // MARK: Canned replies
 
-    func saveCannedReply(name: String, body: String) {
-        guard canMutate else { return }
+    @discardableResult func saveCannedReply(name: String, body: String) -> Bool {
+        guard canMutate else { return false }
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else { return false }
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        cannedReplies.append(.init(id: UUID().uuidString.lowercased(), name: title.isEmpty ? String(text.prefix(28)) : title, body: text))
-        save()
+        var candidate = cannedReplies
+        candidate.append(.init(id: UUID().uuidString.lowercased(), name: title.isEmpty ? String(text.prefix(28)) : title, body: text))
+        guard save(replies: candidate) else { return false }
+        cannedReplies = candidate
+        return true
     }
 
     func deleteCannedReply(_ id: String) {
         guard canMutate else { return }
-        cannedReplies.removeAll { $0.id == id }
-        save()
+        let candidate = cannedReplies.filter { $0.id != id }
+        guard save(replies: candidate) else { return }
+        cannedReplies = candidate
     }
 
     // MARK: Marks (texts, email and call threads alike)
@@ -441,21 +467,24 @@ final class CommsLocalStore: ObservableObject {
         thread(id)?.flags ?? callFlags[id] ?? CommsThreadFlags()
     }
 
-    private func setFlags(_ id: String, _ change: (inout CommsThreadFlags) -> Void) {
-        guard canMutate else { return }
+    @discardableResult private func setFlags(_ id: String, _ change: (inout CommsThreadFlags) -> Void) -> Bool {
+        guard canMutate else { return false }
         if thread(id) != nil {
-            patch(id) { change(&$0.flags) }
+            return patch(id) { change(&$0.flags) }
         } else {
             var flags = callFlags[id] ?? CommsThreadFlags()
             change(&flags)
-            callFlags[id] = flags
-            save()
+            var candidate = callFlags
+            candidate[id] = flags
+            guard save(flags: candidate) else { return false }
+            callFlags = candidate
+            return true
         }
     }
 
     func toggleStar(_ id: String) { let stamp = stamp; setFlags(id) { $0.starredAt = $0.starredAt == nil ? stamp : nil } }
-    func archive(_ id: String) { let stamp = stamp; setFlags(id) { $0.archivedAt = stamp; $0.binnedAt = nil } }
-    func bin(_ id: String) { let stamp = stamp; setFlags(id) { $0.binnedAt = stamp } }
+    @discardableResult func archive(_ id: String) -> Bool { let stamp = stamp; return setFlags(id) { $0.archivedAt = stamp; $0.binnedAt = nil } }
+    @discardableResult func bin(_ id: String) -> Bool { let stamp = stamp; return setFlags(id) { $0.binnedAt = stamp } }
     /// Back to the inbox from Archive or Bin.
     func moveToInbox(_ id: String) { setFlags(id) { $0.archivedAt = nil; $0.binnedAt = nil } }
 
@@ -466,8 +495,10 @@ final class CommsLocalStore: ObservableObject {
     /// Opening a call thread reads it; the calls' own seen marks take over again.
     func clearCallUnread(_ id: String) {
         guard canMutate, callFlags[id]?.unread != nil else { return }
-        callFlags[id]?.unread = nil
-        save()
+        var candidate = callFlags
+        candidate[id]?.unread = nil
+        guard save(flags: candidate) else { return }
+        callFlags = candidate
     }
 
     // MARK: Screenshots
@@ -479,14 +510,16 @@ final class CommsLocalStore: ObservableObject {
         func at(_ minutesAgo: Double) -> String { ISO8601DateFormatter().string(from: base.addingTimeInterval(-minutesAgo * 60)) }
         threads = [
             CommsLocalThread(id: "t-preview-text", contactName: "Danielle Marlowe", phone: "(555) 010-0144", email: nil, channel: .sms,
-                             subject: nil, unread: true, flags: CommsThreadFlags(), messages: [
+                             subject: nil, unread: !ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-read-text"), flags: CommsThreadFlags(), messages: [
                                 .init(id: "m-preview-1", channel: .sms, direction: .outbound, at: at(190), body: "Hi Danielle, this is Acme HVAC confirming tomorrow 9\u{2013}11 a.m.", status: .draft),
                                 .init(id: "m-preview-2", channel: .sms, direction: .inbound, at: at(42), body: "Thanks! Can the tech text when they're 20 minutes out?", status: .received),
                              ], composing: nil),
             CommsLocalThread(id: "t-preview-email", contactName: "ops@harborviewhoa.com", phone: "", email: "ops@harborviewhoa.com", channel: .email,
                              subject: "Quarterly filter changes", unread: false, flags: CommsThreadFlags(), messages: [
                                 .init(id: "m-preview-3", channel: .email, direction: .outbound, at: at(300),
-                                      body: "Hello,\n\nWe can do all twelve units on the 14th. I've attached the visit plan.\n\nThanks,\nAcme HVAC",
+                                      body: ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-long-thread")
+                                        ? String(repeating: "Service details for the next visit. ", count: 80)
+                                        : "Hello,\n\nWe can do all twelve units on the 14th. I've attached the visit plan.\n\nThanks,\nAcme HVAC",
                                       status: .queued, subject: "Quarterly filter changes", to: ["ops@harborviewhoa.com"]),
                              ], composing: nil),
         ]

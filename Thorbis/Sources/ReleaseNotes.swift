@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-14-text-draft-recovery",
+            date: "2026-11-14",
+            highlights: [
+                .init(symbol: "doc.on.doc", title: "Keep text when saving fails",
+                      detail: "If a text draft can't be saved on this device, copy your words before closing."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-13-savings-label",
             date: "2026-11-13",
             highlights: [

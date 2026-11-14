@@ -18,14 +18,24 @@ final class InboxTextPresenter: ObservableObject {
     }
 
     @Published var opening: Opening?
+    @Published var storageUnavailable = false
     /// Who is signed in, set by the root; nil while no workspace is open.
     fileprivate var identity: (actorID: String, organizationID: String)?
+
+    func bind(actorID: String, organizationID: String) {
+        identity = (actorID, organizationID)
+    }
 
     /// False when there is no workspace to keep the conversation in; the caller falls back.
     func open(phone: String, name: String?) -> Bool {
         guard let identity, CommsCallGrouping.key(phone) != nil else { return false }
         let store = CommsLocalStore.shared(actorID: identity.actorID, organizationID: identity.organizationID)
-        guard let threadID = store.threadForPhone(phone, contactName: name) else { return false }
+        guard let threadID = store.threadForPhone(phone, contactName: name) else {
+            // An active workspace must not silently switch to the system Messages app
+            // just because its local inbox is unavailable.
+            storageUnavailable = true
+            return true
+        }
         opening = Opening(id: threadID,
                           actorID: identity.actorID, organizationID: identity.organizationID)
         return true
@@ -63,7 +73,12 @@ private struct InboxTextPresenterModifier: ViewModifier {
             .onAppear { bind() }
             .onChange(of: session.user?.id) { _, _ in bind() }
             .onChange(of: session.activeOrganization?.id) { _, _ in bind() }
-            .onDisappear { presenter.identity = nil; presenter.opening = nil }
+            .onDisappear { presenter.identity = nil; presenter.opening = nil; presenter.storageUnavailable = false }
+            .alert("Couldn't open text", isPresented: $presenter.storageUnavailable) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Your inbox on this device isn't available. Copy unsaved work before restarting the app, then check saved messages.")
+            }
             .sheet(item: $presenter.opening) { opening in
                 NavigationStack {
                     CommsLocalThreadView(threadID: opening.id,
@@ -83,7 +98,7 @@ private struct InboxTextPresenterModifier: ViewModifier {
 
     private func bind() {
         if let actor = session.user?.id, let org = session.activeOrganization?.id {
-            presenter.identity = (actor, org)
+            presenter.bind(actorID: actor, organizationID: org)
         } else {
             presenter.identity = nil
         }
