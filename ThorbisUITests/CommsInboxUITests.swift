@@ -4,6 +4,73 @@ import XCTest
 /// as a draft (it never sends).
 @MainActor
 final class CommsInboxUITests: XCTestCase {
+    func testFailedDiscardKeepsSingleDraftOpen() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-storage-failure", "--paper-preview-email-single-draft"])
+        let thread = app.buttons["inbox-local-t-preview-email"]
+        XCTAssertTrue(thread.waitForExistence(timeout: 20), app.debugDescription); thread.tap()
+        let options = app.buttons["Options for this email"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 10)); options.tap()
+        let discard = app.buttons["Discard draft"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.tap()
+        XCTAssertTrue(options.waitForExistence(timeout: 10), "A failed discard must not close the draft")
+        XCTAssertTrue(app.staticTexts["inbox-thread-storage-error"].exists)
+    }
+
+    func testStartingNewTextWhenStorageBlockedExplainsFailure() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-section", "texts", "--paper-preview-inbox-storage-failure", "--paper-preview-inbox-force-blocked"])
+        let compose = app.buttons["New text"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20), app.debugDescription); compose.tap()
+        let phone = app.textFields["inbox-new-text-phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 10)); phone.tap(); phone.typeText("5550100999")
+        app.buttons["Start text"].tap()
+        XCTAssertTrue(app.staticTexts["inbox-new-text-storage-error"].waitForExistence(timeout: 10))
+        XCTAssertTrue((phone.value as? String)?.contains("5550100999") == true)
+    }
+
+    func testSuccessfulDiscardClosesSingleDraft() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-email-single-draft"])
+        let thread = app.buttons["inbox-local-t-preview-email"]
+        XCTAssertTrue(thread.waitForExistence(timeout: 20), app.debugDescription); thread.tap()
+        let options = app.buttons["Options for this email"].firstMatch
+        XCTAssertTrue(options.waitForExistence(timeout: 10)); options.tap()
+        let discard = app.buttons["Discard draft"]
+        XCTAssertTrue(discard.waitForExistence(timeout: 10)); discard.tap()
+        XCTAssertTrue(options.waitForNonExistence(timeout: 10), "A successfully discarded last draft should close")
+        XCTAssertFalse(thread.exists)
+    }
+
+    func testBlockedStoreStillOpensExistingTextForRecovery() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-section", "texts", "--paper-preview-inbox-storage-failure", "--paper-preview-inbox-force-blocked"])
+        let compose = app.buttons["New text"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20), app.debugDescription); compose.tap()
+        let phone = app.textFields["inbox-new-text-phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 10)); phone.tap(); phone.typeText("5550100144")
+        app.buttons["Start text"].tap()
+        let field = app.descendants(matching: .any)["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        XCTAssertTrue((field.value as? String)?.contains("Unsaved preview text") == true)
+    }
+
+    func testFirstWriteFailureOpensUnsavedTextWithRecoveryWarning() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-section", "texts", "--paper-preview-inbox-storage-failure"])
+        let compose = app.buttons["New text"].firstMatch
+        XCTAssertTrue(compose.waitForExistence(timeout: 20), app.debugDescription); compose.tap()
+        let phone = app.textFields["inbox-new-text-phone"]
+        XCTAssertTrue(phone.waitForExistence(timeout: 10)); phone.tap(); phone.typeText("5550100999")
+        app.buttons["Start text"].tap()
+        let field = app.descendants(matching: .any)["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["inbox-text-storage-error"].waitForExistence(timeout: 10))
+        field.tap(); field.typeText("Keep these words")
+        XCTAssertTrue((field.value as? String)?.contains("Keep these words") == true)
+        XCTAssertTrue(app.buttons["inbox-text-copy-unsaved"].exists)
+    }
+
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "inbox"] + extra

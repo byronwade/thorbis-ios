@@ -235,6 +235,9 @@ final class CommsLocalStore: ObservableObject {
                 store = CommsLocalStore(file: nil)
             }
             store.seedPreview()
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-force-blocked") {
+                store.setComposing("t-preview-text", "Unsaved preview text")
+            }
             stores[key] = store
             return store
         }
@@ -349,14 +352,15 @@ final class CommsLocalStore: ObservableObject {
     }
 
     /// Discards a draft message. A conversation that was only ever that draft goes with it.
-    func discardDraft(_ threadID: String, messageID: String) {
-        guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return }
+    @discardableResult func discardDraft(_ threadID: String, messageID: String) -> Bool {
+        guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return false }
         if thread.messages.count == 1 && thread.channel == .email {
             let candidate = threads.filter { $0.id != threadID }
-            guard save(threads: candidate) else { return }
+            guard save(threads: candidate) else { return false }
             threads = candidate
+            return true
         } else {
-            patch(threadID) { $0.messages.removeAll { $0.id == messageID } }
+            return patch(threadID) { $0.messages.removeAll { $0.id == messageID } }
         }
     }
 
@@ -520,7 +524,8 @@ final class CommsLocalStore: ObservableObject {
                                       body: ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-long-thread")
                                         ? String(repeating: "Service details for the next visit. ", count: 80)
                                         : "Hello,\n\nWe can do all twelve units on the 14th. I've attached the visit plan.\n\nThanks,\nAcme HVAC",
-                                      status: .queued, subject: "Quarterly filter changes", to: ["ops@harborviewhoa.com"]),
+                                      status: ProcessInfo.processInfo.arguments.contains("--paper-preview-email-single-draft") ? .draft : .queued,
+                                      subject: "Quarterly filter changes", to: ["ops@harborviewhoa.com"]),
                              ], composing: nil),
         ]
     }
