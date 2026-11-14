@@ -115,22 +115,58 @@ struct ContactCardDraft: Equatable {
 
 /// An email the person writes and sends from their own account.
 struct MailDraft: Equatable {
-    var recipient: String
-    var subject: String?
+    let recipients: [String]
+    let cc: [String]
+    let bcc: [String]
+    let subject: String?
+    let body: String?
+    var recipient: String { recipients[0] }
 
     init?(recipient: String?, subject: String? = nil) {
-        let address = recipient?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard address.contains("@"), !address.contains(where: \.isWhitespace) else { return nil }
-        self.recipient = address
-        self.subject = subject?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        guard let recipient else { return nil }
+        self.init(recipients: [recipient], cc: [], bcc: [], subject: subject, body: nil)
     }
 
-    /// The fallback when Mail has no account: another mail app opens with the same draft.
+    init?(recipients: [String], cc: [String], bcc: [String], subject: String?, body: String?) {
+        func cleaned(_ values: [String]) -> [String]? {
+            let trimmed = values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard trimmed.allSatisfy({ $0.contains("@") && !$0.contains(where: \.isWhitespace) }) else { return nil }
+            return trimmed
+        }
+        guard let to = cleaned(recipients), !to.isEmpty, let cc = cleaned(cc), let bcc = cleaned(bcc) else { return nil }
+        self.recipients = to; self.cc = cc; self.bcc = bcc
+        self.subject = subject?.isEmpty == true ? nil : subject
+        self.body = body
+    }
+
+    init?(mailtoURL: URL) {
+        guard mailtoURL.scheme?.lowercased() == "mailto",
+              let components = URLComponents(url: mailtoURL, resolvingAgainstBaseURL: false) else { return nil }
+        let query = components.queryItems ?? []
+        let allowed = Set(["to", "cc", "bcc", "subject", "body"])
+        guard query.allSatisfy({ allowed.contains($0.name.lowercased()) }),
+              query.filter({ $0.name.lowercased() == "subject" }).count <= 1,
+              query.filter({ $0.name.lowercased() == "body" }).count <= 1 else { return nil }
+        func addresses(_ name: String) -> [String] {
+            query.filter { $0.name.lowercased() == name }.flatMap { ($0.value ?? "").split(separator: ",").map(String.init) }
+        }
+        let path = components.path.split(separator: ",").map(String.init)
+        self.init(recipients: path + addresses("to"), cc: addresses("cc"), bcc: addresses("bcc"),
+                  subject: query.first { $0.name.lowercased() == "subject" }?.value,
+                  body: query.first { $0.name.lowercased() == "body" }?.value)
+    }
+
+    /// Another mail app can open the same draft when the system composer is unavailable.
     var mailtoURL: URL? {
         var components = URLComponents()
         components.scheme = "mailto"
-        components.path = recipient
-        if let subject { components.queryItems = [URLQueryItem(name: "subject", value: subject)] }
+        components.path = recipients.joined(separator: ",")
+        var query: [URLQueryItem] = []
+        if !cc.isEmpty { query.append(URLQueryItem(name: "cc", value: cc.joined(separator: ","))) }
+        if !bcc.isEmpty { query.append(URLQueryItem(name: "bcc", value: bcc.joined(separator: ","))) }
+        if let subject { query.append(URLQueryItem(name: "subject", value: subject)) }
+        if let body { query.append(URLQueryItem(name: "body", value: body)) }
+        if !query.isEmpty { components.queryItems = query }
         return components.url
     }
 }
@@ -157,13 +193,14 @@ enum DeviceHandoff: Identifiable {
 extension View {
     /// Presents Calendar, Contacts and Mail hand-offs set on `request`. Calendar asks for
     /// add-only access first; a denial explains itself and offers Settings.
-    func deviceHandoffs(_ request: Binding<DeviceHandoff?>) -> some View {
-        modifier(DeviceHandoffPresenter(request: request))
+    func deviceHandoffs(_ request: Binding<DeviceHandoff?>, isCurrent: @escaping @MainActor () -> Bool = { true }) -> some View {
+        modifier(DeviceHandoffPresenter(request: request, isCurrent: isCurrent))
     }
 }
 
 private struct DeviceHandoffPresenter: ViewModifier {
     @Binding var request: DeviceHandoff?
+    let isCurrent: @MainActor () -> Bool
     @State private var presented: DeviceHandoff?
     @State private var calendarDenied = false
     @Environment(\.openURL) private var openURL
@@ -179,7 +216,24 @@ private struct DeviceHandoffPresenter: ViewModifier {
                 switch handoff {
                 case .calendar(let draft): CalendarEventEditor(draft: draft).ignoresSafeArea()
                 case .contact(let draft): ContactCardEditor(draft: draft).ignoresSafeArea()
-                case .mail(let draft): MailComposer(draft: draft).ignoresSafeArea()
+                case .mail(let draft):
+                    #if DEBUG
+                    if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-mail-handoff-test") {
+                        VStack(spacing: 12) {
+                            Text("Mail handoff preview").accessibilityIdentifier("mail-handoff-preview")
+                            Text(draft.recipients.joined(separator: ", ")).accessibilityIdentifier("mail-handoff-to")
+                            Text(draft.cc.joined(separator: ", ")).accessibilityIdentifier("mail-handoff-cc")
+                            Text(draft.bcc.joined(separator: ", ")).accessibilityIdentifier("mail-handoff-bcc")
+                            Text(draft.subject ?? "").accessibilityIdentifier("mail-handoff-subject")
+                            Text(draft.body ?? "").accessibilityIdentifier("mail-handoff-body")
+                            Button("Close Mail preview") { presented = nil }
+                        }.padding()
+                    } else {
+                        MailComposer(draft: draft).ignoresSafeArea()
+                    }
+                    #else
+                    MailComposer(draft: draft).ignoresSafeArea()
+                    #endif
                 }
             }
             .thorbisConfirm("Calendar access is off",
@@ -192,10 +246,16 @@ private struct DeviceHandoffPresenter: ViewModifier {
 
     @MainActor
     private func route(_ handoff: DeviceHandoff) async {
+        guard isCurrent() else { return }
         switch handoff {
         case .calendar:
             if await CalendarAccess.requestAddOnly() { presented = handoff } else { calendarDenied = true }
         case .mail(let draft):
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-mail-handoff-test") {
+                presented = handoff; return
+            }
+            #endif
             if MFMailComposeViewController.canSendMail() {
                 presented = handoff
             } else if let url = draft.mailtoURL {
@@ -274,8 +334,11 @@ private struct MailComposer: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> MFMailComposeViewController {
         let controller = MFMailComposeViewController()
-        controller.setToRecipients([draft.recipient])
+        controller.setToRecipients(draft.recipients)
+        if !draft.cc.isEmpty { controller.setCcRecipients(draft.cc) }
+        if !draft.bcc.isEmpty { controller.setBccRecipients(draft.bcc) }
         if let subject = draft.subject { controller.setSubject(subject) }
+        if let body = draft.body { controller.setMessageBody(body, isHTML: false) }
         controller.mailComposeDelegate = context.coordinator
         return controller
     }

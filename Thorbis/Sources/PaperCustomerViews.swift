@@ -23,6 +23,7 @@ struct CustomersView: View {
     @State private var newJobFor: Customer?
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
     @State private var newName = ""
     @State private var selectedView = CustomerListScope.recent.rawValue
     @State private var stateFilter = "Any state"
@@ -314,6 +315,7 @@ struct CustomerDetailView: View {
     @State private var visiblePastCount = CustomerJobHistory.initialCount
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
 
     /// Overview | Jobs · N | Money: the page's one selector row.
     private var jobsLabel: String { session.can("job.view", feature: "jobs") ? "Jobs · \(jobs.count)" : "Jobs" }
@@ -496,7 +498,7 @@ struct CustomerDetailView: View {
             PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
             PaperLabeledCircle(symbol: "message", title: "Text") { inboxText(text, name: customer.name, openURL: openURL) }
         }
-        if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { handoff = .mail(mail) } }
+        if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { inboxEmail(mail, context: "customer:\(customer.id)") } }
         if let directionsURL {
             PaperLabeledCircle(symbol: "arrow.triangle.turn.up.right.diamond", title: "Directions",
                                accessibilityLabel: "Directions in Maps") { openURL(directionsURL) }
@@ -579,7 +581,7 @@ struct CustomerDetailView: View {
                         detailLine("Phone") { ContactActions(phone: phone, email: nil) }
                     }
                     if let email = record.email, !email.isEmpty, !CustomerFacts.email(email, isIn: contacts.compactMap(\.email)) {
-                        detailLine("Email") { ContactActions(phone: nil, email: email) }
+                        detailLine("Email") { ContactActions(phone: nil, email: email, emailContext: "customer:\(customer.id)") }
                     }
                     if let industry = record.industry { detailLine("Industry") { Text(industry) } }
                     if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
@@ -697,7 +699,7 @@ struct CustomerDetailView: View {
             if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { inboxText(text, name: contact.name, openURL: openURL) }) }
         }
         if let mail = MailDraft(recipient: contact.email) {
-            items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
+            items.append(ThorbisMenuItem("Email", icon: "envelope") { inboxEmail(mail, context: "customer:\(customer.id):contact:\(contact.id)") })
         }
         items.append(ThorbisMenuItem("Save to Contacts", icon: "person.crop.circle.badge.plus") {
             handoff = .contact(ContactCardDraft.make(contact: contact, customerName: record?.name ?? customer.name, address: record?.address))
@@ -1407,8 +1409,11 @@ struct CustomerDetailView: View {
 }
 
 private struct CustomerContactIcon: View {
+    @Environment(\.openURL) private var openURL
+    @Environment(\.inboxEmail) private var inboxEmail
     let value: String
     let isPhone: Bool
+    let emailContext: String
     var size: CGFloat = 30
     private var url: URL? {
         let address = isPhone ? value.filter { $0.isNumber || $0 == "+" } : value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
@@ -1417,7 +1422,9 @@ private struct CustomerContactIcon: View {
     }
     var body: some View {
         if let url {
-            Link(destination: url) {
+            Button {
+                if isPhone { openURL(url) } else { inboxEmail(url, context: emailContext) }
+            } label: {
                 Image(systemName: isPhone ? "phone" : "envelope").font(Theme.font(size == 46 ? 17 : 13)).foregroundStyle(Theme.foreground)
                     .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15, style: .continuous))
                     .frame(width: 44, height: 44).contentShape(Rectangle())

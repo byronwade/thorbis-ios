@@ -1,5 +1,7 @@
 import Foundation
 import SwiftUI
+import Security
+import CryptoKit
 
 // The Inbox's texts and email, as the web beta has them today (apps/web features/inbox/store.ts):
 // conversations, drafts and canned replies live on this device, per person and workspace. No text
@@ -587,4 +589,79 @@ enum CommsInboxScope {
             }
         }.map(\.item)
     }
+}
+
+
+/// Device-only recovery for an in-progress email, isolated by workspace and original recipient context.
+struct CommsEmailRecoveryScope: Equatable {
+    let account: String
+    @MainActor init?(actorID: String, organizationID: String, origin: String, context: String, namespace: String? = nil) {
+        guard let actor = UUID(uuidString: actorID), let organization = UUID(uuidString: organizationID),
+              let canonicalOrigin = APIClient.normalizedOrigin(origin), canonicalOrigin == origin, !context.isEmpty,
+              let encoded = try? JSONEncoder().encode([canonicalOrigin, actor.uuidString.lowercased(), organization.uuidString.lowercased(),
+                                                        context.lowercased(), namespace ?? ""]) else { return nil }
+        account = SHA256.hash(data: encoded).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+struct CommsEmailRecovery: Codable, Equatable {
+    var to: String
+    var cc: String
+    var bcc: String
+    var subject: String
+    var body: String
+    init(_ draft: CommsMailDraft) {
+        to = draft.to; cc = draft.cc; bcc = draft.bcc; subject = draft.subject; body = draft.body
+    }
+    func applying(to draft: inout CommsMailDraft) {
+        draft.to = to; draft.cc = cc; draft.bcc = bcc; draft.subject = subject; draft.body = body
+    }
+}
+
+@MainActor
+protocol CommsEmailRecoveryStoring {
+    func load(scope: CommsEmailRecoveryScope) throws -> CommsEmailRecovery?
+    func save(_ value: CommsEmailRecovery, scope: CommsEmailRecoveryScope) throws
+    func remove(scope: CommsEmailRecoveryScope) throws
+}
+
+@MainActor
+final class KeychainCommsEmailRecoveryStore: CommsEmailRecoveryStoring {
+    static let shared = KeychainCommsEmailRecoveryStore()
+    private let service = "com.thorbis.field.inbox-email-recovery"
+    private func query(_ scope: CommsEmailRecoveryScope) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: scope.account]
+    }
+    func load(scope: CommsEmailRecoveryScope) throws -> CommsEmailRecovery? {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-recovery-load-fails") { throw RecoveryError.keychain(errSecNotAvailable) }
+        #endif
+        var item = query(scope); item[kSecReturnData as String] = true; item[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(item as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess, let data = result as? Data else { throw RecoveryError.keychain(status) }
+        return try JSONDecoder().decode(CommsEmailRecovery.self, from: data)
+    }
+    func save(_ value: CommsEmailRecovery, scope: CommsEmailRecoveryScope) throws {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-recovery-write-fails") { throw RecoveryError.keychain(errSecNotAvailable) }
+        #endif
+        let identity = query(scope); let data = try JSONEncoder().encode(value)
+        let status = SecItemUpdate(identity as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+        if status == errSecItemNotFound {
+            var item = identity; item[kSecValueData as String] = data
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let added = SecItemAdd(item as CFDictionary, nil)
+            guard added == errSecSuccess else { throw RecoveryError.keychain(added) }
+        } else if status != errSecSuccess { throw RecoveryError.keychain(status) }
+    }
+    func remove(scope: CommsEmailRecoveryScope) throws {
+        #if DEBUG
+        if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-recovery-remove-fails") { throw RecoveryError.keychain(errSecNotAvailable) }
+        #endif
+        let status = SecItemDelete(query(scope) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else { throw RecoveryError.keychain(status) }
+    }
+    private enum RecoveryError: Error { case keychain(OSStatus) }
 }

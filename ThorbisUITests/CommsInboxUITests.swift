@@ -37,6 +37,159 @@ final class CommsInboxUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
+    func testCustomerEmailOpensPreaddressedThorbisComposer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer"]
+        app.launch()
+        let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        XCTAssertEqual(to.value as? String, "danielle@example.invalid")
+        XCTAssertTrue(app.buttons["Send with Mail"].exists)
+        XCTAssertTrue(app.buttons["Save draft"].exists)
+    }
+
+    func testJobEmailOpensPreaddressedInboxComposer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job"]
+        app.launch()
+        let actions = app.buttons["Job actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 20)); actions.tap()
+        let email = app.buttons["Email customer"]
+        XCTAssertTrue(email.waitForExistence(timeout: 10)); email.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        XCTAssertEqual(to.value as? String, "danielle@example.invalid")
+        XCTAssertEqual(app.textFields["inbox-mail-subject"].value as? String, "AC not cooling")
+    }
+
+    func testContactEmailOpensPreaddressedInboxComposer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-scroll", "center"]
+        app.launch()
+        let actions = app.buttons["Contact actions for Danielle Marlowe"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 20))
+        for _ in 0..<8 where !actions.isHittable { app.swipeUp() }
+        XCTAssertTrue(actions.isHittable); actions.tap()
+        let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 10)); email.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10))
+        XCTAssertEqual(to.value as? String, "danielle@example.invalid")
+    }
+
+    func testReplacingSessionClosesCustomerEmailComposer() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-email-session-replace"]
+        app.launch()
+        let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10)); body.tap(); body.typeText("Private customer details")
+        let replace = app.buttons["inbox-mail-replace-session"]
+        for _ in 0..<6 where !replace.isHittable { app.swipeDown() }
+        XCTAssertTrue(replace.isHittable); replace.tap()
+        XCTAssertTrue(body.waitForNonExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["Private customer details"].exists)
+        let reopen = app.buttons["Email"].firstMatch
+        XCTAssertTrue(reopen.waitForExistence(timeout: 20)); reopen.tap()
+        let recover = app.buttons["Restore email draft"]
+        XCTAssertTrue(recover.waitForExistence(timeout: 10)); recover.tap()
+        let recoveredBody = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(recoveredBody.waitForExistence(timeout: 10))
+        XCTAssertEqual(recoveredBody.value as? String, "Private customer details")
+    }
+
+    func testCustomerEmailDraftSurvivesAppTermination() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-email-recovery-namespace", UUID().uuidString]
+        app.launch()
+        let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10)); body.tap(); body.typeText("Unfinished job note")
+        app.terminate(); app.launch()
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let restore = app.buttons["Restore email draft"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 10)); restore.tap()
+        XCTAssertTrue(body.waitForExistence(timeout: 10))
+        XCTAssertEqual(body.value as? String, "Unfinished job note")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5)); app.buttons["Discard changes"].tap()
+    }
+
+    func testEmailRecoveryWriteFailureIsVisible() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-email-recovery-write-fails"]
+        app.launch(); let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10)); body.tap(); body.typeText("Draft")
+        XCTAssertTrue(app.staticTexts["This draft could not be protected. Copy it before leaving this screen."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Copy email"].exists)
+    }
+
+    func testEmailRecoveryLoadFailureBlocksEditing() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-email-recovery-load-fails"]
+        app.launch(); let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10)); XCTAssertFalse(to.isEnabled)
+        XCTAssertTrue(app.buttons["Retry recovery"].exists)
+        XCTAssertFalse(app.buttons["Send with Mail"].isEnabled)
+    }
+
+    func testEmailRecoveryCleanupFailurePreventsDuplicateSave() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-email-recovery-remove-fails"]
+        app.launch(); let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10)); body.tap(); body.typeText("Draft")
+        let save = app.buttons["Save draft"]
+        for _ in 0..<6 where !save.isHittable { app.swipeUp() }
+        XCTAssertTrue(save.isHittable); save.tap()
+        XCTAssertTrue(app.buttons["Close saved email"].waitForExistence(timeout: 10))
+        XCTAssertFalse(save.isEnabled)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Your email was saved")).firstMatch.exists)
+    }
+
+    func testSendWithMailPreservesFieldsAndReturnsToDraft() {
+        continueAfterFailure = false
+        let app = launch(["--paper-preview-inbox-section", "email", "--paper-preview-mail-handoff-test"])
+        app.buttons["New email"].firstMatch.tap()
+        let to = app.textFields["inbox-mail-to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 10)); to.tap(); to.typeText("customer@example.com")
+        app.buttons["Add Cc or Bcc"].tap()
+        let cc = app.textFields["inbox-mail-cc"]; XCTAssertTrue(cc.waitForExistence(timeout: 5)); cc.tap(); cc.typeText("copy@example.com")
+        let bcc = app.textFields["inbox-mail-bcc"]; bcc.tap(); bcc.typeText("private@example.com")
+        let subject = app.textFields["inbox-mail-subject"]; subject.tap(); subject.typeText("Visit")
+        let body = app.textFields["inbox-mail-body"]; body.tap(); body.typeText("Please review")
+        let send = app.buttons["Send with Mail"]
+        for _ in 0..<6 where !send.isHittable { app.swipeUp() }
+        XCTAssertTrue(send.isHittable && send.isEnabled); send.tap()
+        XCTAssertTrue(app.staticTexts["mail-handoff-preview"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["mail-handoff-to"].label, "customer@example.com")
+        XCTAssertEqual(app.staticTexts["mail-handoff-cc"].label, "copy@example.com")
+        XCTAssertEqual(app.staticTexts["mail-handoff-bcc"].label, "private@example.com")
+        XCTAssertEqual(app.staticTexts["mail-handoff-subject"].label, "Visit")
+        XCTAssertEqual(app.staticTexts["mail-handoff-body"].label, "Please review")
+        app.buttons["Close Mail preview"].tap()
+        XCTAssertTrue(body.waitForExistence(timeout: 10))
+        XCTAssertEqual(body.value as? String, "Please review")
+        XCTAssertFalse(app.staticTexts["Sent"].exists)
+    }
+
     func testSwitchToCallsAndOpenACallersThread() {
         let app = launch()
         choose(app, menu: "inbox-section-menu", row: "Calls")

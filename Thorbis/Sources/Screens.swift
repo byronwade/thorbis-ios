@@ -65,15 +65,17 @@ struct CustomerPickerSheet: View {
 }
 
 struct ContactActions: View {
+    @Environment(\.inboxEmail) private var inboxEmail
     let phone: String?
     let email: String?
+    var emailContext: String? = nil
     var body: some View {
         if let phone, !phone.isEmpty {
             let number = phone.filter { $0.isNumber || $0 == "+" }
             if let url = URL(string: "tel:" + number) { Link(destination: url) { Label(phone, systemImage: "phone").frame(minHeight: 44) } }
         }
-        if let email, let encoded = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), let url = URL(string: "mailto:" + encoded) {
-            Link(destination: url) { Label(email, systemImage: "envelope").frame(minHeight: 44) }
+        if let email, let emailContext, let encoded = email.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), let url = URL(string: "mailto:" + encoded) {
+            Button { inboxEmail(url, context: emailContext) } label: { Label(email, systemImage: "envelope").frame(minHeight: 44) }
         }
     }
 }
