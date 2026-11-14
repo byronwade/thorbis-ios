@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import XCTest
 import Security
 @testable import Thorbis
@@ -720,4 +721,207 @@ final class PriceBookCatalogTests: XCTestCase {
             .appendingPathComponent("PriceBook", isDirectory: true).appendingPathComponent("\(org).json")
     }
     private func removeOwnCache(_ org: String) { try? FileManager.default.removeItem(at: cacheURL(org)) }
+}
+
+// Isolated experiment only: these types are compiled into the test target, never the app.
+private struct LeasePrototypeScope: Codable, Hashable {
+    let actor: String
+    let organization: String
+    let origin: String
+    let generation: String
+}
+
+@MainActor
+final class PriceBookOfflineLeasePrototypeTests: XCTestCase {
+    private let scope = LeasePrototypeScope(actor: "actor", organization: "org", origin: "https://example.test", generation: "1")
+    private let now = Date(timeIntervalSince1970: 1000)
+
+    private func fixture() throws -> LeasePrototypeStore {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lease-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        return LeasePrototypeStore(root: root)
+    }
+
+    func testCompleteAuthorizedSnapshotSurvivesReopeningButExpires() throws {
+        let store = try fixture()
+        let coordinator = LeasePrototype(store: store)
+        let token = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(token, payload: Data("catalog".utf8), deadline: now.addingTimeInterval(30), now: now))
+        XCTAssertEqual(LeasePrototype(store: store).read(scope, now: now), Data("catalog".utf8))
+        XCTAssertNil(LeasePrototype(store: store).read(scope, now: now.addingTimeInterval(30)))
+    }
+
+    func testDirtyBarrierSurvivesRestartAndDenial() throws {
+        let store = try fixture()
+        let coordinator = LeasePrototype(store: store)
+        let first = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(first, payload: Data("old".utf8), deadline: now.addingTimeInterval(30), now: now))
+        _ = try XCTUnwrap(coordinator.begin(scope)) // A denial or crash occurs after request starts.
+        XCTAssertNil(LeasePrototype(store: store).read(scope, now: now))
+    }
+
+    func testFailedBarrierDoesNotPermitRequestAndUncertainWriteStaysDirty() throws {
+        let store = try fixture()
+        let coordinator = LeasePrototype(store: store)
+        let first = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(first, payload: Data("old".utf8), deadline: now.addingTimeInterval(30), now: now))
+        store.failure = .beforeLease
+        XCTAssertNil(coordinator.begin(scope), "Caller must not start the request when the barrier fails")
+        XCTAssertEqual(LeasePrototype(store: store).read(scope, now: now), Data("old".utf8))
+        store.failure = .afterLease
+        XCTAssertNil(coordinator.begin(scope))
+        XCTAssertNil(LeasePrototype(store: store).read(scope, now: now))
+    }
+
+    func testSnapshotOrCleanWriteFailureCannotRestoreOfflineData() throws {
+        for failure in [LeasePrototypeStore.Failure.beforeSnapshot, .afterSnapshot, .beforeLease] {
+            let store = try fixture()
+            let coordinator = LeasePrototype(store: store)
+            let token = try XCTUnwrap(coordinator.begin(scope))
+            store.failure = failure
+            XCTAssertFalse(coordinator.commit(token, payload: Data("new".utf8), deadline: now.addingTimeInterval(30), now: now))
+            XCTAssertNil(LeasePrototype(store: store).read(scope, now: now))
+        }
+    }
+
+    func testScopeIsolationLegacyDataAndStaleTransactions() throws {
+        let store = try fixture()
+        let coordinator = LeasePrototype(store: store)
+        try store.writeLegacy(scope, payload: Data("legacy".utf8))
+        XCTAssertNil(coordinator.read(scope, now: now))
+        let stale = try XCTUnwrap(coordinator.begin(scope))
+        let current = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertFalse(coordinator.commit(stale, payload: Data("stale".utf8), deadline: now.addingTimeInterval(30), now: now))
+        XCTAssertTrue(coordinator.commit(current, payload: Data("fresh".utf8), deadline: now.addingTimeInterval(30), now: now))
+        for other in [LeasePrototypeScope(actor: "other", organization: "org", origin: scope.origin, generation: "1"), LeasePrototypeScope(actor: "actor", organization: "other", origin: scope.origin, generation: "1"), LeasePrototypeScope(actor: "actor", organization: "org", origin: "https://other.test", generation: "1"), LeasePrototypeScope(actor: "actor", organization: "org", origin: scope.origin, generation: "2")] {
+            XCTAssertNil(coordinator.read(other, now: now))
+        }
+        XCTAssertEqual(coordinator.read(scope, now: now), Data("fresh".utf8))
+    }
+
+    func testOldSnapshotWithSamePayloadCannotMatchNewLeaseNonce() throws {
+        let store = try fixture()
+        let coordinator = LeasePrototype(store: store)
+        let first = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(first, payload: Data("same".utf8), deadline: now.addingTimeInterval(30), now: now))
+        let old = try store.snapshot(scope)
+        let second = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(second, payload: Data("same".utf8), deadline: now.addingTimeInterval(30), now: now))
+        try store.writeSnapshot(old)
+        XCTAssertNil(LeasePrototype(store: store).read(scope, now: now))
+    }
+
+    func testUncertainCleanWriteHasNoSuccessAcknowledgement() throws {
+        let store = try fixture()
+        let coordinator = LeasePrototype(store: store)
+        let token = try XCTUnwrap(coordinator.begin(scope))
+        store.failure = .afterLease
+        XCTAssertFalse(coordinator.commit(token, payload: Data("authorized".utf8), deadline: now.addingTimeInterval(30), now: now))
+        // The write may already have reached disk; this is safe only because a
+        // complete authorized response preceded it and its binding validates.
+        XCTAssertEqual(LeasePrototype(store: store).read(scope, now: now), Data("authorized".utf8))
+    }
+
+    func testMismatchedSnapshotAndInvalidDeadlineFailClosed() throws {
+        let store = try fixture()
+        let coordinator = LeasePrototype(store: store)
+        let token = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertFalse(coordinator.commit(token, payload: Data("data".utf8), deadline: now, now: now))
+        XCTAssertNil(coordinator.read(scope, now: now))
+        let valid = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(valid, payload: Data("data".utf8), deadline: now.addingTimeInterval(30), now: now))
+        try store.writeLegacy(scope, payload: Data("tampered".utf8))
+        XCTAssertNil(coordinator.read(scope, now: now))
+    }
+}
+
+private struct LeasePrototypeRecord: Codable, Equatable {
+    let scope: LeasePrototypeScope
+    let transaction: UUID
+    let nonce: UUID?
+    let digest: Data?
+    let deadline: Date?
+}
+
+private struct LeasePrototypeSnapshot: Codable {
+    let scope: LeasePrototypeScope
+    let nonce: UUID
+    let payload: Data
+}
+
+// This fixture is deliberately independent of the application's real storage.
+private final class LeasePrototypeStore {
+    enum Failure { case none, beforeLease, afterLease, beforeSnapshot, afterSnapshot }
+    enum StoreError: Error { case injected }
+    let root: URL
+    var failure: Failure = .none
+    init(root: URL) { self.root = root }
+
+    private func path(_ scope: LeasePrototypeScope, _ kind: String) throws -> URL {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let digest = SHA256.hash(data: try encoder.encode(scope)).map { String(format: "%02x", $0) }.joined()
+        return root.appendingPathComponent("\(digest)-\(kind)")
+    }
+    func lease(_ scope: LeasePrototypeScope) throws -> LeasePrototypeRecord {
+        try JSONDecoder().decode(LeasePrototypeRecord.self, from: Data(contentsOf: path(scope, "lease")))
+    }
+    func snapshot(_ scope: LeasePrototypeScope) throws -> LeasePrototypeSnapshot {
+        try JSONDecoder().decode(LeasePrototypeSnapshot.self, from: Data(contentsOf: path(scope, "snapshot")))
+    }
+    func writeLease(_ record: LeasePrototypeRecord) throws {
+        if failure == .beforeLease { throw StoreError.injected }
+        try JSONEncoder().encode(record).write(to: path(record.scope, "lease"), options: .atomic)
+        if failure == .afterLease { throw StoreError.injected }
+        guard try lease(record.scope) == record else { throw StoreError.injected }
+    }
+    func writeSnapshot(_ snapshot: LeasePrototypeSnapshot) throws {
+        if failure == .beforeSnapshot { throw StoreError.injected }
+        try JSONEncoder().encode(snapshot).write(to: path(snapshot.scope, "snapshot"), options: .atomic)
+        if failure == .afterSnapshot { throw StoreError.injected }
+        let check = try self.snapshot(snapshot.scope)
+        guard check.scope == snapshot.scope, check.nonce == snapshot.nonce, check.payload == snapshot.payload else { throw StoreError.injected }
+    }
+    func writeLegacy(_ scope: LeasePrototypeScope, payload: Data) throws {
+        try payload.write(to: path(scope, "snapshot"), options: .atomic)
+    }
+}
+
+// A caller may issue a network request only after begin returns a token. The
+// coordinator assumes one serialized owner and a complete, authorized response.
+@MainActor
+private final class LeasePrototype {
+    struct Token { let scope: LeasePrototypeScope; let id: UUID }
+    private let store: LeasePrototypeStore
+    init(store: LeasePrototypeStore) { self.store = store }
+    func begin(_ scope: LeasePrototypeScope) -> Token? {
+        let token = Token(scope: scope, id: UUID())
+        do {
+            try store.writeLease(.init(scope: scope, transaction: token.id, nonce: nil, digest: nil, deadline: nil))
+            return token
+        } catch { return nil }
+    }
+    func commit(_ token: Token, payload: Data, deadline: Date, now: Date) -> Bool {
+        guard deadline.timeIntervalSinceReferenceDate.isFinite, now.timeIntervalSinceReferenceDate.isFinite, deadline > now,
+              let lease = try? store.lease(token.scope), lease.scope == token.scope,
+              lease.transaction == token.id, lease.nonce == nil, lease.digest == nil, lease.deadline == nil else { return false }
+        let nonce = UUID()
+        let snapshot = LeasePrototypeSnapshot(scope: token.scope, nonce: nonce, payload: payload)
+        do {
+            try store.writeSnapshot(snapshot)
+            let digest = Data(SHA256.hash(data: payload))
+            try store.writeLease(.init(scope: token.scope, transaction: token.id, nonce: nonce, digest: digest, deadline: deadline))
+            return true
+        } catch { return false }
+    }
+    func read(_ scope: LeasePrototypeScope, now: Date) -> Data? {
+        guard now.timeIntervalSinceReferenceDate.isFinite,
+              let lease = try? store.lease(scope), lease.scope == scope,
+              let nonce = lease.nonce, let digest = lease.digest, let deadline = lease.deadline,
+              deadline.timeIntervalSinceReferenceDate.isFinite, now < deadline,
+              let snapshot = try? store.snapshot(scope), snapshot.scope == scope,
+              snapshot.nonce == nonce, Data(SHA256.hash(data: snapshot.payload)) == digest else { return nil }
+        return snapshot.payload
+    }
 }
