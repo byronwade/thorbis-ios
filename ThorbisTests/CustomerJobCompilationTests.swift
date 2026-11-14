@@ -392,6 +392,45 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertTrue(publication.partial)
     }
 
+    func testActivityDenialPurgesAndRejectsLateSuccessUntilFreshRecovery() throws {
+        let scope = CustomerRecordsScope(actorID: "a", organizationID: "o", customerID: "c", generation: UUID(),
+                                         authorityRevision: UUID(), policyVersion: 1,
+                                         access: .init(jobs: true, estimates: true, invoices: true))
+        let identity = CustomerActivityIdentity(scope: scope, origin: "https://a.example", requestGeneration: UUID(), savedCopyRevision: UUID())
+        let entry = CustomerHistoryEntry(occurredAt: "2026-11-14T00:00:00Z", kind: "job", subjectId: "job", summary: "Private")
+        let page = CustomerHistoryPage(items: [entry], nextCursor: "next", sourceIncomplete: false)
+        var publication = CustomerActivityPublication()
+        let first = try XCTUnwrap(publication.begin(identity, reset: true))
+        publication.publish(page, request: first, identity: identity, current: identity)
+        let newer = try XCTUnwrap(publication.begin(identity, reset: false))
+        publication.fail("Access unavailable", request: first, identity: identity, current: identity, status: 403)
+        XCTAssertTrue(publication.denied)
+        XCTAssertTrue(publication.visible(identity).isEmpty)
+        XCTAssertNil(publication.cursor)
+        publication.publish(page, request: newer, identity: identity, current: identity)
+        XCTAssertTrue(publication.visible(identity).isEmpty, "Late success must not restore denied data")
+        XCTAssertNil(publication.begin(identity, reset: true), "Denial requires a fresh owner")
+        var recovered = CustomerActivityPublication()
+        let fresh = try XCTUnwrap(recovered.begin(identity, reset: true))
+        recovered.publish(page, request: fresh, identity: identity, current: identity)
+        XCTAssertEqual(recovered.visible(identity), [entry])
+    }
+
+    func testActivityPagesDeduplicateWithinAndAcrossPages() throws {
+        let scope = CustomerRecordsScope(actorID: "a", organizationID: "o", customerID: "c", generation: UUID(),
+                                         authorityRevision: UUID(), policyVersion: 1,
+                                         access: .init(jobs: true, estimates: true, invoices: true))
+        let identity = CustomerActivityIdentity(scope: scope, origin: "https://a.example", requestGeneration: UUID(), savedCopyRevision: UUID())
+        let firstEntry = CustomerHistoryEntry(occurredAt: "2026-11-14T00:00:00Z", kind: "job", subjectId: "1", summary: "First")
+        let secondEntry = CustomerHistoryEntry(occurredAt: "2026-11-14T00:01:00Z", kind: "job", subjectId: "2", summary: "Second")
+        var publication = CustomerActivityPublication()
+        let first = try XCTUnwrap(publication.begin(identity, reset: true))
+        publication.publish(.init(items: [firstEntry, firstEntry], nextCursor: "next", sourceIncomplete: false), request: first, identity: identity, current: identity)
+        let next = try XCTUnwrap(publication.begin(identity, reset: false))
+        publication.publish(.init(items: [firstEntry, secondEntry, secondEntry], nextCursor: nil, sourceIncomplete: false), request: next, identity: identity, current: identity)
+        XCTAssertEqual(publication.visible(identity), [firstEntry, secondEntry])
+    }
+
     func testOrdinaryCustomerHistoryCanStillUseSavedCopyOffline() async throws {
         let client = APIClient(session: URLProtocolFixture.session([.init(200, page([])), URLProtocolFixture.offline]), baseURL: "https://app.thorbis.com")
         client.savedCopyScope = "customer-history-test-\(UUID().uuidString)"

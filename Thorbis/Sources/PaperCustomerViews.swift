@@ -262,31 +262,32 @@ struct CustomerActivityPublication {
     private(set) var loading = false
     private(set) var error: String?
     private(set) var partial = false
+    private(set) var denied = false
     private var request: UUID?
+    private var issuedRequests: Set<UUID> = []
     private var resetting = true
     private var seenCursors: Set<String> = []
 
     mutating func begin(_ identity: CustomerActivityIdentity, reset: Bool) -> UUID? {
         if self.identity != identity {
             self.identity = identity
-            items = []; cursor = nil; error = nil; partial = false; loading = false; seenCursors = []
+            items = []; cursor = nil; error = nil; partial = false; loading = false; denied = false
+            seenCursors = []; issuedRequests = []; request = nil
         }
-        guard !loading, reset || cursor != nil else { return nil }
+        guard !denied, !loading, reset || cursor != nil else { return nil }
         if reset { cursor = nil; seenCursors = [] }
         let token = UUID()
-        request = token; resetting = reset; loading = true
+        request = token; issuedRequests.insert(token); resetting = reset; loading = true
         return token
     }
 
     mutating func publish(_ page: CustomerHistoryPage, request: UUID, identity: CustomerActivityIdentity,
                           current: CustomerActivityIdentity?) {
-        guard self.request == request, self.identity == identity, current == identity else { return }
-        if resetting { items = page.items; partial = page.sourceIncomplete != false }
-        else {
-            let existing = Set(items.map(\.id))
-            items.append(contentsOf: page.items.filter { !existing.contains($0.id) })
-            partial = partial || page.sourceIncomplete != false
-        }
+        guard !denied, self.request == request, self.identity == identity, current == identity else { return }
+        if resetting { items = []; partial = page.sourceIncomplete != false }
+        else { partial = partial || page.sourceIncomplete != false }
+        var existing = Set(items.map(\.id))
+        items.append(contentsOf: page.items.filter { existing.insert($0.id).inserted })
         if let next = page.nextCursor {
             if next.isEmpty || !seenCursors.insert(next).inserted {
                 cursor = nil; partial = true
@@ -296,14 +297,25 @@ struct CustomerActivityPublication {
     }
 
     mutating func fail(_ message: String?, request: UUID, identity: CustomerActivityIdentity,
-                       current: CustomerActivityIdentity?) {
-        guard self.request == request, self.identity == identity, current == identity else { return }
+                       current: CustomerActivityIdentity?, status: Int? = nil) {
+        guard self.identity == identity, current == identity, issuedRequests.contains(request) else { return }
+        if status == 401 || status == 403 {
+            items = []; cursor = nil; loading = false; partial = true; denied = true
+            error = message; self.request = nil; issuedRequests = []; seenCursors = []
+            return
+        }
+        guard self.request == request else { return }
         error = message; loading = false; self.request = nil
     }
 
     func visible(_ identity: CustomerActivityIdentity?) -> [CustomerHistoryEntry] {
         self.identity == identity && identity != nil ? items : []
     }
+}
+
+private struct CustomerSectionKey: Equatable {
+    let identity: CustomerActivityIdentity
+    let section: CustomerRecordSection
 }
 
 struct CustomerDetailView: View {
@@ -342,6 +354,19 @@ struct CustomerDetailView: View {
     @State private var locationError: String?
     @State private var tab = "Overview"
     @State private var recordPart = "Notes"
+    @State private var sectionKey: CustomerSectionKey?
+    @State private var sectionRecords: CustomerRecordSectionAccumulator?
+    @State private var sectionLoading = false
+    @State private var sectionError: String?
+    @State private var sectionRequest = UUID()
+    private var selectedSectionKey: CustomerSectionKey? {
+        guard tab == "Records", let identity = activityIdentity, identity.scope.access.jobs else { return nil }
+        switch recordPart {
+        case "Notes": return CustomerSectionKey(identity: identity, section: .notes)
+        case "Documents": return CustomerSectionKey(identity: identity, section: .documents)
+        default: return nil
+        }
+    }
     @State private var records: CustomerJobCompilation?
     @State private var recordsLoading = false
     @State private var recordsError: String?
@@ -460,6 +485,7 @@ struct CustomerDetailView: View {
         .task { await loadJobEmails() }
         .task(id: customer.id) { pricing = try? await api.memberPricing(customer.id) }
         .task(id: activityIdentity) { await loadActivity(reset: true) }
+        .task(id: selectedSectionKey) { await startCustomerSection(selectedSectionKey) }
         .task(id: recordsScope) {
             if recordsPublishedScope != recordsScope {
                 records = nil
@@ -486,16 +512,13 @@ struct CustomerDetailView: View {
             if selectedTab != "Overview" { Task { await loadSelectedRecords() } }
             if selectedTab == "Jobs" { Task { await loadJobRecords() } }
         }
-        .onChange(of: recordPart) { _, selectedPart in
-            if tab == "Records", selectedPart != "Customer activity", visibleRecords == nil {
-                Task { await loadRecords() }
-            }
-        }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
+                if activityPublication.denied { activityPublication = CustomerActivityPublication() }
                 await loadActivity(reset: true)
-                await loadSelectedRecords()
+                if let key = selectedSectionKey { await startCustomerSection(key) }
+                else { await loadSelectedRecords() }
                 if tab == "Jobs" { await loadJobRecords() }
             }
         }
@@ -1227,14 +1250,117 @@ struct CustomerDetailView: View {
     /// Customer-wide records remain grouped by job. Customer activity is a separate feed.
     private var customerRecordsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            PaperTabs(options: ["Notes", "Documents", "Job & account activity", "Customer activity"],
+            PaperTabs(options: ["Notes", "Documents", "Customer activity"],
                       selection: $recordPart, wrapOverflow: true, textTabs: true)
                 .padding(.horizontal, -Theme.gutter)
             switch recordPart {
-            case "Documents": recordsParts([.documents])
-            case "Job & account activity": recordsParts([.activity], activityTitle: "Job & account activity")
             case "Customer activity": activitySection
-            default: recordsParts([.notes])
+            default: boundedCustomerSection
+            }
+        }
+    }
+
+    @ViewBuilder private var boundedCustomerSection: some View {
+        if let key = selectedSectionKey, key == sectionKey {
+            if let sectionError {
+                ErrorBanner(message: sectionError) {
+                    if sectionRecords?.denied == true { await startCustomerSection(key) }
+                    else { await loadCustomerSectionPage(key, cursor: sectionRecords?.nextJobCursor) }
+                }
+                    .accessibilityIdentifier("customer-section-retry")
+            }
+            if let records = sectionRecords {
+                CustomerRecordSectionList(section: key.section, groups: records.groups,
+                    hasMoreJobs: records.nextJobCursor != nil,
+                    partial: records.identityIncomplete || records.groups.contains { $0.incomplete },
+                    loading: sectionLoading,
+                    loadMoreJobs: { Task { await loadCustomerSectionPage(key, cursor: records.nextJobCursor) } },
+                    loadMoreMedia: { group in Task { await loadCustomerSectionGroup(key, group: group, cursor: group.nextMediaCursor) } },
+                    retryGroup: { group in Task { await loadCustomerSectionGroup(key, group: group, cursor: nil) } })
+            } else if sectionLoading || sectionError == nil {
+                SkeletonRows(count: 3, inset: 0)
+            }
+        } else if recordsScope?.access.jobs == false {
+            emptyText("Job records are unavailable with your current access.")
+        } else {
+            SkeletonRows(count: 3, inset: 0)
+        }
+    }
+
+    private func startCustomerSection(_ key: CustomerSectionKey?) async {
+        sectionRequest = UUID(); sectionKey = key; sectionRecords = nil; sectionError = nil; sectionLoading = false
+        guard let key else { return }
+        await loadCustomerSectionPage(key, cursor: nil)
+    }
+
+    private func customerSectionCurrent(_ key: CustomerSectionKey) -> Bool {
+        selectedSectionKey == key && sectionKey == key
+    }
+
+    private func loadCustomerSectionPage(_ key: CustomerSectionKey, cursor: String?) async {
+        guard customerSectionCurrent(key), !sectionLoading else { return }
+        let scope = CustomerRecordSectionScope(customerID: key.identity.scope.customerID,
+            organizationID: key.identity.scope.organizationID, apiGeneration: key.identity.requestGeneration)
+        var owner = sectionRecords ?? CustomerRecordSectionAccumulator(scope: scope, section: key.section)
+        guard let pageToken = owner.beginPage(cursor: cursor) else { return }
+        sectionRecords = owner
+        let epoch = UUID(); sectionRequest = epoch; sectionLoading = true; sectionError = nil
+        let apiRef = api, sessionRef = session, identity = key.identity
+        let current: @MainActor @Sendable () -> Bool = {
+            identity.scope.isCurrent(session: sessionRef) && apiRef.normalizedOrigin == identity.origin &&
+                apiRef.requestGeneration == identity.requestGeneration && apiRef.savedCopyScopeRevision == identity.savedCopyRevision
+        }
+        defer { if sectionRequest == epoch { sectionLoading = false } }
+        do {
+            let page = try await CustomerRecordSectionLoader.load(scope: scope, section: key.section, cursor: cursor,
+                                                                   api: api, isCurrent: current)
+            guard customerSectionCurrent(key), current(), var records = sectionRecords else { return }
+            // The accumulator rejects stale successes but latches same-owner definitive denials.
+            if records.apply(page: page, token: pageToken) { sectionRecords = records }
+            else if sectionRequest == epoch && !Task.isCancelled { sectionError = "Records changed. Refresh and try again." }
+        } catch is CancellationError {
+        } catch {
+            guard customerSectionCurrent(key), current(), var records = sectionRecords else { return }
+            if let problem = error as? Problem, problem.status == 401 || problem.status == 403 {
+                if records.denySection(token: pageToken) {
+                    sectionRecords = records; sectionError = "Customer job access is unavailable. Try again."
+                }
+            } else if sectionRequest == epoch && !Task.isCancelled {
+                sectionError = "Couldn't load customer records. Try again."
+            }
+        }
+    }
+
+    private func loadCustomerSectionGroup(_ key: CustomerSectionKey, group: CustomerRecordSectionGroup, cursor: String?) async {
+        guard customerSectionCurrent(key), !sectionLoading, var owner = sectionRecords else { return }
+        let scope = CustomerRecordSectionScope(customerID: key.identity.scope.customerID,
+            organizationID: key.identity.scope.organizationID, apiGeneration: key.identity.requestGeneration)
+        let groupToken = (group.denied || group.unavailable) && cursor == nil
+            ? owner.beginGroupRecovery(jobID: group.jobID) : owner.beginGroup(jobID: group.jobID, cursor: cursor)
+        guard let groupToken else { return }
+        sectionRecords = owner
+        let epoch = UUID(); sectionRequest = epoch; sectionLoading = true
+        let apiRef = api, sessionRef = session, identity = key.identity
+        let current: @MainActor @Sendable () -> Bool = {
+            identity.scope.isCurrent(session: sessionRef) && apiRef.normalizedOrigin == identity.origin &&
+                apiRef.requestGeneration == identity.requestGeneration && apiRef.savedCopyScopeRevision == identity.savedCopyRevision
+        }
+        defer { if sectionRequest == epoch { sectionLoading = false } }
+        do {
+            let page = try await CustomerRecordSectionLoader.loadGroup(scope: scope, job: group.job, section: key.section,
+                                                                        mediaCursor: cursor, api: api, isCurrent: current)
+            guard customerSectionCurrent(key), current(), var records = sectionRecords else { return }
+            if records.apply(group: page, token: groupToken) { sectionRecords = records }
+            else if sectionRequest == epoch && !Task.isCancelled { sectionError = "Records changed. Refresh and try again." }
+        } catch is CancellationError {
+        } catch {
+            guard customerSectionCurrent(key), current(), var records = sectionRecords else { return }
+            if let problem = error as? Problem, problem.status == 401 {
+                if records.denySection(token: groupToken) {
+                    sectionRecords = records; sectionError = "Customer job access is unavailable. Try again."
+                }
+            } else if sectionRequest == epoch && !Task.isCancelled {
+                sectionError = "Couldn't load customer records. Try again."
             }
         }
     }
@@ -1242,7 +1368,7 @@ struct CustomerDetailView: View {
     /// Money: the customer's estimates and invoices, on and off jobs.
     private var moneySection: some View { recordsParts([.estimates, .invoices], moneyOnly: true) }
 
-    private func recordsParts(_ parts: Set<CustomerRecordsPart>, moneyOnly: Bool = false, activityTitle: String = "Activity") -> some View {
+    private func recordsParts(_ parts: Set<CustomerRecordsPart>, moneyOnly: Bool = false) -> some View {
         let scope = recordsScope
         let visible = moneyOnly ? (scope != nil && moneyRecordsPublishedScope == scope ? moneyRecords : nil) : visibleRecords
         let visibleError = moneyOnly
@@ -1262,7 +1388,7 @@ struct CustomerDetailView: View {
                 } else if let visible {
                     CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: {
                         if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
-                    }, parts: parts, activityTitle: activityTitle)
+                    }, parts: parts)
                 }
             }
         }
@@ -1279,7 +1405,6 @@ struct CustomerDetailView: View {
         switch tab {
         case "Money": await loadMoneyRecords()
         case "Jobs", "Photos": await loadRecords()
-        case "Records": if recordPart != "Customer activity" { await loadRecords() }
         default: break
         }
     }
@@ -1347,11 +1472,12 @@ struct CustomerDetailView: View {
                     ErrorBanner(message: activity.isEmpty ? "Activity did not load. \(activityError)" : activityError) {
                         // A failed "load earlier" keeps its cursor, so retry continues the page
                         // instead of throwing away what already loaded.
+                        if activityPublication.denied { activityPublication = CustomerActivityPublication() }
                         await loadActivity(reset: activityCursor == nil)
                     }
                     .accessibilityIdentifier("customer-activity-retry")
                 }
-                PaperSection("Activity", count: activity.isEmpty ? nil : activity.count) {
+                PaperSection("Activity") {
                     if activityLoading && activity.isEmpty {
                         SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset)
                     } else if activity.isEmpty {
@@ -1401,7 +1527,8 @@ struct CustomerDetailView: View {
         } catch is CancellationError {
             activityPublication.fail(nil, request: request, identity: identity, current: activityIdentity)
         } catch {
-            activityPublication.fail(error.localizedDescription, request: request, identity: identity, current: activityIdentity)
+            activityPublication.fail(error.localizedDescription, request: request, identity: identity, current: activityIdentity,
+                                     status: (error as? Problem)?.status)
         }
     }
 

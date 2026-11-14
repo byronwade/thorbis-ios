@@ -24,6 +24,138 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["customer-activity"].waitForExistence(timeout: 10))
     }
 
+    func testRecordsLoadDocumentAfterPhotoOnlyMediaPage() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records",
+                               "--paper-preview-customer-document-rollup", "--paper-preview-customer-document-pages"]
+        app.launch()
+        let records = app.buttons["Records"].firstMatch
+        XCTAssertTrue(records.waitForExistence(timeout: 20)); records.tap()
+        app.buttons["Documents"].firstMatch.tap()
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Load more documents for AC not cooling")).firstMatch
+        for _ in 0..<10 where !more.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.waitForExistence(timeout: 20))
+        XCTAssertTrue(more.isHittable)
+        app.scrollClearOfFoot(more)
+        more.tap()
+        let document = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(document.waitForExistence(timeout: 15))
+        XCTAssertTrue(document.label.contains("Service report"))
+    }
+
+    func testPullToRefreshReloadsTheVisibleRecordsSection() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-records-refresh")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        XCTAssertTrue(file.label.contains("Service report"), file.label)
+        for _ in 0..<6 { app.swipeDown() }
+        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Updated service report"), object: file)
+        XCTAssertEqual(XCTWaiter.wait(for: [updated], timeout: 20), .completed, "Pull-to-refresh must reload the selected section")
+    }
+
+    func testDelayedJobDenialAfterRefreshStillPurgesRecords() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-deny-after-refresh")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Load more documents for AC not cooling")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 10)); app.scrollClearOfFoot(more); more.tap()
+        for _ in 0..<6 { app.swipeDown() }
+        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Updated service report"), object: file)
+        XCTAssertEqual(XCTWaiter.wait(for: [updated], timeout: 15), .completed, "The refresh must finish before the delayed denial")
+        XCTAssertTrue(app.staticTexts["You no longer have access to this job."].waitForExistence(timeout: 15))
+        XCTAssertFalse(file.exists, "A later same-owner denial must purge the refreshed job")
+    }
+
+    func testRecordsPurgeJobDocumentsAfterAccessDenial() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-records-deny-group")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Load more documents for AC not cooling")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 10)); app.scrollClearOfFoot(more); more.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "access")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(file.exists, "Denied job content must be purged immediately")
+        let retry = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Retry records for AC not cooling")).firstMatch
+        XCTAssertTrue(retry.waitForExistence(timeout: 10)); app.scrollClearOfFoot(retry); retry.tap()
+        XCTAssertTrue(file.waitForExistence(timeout: 15), "A fresh authorized retry can restore the job's records")
+    }
+
+    func testRecordsPurgeMissingJobDocuments() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-records-missing-group")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Load more documents for AC not cooling")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 10)); app.scrollClearOfFoot(more); more.tap()
+        XCTAssertTrue(app.staticTexts["This job is no longer available."].waitForExistence(timeout: 10))
+        XCTAssertFalse(file.exists)
+    }
+
+    func testRecordsPurgeAllDocumentsAfterSessionDenial() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-records-unauthorized-jobs")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        let more = app.buttons["customer-records-load-more-jobs"]
+        for _ in 0..<15 where !more.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.waitForExistence(timeout: 10)); app.scrollClearOfFoot(more); more.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["customer-section-retry"].waitForExistence(timeout: 10))
+        XCTAssertFalse(file.exists)
+    }
+
+    func testRecordsPurgeAllDocumentsAfterCustomerJobsDenial() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-records-deny-jobs")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        let more = app.buttons["customer-records-load-more-jobs"]
+        for _ in 0..<15 where !more.isHittable { app.swipeUp() }
+        XCTAssertTrue(more.waitForExistence(timeout: 10)); app.scrollClearOfFoot(more); more.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["customer-section-retry"].waitForExistence(timeout: 10))
+        XCTAssertFalse(file.exists, "A fresh customer-jobs denial must purge the entire section")
+    }
+
+    func testRecordsStopRepeatedMediaCursorWithoutDuplicateDocuments() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-records-cursor-cycle")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Load more documents for AC not cooling")).firstMatch
+        for _ in 0..<2 {
+            XCTAssertTrue(more.waitForExistence(timeout: 10)); app.scrollClearOfFoot(more); more.tap()
+        }
+        XCTAssertTrue(app.staticTexts["Some records may be missing."].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.buttons.matching(identifier: "customer-document-00000000-0000-4000-8000-000000031777").count, 1)
+        XCTAssertFalse(more.exists, "A repeated cursor must stop further loading")
+    }
+
+    private func openPagedCustomerRecords(_ flag: String) -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records",
+                               "--paper-preview-customer-document-rollup", flag]
+        app.launch()
+        let records = app.buttons["Records"].firstMatch
+        XCTAssertTrue(records.waitForExistence(timeout: 20)); records.tap()
+        let documents = app.buttons["Documents"].firstMatch
+        XCTAssertTrue(documents.waitForExistence(timeout: 10)); documents.tap()
+        return app
+    }
+
+    func testRecordsRemainReachableAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records", "--paper-preview-customer-document-rollup",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        let outer = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Showing Jobs")).firstMatch
+        XCTAssertTrue(outer.waitForExistence(timeout: 20)); outer.tap()
+        app.buttons["Records"].firstMatch.tap()
+        let inner = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Showing Notes")).firstMatch
+        XCTAssertTrue(inner.waitForExistence(timeout: 10)); inner.tap()
+        app.buttons["Documents"].firstMatch.tap()
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        for _ in 0..<15 where !file.isHittable { app.swipeUp() }
+        XCTAssertTrue(file.waitForExistence(timeout: 20)); XCTAssertTrue(file.isHittable)
+        XCTAssertGreaterThanOrEqual(file.frame.height, 44)
+    }
+
     func testCustomerDocumentsKeepJobIdentityAndUnavailableFilesClosed() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -800,6 +800,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var invoiceEditRevoked = false
         var jobMediaViewRevoked = false
         var priceBookReads = 0
+        var customerSectionReads = 0
+        var customerRefreshedMediaSeen = false
         var priceBookQueryFailed = false
         var savedWorkMutationCount = 0
         var answeredListPaths: Set<String> = []
@@ -807,7 +809,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.customerSectionReads = 0; scenario.customerRefreshedMediaSeen = false; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -911,7 +913,30 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if PaperPreview.isJobDocumentsPreview,
+        if PaperPreview.isCustomerRecordsPreview,
+           (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-deny-group") ||
+            ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-missing-group") ||
+            ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh")),
+           url.path == "/v1/jobs/00000000-0000-4000-8000-000000002214/media",
+           URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "cursor" }) == true {
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh") {
+                let deadline = Date().addingTimeInterval(20)
+                while Date() < deadline && !Self.scenario.lock.withLock({ Self.scenario.customerRefreshedMediaSeen }) {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+            status = ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-missing-group") ? 404 : 403
+            payload = ["status": status, "title": "Job unavailable"]
+        } else if PaperPreview.isCustomerRecordsPreview,
+                  (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-deny-jobs") ||
+                   ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-unauthorized-jobs")),
+                  url.path == "/v1/jobs",
+                  URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "cursor" }) == true,
+                  URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "limit" && $0.value == "5" }) == true {
+            status = ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-unauthorized-jobs") ? 401 : 403
+            payload = ["status": status, "title": "Customer job access unavailable"]
+        } else if PaperPreview.isJobDocumentsPreview,
            ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
            request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
             let foreign = ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice-foreign")
@@ -1558,7 +1583,20 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
         case "/v1/jobs":
             let items = jobs().map { $0.filter { $0.key != "allowedTransitions" } }
-            return ["items": matchingCustomer(items, queryItems: queryItems)]
+            let matched = matchingCustomer(items, queryItems: queryItems)
+            if PaperPreview.isCustomerRecordsPreview,
+               (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-refresh") ||
+                ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh")),
+               queryItems.contains(where: { $0.name == "limit" && $0.value == "5" }) {
+                scenario.lock.withLock { scenario.customerSectionReads += 1 }
+            }
+            if PaperPreview.isCustomerRecordsPreview,
+               (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-deny-jobs") ||
+                ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-unauthorized-jobs")),
+               queryItems.contains(where: { $0.name == "limit" && $0.value == "5" }) {
+                return ["items": matched, "nextCursor": "sample-jobs-next"]
+            }
+            return ["items": matched]
         case "/v1/customers": return ["items": customers()]
         case "/v1/search":
             // The Search Gateway over the sample rows: titles and names, and phone digits.
@@ -1701,11 +1739,35 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-document-rollup") {
                 guard id.hasSuffix("2214") || id.hasSuffix("2201") else { return ["items": []] }
                 let first = id.hasSuffix("2214")
-                let file: [String: Any] = ["id": first ? "00000000-0000-4000-8000-000000031777" : "00000000-0000-4000-8000-000000031778", "organizationId": org, "jobId": id,
+                var file: [String: Any] = ["id": first ? "00000000-0000-4000-8000-000000031777" : "00000000-0000-4000-8000-000000031778", "organizationId": org, "jobId": id,
                     "uploaderUserId": actor, "kind": "document", "mime": "application/pdf", "sizeBytes": 128,
                     "originalFilename": first ? "Service report.pdf" : "Drain report.pdf", "contentHash": "preview", "storageKey": "preview/report.pdf",
                     "uploadState": "stored", "tags": [String](), "caption": first ? "Service report" : "Drain report", "archived": false,
                     "createdAt": now, "updatedAt": now]
+                if first && (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-refresh") ||
+                             ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh")),
+                   scenario.lock.withLock({ scenario.customerSectionReads > 1 }) {
+                    file["caption"] = "Updated service report"
+                    scenario.lock.withLock { scenario.customerRefreshedMediaSeen = true }
+                }
+                if first && (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-deny-group") ||
+                             ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-missing-group") ||
+                             ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh")) {
+                    return ["items": [file], "nextCursor": "sample-denied-next"]
+                }
+                if first && ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-cursor-cycle") {
+                    let cursor = queryItems.first(where: { $0.name == "cursor" })?.value
+                    return ["items": [file], "nextCursor": cursor == nil ? "sample-a" : cursor == "sample-a" ? "sample-b" : "sample-a"]
+                }
+                if first && ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-document-pages") {
+                    if queryItems.contains(where: { $0.name == "cursor" }) { return ["items": [file], "nextCursor": NSNull()] }
+                    var photo = file
+                    photo["id"] = "00000000-0000-4000-8000-000000031781"
+                    photo["kind"] = "photo"
+                    photo["mime"] = "image/jpeg"
+                    photo["originalFilename"] = "site.jpg"
+                    return ["items": [photo], "nextCursor": "sample-media-next"]
+                }
                 if !first { return ["items": [file]] }
                 var pending = file
                 pending["id"] = "00000000-0000-4000-8000-000000031779"

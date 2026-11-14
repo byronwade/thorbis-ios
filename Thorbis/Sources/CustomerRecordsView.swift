@@ -14,7 +14,6 @@ struct CustomerRecordsView: View {
     let customerID: String
     var retryMedia: () async -> Void = {}
     var parts: Set<CustomerRecordsPart> = Set(CustomerRecordsPart.allCases)
-    var activityTitle = "Activity"
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.paperGroupedWells) private var wells
     @State private var openedLegacy: LegacyCustomerPhoto?
@@ -233,7 +232,7 @@ struct CustomerRecordsView: View {
 
     private var activitySection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            heading(activityTitle, count: compilation.activityCount + compilation.accountActivity.count, symbol: "clock", incomplete: compilation.activityIncomplete)
+            heading("Activity", count: compilation.activityCount + compilation.accountActivity.count, symbol: "clock", incomplete: compilation.activityIncomplete)
             if compilation.activityIncomplete {
                 ErrorBanner(message: "Some activity could not be loaded. Please try again.") { await retryMedia() }
             } else if compilation.activity.isEmpty && compilation.accountActivity.isEmpty {
@@ -479,4 +478,105 @@ private struct LegacyPhotoRequest: Hashable {
     let id: String
     let scope: MediaThumbnailScope?
     let attempt: Int
+}
+
+/// A bounded page of customer notes or documents. Rows remain grouped by their source job.
+struct CustomerRecordSectionList: View {
+    let section: CustomerRecordSection
+    let groups: [CustomerRecordSectionGroup]
+    let hasMoreJobs: Bool
+    let partial: Bool
+    let loading: Bool
+    let loadMoreJobs: () -> Void
+    let loadMoreMedia: (CustomerRecordSectionGroup) -> Void
+    let retryGroup: (CustomerRecordSectionGroup) -> Void
+
+    private var visibleGroups: [CustomerRecordSectionGroup] {
+        groups.filter { group in
+            group.issue != nil || group.incomplete || group.nextMediaCursor != nil ||
+                (section == .notes ? !group.notes.isEmpty : !group.documents.isEmpty)
+        }
+    }
+
+    var body: some View {
+        LazyVStack(alignment: .leading, spacing: 16) {
+            Text(section == .notes ? "Notes" : "Documents")
+                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                .accessibilityAddTraits(.isHeader)
+            if partial { Text("Some records may be missing.").font(Theme.font(13)).foregroundStyle(Theme.muted) }
+            if visibleGroups.isEmpty && !loading && !partial {
+                Text(section == .notes ? "No notes in loaded jobs" : "No documents in loaded jobs")
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            }
+            ForEach(visibleGroups, id: \.jobID) { group in
+                VStack(alignment: .leading, spacing: 8) {
+                    NavigationLink(value: PaperRoute.job(group.jobID)) {
+                        HStack {
+                            Text(group.title).font(Theme.font(15, weight: .medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right").accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityLabel("Job: \(group.title)")
+                    .accessibilityHint("Opens the job")
+                    .accessibilityIdentifier("customer-records-job-\(group.jobID)")
+                    if section == .notes {
+                        ForEach(group.notes) { note in
+                            ExpandableNoteText(text: note.body, lines: 3, color: Theme.foreground)
+                                .padding(.vertical, 6)
+                        }
+                    } else {
+                        ForEach(group.documents) { asset in
+                            NavigationLink(value: PaperRoute.media(jobID: asset.jobId, assetID: asset.id)) {
+                                HStack(spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        if asset.uploadState != "stored" {
+                                            Text("File is not ready yet").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                        }
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "chevron.right").accessibilityHidden(true)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .disabled(asset.uploadState != "stored")
+                            .accessibilityHint(asset.uploadState == "stored" ? "Opens the file" : "File is not ready yet")
+                            .accessibilityIdentifier("customer-document-\(asset.id)")
+                        }
+                        if group.nextMediaCursor != nil {
+                            Button("Load more documents") { loadMoreMedia(group) }
+                                .frame(minHeight: 44).disabled(loading)
+                                .accessibilityLabel("Load more documents for \(group.title)")
+                        }
+                    }
+                    if let issue = group.issue {
+                        Text(issue).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } else if group.incomplete {
+                        Text("Some records may be missing.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    if group.issue != nil || group.incomplete {
+                        Button("Retry this job") { retryGroup(group) }
+                            .frame(minHeight: 44).disabled(loading)
+                            .accessibilityLabel("Retry records for \(group.title)")
+                    }
+                }
+            }
+            if hasMoreJobs {
+                Button("Load more jobs") { loadMoreJobs() }
+                    .frame(minHeight: 44).disabled(loading)
+                    .accessibilityIdentifier("customer-records-load-more-jobs")
+            }
+            if loading { ProgressView().accessibilityLabel("Loading customer records") }
+        }
+    }
 }
