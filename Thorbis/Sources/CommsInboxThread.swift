@@ -605,8 +605,7 @@ struct CommsLocalThreadView: View {
         if message.status == .draft {
             items.append(ThorbisMenuItem("Discard draft", icon: "trash", role: .destructive) {
                 let leaving = thread.channel == .email && thread.messages.count == 1
-                store.discardDraft(thread.id, messageID: message.id)
-                if leaving { dismiss() }
+                if store.discardDraft(thread.id, messageID: message.id), leaving { dismiss() }
             })
         }
         return items
@@ -916,6 +915,7 @@ struct CommsComposeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var phone = ""
     @State private var name = ""
+    @State private var textOpenFailed = false
     @FocusState private var phoneFocused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -937,9 +937,20 @@ struct CommsComposeSheet: View {
                 Text("An existing conversation with this number opens instead of a new one. Drafts stay on this device.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                if textOpenFailed {
+                    Text("Couldn't open this text. Copy any unsaved work before restarting the app, then check saved messages.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("inbox-new-text-storage-error")
+                }
                 let ready = CommsCallGrouping.key(phone) != nil
                 Button {
-                    if let id = store.threadForPhone(phone, contactName: name) { onOpen(id) }
+                    if let id = store.threadForPhone(phone, contactName: name) {
+                        textOpenFailed = false
+                        onOpen(id)
+                    } else {
+                        textOpenFailed = true
+                    }
                 } label: {
                     Text("Start text").inkCommit(enabled: ready)
                 }

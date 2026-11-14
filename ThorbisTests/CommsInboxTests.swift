@@ -3,6 +3,34 @@ import XCTest
 
 @MainActor
 final class CommsInboxTests: XCTestCase {
+    func testDiscardEmailDraftReportsFailedWriteAndKeepsDiskCopy() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let active = root.appendingPathComponent("active", isDirectory: true)
+        let retained = root.appendingPathComponent("retained", isDirectory: true)
+        try FileManager.default.createDirectory(at: active, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = CommsLocalStore(file: active.appendingPathComponent("inbox.json"), requiresPersistence: true)
+        let id = try XCTUnwrap(store.commitMail(.init(to: ["customer@example.com"], subject: "Visit", body: "Keep these details"), send: false))
+        let message = try XCTUnwrap(store.thread(id)?.messages.first)
+        let saved = try Data(contentsOf: active.appendingPathComponent("inbox.json"))
+        try FileManager.default.moveItem(at: active, to: retained)
+        XCTAssertFalse(store.discardDraft(id, messageID: message.id))
+        XCTAssertTrue(store.storageBlocked)
+        XCTAssertEqual(store.thread(id)?.messages.first?.body, "Keep these details")
+        XCTAssertFalse(store.discardDraft(id, messageID: message.id))
+        XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("inbox.json")), saved)
+    }
+
+    func testDiscardEmailDraftReportsSuccessfulDurableRemoval() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = CommsLocalStore(file: file, requiresPersistence: true)
+        let id = try XCTUnwrap(store.commitMail(.init(to: ["customer@example.com"], subject: "Visit", body: "Details"), send: false))
+        let message = try XCTUnwrap(store.thread(id)?.messages.first)
+        XCTAssertTrue(store.discardDraft(id, messageID: message.id))
+        XCTAssertNil(CommsLocalStore(file: file, requiresPersistence: true).thread(id))
+    }
+
     func testTextPresenterReportsUnavailableInboxInsteadOfFallingBackToMessages() {
         let actor = UUID().uuidString, organization = UUID().uuidString
         let store = CommsLocalStore.shared(actorID: actor, organizationID: organization)

@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-14-inbox-draft-actions",
+            date: "2026-11-14",
+            highlights: [
+                .init(symbol: "tray", title: "Keep draft actions clear",
+                      detail: "Inbox explains when a text can't open and keeps an email draft open if discard fails."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-14-text-draft-recovery",
             date: "2026-11-14",
             highlights: [
