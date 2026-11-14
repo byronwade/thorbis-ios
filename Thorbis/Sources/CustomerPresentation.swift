@@ -127,7 +127,6 @@ struct CustomerEstimatePresentation: View {
     @State private var signedName = ""
     @State private var offer = FinancingOffer.off
     @State private var showTerms = false
-    @State private var isMember = false
     @State private var openingReview = false
     @State private var openingError: String?
     @State private var reviewGeneration: UUID?
@@ -229,7 +228,6 @@ struct CustomerEstimatePresentation: View {
         .animation(.easeOut(duration: 0.2), value: flow.step)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadOffer() }
-        .task { isMember = await api.customerIsMember(flow.estimate.customerId) }
         .toolbar {
             // PresentDetail.dc.html: a round back circle opposite the lock. Only where this screen is
             // the customer-mode root; pushed hosts (handoff, job documents) already show their back.
@@ -298,7 +296,7 @@ struct CustomerEstimatePresentation: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 6)
                     if let saved = customerSavingsText(option.lines, currency: option.currency) {
-                        Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
+                        Text("Includes savings of \(saved)")
                             .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                             .padding(.top, 6)
                     }
@@ -364,7 +362,7 @@ struct CustomerEstimatePresentation: View {
                    title: flow.choiceName, summary: flow.hasOptions ? flow.selectedOption?.description : nil)
             if let projected = verifiedCustomerLines {
                 CustomerIncludedLines(lines: projected, type: type,
-                                      rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
+                                      rows: customerSavingsRows(flow.lines, currency: flow.currency)
                                           + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
             } else {
                 Text("These amounts couldn't be verified. Hand the device back to your technician.")
@@ -811,7 +809,6 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
-    @State private var isMember = false
     /// The invoice as re-read after the lender funded it while this screen was open.
     @State private var reloadedInvoice: InvoiceRecord?
     private var invoice: InvoiceRecord { reloadedInvoice ?? openedInvoice }
@@ -867,7 +864,6 @@ struct CustomerInvoicePresentation: View {
         .animation(.easeOut(duration: 0.2), value: payChoice)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadFinancing() }
-        .task { isMember = await api.customerIsMember(invoice.customerId) }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -910,7 +906,7 @@ struct CustomerInvoicePresentation: View {
     /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest; savings sit
     /// above them as their own labelled row (CP-06).
     private var amountRows: [CustomerAmountRow] {
-        customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
+        customerSavingsRows(invoice.lines, currency: invoice.currency)
             + (CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
                 .map { customerAmountRows($0, currency: invoice.currency) } ?? [])
     }
@@ -1190,9 +1186,8 @@ struct CustomerInvoicePresentation: View {
     }
 }
 
-/// What the customer saves off list price on these lines: each price book line records the list
-/// price it came from, and the server charges a member the member price (CP: savings show only
-/// when the amount already includes them). Invoice lines carry the estimate line's provenance.
+/// The difference between captured price-book amounts and charged amounts. This comparison does
+/// not establish why a price changed. Invoice lines may carry estimate-line provenance.
 func customerSavings(_ lines: [FieldLine]) -> Int {
     lines.reduce(0) { sum, line in
         let source = line.source?.kind == "price_book" ? line.source?.originalUnitPrice
@@ -1208,22 +1203,10 @@ func customerSavingsText(_ lines: [FieldLine], currency: String) -> String? {
     return saved > 0 ? money(saved, currency: currency) : nil
 }
 
-/// Membership alone does not prove a particular markdown came from member pricing.
-func savingsLabel(_: Bool) -> String { "Savings" }
-
 /// A labelled savings row (CP-06), shown above the total and never as a strike-through alone.
-func customerSavingsRows(_ lines: [FieldLine], currency: String, isMember: Bool) -> [CustomerAmountRow] {
+func customerSavingsRows(_ lines: [FieldLine], currency: String) -> [CustomerAmountRow] {
     guard let saved = customerSavingsText(lines, currency: currency) else { return [] }
-    return [CustomerAmountRow(label: savingsLabel(isMember), amount: "−\(saved)", emphasis: false)]
-}
-
-@MainActor
-extension APIClient {
-    /// Whether to call savings "member savings". Technicians may not read memberships yet, so any
-    /// refusal reads as not known and the row says "Savings".
-    func customerIsMember(_ customerID: String) async -> Bool {
-        (try? await memberPricing(customerID))?.isMember ?? false
-    }
+    return [CustomerAmountRow(label: "Savings", amount: "−\(saved)", emphasis: false)]
 }
 
 // MARK: - Shared pieces

@@ -129,14 +129,16 @@ final class CustomerPresentationTests: XCTestCase {
                                      kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD"))))
         let lines = [member, marked, invoiced, line("x", 1, 9_000)]
         XCTAssertEqual(customerSavings(lines), 9_000)
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: true),
+        XCTAssertEqual(customerSavingsRows(lines, currency: "USD"),
                        [CustomerAmountRow(label: "Savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false).first?.label, "Savings")
-        XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD", isMember: true).isEmpty)
+        XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD").isEmpty)
     }
 
-    func testMembershipAloneDoesNotAttributeMarkdownToMembership() {
-        XCTAssertEqual(savingsLabel(true), "Savings")
-        XCTAssertEqual(savingsLabel(false), "Savings")
+    func testPriceBookMarkdownUsesNeutralSavingsLabel() {
+        let markdown = FieldLine(id: "member", description: "Repair", quantity: 1,
+                                 unitPrice: FieldMoney(amount: 8_000, currency: "USD"),
+                                 source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 10_000, currency: "USD")))
+        XCTAssertEqual(customerSavingsRows([markdown], currency: "USD"),
+                       [CustomerAmountRow(label: "Savings", amount: "−\(money(2_000, currency: "USD"))", emphasis: false)])
     }
 }
