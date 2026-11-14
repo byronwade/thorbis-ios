@@ -1076,8 +1076,13 @@ struct JobDetailView: View {
     }
 
     private var invoiceBalanceCents: Int? {
-        let issued = invoices.filter { $0.status == "issued" && $0.currency == "USD" }
-        guard !issued.isEmpty else { return nil }
+        guard let job, let expectedScope = scope(for: job), let read = invoiceRead,
+              read.scope == expectedScope, read.isComplete, read.unavailableIDs.isEmpty,
+              documentGeneration == session.generation,
+              overviewInvoicesAuthority?.isCurrent(api: api, session: session) == true,
+              read.records.allSatisfy({ expectedScope.contains($0) && read.freshIDs.contains($0.id) }) else { return nil }
+        let issued = read.records.filter { $0.status == "issued" }
+        guard !issued.isEmpty, issued.allSatisfy({ $0.currency == "USD" && $0.amountPaid >= 0 }) else { return nil }
         var balanceTotal = 0
         for invoice in issued {
             var invoiceTotal = 0

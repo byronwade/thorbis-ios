@@ -196,6 +196,21 @@ enum PaperPreview {
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-draft") {
             primary = changed(primary, ["status": "draft"])
         }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-credit-balance"),
+           var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines)) as? [[String: Any]],
+           !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+            price["amount"] = -100
+            lines[0]["unitPrice"] = price
+            primary = changed(primary, ["lines": lines])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-large-balance"),
+           var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines)) as? [[String: Any]],
+           !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+            price["amount"] = 1_000_000_000_000
+            lines[0]["unitPrice"] = price
+            lines[0]["quantity"] = 1
+            primary = changed(primary, ["lines": [lines[0]], "amountPaid": 0])
+        }
         let original = primary
         if isJobDocumentsMoneyPreview {
             let discount = FieldLine(id: "00000000-0000-4000-8000-000000009104", description: "Member discount", quantity: 1,
@@ -211,11 +226,23 @@ enum PaperPreview {
             primary = changed(primary, ["lines": lines])
         }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
+        let mixedBalance = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-mixed-balance")
+        var alternate = original
+        if mixedBalance, var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(original.lines)) as? [[String: Any]] {
+            for index in lines.indices {
+                if var price = lines[index]["unitPrice"] as? [String: Any] {
+                    price["currency"] = "EUR"
+                    lines[index]["unitPrice"] = price
+                }
+            }
+            alternate = changed(original, ["currency": "EUR", "lines": lines])
+        }
         return [primary,
-         changed(original, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
+         changed(alternate, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
                             ? "00000000-0000-4000-8000-000000012209" : "00000000-0000-4000-8000-000000002240",
-                           "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
-                           "amountPaid": equalBalances ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
+                           "status": equalBalances || mixedBalance ? "issued" : "paid", "origin": "estimate_deposit",
+                           "currency": mixedBalance ? "EUR" : original.currency,
+                           "amountPaid": equalBalances || mixedBalance ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),
          changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002241", "jobId": "00000000-0000-4000-8000-000000002215"])]
     }
@@ -1103,7 +1130,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") {
                     return ["items": scenario.lock.withLock { scenario.completionCreated } ? [jsonObject(PaperPreview.invoice)!] : []]
                 }
-                return ["items": invoices.filter { $0.jobId == PaperPreview.jobID }.map { jsonObject($0)! }]
+                let rows = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-partial-balance")
+                    ? invoices : invoices.filter { $0.jobId == PaperPreview.jobID }
+                return ["items": rows.map { jsonObject($0)! }]
             }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
                scenario.lock.withLock({ scenario.completionCreated }), path == "/v1/invoices/\(PaperPreview.invoice.id)" {

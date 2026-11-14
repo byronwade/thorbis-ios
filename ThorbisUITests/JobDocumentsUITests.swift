@@ -292,6 +292,54 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(estimate.frame.minY, estimates.frame.maxY, "The pinned shortcut must not cover the estimate")
     }
 
+    func testPartialInvoiceReadDoesNotShowAnIncompleteJobBalance() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-partial-balance"])
+        let issue = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Couldn't load all invoices")).firstMatch
+        XCTAssertTrue(issue.waitForExistence(timeout: 20))
+        let financial = app.buttons["job-section-money"]
+        XCTAssertTrue(financial.waitForExistence(timeout: 10))
+        XCTAssertFalse(financial.label.contains("due"), financial.label)
+    }
+
+    func testMixedInvoiceCurrenciesDoNotShowAnIncompleteDollarBalance() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-mixed-balance"])
+        let financial = thorbisStableButton(app, "job-section-money")
+        financial.tap()
+        app.buttons["job-money-jump-invoices"].tap()
+        XCTAssertTrue(app.buttons["job-invoice-\(depositA)"].waitForExistence(timeout: 15))
+        XCTAssertFalse(financial.label.contains("due"), financial.label)
+    }
+
+    func testCreditLineDoesNotInventAJobBalance() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-credit-balance"])
+        let financial = thorbisStableButton(app, "job-section-money")
+        financial.tap()
+        app.buttons["job-money-jump-invoices"].tap()
+        XCTAssertTrue(app.buttons["job-invoice-\(invoiceA)"].waitForExistence(timeout: 15))
+        XCTAssertFalse(financial.label.contains("due"), financial.label)
+    }
+
+    func testLargestTextKeepsLargeBalanceExactAndDocumentsUsable() {
+        continueAfterFailure = false
+        let app = preview(extra: ["--paper-preview-job-large-balance", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch.tap()
+        let amount = "$10,000,000,000.00"
+        XCTAssertTrue(chooser.label.contains(amount), chooser.label)
+        XCTAssertTrue(app.staticTexts["Money · \(amount)"].exists, "The full amount must remain visible")
+        let menu = app.buttons["job-money-jump-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10))
+        menu.tap(); app.buttons["Estimates"].firstMatch.tap()
+        let estimate = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        revealJobItem(estimate, in: app)
+        capture(app, "Large-text financial section with large balance")
+    }
+
     func testLargestTextFinancialSectionChooserLeavesRoomForDocuments() {
         continueAfterFailure = false
         let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
