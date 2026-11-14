@@ -20,5 +20,6 @@ No amounts or approval behavior were changed.
 This does not establish verified membership discount provenance or fix the
 separate held customer-invoice visibility issue. The generic savings amount is
 still a comparison with the captured price-book amount, not a newly calculated
-credit. Physical-device and VoiceOver behavior were not tested. Independent
-review of this exact change remains pending.
+credit. Physical-device and VoiceOver behavior were not tested. The independent
+Codex GitHub review of source commit `206c1ad3` completed with no findings;
+the later evidence update does not change app or test code.
