@@ -424,6 +424,7 @@ struct CustomerRecordSectionGroup: Equatable, Sendable {
     /// True when records were rejected or this job's read failed. Retrying must not discard other groups.
     let incomplete: Bool
     let issue: String?
+    var denied: Bool = false
     var jobID: String { job.id }
     var title: String { job.title }
 }
@@ -508,6 +509,10 @@ enum CustomerRecordSectionLoader {
             throw CancellationError()
         } catch let problem as Problem where problem.status == 401 {
             throw problem
+        } catch let problem as Problem where problem.status == 403 {
+            try requireCurrent(scope, api: api, isCurrent: isCurrent)
+            return CustomerRecordSectionGroup(job: job, notes: [], documents: [], nextMediaCursor: nil,
+                                              incomplete: true, issue: "You no longer have access to this job.", denied: true)
         } catch {
             try requireCurrent(scope, api: api, isCurrent: isCurrent)
             return CustomerRecordSectionGroup(job: job, notes: [], documents: [], nextMediaCursor: mediaCursor,
@@ -522,5 +527,94 @@ enum CustomerRecordSectionLoader {
             throw Problem(title: "Invalid customer scope", status: nil, detail: "The customer or workspace could not be verified.")
         }
         guard api.requestGeneration == scope.apiGeneration, isCurrent() else { throw CancellationError() }
+    }
+}
+
+/// State is bound to one authority scope and section. The owner must discard it when its
+/// actor, permissions, authority revision, or API generation changes, and ignore stale tasks.
+struct CustomerRecordSectionAccumulator {
+    let scope: CustomerRecordSectionScope
+    let section: CustomerRecordSection
+    private(set) var groups: [CustomerRecordSectionGroup] = []
+    private(set) var nextJobCursor: String?
+    private(set) var identityIncomplete = false
+    private var loadedJobs = false
+    private var jobCursors = Set<String>()
+    private var mediaCursors: [String: Set<String>] = [:]
+    private var integrityIncomplete: [String: Bool] = [:]
+
+    init(scope: CustomerRecordSectionScope, section: CustomerRecordSection) {
+        self.scope = scope
+        self.section = section
+    }
+
+    @discardableResult
+    mutating func apply(page: CustomerRecordSectionPage, requestedCursor: String?) -> Bool {
+        guard page.scope == scope, page.section == section,
+              (!loadedJobs && requestedCursor == nil) || (loadedJobs && requestedCursor != nil && requestedCursor == nextJobCursor) else { return false }
+        if let requestedCursor { jobCursors.insert(requestedCursor) }
+        loadedJobs = true
+        identityIncomplete = identityIncomplete || page.identityIncomplete
+        for group in page.groups {
+            guard valid(group) else { identityIncomplete = true; continue }
+            if let index = groups.firstIndex(where: { $0.jobID == group.jobID }) {
+                identityIncomplete = true
+                if group.denied {
+                    groups[index] = group
+                    mediaCursors[group.jobID] = nil
+                    integrityIncomplete[group.jobID] = nil
+                }
+                continue
+            }
+            groups.append(group)
+            integrityIncomplete[group.jobID] = group.incomplete && group.issue == nil
+        }
+        if let next = page.nextJobCursor, next.isEmpty || jobCursors.contains(next) {
+            identityIncomplete = true
+            nextJobCursor = nil
+        } else { nextJobCursor = page.nextJobCursor }
+        return true
+    }
+
+    /// Applies a retry or continuation. Failed reads retain earlier content; authorization
+    /// denial purges it. Cursor cycles stop with a visible partial state.
+    @discardableResult
+    mutating func apply(group: CustomerRecordSectionGroup, requestedCursor: String?) -> Bool {
+        guard valid(group), let index = groups.firstIndex(where: { $0.jobID == group.jobID }) else { return false }
+        let old = groups[index]
+        guard requestedCursor == nil || (section == .documents && requestedCursor == old.nextMediaCursor) else { return false }
+        if group.denied {
+            groups[index] = group
+            mediaCursors[group.jobID] = nil
+            integrityIncomplete[group.jobID] = nil
+            return true
+        }
+        if group.issue != nil {
+            groups[index] = CustomerRecordSectionGroup(job: old.job, notes: old.notes, documents: old.documents,
+                nextMediaCursor: old.nextMediaCursor, incomplete: true, issue: group.issue)
+            return true
+        }
+        if requestedCursor == nil {
+            mediaCursors[group.jobID] = []
+            groups[index] = group
+            integrityIncomplete[group.jobID] = group.incomplete
+            return true
+        }
+        var seen = mediaCursors[group.jobID, default: []]
+        seen.insert(requestedCursor!)
+        mediaCursors[group.jobID] = seen
+        var documentIDs = Set(old.documents.map(\.id))
+        let documents = old.documents + group.documents.filter { documentIDs.insert($0.id).inserted }
+        let cycle = group.nextMediaCursor.map { $0.isEmpty || seen.contains($0) } ?? false
+        let incomplete = (integrityIncomplete[group.jobID] ?? false) || group.incomplete || cycle
+        integrityIncomplete[group.jobID] = incomplete
+        groups[index] = CustomerRecordSectionGroup(job: group.job, notes: old.notes, documents: documents,
+            nextMediaCursor: cycle ? nil : group.nextMediaCursor, incomplete: incomplete,
+            issue: cycle ? "Some records could not be loaded. Try again." : nil)
+        return true
+    }
+
+    private func valid(_ group: CustomerRecordSectionGroup) -> Bool {
+        group.job.organizationId == scope.organizationID && group.job.customerId == scope.customerID
     }
 }
