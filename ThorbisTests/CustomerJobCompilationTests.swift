@@ -176,6 +176,37 @@ final class CustomerJobCompilationTests: XCTestCase {
         XCTAssertFalse(state.apply(group: success, token: recovery2))
     }
 
+    func testSameScopeRefreshKeepsOwnerAndRetainsDelayedDenial() throws {
+        let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: UUID())
+        let record = try JSONDecoder().decode(JobRecord.self, from: JSONSerialization.data(withJSONObject: job(id: jobA, title: "First")))
+        let item = try JSONDecoder().decode(MediaAssetRecord.self, from: JSONSerialization.data(withJSONObject: media(id: uid(1001), job: jobA, kind: "document", archived: false)))
+        let success = CustomerRecordSectionGroup(job: record, notes: [], documents: [item], nextMediaCursor: nil, incomplete: false, issue: nil)
+        let denied = CustomerRecordSectionGroup(job: record, notes: [], documents: [], nextMediaCursor: nil, incomplete: true, issue: "Denied", denied: true)
+        let page = CustomerRecordSectionPage(scope: scope, section: .documents, groups: [success], nextJobCursor: nil, identityIncomplete: false)
+        var state = CustomerRecordSectionAccumulator(scope: scope, section: .documents)
+        let initial = try XCTUnwrap(state.beginPage(cursor: nil))
+        XCTAssertTrue(state.apply(page: page, token: initial))
+        let staleJob = try XCTUnwrap(state.beginGroup(jobID: jobA, cursor: nil))
+        let refresh = try XCTUnwrap(state.beginRefresh())
+        XCTAssertEqual(state.groups.first?.documents.count, 1, "Refresh failure must leave previously visible content")
+        XCTAssertTrue(state.apply(page: page, token: refresh))
+        XCTAssertFalse(state.apply(group: success, token: staleJob), "Old successful reads must not overwrite refresh")
+        XCTAssertTrue(state.apply(group: denied, token: staleJob), "Same-owner denial still purges after refresh")
+        XCTAssertTrue(state.groups.first?.documents.isEmpty == true)
+        XCTAssertTrue(state.groups.first?.denied == true)
+        let secondRefresh = try XCTUnwrap(state.beginRefresh())
+        XCTAssertTrue(state.apply(page: page, token: secondRefresh))
+        XCTAssertTrue(state.groups.first?.denied == true, "Ordinary refresh cannot unlock a denied job")
+        let recovery = try XCTUnwrap(state.beginGroupRecovery(jobID: jobA))
+        XCTAssertTrue(state.apply(group: success, token: recovery))
+        XCTAssertEqual(state.groups.first?.documents.count, 1)
+        var newOwner = CustomerRecordSectionAccumulator(scope: scope, section: .documents)
+        let newPage = try XCTUnwrap(newOwner.beginPage(cursor: nil))
+        XCTAssertTrue(newOwner.apply(page: page, token: newPage))
+        XCTAssertFalse(newOwner.apply(group: denied, token: staleJob), "A replaced owner must not accept old denial")
+        XCTAssertEqual(newOwner.groups.first?.documents.count, 1)
+    }
+
     func testSupersededPageAppliesOnlyEmbeddedDenials() throws {
         let scope = CustomerRecordSectionScope(customerID: customer, organizationID: org, apiGeneration: UUID())
         let record = try JSONDecoder().decode(JobRecord.self, from: JSONSerialization.data(withJSONObject: job(id: jobA, title: "First")))

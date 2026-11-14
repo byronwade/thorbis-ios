@@ -539,6 +539,7 @@ struct CustomerRecordSectionRequest {
     fileprivate let request: UUID
     fileprivate let jobID: String?
     fileprivate let cursor: String?
+    fileprivate var refresh: Bool = false
 }
 
 struct CustomerRecordSectionAccumulator {
@@ -566,6 +567,16 @@ struct CustomerRecordSectionAccumulator {
         guard !denied, (!loadedJobs && cursor == nil) || (loadedJobs && cursor != nil && cursor == nextJobCursor) else { return nil }
         let request = UUID(); pageRequest = request
         return .init(owner: owner, request: request, jobID: nil, cursor: cursor)
+    }
+
+    /// Refresh in place so earlier definitive denials remain authoritative. Content is
+    /// replaced only after a successful first page; transient failures leave it visible.
+    mutating func beginRefresh() -> CustomerRecordSectionRequest? {
+        guard !denied else { return nil }
+        let request = UUID()
+        pageRequest = request
+        jobRequests.removeAll()
+        return .init(owner: owner, request: request, jobID: nil, cursor: nil, refresh: true)
     }
 
     mutating func beginGroup(jobID: String, cursor: String?) -> CustomerRecordSectionRequest? {
@@ -609,14 +620,22 @@ struct CustomerRecordSectionAccumulator {
             }
             return applied
         }
-        guard (!loadedJobs && requestedCursor == nil) || (loadedJobs && requestedCursor != nil && requestedCursor == nextJobCursor) else { return false }
+        guard token.refresh || (!loadedJobs && requestedCursor == nil) || (loadedJobs && requestedCursor != nil && requestedCursor == nextJobCursor) else { return false }
         pageRequest = nil
+        if token.refresh {
+            groups.removeAll()
+            jobCursors.removeAll()
+            mediaCursors.removeAll()
+            integrityIncomplete.removeAll()
+            identityIncomplete = false
+        }
         if let requestedCursor { jobCursors.insert(requestedCursor) }
         loadedJobs = true
         identityIncomplete = identityIncomplete || page.identityIncomplete
         for incoming in page.groups {
             guard valid(incoming) else { identityIncomplete = true; continue }
             let group = pendingDenials[incoming.jobID] ?? incoming
+            if group.denied || group.unavailable { pendingDenials[group.jobID] = group }
             if let index = groups.firstIndex(where: { $0.jobID == group.jobID }) {
                 identityIncomplete = true
                 if group.denied || group.unavailable {
@@ -642,19 +661,19 @@ struct CustomerRecordSectionAccumulator {
     @discardableResult
     mutating func apply(group: CustomerRecordSectionGroup, token: CustomerRecordSectionRequest) -> Bool {
         let requestedCursor = token.cursor
-        guard !denied, token.owner == owner, token.jobID == group.jobID,
-              valid(group), let index = groups.firstIndex(where: { $0.jobID == group.jobID }) else { return false }
+        guard !denied, token.owner == owner, token.jobID == group.jobID, valid(group) else { return false }
         // A definitive denial may have been authorized after a newer success. Conservatively
-        // purge any same-owner denial, regardless of request ordering.
+        // purge or latch any same-owner denial, regardless of request ordering.
         if group.denied || group.unavailable {
             pendingDenials[group.jobID] = group
             jobRequests[group.jobID] = nil
-            groups[index] = group
+            if let index = groups.firstIndex(where: { $0.jobID == group.jobID }) { groups[index] = group }
             mediaCursors[group.jobID] = nil
             integrityIncomplete[group.jobID] = nil
             return true
         }
-        guard jobRequests[group.jobID] == token.request else { return false }
+        guard jobRequests[group.jobID] == token.request,
+              let index = groups.firstIndex(where: { $0.jobID == group.jobID }) else { return false }
         let old = groups[index]
         guard requestedCursor == nil || (section == .documents && requestedCursor == old.nextMediaCursor) else { return false }
         jobRequests[group.jobID] = nil
