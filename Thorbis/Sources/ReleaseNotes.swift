@@ -21,6 +21,14 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-11-13-present-estimates",
+            date: "2026-11-13",
+            highlights: [
+                .init(symbol: "iphone", title: "Show estimates sooner",
+                      detail: "Open customer view before scrolling through a job’s estimates."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-13-savings-label",
             date: "2026-11-13",
             highlights: [
