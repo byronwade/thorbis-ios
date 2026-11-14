@@ -148,6 +148,43 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Send with Mail"].isEnabled)
     }
 
+    func testSwipeDismissingRevertedEmailClearsRecovery() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer",
+                               "--paper-preview-email-recovery-namespace", UUID().uuidString]
+        app.launch()
+        let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10)); body.tap(); body.typeText("Draft")
+        body.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5))
+        let grabber = app.buttons["Sheet Grabber"].firstMatch
+        XCTAssertTrue(grabber.waitForExistence(timeout: 5))
+        grabber.swipeDown()
+        if body.exists { grabber.swipeDown() }
+        XCTAssertTrue(body.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        XCTAssertTrue(app.textFields["inbox-mail-to"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Restore email draft"].exists)
+    }
+
+    func testDiscardClosesWhenRecoveryCleanupFails() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer",
+                               "--paper-preview-email-recovery-remove-fails"]
+        app.launch(); let email = app.buttons["Email"].firstMatch
+        XCTAssertTrue(email.waitForExistence(timeout: 20)); email.tap()
+        let body = app.textFields["inbox-mail-body"]
+        XCTAssertTrue(body.waitForExistence(timeout: 10)); body.tap(); body.typeText("Draft")
+        app.buttons["Close"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["Discard changes"].waitForExistence(timeout: 5))
+        app.buttons["Discard changes"].tap()
+        XCTAssertTrue(body.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(email.waitForExistence(timeout: 10))
+    }
+
     func testEmailRecoveryCleanupFailurePreventsDuplicateSave() {
         continueAfterFailure = false
         let app = XCUIApplication()

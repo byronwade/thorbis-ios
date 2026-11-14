@@ -958,6 +958,29 @@ struct CommsMailDraft: Identifiable {
     }
 }
 
+/// Leave paths for the on-device email recovery copy. Swipe dismisses the sheet without
+/// `requestClose()`, so cleanup cannot depend on the presenter still holding the opening.
+@MainActor
+enum CommsMailRecoveryLeave {
+    static func shouldRemoveAbandoned(
+        hasChanges: Bool, showingCandidate: Bool, blocked: Bool, awaitingCleanup: Bool, storeActive: Bool
+    ) -> Bool {
+        storeActive && !hasChanges && !showingCandidate && !blocked && !awaitingCleanup
+    }
+
+    @discardableResult
+    static func removeAbandoned(
+        _ store: CommsEmailRecoveryStoring, scope: CommsEmailRecoveryScope?,
+        hasChanges: Bool, showingCandidate: Bool, blocked: Bool, awaitingCleanup: Bool, storeActive: Bool
+    ) -> Bool {
+        guard shouldRemoveAbandoned(hasChanges: hasChanges, showingCandidate: showingCandidate, blocked: blocked,
+                                    awaitingCleanup: awaitingCleanup, storeActive: storeActive) else { return true }
+        guard let scope else { return true }
+        do { try store.remove(scope: scope); return true }
+        catch { return false }
+    }
+}
+
 /// The email composer (web compose.tsx): To, Cc and Bcc, subject, body. Save draft keeps it on
 /// this device; queued messages do not send automatically.
 struct CommsMailSheet: View {
@@ -1173,9 +1196,10 @@ struct CommsMailSheet: View {
         .onChange(of: store.isActive) { _, active in
             if !active { onClose() }
         }
+        .onDisappear { removeAbandonedRecovery() }
         .alert("Keep your changes?", isPresented: $confirmClose) {
             if canSave && saveFailure != .storage { Button("Save draft") { commit(send: false) } }
-            Button("Discard changes", role: .destructive) { if removeRecovery() { onClose() } }
+            Button("Discard changes", role: .destructive) { _ = removeRecovery(); onClose() }
             Button("Keep editing", role: .cancel) { }
         } message: {
             Text(canSave ? "Save this draft on your device or discard your changes." : "Keep editing or discard your changes.")
@@ -1188,10 +1212,18 @@ struct CommsMailSheet: View {
         }
     }
 
+    private func removeAbandonedRecovery() {
+        _ = CommsMailRecoveryLeave.removeAbandoned(
+            recoveryStore, scope: recoveryScope, hasChanges: hasChanges,
+            showingCandidate: recoveryCandidate != nil, blocked: recoveryBlocked,
+            awaitingCleanup: savedThreadAwaitingCleanup != nil, storeActive: store.isActive)
+    }
+
     private func requestClose() {
         if let savedThreadAwaitingCleanup { onSaved(savedThreadAwaitingCleanup); return }
         guard hasChanges else {
-            if recoveryCandidate != nil || recoveryBlocked || removeRecovery() { onClose() }
+            removeAbandonedRecovery()
+            onClose()
             return
         }
         // The keyboard can cover the confirmation's cancel action on iPhone.

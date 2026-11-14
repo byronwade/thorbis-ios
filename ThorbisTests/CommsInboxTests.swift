@@ -2,6 +2,18 @@ import XCTest
 @testable import Thorbis
 
 @MainActor
+private final class MemoryCommsEmailRecoveryStore: CommsEmailRecoveryStoring {
+    var items: [String: CommsEmailRecovery] = [:]
+    var rejectRemovals = false
+    func load(scope: CommsEmailRecoveryScope) throws -> CommsEmailRecovery? { items[scope.account] }
+    func save(_ value: CommsEmailRecovery, scope: CommsEmailRecoveryScope) throws { items[scope.account] = value }
+    func remove(scope: CommsEmailRecoveryScope) throws {
+        if rejectRemovals { throw NSError(domain: "test", code: 1) }
+        items[scope.account] = nil
+    }
+}
+
+@MainActor
 final class CommsInboxTests: XCTestCase {
     func testEmailOpeningKeepsExistingDraftAndRetiresStaleIdentity() throws {
         let presenter = InboxEmailPresenter()
@@ -65,6 +77,57 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertNil(try store.load(scope: wrongActor)); XCTAssertNil(try store.load(scope: wrongOrigin)); XCTAssertNil(try store.load(scope: wrongJob))
         try store.remove(scope: owner)
         XCTAssertNil(try store.load(scope: owner))
+    }
+
+    func testAbandonedEmailRecoveryIsRemovedWhenLeavingUnchanged() throws {
+        let scope = try XCTUnwrap(CommsEmailRecoveryScope(
+            actorID: UUID().uuidString, organizationID: UUID().uuidString,
+            origin: "https://app.thorbis.com", context: "customer:one", namespace: UUID().uuidString))
+        let store = MemoryCommsEmailRecoveryStore()
+        let draft = CommsMailDraft(mail: try XCTUnwrap(MailDraft(recipients: ["customer@example.com"], cc: [], bcc: [], subject: nil, body: nil)))
+        try store.save(CommsEmailRecovery(draft), scope: scope)
+        XCTAssertTrue(CommsMailRecoveryLeave.removeAbandoned(
+            store, scope: scope, hasChanges: false, showingCandidate: false, blocked: false,
+            awaitingCleanup: false, storeActive: true))
+        XCTAssertNil(try store.load(scope: scope))
+    }
+
+    func testAbandonedEmailRecoveryStaysWhenSessionIsInactiveOrRestoreIsOffered() throws {
+        let scope = try XCTUnwrap(CommsEmailRecoveryScope(
+            actorID: UUID().uuidString, organizationID: UUID().uuidString,
+            origin: "https://app.thorbis.com", context: "customer:one", namespace: UUID().uuidString))
+        let store = MemoryCommsEmailRecoveryStore()
+        let draft = CommsMailDraft(mail: try XCTUnwrap(MailDraft(recipients: ["customer@example.com"], cc: [], bcc: [], subject: nil, body: "Note")))
+        try store.save(CommsEmailRecovery(draft), scope: scope)
+        XCTAssertFalse(CommsMailRecoveryLeave.shouldRemoveAbandoned(
+            hasChanges: false, showingCandidate: false, blocked: false, awaitingCleanup: false, storeActive: false))
+        XCTAssertFalse(CommsMailRecoveryLeave.shouldRemoveAbandoned(
+            hasChanges: true, showingCandidate: false, blocked: false, awaitingCleanup: false, storeActive: true))
+        XCTAssertFalse(CommsMailRecoveryLeave.shouldRemoveAbandoned(
+            hasChanges: false, showingCandidate: true, blocked: false, awaitingCleanup: false, storeActive: true))
+        XCTAssertTrue(CommsMailRecoveryLeave.removeAbandoned(
+            store, scope: scope, hasChanges: false, showingCandidate: true, blocked: false,
+            awaitingCleanup: false, storeActive: true))
+        XCTAssertEqual(try store.load(scope: scope), CommsEmailRecovery(draft))
+        XCTAssertTrue(CommsMailRecoveryLeave.removeAbandoned(
+            store, scope: scope, hasChanges: false, showingCandidate: false, blocked: false,
+            awaitingCleanup: false, storeActive: false))
+        XCTAssertEqual(try store.load(scope: scope), CommsEmailRecovery(draft))
+    }
+
+    func testAbandonedEmailRecoveryLeaveDoesNotDependOnCleanupSuccess() throws {
+        let scope = try XCTUnwrap(CommsEmailRecoveryScope(
+            actorID: UUID().uuidString, organizationID: UUID().uuidString,
+            origin: "https://app.thorbis.com", context: "customer:one", namespace: UUID().uuidString))
+        let store = MemoryCommsEmailRecoveryStore()
+        store.rejectRemovals = true
+        let draft = CommsMailDraft(mail: try XCTUnwrap(MailDraft(recipients: ["customer@example.com"], cc: [], bcc: [], subject: nil, body: "Note")))
+        try store.save(CommsEmailRecovery(draft), scope: scope)
+        XCTAssertFalse(CommsMailRecoveryLeave.removeAbandoned(
+            store, scope: scope, hasChanges: false, showingCandidate: false, blocked: false,
+            awaitingCleanup: false, storeActive: true))
+        XCTAssertEqual(try store.load(scope: scope), CommsEmailRecovery(draft),
+                       "A failed delete must not block leaving; the leftover is offered on the next open")
     }
 
     private func call(_ id: String, status: String = "completed", number: String? = "+15550100100", name: String? = nil,
