@@ -729,6 +729,11 @@ private struct LeasePrototypeScope: Codable, Hashable {
     let organization: String
     let origin: String
     let generation: String
+    let policyVersion: Int
+    init(actor: String, organization: String, origin: String, generation: String, policyVersion: Int = 1) {
+        self.actor = actor; self.organization = organization; self.origin = origin
+        self.generation = generation; self.policyVersion = policyVersion
+    }
 }
 
 @MainActor
@@ -823,6 +828,59 @@ final class PriceBookOfflineLeasePrototypeTests: XCTestCase {
         XCTAssertEqual(LeasePrototype(store: store).read(scope, now: now), Data("authorized".utf8))
     }
 
+    func testKeychainLeaseIsScopedAndMissingMarkerFailsClosed() throws {
+        let service = "com.thorbis.field.test-only-lease.\(UUID().uuidString)"
+        let base = try fixture()
+        let store = LeasePrototypeStore(root: base.root, keychainService: service)
+        addTeardownBlock { store.deleteTestKeychainItems() }
+        let coordinator = LeasePrototype(store: store)
+        let token = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(token, payload: Data("catalog".utf8), deadline: now.addingTimeInterval(30), now: now))
+        XCTAssertEqual(store.testKeychainLookupStatus(scope), errSecSuccess, "The lease must really be in Keychain")
+        let other = LeasePrototypeScope(actor: "other", organization: scope.organization, origin: scope.origin, generation: scope.generation)
+        XCTAssertEqual(store.testKeychainLookupStatus(other), errSecItemNotFound)
+        XCTAssertEqual(LeasePrototype(store: store).read(scope, now: now), Data("catalog".utf8))
+        XCTAssertEqual(store.deleteTestKeychainMarker(scope), errSecSuccess)
+        XCTAssertNil(LeasePrototype(store: store).read(scope, now: now), "A file alone is never authorization")
+    }
+
+    func testKeychainDirtyMarkerAndFailedWritesPreserveCorrectOfflineOutcome() throws {
+        let service = "com.thorbis.field.test-only-lease.\(UUID().uuidString)"
+        let base = try fixture()
+        let store = LeasePrototypeStore(root: base.root, keychainService: service)
+        addTeardownBlock { store.deleteTestKeychainItems() }
+        let coordinator = LeasePrototype(store: store)
+        let first = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(first, payload: Data("old".utf8), deadline: now.addingTimeInterval(30), now: now))
+        store.failure = .beforeLease
+        XCTAssertNil(coordinator.begin(scope)) // no request may be issued
+        XCTAssertEqual(LeasePrototype(store: store).read(scope, now: now), Data("old".utf8))
+        store.failure = .afterLease
+        XCTAssertNil(coordinator.begin(scope))
+        XCTAssertNil(LeasePrototype(store: store).read(scope, now: now), "Dirty Keychain state survives reopening")
+        store.failure = .none
+        let next = try XCTUnwrap(coordinator.begin(scope))
+        store.failure = .afterSnapshot
+        XCTAssertFalse(coordinator.commit(next, payload: Data("new".utf8), deadline: now.addingTimeInterval(30), now: now))
+        XCTAssertNil(LeasePrototype(store: store).read(scope, now: now))
+    }
+
+    func testKeychainScopesIncludePolicyAndLegacyNeedsAuthorization() throws {
+        let service = "com.thorbis.field.test-only-lease.\(UUID().uuidString)"
+        let base = try fixture()
+        let store = LeasePrototypeStore(root: base.root, keychainService: service)
+        addTeardownBlock { store.deleteTestKeychainItems() }
+        let coordinator = LeasePrototype(store: store)
+        try store.writeLegacy(scope, payload: Data("legacy".utf8))
+        XCTAssertNil(coordinator.read(scope, now: now))
+        let token = try XCTUnwrap(coordinator.begin(scope))
+        XCTAssertTrue(coordinator.commit(token, payload: Data("fresh".utf8), deadline: now.addingTimeInterval(30), now: now))
+        let nextPolicy = LeasePrototypeScope(actor: scope.actor, organization: scope.organization, origin: scope.origin, generation: scope.generation, policyVersion: 2)
+        XCTAssertNil(coordinator.read(nextPolicy, now: now))
+        XCTAssertEqual(store.testKeychainLookupStatus(nextPolicy), errSecItemNotFound)
+        XCTAssertEqual(coordinator.read(scope, now: now), Data("fresh".utf8))
+    }
+
     func testMismatchedSnapshotAndInvalidDeadlineFailClosed() throws {
         let store = try fixture()
         let coordinator = LeasePrototype(store: store)
@@ -853,10 +911,29 @@ private struct LeasePrototypeSnapshot: Codable {
 // This fixture is deliberately independent of the application's real storage.
 private final class LeasePrototypeStore {
     enum Failure { case none, beforeLease, afterLease, beforeSnapshot, afterSnapshot }
-    enum StoreError: Error { case injected }
+    enum StoreError: Error { case injected, keychain(OSStatus) }
     let root: URL
     var failure: Failure = .none
-    init(root: URL) { self.root = root }
+    let keychainService: String?
+    init(root: URL, keychainService: String? = nil) { self.root = root; self.keychainService = keychainService }
+
+    private func testKeychainQuery(_ scope: LeasePrototypeScope) -> [String: Any] {
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        let bytes = (try? encoder.encode(scope)) ?? Data()
+        let account = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: keychainService ?? "",
+                kSecAttrAccount as String: account]
+    }
+    func testKeychainLookupStatus(_ scope: LeasePrototypeScope) -> OSStatus {
+        SecItemCopyMatching(testKeychainQuery(scope) as CFDictionary, nil)
+    }
+    func deleteTestKeychainMarker(_ scope: LeasePrototypeScope) -> OSStatus {
+        SecItemDelete(testKeychainQuery(scope) as CFDictionary)
+    }
+    func deleteTestKeychainItems() {
+        guard let keychainService, keychainService.hasPrefix("com.thorbis.field.test-only-lease.") else { return }
+        SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: keychainService] as CFDictionary)
+    }
 
     private func path(_ scope: LeasePrototypeScope, _ kind: String) throws -> URL {
         let encoder = JSONEncoder()
@@ -865,20 +942,46 @@ private final class LeasePrototypeStore {
         return root.appendingPathComponent("\(digest)-\(kind)")
     }
     func lease(_ scope: LeasePrototypeScope) throws -> LeasePrototypeRecord {
-        try JSONDecoder().decode(LeasePrototypeRecord.self, from: Data(contentsOf: path(scope, "lease")))
+        let data: Data
+        if keychainService != nil {
+            var query = testKeychainQuery(scope)
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var result: CFTypeRef?
+            let status = SecItemCopyMatching(query as CFDictionary, &result)
+            guard status == errSecSuccess, let value = result as? Data else { throw StoreError.keychain(status) }
+            data = value
+        } else {
+            data = try Data(contentsOf: path(scope, "lease"))
+        }
+        return try JSONDecoder().decode(LeasePrototypeRecord.self, from: data)
     }
     func snapshot(_ scope: LeasePrototypeScope) throws -> LeasePrototypeSnapshot {
         try JSONDecoder().decode(LeasePrototypeSnapshot.self, from: Data(contentsOf: path(scope, "snapshot")))
     }
     func writeLease(_ record: LeasePrototypeRecord) throws {
         if failure == .beforeLease { throw StoreError.injected }
-        try JSONEncoder().encode(record).write(to: path(record.scope, "lease"), options: .atomic)
+        let data = try JSONEncoder().encode(record)
+        if keychainService != nil {
+            let query = testKeychainQuery(record.scope)
+            let changes = [kSecValueData as String: data]
+            var status = SecItemUpdate(query as CFDictionary, changes as CFDictionary)
+            if status == errSecItemNotFound {
+                var item = query
+                item[kSecValueData as String] = data
+                item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                status = SecItemAdd(item as CFDictionary, nil)
+            }
+            guard status == errSecSuccess else { throw StoreError.keychain(status) }
+        } else {
+            try data.write(to: path(record.scope, "lease"), options: .atomic)
+        }
         if failure == .afterLease { throw StoreError.injected }
         guard try lease(record.scope) == record else { throw StoreError.injected }
     }
     func writeSnapshot(_ snapshot: LeasePrototypeSnapshot) throws {
         if failure == .beforeSnapshot { throw StoreError.injected }
-        try JSONEncoder().encode(snapshot).write(to: path(snapshot.scope, "snapshot"), options: .atomic)
+        try JSONEncoder().encode(snapshot).write(to: path(snapshot.scope, "snapshot"), options: [.atomic, .completeFileProtection])
         if failure == .afterSnapshot { throw StoreError.injected }
         let check = try self.snapshot(snapshot.scope)
         guard check.scope == snapshot.scope, check.nonce == snapshot.nonce, check.payload == snapshot.payload else { throw StoreError.injected }
