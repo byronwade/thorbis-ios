@@ -914,6 +914,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let status: Int
         let payload: Any
         if PaperPreview.isCustomerRecordsPreview,
+           ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-refresh-fail-once"),
+           url.path == "/v1/jobs",
+           URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "limit" && $0.value == "5" }) == true,
+           Self.scenario.lock.withLock({
+               guard Self.scenario.customerSectionReads == 1 else { return false }
+               Self.scenario.customerSectionReads += 1
+               return true
+           }) {
+            status = 503
+            payload = ["status": 503, "title": "Temporary customer records error"]
+        } else if PaperPreview.isCustomerRecordsPreview,
            (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-deny-group") ||
             ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-missing-group") ||
             ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh")),
@@ -1586,6 +1597,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             let matched = matchingCustomer(items, queryItems: queryItems)
             if PaperPreview.isCustomerRecordsPreview,
                (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-refresh") ||
+                ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-refresh-fail-once") ||
                 ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh")),
                queryItems.contains(where: { $0.name == "limit" && $0.value == "5" }) {
                 scenario.lock.withLock { scenario.customerSectionReads += 1 }
@@ -1745,6 +1757,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "uploadState": "stored", "tags": [String](), "caption": first ? "Service report" : "Drain report", "archived": false,
                     "createdAt": now, "updatedAt": now]
                 if first && (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-refresh") ||
+                             ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-records-refresh-fail-once") ||
                              ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-deny-after-refresh")),
                    scenario.lock.withLock({ scenario.customerSectionReads > 1 }) {
                     file["caption"] = "Updated service report"

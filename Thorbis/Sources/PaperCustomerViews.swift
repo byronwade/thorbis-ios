@@ -318,6 +318,11 @@ private struct CustomerSectionKey: Equatable {
     let section: CustomerRecordSection
 }
 
+private enum CustomerSectionRetry {
+    case page(String?)
+    case refresh
+}
+
 struct CustomerDetailView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
@@ -358,6 +363,7 @@ struct CustomerDetailView: View {
     @State private var sectionRecords: CustomerRecordSectionAccumulator?
     @State private var sectionLoading = false
     @State private var sectionError: String?
+    @State private var sectionRetry: CustomerSectionRetry?
     @State private var sectionRequest = UUID()
     private var selectedSectionKey: CustomerSectionKey? {
         guard tab == "Records", let identity = activityIdentity, identity.scope.access.jobs else { return nil }
@@ -514,11 +520,14 @@ struct CustomerDetailView: View {
         }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
+                // Refresh the visible records first so unrelated customer or activity reads do not block it.
+                if let key = selectedSectionKey {
+                    if sectionRecords == nil || sectionRecords?.denied == true { await startCustomerSection(key) }
+                    else { await loadCustomerSectionPage(key, cursor: nil, refresh: true) }
+                } else { await loadSelectedRecords() }
                 await load()
                 if activityPublication.denied { activityPublication = CustomerActivityPublication() }
                 await loadActivity(reset: true)
-                if let key = selectedSectionKey { await startCustomerSection(key) }
-                else { await loadSelectedRecords() }
                 if tab == "Jobs" { await loadJobRecords() }
             }
         }
@@ -1265,7 +1274,9 @@ struct CustomerDetailView: View {
             if let sectionError {
                 ErrorBanner(message: sectionError) {
                     if sectionRecords?.denied == true { await startCustomerSection(key) }
-                    else { await loadCustomerSectionPage(key, cursor: sectionRecords?.nextJobCursor) }
+                    else if case .refresh = sectionRetry { await loadCustomerSectionPage(key, cursor: nil, refresh: true) }
+                    else if case let .page(cursor) = sectionRetry { await loadCustomerSectionPage(key, cursor: cursor) }
+                    else { await startCustomerSection(key) }
                 }
                     .accessibilityIdentifier("customer-section-retry")
             }
@@ -1288,7 +1299,7 @@ struct CustomerDetailView: View {
     }
 
     private func startCustomerSection(_ key: CustomerSectionKey?) async {
-        sectionRequest = UUID(); sectionKey = key; sectionRecords = nil; sectionError = nil; sectionLoading = false
+        sectionRequest = UUID(); sectionKey = key; sectionRecords = nil; sectionError = nil; sectionRetry = nil; sectionLoading = false
         guard let key else { return }
         await loadCustomerSectionPage(key, cursor: nil)
     }
@@ -1297,14 +1308,15 @@ struct CustomerDetailView: View {
         selectedSectionKey == key && sectionKey == key
     }
 
-    private func loadCustomerSectionPage(_ key: CustomerSectionKey, cursor: String?) async {
-        guard customerSectionCurrent(key), !sectionLoading else { return }
+    private func loadCustomerSectionPage(_ key: CustomerSectionKey, cursor: String?, refresh: Bool = false) async {
+        guard customerSectionCurrent(key), !sectionLoading || refresh else { return }
         let scope = CustomerRecordSectionScope(customerID: key.identity.scope.customerID,
             organizationID: key.identity.scope.organizationID, apiGeneration: key.identity.requestGeneration)
         var owner = sectionRecords ?? CustomerRecordSectionAccumulator(scope: scope, section: key.section)
-        guard let pageToken = owner.beginPage(cursor: cursor) else { return }
+        let pageToken = refresh ? owner.beginRefresh() : owner.beginPage(cursor: cursor)
+        guard let pageToken else { return }
         sectionRecords = owner
-        let epoch = UUID(); sectionRequest = epoch; sectionLoading = true; sectionError = nil
+        let epoch = UUID(); sectionRequest = epoch; sectionLoading = true; sectionError = nil; sectionRetry = nil
         let apiRef = api, sessionRef = session, identity = key.identity
         let current: @MainActor @Sendable () -> Bool = {
             identity.scope.isCurrent(session: sessionRef) && apiRef.normalizedOrigin == identity.origin &&
@@ -1317,7 +1329,10 @@ struct CustomerDetailView: View {
             guard customerSectionCurrent(key), current(), var records = sectionRecords else { return }
             // The accumulator rejects stale successes but latches same-owner definitive denials.
             if records.apply(page: page, token: pageToken) { sectionRecords = records }
-            else if sectionRequest == epoch && !Task.isCancelled { sectionError = "Records changed. Refresh and try again." }
+            else if sectionRequest == epoch && !Task.isCancelled {
+                sectionError = "Records changed. Refresh and try again."
+                sectionRetry = refresh ? .refresh : .page(cursor)
+            }
         } catch is CancellationError {
         } catch {
             guard customerSectionCurrent(key), current(), var records = sectionRecords else { return }
@@ -1327,6 +1342,7 @@ struct CustomerDetailView: View {
                 }
             } else if sectionRequest == epoch && !Task.isCancelled {
                 sectionError = "Couldn't load customer records. Try again."
+                sectionRetry = refresh ? .refresh : .page(cursor)
             }
         }
     }

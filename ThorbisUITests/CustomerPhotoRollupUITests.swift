@@ -54,6 +54,20 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [updated], timeout: 20), .completed, "Pull-to-refresh must reload the selected section")
     }
 
+    func testFailedRecordsRefreshRetriesRefreshAndKeepsEarlierDocuments() {
+        let app = openPagedCustomerRecords("--paper-preview-customer-records-refresh-fail-once")
+        let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        for _ in 0..<6 { app.swipeDown() }
+        let retry = app.descendants(matching: .any)["customer-section-retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+        XCTAssertTrue(file.exists, "A transient refresh failure must preserve earlier documents")
+        let button = retry.buttons.firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 10)); button.tap()
+        let updated = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Updated service report"), object: file)
+        XCTAssertEqual(XCTWaiter.wait(for: [updated], timeout: 20), .completed, "Retry must repeat the refresh rather than load an old next page")
+    }
+
     func testDelayedJobDenialAfterRefreshStillPurgesRecords() {
         let app = openPagedCustomerRecords("--paper-preview-customer-deny-after-refresh")
         let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
@@ -97,7 +111,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         let more = app.buttons["customer-records-load-more-jobs"]
         for _ in 0..<15 where !more.isHittable { app.swipeUp() }
         XCTAssertTrue(more.waitForExistence(timeout: 10)); app.scrollClearOfFoot(more); more.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["customer-section-retry"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Your session expired. Sign in again."].waitForExistence(timeout: 15))
         XCTAssertFalse(file.exists)
     }
 
@@ -151,8 +165,13 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         XCTAssertTrue(inner.waitForExistence(timeout: 10)); inner.tap()
         app.buttons["Documents"].firstMatch.tap()
         let file = app.buttons["customer-document-00000000-0000-4000-8000-000000031777"]
-        for _ in 0..<15 where !file.isHittable { app.swipeUp() }
-        XCTAssertTrue(file.waitForExistence(timeout: 20)); XCTAssertTrue(file.isHittable)
+        for _ in 0..<15 where !file.exists { app.swipeUp() }
+        XCTAssertTrue(file.waitForExistence(timeout: 20))
+        for _ in 0..<10 where !file.isHittable {
+            if file.frame.midY < app.frame.midY { app.swipeDown(velocity: .slow) }
+            else { app.swipeUp(velocity: .slow) }
+        }
+        XCTAssertTrue(file.isHittable)
         XCTAssertGreaterThanOrEqual(file.frame.height, 44)
     }
 
