@@ -13,9 +13,10 @@ writes and cleanup are reported. Previous copies may be older or already saved.
 The release-based candidate at `db37e4a2` passed 26 focused unit tests and five
 UI tests for session restoration, process termination, and injected recovery
 load, write and cleanup failures (`/private/tmp/thorbis-email-recovery-db37-1113.log`).
-Earlier checkpoints passed customer, job and contact entry tests and a
-simulated Mail handoff preserving all fields, before recovery was added. The final
-combined route and handoff run is pending. Independent source review found and
+On the same built code, a combined run passed 35 unit tests and four UI tests
+covering customer, job and contact entry points and the simulated Mail handoff
+preserving all fields (`/private/tmp/thorbis-inbox-email-final-db37-1113.log`).
+Independent source review found and
 prompted fixes for scope collisions, field loss and stale recovery cleanup;
 the later source changes were DEBUG-only test injection.
 
