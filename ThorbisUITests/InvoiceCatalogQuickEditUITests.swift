@@ -7,6 +7,28 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testInvoiceDraftIsHeldAndMaskedAfterAPIOriginChange() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line", "--paper-preview-invoice-change-origin"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 30))
+        let inline = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(inline.waitForExistence(timeout: 20))
+        inline.tap()
+        inline.typeText(" unsent draft")
+        let changed = app.buttons["invoice-editor-test-change-origin"]
+        XCTAssertTrue(changed.waitForExistence(timeout: 10))
+        changed.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["invoice-editor-scope-unavailable"].waitForExistence(timeout: 10))
+        XCTAssertFalse(inline.exists, "Old-origin draft contents must be masked")
+        let held = app.staticTexts["invoice-editor-test-held-draft"]
+        XCTAssertTrue(held.exists)
+        XCTAssertTrue(held.label.contains("unsent draft"), "The original draft must stay in memory")
+        XCTAssertFalse(app.buttons["Edit full description"].exists)
+        XCTAssertFalse(app.buttons["Save draft"].exists, "Old-origin draft must not be written to the new API")
+    }
+
     func testDescriptionCanvasRetiresWithAPIRequestsPreservingDraft() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -17,6 +17,7 @@ struct InvoiceLineEditorView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var staleRevision = false
+    @State private var initialEditorScope: InvoiceEditorTransportScope?
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @State private var addedLineSelection: InvoiceCatalogLineSelection?
     @State private var expandedLine: UUID?
@@ -33,47 +34,95 @@ struct InvoiceLineEditorView: View {
         _editor = State(initialValue: InvoiceLineEditorState(invoice: invoice))
     }
 
+    private var currentEditorScope: InvoiceEditorTransportScope? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id,
+              organization.lowercased() == invoice.organizationId.lowercased(),
+              let origin = api.normalizedOrigin else { return nil }
+        return InvoiceEditorTransportScope(actor: actor, organization: organization,
+                                           sessionGeneration: session.generation, origin: origin,
+                                           requestGeneration: api.requestGeneration)
+    }
+
+    private var editorTransportIsCurrent: Bool {
+        guard let initialEditorScope else { return false }
+        return currentEditorScope == initialEditorScope
+    }
+
     private var canEdit: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+        editorTransportIsCurrent && editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
     }
 
     private var canUsePriceBook: Bool {
-        session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD"
+        editorTransportIsCurrent && session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD"
     }
 
     private var canIssue: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
+        editorTransportIsCurrent && editor.invoice.status == "draft" && session.can("invoice.issue", feature: "invoicing")
     }
 
     private var linesDisabled: Bool { busy || !canEdit || editor.hasUnsupportedLineSources }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView { content }
-                // The keyboard's floating Done control sits above the keyboard safe area.
-                // Reserve room inside the scroll view so line actions can move above it.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if keyboardUp { Color.clear.frame(height: 72).allowsHitTesting(false) }
+        Group {
+            if editorTransportIsCurrent {
+                ScrollViewReader { proxy in
+                    ScrollView { content }
+                        // The keyboard's floating Done control sits above the keyboard safe area.
+                        // Reserve room inside the scroll view so line actions can move above it.
+                        .safeAreaInset(edge: .bottom, spacing: 0) {
+                            if keyboardUp { Color.clear.frame(height: 72).allowsHitTesting(false) }
+                        }
+                        .scrollDismissesKeyboard(.interactively)
+                        .onChange(of: focus) { _, value in
+                            guard let id = value?.lineID else { return }
+                            expandedLine = id
+                            withAnimation { proxy.scrollTo(id, anchor: .center) }
+                        }
+                        .onChange(of: expandedLine) { _, id in
+                            guard let id else { return }
+                            withAnimation { proxy.scrollTo(id, anchor: .center) }
+                        }
                 }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: focus) { _, value in
-                    guard let id = value?.lineID else { return }
-                    expandedLine = id
-                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+            } else {
+                VStack {
+                    ContentUnavailableView("Invoice draft held", systemImage: "lock.shield",
+                                           description: Text("The account or connection changed. This draft is held on this screen and cannot be saved here."))
+                        .accessibilityIdentifier("invoice-editor-scope-unavailable")
+                    #if DEBUG
+                    if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-change-origin") {
+                        Text(editor.lines.first?.description ?? "")
+                            .font(.system(size: 1)).frame(width: 1, height: 1).opacity(0.01)
+                            .accessibilityIdentifier("invoice-editor-test-held-draft")
+                    }
+                    #endif
                 }
-                .onChange(of: expandedLine) { _, id in
-                    guard let id else { return }
-                    withAnimation { proxy.scrollTo(id, anchor: .center) }
-                }
+            }
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-change-origin") {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    Button("Change API") { api.baseURL = "https://retired-preview.invalid" }
+                        .accessibilityIdentifier("invoice-editor-test-change-origin")
+                }
+            }
+            #endif
             ThorbisToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }
+        }
+        .onAppear { if initialEditorScope == nil { initialEditorScope = currentEditorScope } }
+        .onChange(of: currentEditorScope) { _, current in
+            guard let initialEditorScope, current != initialEditorScope else { return }
+            showPriceBook = false
+            addedLineSelection = nil
+            confirmReload = false
+            confirmIssue = false
         }
         .keyboardDoneButton()
         .trackKeyboard($keyboardUp)
@@ -85,7 +134,7 @@ struct InvoiceLineEditorView: View {
             }
         }
         .discardChangesGuard(hasChanges: editor.hasChanges, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-        .safeAreaInset(edge: .bottom) { if !keyboardUp { invoiceCommitActions } }
+        .safeAreaInset(edge: .bottom) { if editorTransportIsCurrent && !keyboardUp { invoiceCommitActions } }
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
@@ -453,6 +502,7 @@ struct InvoiceLineEditorView: View {
             commitPrices()
             let request = try editor.makeRequest()
             let updated = try await api.replaceFieldInvoiceLines(invoice.id, request: request)
+            guard editorTransportIsCurrent else { return }
             addedLineSelection = nil
             onSaved(updated)
             dismiss()
@@ -477,10 +527,12 @@ struct InvoiceLineEditorView: View {
     }
 
     private func reloadLatest() async {
+        guard editorTransportIsCurrent else { return }
         busy = true
         defer { busy = false }
         do {
             let current = try await api.liveFieldInvoice(invoice.id)
+            guard editorTransportIsCurrent else { return }
             addedLineSelection = nil
             editor = InvoiceLineEditorState(invoice: current)
             staleRevision = false
@@ -503,11 +555,13 @@ struct InvoiceLineEditorView: View {
             var current = editor.invoice
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())
+                guard editorTransportIsCurrent else { return }
                 addedLineSelection = nil
                 editor = InvoiceLineEditorState(invoice: current)
                 onSaved(current)
             }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)
+            guard editorTransportIsCurrent else { return }
             onSaved(issued)
             dismiss()
         } catch is CancellationError {
@@ -516,6 +570,14 @@ struct InvoiceLineEditorView: View {
             staleRevision = (error as? Problem)?.status == 409
         }
     }
+}
+
+private struct InvoiceEditorTransportScope: Equatable {
+    let actor: String
+    let organization: String
+    let sessionGeneration: UUID
+    let origin: String
+    let requestGeneration: UUID
 }
 
 /// A catalogue quick editor never resolves by description, source item, or array position.
