@@ -74,7 +74,30 @@ struct InvoiceLineEditorView: View {
             ThorbisToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
             }
+            #if DEBUG
+            if PaperPreview.enabled && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-editor-session-replacement") || ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-editor-workspace-replacement")) {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    Button("Replace session") {
+                        if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-editor-workspace-replacement") {
+                            PaperPreviewProtocol.switchSavedWorkWorkspace()
+                        }
+                        Task { await session.restore() }
+                    }
+                        .accessibilityIdentifier("invoice-editor-test-replace-session")
+                }
+            }
+            #endif
         }
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-editor-workspace-replacement") {
+                Text("Preview workspace \(session.activeOrganization?.id ?? "unavailable") phase \(String(describing: session.phase))")
+                    .font(.system(size: 1)).frame(width: 1, height: 1).allowsHitTesting(false)
+                    .accessibilityLabel("Preview workspace \(session.activeOrganization?.id ?? "unavailable") phase \(String(describing: session.phase))")
+                    .accessibilityIdentifier("invoice-editor-test-workspace")
+            }
+        }
+        #endif
         .keyboardDoneButton()
         .trackKeyboard($keyboardUp)
         .task(id: catalogContext) { await refreshCatalog() }

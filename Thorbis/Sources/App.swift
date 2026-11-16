@@ -176,6 +176,14 @@ struct ThorbisApp: App {
                 appContent
                 #endif
             }
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-editor-workspace-replacement") {
+                Text("Preview workspace \(session.activeOrganization?.id ?? "unavailable") phase \(String(describing: session.phase))")
+                    .font(.system(size: 1)).frame(width: 1, height: 1).allowsHitTesting(false)
+                    .accessibilityLabel("Preview workspace \(session.activeOrganization?.id ?? "unavailable") phase \(String(describing: session.phase))")
+                    .accessibilityIdentifier("invoice-editor-test-workspace")
+            }
+            #endif
             }
             .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil && !estimateHandoff.usesSceneWindow }, set: { _ in })) {
                 if let model = estimateHandoff.active {

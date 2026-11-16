@@ -1,5 +1,8 @@
 import Foundation
 import SQLite3
+#if INVOICE_FENCE_HOST_TEST
+import Darwin
+#endif
 
 /// A storage domain only; callers must derive origin and IDs from trusted session/API state.
 struct InvoiceFenceDomain: Sendable {
@@ -40,11 +43,24 @@ struct InvoiceIdleCaptureRecovery: Sendable {
 enum InvoiceFencePending: Int32, Sendable { case keyed = 1, directUnknown = 2 }
 enum InvoiceFenceError: Error { case invalid, conflict, pending, database(Int32) }
 
+struct InvoiceFenceCaptureReceipt: Sendable {
+    fileprivate let id: UUID
+    fileprivate init(id: UUID) { self.id = id }
+}
+
 /// Held experiment: one DB shared by all participants, no authorization or transport.
 /// Pending markers have no automatic clearing path. SQLite and device data protection
 /// must be qualified on real devices before this class can protect a financial write.
 final class InvoiceTransactionFence: @unchecked Sendable {
     private let path: String
+    private let receiptLock = NSLock()
+    private var receipts: [UUID: (InvoiceIdleCaptureIdentity, UUID, Int64, Int64, Data)] = [:]
+    private var receiptHighWater: [String: Int64] = [:]
+    #if INVOICE_FENCE_HOST_TEST
+    var testAmbiguousNextCommit = false
+    var testBeforeReceiptRegistration: (@Sendable (Int64) -> Void)?
+    var testReceiptCount: Int { receiptLock.lock(); defer { receiptLock.unlock() }; return receipts.count }
+    #endif
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     init(path: String) throws {
@@ -92,7 +108,28 @@ final class InvoiceTransactionFence: @unchecked Sendable {
         guard domain.valid else { throw InvoiceFenceError.invalid }
         return try connection { db in
             try exec(db, "BEGIN IMMEDIATE")
-            do { let result = try body(db); try exec(db, "COMMIT"); return result }
+            do {
+                let result = try body(db)
+                #if INVOICE_FENCE_HOST_TEST
+                if ProcessInfo.processInfo.arguments.contains("--invoice-fence-test-kill-before-commit") {
+                    kill(getpid(), SIGKILL)
+                }
+                #endif
+                try exec(db, "COMMIT")
+                #if INVOICE_FENCE_HOST_TEST
+                if testAmbiguousNextCommit {
+                    testAmbiguousNextCommit = false
+                    throw InvoiceFenceError.database(SQLITE_IOERR)
+                }
+                if ProcessInfo.processInfo.arguments.contains("--invoice-fence-test-kill-after-commit") {
+                    kill(getpid(), SIGKILL)
+                }
+                if ProcessInfo.processInfo.arguments.contains("--invoice-fence-test-ambiguous-after-commit") {
+                    throw InvoiceFenceError.database(SQLITE_IOERR)
+                }
+                #endif
+                return result
+            }
             catch { try? exec(db, "ROLLBACK"); throw error }
         }
     }
@@ -182,6 +219,56 @@ final class InvoiceTransactionFence: @unchecked Sendable {
             return version
         }
     }
+    /// Receipt exists only in this store instance after capture returns successfully.
+    func captureWithReceipt(identity: InvoiceIdleCaptureIdentity, owner: UUID, expectedVersion: Int64?, sequence: Int64, bytes: Data) throws -> (version: Int64, receipt: InvoiceFenceCaptureReceipt) {
+        let version = try capture(identity: identity, owner: owner, expectedVersion: expectedVersion, sequence: sequence, bytes: bytes)
+        #if INVOICE_FENCE_HOST_TEST
+        testBeforeReceiptRegistration?(version)
+        #endif
+        let id = UUID()
+        receiptLock.lock()
+        let domainKey = [identity.domain.origin, identity.domain.organizationID, identity.domain.invoiceID].joined(separator: "\u{0}")
+        let sameDomain: (InvoiceIdleCaptureIdentity) -> Bool = { other in
+            other.domain.origin == identity.domain.origin && other.domain.organizationID == identity.domain.organizationID && other.domain.invoiceID == identity.domain.invoiceID
+        }
+        let newer = (receiptHighWater[domainKey] ?? 0) > version
+        receiptHighWater[domainKey] = max(receiptHighWater[domainKey] ?? 0, version)
+        receipts = receipts.filter { !sameDomain($0.value.0) || $0.value.2 >= version }
+        if !newer { receipts[id] = (identity, owner, version, sequence, bytes) }
+        receiptLock.unlock()
+        return (version, InvoiceFenceCaptureReceipt(id: id))
+    }
+
+    func acknowledgeCapture(_ receipt: InvoiceFenceCaptureReceipt) throws {
+        receiptLock.lock(); defer { receiptLock.unlock() }
+        guard let values = receipts[receipt.id] else { throw InvoiceFenceError.conflict }
+        let (identity, owner, version, sequence, bytes) = values
+        try pruneAcknowledged(identity: identity, owner: owner, version: version, sequence: sequence, bytes: bytes)
+        receipts.removeValue(forKey: receipt.id)
+    }
+
+    private func pruneAcknowledged(identity: InvoiceIdleCaptureIdentity, owner: UUID, version: Int64, sequence: Int64, bytes: Data) throws {
+        guard identity.valid, version > 0, sequence > 0, !bytes.isEmpty else { throw InvoiceFenceError.invalid }
+        let domain = identity.domain
+        try transaction(domain) { db in
+            guard let current = try head(db, domain), current.2 == 0,
+                  current.0 == owner.uuidString.lowercased(), current.1 == version,
+                  let capture = try captureHead(db, domain), capture.0 == identity.actorID,
+                  capture.1 == identity.customerID, capture.2 == (identity.jobID ?? ""), capture.3 == sequence else { throw InvoiceFenceError.conflict }
+            let matches = try statement(db, "SELECT draft FROM snapshots WHERE origin=? AND org=? AND invoice=? AND version=?") { s in
+                try keys(s, domain); sqlite3_bind_int64(s, 4, version)
+                let code = sqlite3_step(s)
+                guard code == SQLITE_ROW, let ptr = sqlite3_column_blob(s, 0) else { throw InvoiceFenceError.conflict }
+                return Data(bytes: ptr, count: Int(sqlite3_column_bytes(s, 0))) == bytes
+            }
+            guard matches else { throw InvoiceFenceError.conflict }
+            try statement(db, "DELETE FROM snapshots WHERE origin=? AND org=? AND invoice=? AND version<?") { s in
+                try keys(s, domain); sqlite3_bind_int64(s, 4, version)
+                let code = sqlite3_step(s); guard code == SQLITE_DONE else { throw InvoiceFenceError.database(code) }
+            }
+        }
+    }
+
     /// Metadata matching is not authentication. Reauthorization must occur before disclosure.
     func recoverIdle(identity: InvoiceIdleCaptureIdentity) throws -> InvoiceIdleCaptureRecovery? {
         guard identity.valid else { throw InvoiceFenceError.invalid }

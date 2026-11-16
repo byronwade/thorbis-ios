@@ -7,6 +7,64 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testSessionReplacementProtectsAndRecoversUnsavedInvoiceEdit() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line", "--paper-preview-invoice-editor-session-replacement"]
+        app.launch()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        reveal(quantity, in: app)
+        quantity.tap()
+        replaceQuantity(quantity, with: "2", in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
+        app.buttons["Done"].firstMatch.tap()
+        let replace = app.buttons["invoice-editor-test-replace-session"]
+        XCTAssertTrue(replace.waitForExistence(timeout: 10))
+        replace.tap()
+        XCTAssertTrue(app.staticTexts["invoice-editor-authority-unavailable"].waitForExistence(timeout: 20))
+        XCTAssertFalse(quantity.exists, "Prior-session invoice data must not remain visible")
+        XCTAssertFalse(app.descendants(matching: .any)["invoice-line-description-" + identity].exists)
+        let save = app.buttons["Save draft"]
+        if save.exists { XCTAssertFalse(save.isEnabled) }
+        let recover = app.buttons["invoice-editor-recover-draft"]
+        XCTAssertTrue(recover.waitForExistence(timeout: 20), "Unsaved work must be recoverable after the original authority is verified")
+        recover.tap()
+        XCTAssertTrue(quantity.waitForExistence(timeout: 20))
+        XCTAssertEqual(quantity.value as? String, "2")
+    }
+
+    func testWorkspaceReplacementHidesUnsavedInvoiceAndRecovery() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line", "--paper-preview-invoice-editor-workspace-replacement"]
+        app.launch()
+        let line = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(line.waitForExistence(timeout: 30), "The initial editor must finish opening before changing workspaces")
+        let originalWorkspace = app.staticTexts.matching(identifier: "invoice-editor-test-workspace")
+            .matching(NSPredicate(format: "label CONTAINS %@", "00000000-0000-4000-8000-000000000002 phase ready")).firstMatch
+        XCTAssertTrue(originalWorkspace.waitForExistence(timeout: 20), "The test must establish that workspace A was active before editing")
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        reveal(quantity, in: app); quantity.tap()
+        replaceQuantity(quantity, with: "2", in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
+        app.buttons["Done"].firstMatch.tap()
+        app.buttons["invoice-editor-test-replace-session"].tap()
+        let switched = app.staticTexts.matching(identifier: "invoice-editor-test-workspace")
+            .matching(NSPredicate(format: "label CONTAINS %@", "00000000-0000-4000-8000-000000000003 phase ready")).firstMatch
+        XCTAssertTrue(switched.waitForExistence(timeout: 20), "The test must establish that workspace B became ready")
+        XCTAssertFalse(quantity.exists, "Another workspace must not see the old invoice")
+        XCTAssertFalse(app.descendants(matching: .any)["invoice-line-description-" + identity].exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).count, 0,
+                       "A recreated editor must not reveal workspace A's invoice with new line identifiers")
+        XCTAssertFalse(app.buttons["invoice-editor-recover-draft"].exists, "Another workspace cannot recover this draft")
+        let save = app.buttons["Save draft"]
+        if save.exists { XCTAssertFalse(save.isEnabled) }
+    }
+
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
