@@ -61,6 +61,39 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertNil(try store.load(scope: otherOrigin))
     }
 
+    @MainActor
+    func testConditionalWriteSupportComesOnlyFromFreshCustomerResponse() async throws {
+        let json = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, json, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]),
+            .init(200, json),
+            .init(200, json, headers: ["X-Thorbis-Customer-Conditional-Writes": "2"])
+        ]), baseURL: "https://app.thorbis.com")
+        let supported = try await api.customerConditionalRead(record().id)
+        let missing = try await api.customerConditionalRead(record().id)
+        let malformed = try await api.customerConditionalRead(record().id)
+        XCTAssertTrue(supported.supportsConditionalWrites)
+        XCTAssertFalse(missing.supportsConditionalWrites)
+        XCTAssertFalse(malformed.supportsConditionalWrites)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 3, "Capability must not come from a cached earlier response")
+    }
+
+    @MainActor
+    func testConditionalSupportReadIsCancelledWhenAPIAuthorityChanges() async throws {
+        let gate = URLProtocolFixture.Gate()
+        let json = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, json, gate: gate, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"])
+        ]), baseURL: "https://app.thorbis.com")
+        let task = Task { try await api.customerConditionalRead(record().id) }
+        defer { gate.release(); task.cancel() }
+        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        api.invalidateRequests(); gate.release()
+        do { _ = try await task.value; XCTFail("A retired response cannot advertise support") }
+        catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+    }
+
     func testNoEditsMeansNothingToSave() {
         let draft = CustomerSelfEditDraft(record: record(), contacts: [contact()], locations: [location()], smsConsent: nil)
         XCTAssertFalse(draft.hasChanges)
@@ -68,6 +101,95 @@ final class CustomerSelfEditTests: XCTestCase {
         XCTAssertTrue(draft.contactUpdates.isEmpty)
         XCTAssertNil(draft.newContact)
         XCTAssertTrue(draft.locationChanges.isEmpty)
+    }
+
+    func testConditionalCustomerPatchIncludesExactNullBaseline() throws {
+        var draft = CustomerSelfEditDraft(record: record(phone: nil), contacts: [], locations: [], smsConsent: nil)
+        draft.phone = "555-0100"
+        let body = try json(draft.conditionalCustomerUpdate())
+        let expected = try XCTUnwrap(body["expected"] as? [String: Any])
+        XCTAssertTrue(expected["phone"] is NSNull)
+        XCTAssertNil(expected["email"], "Unchanged fields must not be included in the baseline")
+        XCTAssertEqual(body["phone"] as? String, "555-0100")
+    }
+
+    func testConditionalContactPatchPreservesNullAndEmptyBaselines() throws {
+        let nullable = ConditionalContactUpdate(update: .init(phone: .value("555")), original: contact(phone: nil))
+        let empty = ConditionalContactUpdate(update: .init(phone: .value("555")), original: contact(phone: ""))
+        XCTAssertTrue((try XCTUnwrap(json(nullable)["expected"] as? [String: Any]))["phone"] is NSNull)
+        XCTAssertEqual((try XCTUnwrap(json(empty)["expected"] as? [String: Any]))["phone"] as? String, "")
+    }
+
+    func testConditionalLocationPatchGuardsAndClearsOriginalPin() throws {
+        let original = ServiceLocationRecord(id: "l1", organizationId: "org", customerId: "cust", label: "Home", kind: "service", address: "1 Main St", notes: nil,
+            coordinates: .init(latitude: 36.5, longitude: -121.9), gateCode: nil, alarmCode: nil, dogOnSite: nil, parking: nil,
+            createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        let body = try json(ConditionalLocationUpdate(address: "2 Main St", original: original))
+        let expected = try XCTUnwrap(body["expected"] as? [String: Any])
+        let coordinates = try XCTUnwrap(expected["coordinates"] as? [String: Double])
+        XCTAssertEqual(coordinates["latitude"], 36.5)
+        XCTAssertEqual(coordinates["longitude"], -121.9)
+        XCTAssertTrue(body["coordinates"] is NSNull)
+        XCTAssertNil(body["notes"])
+        XCTAssertEqual(expected["address"] as? String, "1 Main St")
+    }
+
+    @MainActor
+    func testMissingConditionalCapabilityKeepsDraftWithoutWriting() async throws {
+        let body = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, body)]), baseURL: "https://app.thorbis.com")
+        let store = MemoryCustomerSelfEditRecoveryStore()
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
+        draft.name = "Edited"
+        model.draft = draft
+        await model.save(api: api)
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        XCTAssertEqual(URLProtocolFixture.recorded.first?.method, "GET")
+        XCTAssertEqual(try store.load(scope: recoveryScope)?.draft.name, "Edited")
+        XCTAssertFalse(model.savedAll)
+        XCTAssertNotNil(model.saveError)
+    }
+
+    @MainActor
+    func testSupportedCustomerSaveSendsGuardedPatch() async throws {
+        let before = record(phone: nil), after = record(phone: "555-0100")
+        let beforeJSON = String(decoding: try JSONEncoder().encode(before), as: UTF8.self)
+        let afterJSON = String(decoding: try JSONEncoder().encode(after), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(200, beforeJSON, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]), .init(200, afterJSON)
+        ]), baseURL: "https://app.thorbis.com")
+        let model = CustomerSelfEditModel(customerID: before.id, recoveryStore: MemoryCustomerSelfEditRecoveryStore(), recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: before, contacts: [], locations: [], smsConsent: nil)
+        draft.phone = "555-0100"
+        model.draft = draft
+        await model.save(api: api)
+        XCTAssertTrue(model.savedAll, model.saveError ?? "")
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET", "POST"])
+        let data = try XCTUnwrap(URLProtocolFixture.recorded.last?.body)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertTrue((try XCTUnwrap(body["expected"] as? [String: Any]))["phone"] is NSNull)
+    }
+
+    @MainActor
+    func testOldDraftWithoutLosslessBaselinesIsHeldForReview() async throws {
+        let oldContact = CustomerContactRecord(id: "c1", organizationId: "org", customerId: record().id, name: "Sam", role: nil,
+            email: nil, phone: nil, primary: false, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-01T00:00:00Z")
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [oldContact], locations: [], smsConsent: nil)
+        draft.contacts[0].phone = "555-0199"
+        var serialized = try json(draft)
+        serialized.removeValue(forKey: "conditionalContactBaselines")
+        serialized.removeValue(forKey: "conditionalLocationBaselines")
+        let oldDraft = try JSONDecoder().decode(CustomerSelfEditDraft.self, from: JSONSerialization.data(withJSONObject: serialized))
+        let body = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, body, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"])]), baseURL: "https://app.thorbis.com")
+        let store = MemoryCustomerSelfEditRecoveryStore()
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
+        model.draft = oldDraft
+        await model.save(api: api)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET"])
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        XCTAssertEqual(try store.load(scope: recoveryScope)?.draft.contacts[0].phone, "555-0199")
     }
 
     func testOnlyChangedCustomerFieldsAreSentAndClearedOnesAreNull() throws {
@@ -129,10 +251,30 @@ final class CustomerSelfEditTests: XCTestCase {
     }
 
     @MainActor
+    func testConsentSaveUsesOriginalVersionAndPreservesConflict() async throws {
+        let api = APIClient(session: URLProtocolFixture.session([
+            .init(409, "{\"title\":\"sms_consent_conflict\",\"detail\":\"Stale consent\"}")
+        ]), baseURL: "https://app.thorbis.com")
+        let store = MemoryCustomerSelfEditRecoveryStore()
+        let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: store, recoveryScope: recoveryScope)
+        var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [],
+            smsConsent: .init(decision: "grant", version: "original-version", recordedAt: "2026-10-01T00:00:00Z"))
+        draft.allowsTexts = false
+        model.draft = draft
+        await model.save(api: api)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["POST"])
+        let data = try XCTUnwrap(URLProtocolFixture.recorded.first?.body)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(body["expectedVersion"] as? String, "original-version")
+        XCTAssertTrue(model.saveNeedsReconciliation)
+        XCTAssertEqual(try store.load(scope: recoveryScope)?.draft.allowsTexts, false)
+    }
+
+    @MainActor
     func testAuthorityChangeDuringCustomerSaveStopsFollowingContactWrite() async throws {
         let gate = URLProtocolFixture.Gate()
         let body = String(decoding: try JSONEncoder().encode(record(name: "Updated Customer")), as: UTF8.self)
-        let api = APIClient(session: URLProtocolFixture.session([.init(200, body, gate: gate), .init(200, "{}")]), baseURL: "https://app.thorbis.com")
+        let api = APIClient(session: URLProtocolFixture.session([.init(200, body, headers: ["X-Thorbis-Customer-Conditional-Writes": "1"]), .init(200, body, gate: gate), .init(200, "{}")]), baseURL: "https://app.thorbis.com")
         let model = CustomerSelfEditModel(customerID: record().id, recoveryStore: MemoryCustomerSelfEditRecoveryStore(), recoveryScope: recoveryScope)
         var draft = CustomerSelfEditDraft(record: record(), contacts: [], locations: [], smsConsent: nil)
         draft.name = "Updated Customer"
@@ -142,17 +284,17 @@ final class CustomerSelfEditTests: XCTestCase {
         var permitted = true
         let task = Task { await model.save(api: api, currentAuthority: { permitted }) }
         defer { gate.release(); task.cancel() }
-        for _ in 0..<100 where URLProtocolFixture.recorded.isEmpty { try await Task.sleep(for: .milliseconds(50)) }
-        XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
+        for _ in 0..<100 where URLProtocolFixture.recorded.count < 2 { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
         permitted = false
         gate.release()
         await task.value
-        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "No contact write should follow a retired customer save")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "No contact write should follow a retired customer save")
         XCTAssertFalse(model.savedAll)
         XCTAssertTrue(model.saveNeedsReconciliation)
         permitted = true
         await model.save(api: api, currentAuthority: { permitted })
-        XCTAssertEqual(URLProtocolFixture.recorded.count, 1, "An uncertain write must not be retried without checking the customer record")
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2, "An uncertain write must not be retried without checking the customer record")
     }
 
     @MainActor
