@@ -128,9 +128,9 @@ enum InvoiceDraftRecoveryWriteState: Codable, Equatable, Sendable {
 struct InvoiceDraftRecovery: Codable, Equatable, Sendable {
     let snapshotID: UUID
     let scope: InvoiceDraftRecoveryScope
-    private let baseline: InvoiceRecord
-    private let lines: [InvoiceDraftRecoveryLine]
-    private let priceBookOverrideReason: String
+    fileprivate let baseline: InvoiceRecord
+    fileprivate let lines: [InvoiceDraftRecoveryLine]
+    fileprivate let priceBookOverrideReason: String
     let writeState: InvoiceDraftRecoveryWriteState
 
     init(scope: InvoiceDraftRecoveryScope, state: InvoiceLineEditorState, writeState: InvoiceDraftRecoveryWriteState, snapshotID: UUID = UUID()) throws {
@@ -371,4 +371,53 @@ actor KeychainInvoiceDraftRecoveryStore: InvoiceDraftRecoveryStoring {
     }
 
     // No deletion or marker clearing until a cross-process-safe reconciliation and retention policy exists.
+}
+
+/// Held prototype: pure construction only. It does not persist, authorize, transmit, or reconcile.
+struct InvoiceKeyedEdit {
+    let snapshot: InvoiceDraftRecovery
+    let envelopeBytes: Data
+    private init(snapshot: InvoiceDraftRecovery, envelopeBytes: Data) { self.snapshot = snapshot; self.envelopeBytes = envelopeBytes }
+
+    private struct Payload: Encodable {
+        let invoiceId: String
+        let request: FieldInvoiceLinesRequest
+        func encode(to encoder: Encoder) throws {
+            try request.encode(to: encoder)
+            var container = encoder.container(keyedBy: Keys.self)
+            try container.encode(invoiceId, forKey: .invoiceId)
+        }
+        enum Keys: String, CodingKey { case invoiceId }
+    }
+    private struct Envelope: Encodable {
+        let commandId: String, deviceId: String, actorId: String, organizationId: String
+        let policyVersion: Int
+        let command: String
+        let clientCreatedAt: String
+        let payload: Payload
+    }
+
+    static func prepare(snapshot: InvoiceDraftRecovery, expectedScope: InvoiceDraftRecoveryScope, expectedSnapshotID: UUID,
+                        commandID: UUID, deviceID: UUID, policyVersion: Int,
+                        clientCreatedAt: String) throws -> InvoiceKeyedEdit {
+        let scope = snapshot.scope
+        guard snapshot.isValid, snapshot.writeState == .idle, scope == expectedScope, snapshot.snapshotID == expectedSnapshotID,
+              UUID(uuidString: scope.actorID) != nil, UUID(uuidString: scope.organizationID) != nil,
+              UUID(uuidString: scope.invoiceID) != nil, UUID(uuidString: scope.customerID) != nil,
+              (scope.jobID.map { UUID(uuidString: $0) != nil } ?? true), (1...Int(Int32.max)).contains(policyVersion),
+              ISO8601DateFormatter().date(from: clientCreatedAt) != nil else { throw InvoiceDraftRecoveryError.invalidData }
+        var state = InvoiceLineEditorState(invoice: snapshot.baseline)
+        state.lines = snapshot.lines.map(\.draft)
+        state.priceBookOverrideReason = snapshot.priceBookOverrideReason
+        let request = try state.makeRequest()
+        let envelope = Envelope(commandId: commandID.uuidString.lowercased(), deviceId: deviceID.uuidString.lowercased(),
+                                actorId: scope.actorID, organizationId: scope.organizationID,
+                                policyVersion: policyVersion, command: "invoices.updateLines", clientCreatedAt: clientCreatedAt,
+                                payload: Payload(invoiceId: scope.invoiceID, request: request))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let bytes = try encoder.encode(envelope)
+        guard bytes.count <= 65_536 else { throw InvoiceDraftRecoveryError.invalidData }
+        return InvoiceKeyedEdit(snapshot: snapshot, envelopeBytes: bytes)
+    }
 }

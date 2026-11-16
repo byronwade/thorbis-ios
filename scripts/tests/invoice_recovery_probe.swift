@@ -46,11 +46,13 @@ struct InvoiceLineDraft: Equatable {
     var priceBookBaselineDescription: String?
     var priceBookBaselinePrice: FieldMoney?
 }
+struct FieldInvoiceLinesRequest: Encodable { let expectedLinesRevision: Int; let lines: [String]; let priceBookOverrideReason: String? }
 struct InvoiceLineEditorState: Equatable {
     let invoice: InvoiceRecord
     var lines: [InvoiceLineDraft]
     var priceBookOverrideReason: String
     init(invoice: InvoiceRecord) { self.invoice = invoice; lines = []; priceBookOverrideReason = "" }
+    func makeRequest() throws -> FieldInvoiceLinesRequest { .init(expectedLinesRevision: invoice.linesRevision, lines: lines.map(\.description), priceBookOverrideReason: priceBookOverrideReason) }
 }
 
 @main struct Probe {
@@ -63,6 +65,32 @@ struct InvoiceLineEditorState: Equatable {
         catch InvoiceDraftRecoveryError.unresolvedWrite { return false }
     }
     static func main() async throws {
+        let uuid = "00000000-0000-4000-8000-000000000001"
+        let scopeUUID = InvoiceDraftRecoveryScope(actorID: uuid, organizationID: uuid, origin: "https://app.thorbis.com", invoiceID: uuid, customerID: uuid, jobID: nil)
+        let invoiceUUID = InvoiceRecord(id: uuid, organizationId: uuid, customerId: uuid, jobId: nil, status: "draft", linesRevision: 3)
+        var keyedState = InvoiceLineEditorState(invoice: invoiceUUID)
+        keyedState.lines = [InvoiceLineDraft(id: UUID(), originalLineID: nil, description: "hello", quantity: "01", unitPrice: "3.00", unitLabel: nil, source: .manual, priceBookBaselineDescription: nil, priceBookBaselinePrice: nil)]
+        let keyedSnapshot = try InvoiceDraftRecovery(scope: scopeUUID, state: keyedState, writeState: .idle)
+        let key = UUID(), device = UUID()
+        let command = try InvoiceKeyedEdit.prepare(snapshot: keyedSnapshot, expectedScope: scopeUUID, expectedSnapshotID: keyedSnapshot.snapshotID, commandID: key, deviceID: device, policyVersion: 2, clientCreatedAt: "2026-11-12T12:00:00Z")
+        let again = try InvoiceKeyedEdit.prepare(snapshot: keyedSnapshot, expectedScope: scopeUUID, expectedSnapshotID: keyedSnapshot.snapshotID, commandID: key, deviceID: device, policyVersion: 2, clientCreatedAt: "2026-11-12T12:00:00Z")
+        precondition(command.envelopeBytes == again.envelopeBytes && command.snapshot == keyedSnapshot)
+        let json = try JSONSerialization.jsonObject(with: command.envelopeBytes) as! [String: Any]
+        precondition(json["commandId"] as? String == key.uuidString.lowercased())
+        precondition((json["payload"] as? [String: Any])?["invoiceId"] as? String == uuid)
+        do { _ = try InvoiceKeyedEdit.prepare(snapshot: keyedSnapshot, expectedScope: InvoiceDraftRecoveryScope(actorID: uuid, organizationID: uuid, origin: "https://other.example", invoiceID: uuid, customerID: uuid, jobID: nil), expectedSnapshotID: keyedSnapshot.snapshotID, commandID: key, deviceID: device, policyVersion: 2, clientCreatedAt: "2026-11-12T12:00:00Z"); preconditionFailure("scope accepted") } catch { }
+        do { _ = try InvoiceKeyedEdit.prepare(snapshot: keyedSnapshot, expectedScope: scopeUUID, expectedSnapshotID: UUID(), commandID: key, deviceID: device, policyVersion: 2, clientCreatedAt: "2026-11-12T12:00:00Z"); preconditionFailure("wrong snapshot accepted") } catch { }
+        let existingCount = command.envelopeBytes.count
+        keyedState.lines[0].description = String(repeating: "x", count: 65_536 - existingCount + 5)
+        let limitSnapshot = try InvoiceDraftRecovery(scope: scopeUUID, state: keyedState, writeState: .idle)
+        let atLimit = try InvoiceKeyedEdit.prepare(snapshot: limitSnapshot, expectedScope: scopeUUID, expectedSnapshotID: limitSnapshot.snapshotID, commandID: key, deviceID: device, policyVersion: 2, clientCreatedAt: "2026-11-12T12:00:00Z")
+        precondition(atLimit.envelopeBytes.count == 65_536)
+        keyedState.lines[0].description += "x"
+        let overLimit = try InvoiceDraftRecovery(scope: scopeUUID, state: keyedState, writeState: .idle)
+        do { _ = try InvoiceKeyedEdit.prepare(snapshot: overLimit, expectedScope: scopeUUID, expectedSnapshotID: overLimit.snapshotID, commandID: key, deviceID: device, policyVersion: 2, clientCreatedAt: "2026-11-12T12:00:00Z"); preconditionFailure("65,537 accepted") } catch { }
+        keyedState.lines[0].description = String(repeating: "x", count: 70_000)
+        let huge = try InvoiceDraftRecovery(scope: scopeUUID, state: keyedState, writeState: .idle)
+        do { _ = try InvoiceKeyedEdit.prepare(snapshot: huge, expectedScope: scopeUUID, expectedSnapshotID: huge.snapshotID, commandID: key, deviceID: device, policyVersion: 2, clientCreatedAt: "2026-11-12T12:00:00Z"); preconditionFailure("oversized accepted") } catch { }
         let scope = InvoiceDraftRecoveryScope(actorID: "a", organizationID: "o", origin: "https://app.thorbis.com", invoiceID: "i", customerID: "c", jobID: "j")
         let invoice = InvoiceRecord(id: "i", organizationId: "o", customerId: "c", jobId: "j", status: "draft", linesRevision: 3)
         var state = InvoiceLineEditorState(invoice: invoice)
