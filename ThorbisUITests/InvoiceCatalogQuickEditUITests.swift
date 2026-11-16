@@ -7,6 +7,69 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testDescriptionCanvasRetiresWithAPIRequestsPreservingDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line", "--paper-preview-line-retire-api"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 30))
+        let inline = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(inline.waitForExistence(timeout: 20))
+        app.buttons["Edit full description"].tap()
+        let canvas = app.textViews["line-description-canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        canvas.tap()
+        canvas.typeText(" transport draft")
+        let retire = app.buttons["line-canvas-test-retire-api"]
+        XCTAssertTrue(retire.waitForExistence(timeout: 10))
+        retire.tap()
+        XCTAssertTrue(canvas.waitForNonExistence(timeout: 10), "The canvas must close when its API request generation retires")
+        XCTAssertTrue((inline.value as? String ?? "").contains("transport draft"), "Retiring requests must not discard the existing local draft")
+    }
+
+    func testDescriptionCanvasWritesDirectlyIntoInvoiceDraft() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 30))
+        let inline = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(inline.waitForExistence(timeout: 20))
+        let readAll = app.buttons["Edit full description"]
+        XCTAssertTrue(readAll.waitForExistence(timeout: 10))
+        XCTAssertTrue(readAll.isHittable)
+        readAll.tap()
+        let canvas = app.textViews["line-description-canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        canvas.tap()
+        canvas.typeText(" extra detail")
+        app.buttons["line-description-canvas-done"].tap()
+        XCTAssertTrue(canvas.waitForNonExistence(timeout: 10))
+        XCTAssertTrue((inline.value as? String ?? "").contains("extra detail"), "The canvas edits must remain in the current invoice draft")
+    }
+
+    func testLongCollapsedDescriptionOpensEditableCanvas() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor-line"]
+        app.launch()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 30))
+        let field = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "invoice-line-description-")).firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        field.tap()
+        field.typeText(String(repeating: " extra detail", count: 8))
+        let close = app.buttons["Close line"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        close.tap()
+        let more = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "line-summary-full-", "extra detail")).firstMatch
+        XCTAssertTrue(more.waitForExistence(timeout: 10))
+        XCTAssertTrue(more.label.hasPrefix("Show full description for "))
+        more.tap()
+        let canvas = app.textViews["line-description-canvas"]
+        XCTAssertTrue(canvas.waitForExistence(timeout: 10))
+        XCTAssertTrue((canvas.value as? String ?? "").contains("extra detail"))
+    }
+
     func testDraftInvoiceOffersDirectLineItemEditing() {
         continueAfterFailure = false
         let app = XCUIApplication()

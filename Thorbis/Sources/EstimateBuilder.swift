@@ -745,6 +745,9 @@ struct BuilderLineRow: View {
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
+    @State private var descriptionOpening: LineDescriptionOpening?
 
     private var removeLineButton: some View {
         Button(role: .destructive, action: remove) {
@@ -769,6 +772,16 @@ struct BuilderLineRow: View {
     private var stacked: Bool { typeSize.isAccessibilitySize }
     private var name: String { description.trimmingCharacters(in: .whitespacesAndNewlines) }
 
+    private func openDescription() {
+        guard isEnabled, let actorID = session.user?.id,
+              let organizationID = session.activeOrganization?.id,
+              let origin = api.normalizedOrigin else { return }
+        focus.wrappedValue = nil
+        descriptionOpening = LineDescriptionOpening(actorID: actorID, organizationID: organizationID,
+                                                    generation: session.generation, authorityRevision: session.authorityRevision,
+                                                    origin: origin, requestGeneration: api.requestGeneration)
+    }
+
     var body: some View {
         Group {
             if expanded { editor } else { summary }
@@ -777,46 +790,101 @@ struct BuilderLineRow: View {
         .id(lineID)
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Remove line", remove)
+        .sheet(item: $descriptionOpening) { opening in
+            SheetSurface {
+                if isEnabled, opening.actorID == session.user?.id,
+                   opening.organizationID == session.activeOrganization?.id,
+                   opening.generation == session.generation,
+                   opening.authorityRevision == session.authorityRevision,
+                   opening.origin == api.normalizedOrigin,
+                   opening.requestGeneration == api.requestGeneration {
+                    NavigationStack {
+                        TextEditor(text: $description)
+                            .font(Theme.font(16))
+                            .scrollContentBackground(.hidden)
+                            .padding(Theme.gutter)
+                            .background(Theme.canvas)
+                            .accessibilityLabel("Line description")
+                            .accessibilityIdentifier("line-description-canvas")
+                            .navigationTitle("Description")
+                            .navigationBarTitleDisplayMode(.inline)
+                            .toolbar {
+                                #if DEBUG
+                                if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-line-retire-api") {
+                                    ThorbisToolbarItem(placement: .cancellationAction) {
+                                        Button("Retire requests") { api.invalidateRequests() }
+                                            .accessibilityIdentifier("line-canvas-test-retire-api")
+                                    }
+                                }
+                                #endif
+                                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
+                                    Button("Done") { descriptionOpening = nil }
+                                        .accessibilityIdentifier("line-description-canvas-done")
+                                }
+                            }
+                    }
+                    .presentationDetents([.large])
+                }
+            }
+        }
+        .onChange(of: session.generation) { _, _ in descriptionOpening = nil }
+        .onChange(of: session.activeOrganization?.id) { _, _ in descriptionOpening = nil }
+        .onChange(of: session.authorityRevision) { _, _ in descriptionOpening = nil }
+        .onChange(of: api.normalizedOrigin) { _, _ in descriptionOpening = nil }
+        .onChange(of: api.requestGeneration) { _, _ in descriptionOpening = nil }
+        .onChange(of: isEnabled) { _, enabled in if !enabled { descriptionOpening = nil } }
     }
 
     // MARK: Collapsed
 
     private var summary: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Button(action: toggle) {
-                let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                     : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
-                layout {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(name.isEmpty ? "Describe this item" : name)
-                            .font(Theme.font(16, weight: .medium))
-                            .foregroundStyle(name.isEmpty ? Theme.muted : Theme.foreground)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(detailText).font(Theme.font(14)).monospacedDigit()
-                            .foregroundStyle(priceText == nil ? Theme.warning : Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let note {
-                            Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 0) {
+                Button(action: toggle) {
+                    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                         : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
+                    layout {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(name.isEmpty ? "Describe this item" : name)
+                                .font(Theme.font(16, weight: .medium))
+                                .foregroundStyle(name.isEmpty ? Theme.muted : Theme.foreground)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(2)
+                            Text(detailText).font(Theme.font(14)).monospacedDigit()
+                                .foregroundStyle(priceText == nil ? Theme.warning : Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
+                            if let note {
+                                Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                        if !stacked { Spacer(minLength: 8) }
+                        Text(totalText)
+                            .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .contentTransition(.numericText())
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                            .fixedSize(horizontal: !stacked, vertical: false)
                     }
-                    if !stacked { Spacer(minLength: 8) }
-                    Text(totalText)
-                        .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .contentTransition(.numericText())
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .fixedSize(horizontal: !stacked, vertical: false)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens quantity, price and description")
+                .modifier(OptionalDraggable(payload: dragPayload, title: name))
+                menu.padding(.trailing, -10)
             }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens quantity, price and description")
-            .modifier(OptionalDraggable(payload: dragPayload, title: name))
-            menu.padding(.trailing, -10)
+            if !name.isEmpty {
+                Button("Show full description", action: openDescription)
+                    .font(Theme.font(14, weight: .medium))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show full description for \(String(name.prefix(80)))")
+                    .accessibilityIdentifier("line-summary-full-\(lineID)")
+            }
         }
     }
 
@@ -848,6 +916,12 @@ struct BuilderLineRow: View {
                     .modifier(OptionalIdentifier(identifier: descriptionIdentifier))
                 menu.padding(.trailing, -10)
             }
+            Button("Edit full description", action: openDescription)
+            .font(Theme.font(14, weight: .medium))
+            .foregroundStyle(Theme.brandText)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .buttonStyle(.plain)
             let layout = stacked || typeSize >= .xxLarge ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
                                                          : AnyLayout(HStackLayout(spacing: 10))
             layout {
@@ -945,6 +1019,16 @@ struct BuilderLineRow: View {
         .accessibilityLabel(label)
         .sensoryFeedback(.selection, trigger: quantity)
     }
+}
+
+private struct LineDescriptionOpening: Identifiable {
+    let id = UUID()
+    let actorID: String
+    let organizationID: String
+    let generation: UUID
+    let authorityRevision: UUID
+    let origin: String
+    let requestGeneration: UUID
 }
 
 struct OptionalIdentifier: ViewModifier {
