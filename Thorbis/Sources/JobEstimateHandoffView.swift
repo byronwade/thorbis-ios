@@ -137,6 +137,73 @@ private struct CustomerHandoffEstimateDetails: View {
     }
 }
 
+/// Browse only fresh, verified estimates already loaded for this job. Each destination
+/// retains the existing issued-revision read and never changes the selected work.
+private struct CustomerHandoffEstimateBrowser: View {
+    @ObservedObject var model: JobEstimateHandoffModel
+    @State private var currentID: String
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    init(model: JobEstimateHandoffModel, initial: EstimateRecord) {
+        self.model = model
+        _currentID = State(initialValue: initial.id)
+    }
+
+    private var type: CustomerType { CustomerType(sizeClass) }
+    private var readable: [EstimateRecord] {
+        model.records.filter { model.detailsCurrent($0, authority: model.session.authorityRevision) }
+    }
+    private var index: Int? { readable.firstIndex { $0.id == currentID } }
+
+    var body: some View {
+        Group {
+            if let record = readable.first(where: { $0.id == currentID }) {
+                CustomerHandoffEstimateDetails(model: model, record: record)
+                    .id(record)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 50).onEnded { value in
+                            let horizontal = value.translation.width
+                            guard value.startLocation.x > 30,
+                                  abs(horizontal) > 70,
+                                  abs(horizontal) > abs(value.translation.height) * 2 else { return }
+                            move(horizontal < 0 ? 1 : -1)
+                        }
+                    )
+            } else {
+                CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                     message: "Hand the device back to your technician to reopen this estimate.")
+                    .padding(Theme.gutter)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let index, readable.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { browseControls(index: index) }
+                    VStack(spacing: 8) { browseControls(index: index) }
+                }
+                .padding(Theme.gutter)
+                .background(Theme.canvas)
+            }
+        }
+    }
+
+    @ViewBuilder private func browseControls(index: Int) -> some View {
+        CustomerSecondaryButton(title: "Previous estimate", type: type) { move(-1) }
+            .disabled(index == 0)
+            .accessibilityIdentifier("handoff-previous-estimate")
+        CustomerSecondaryButton(title: "Next estimate", type: type) { move(1) }
+            .disabled(index + 1 >= readable.count)
+            .accessibilityIdentifier("handoff-next-estimate")
+    }
+
+    private func move(_ offset: Int) {
+        let current = readable
+        guard let index = current.firstIndex(where: { $0.id == currentID }),
+              current.indices.contains(index + offset) else { return }
+        currentID = current[index + offset].id
+    }
+}
+
 /// Customer-only destinations inside the existing protected customer navigation owner.
 struct JobEstimateHandoffView: View {
     @ObservedObject var model: JobEstimateHandoffModel
@@ -156,7 +223,9 @@ struct JobEstimateHandoffView: View {
             if model.isCurrent {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if reviewing { selectedReview } else { overview }
+                        if reviewing { selectedReview } else {
+                            overview.task(id: model.overviewPriceGeneration) { await model.loadOverviewPrices() }
+                        }
                     }
                     .padding(Theme.gutter).padding(.bottom, footerHeight)
                     .frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
@@ -193,8 +262,8 @@ struct JobEstimateHandoffView: View {
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
         .thorbisDestination(item: $detailsID) { id in
             if let record = model.records.first(where: { $0.id == id }) {
-                CustomerHandoffEstimateDetails(model: model, record: record)
-                    .id(record)
+                CustomerHandoffEstimateBrowser(model: model, initial: record)
+                    .id(record.id)
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             }
         }
@@ -202,6 +271,14 @@ struct JobEstimateHandoffView: View {
 
     private var overview: some View {
         LazyVStack(alignment: .leading, spacing: 20) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
+                Button("Fail sample refresh") {
+                    JobEstimateHandoffPreview.shared.rejectNextMembership()
+                    Task { await model.refresh() }
+                }
+            }
+            #endif
             VStack(alignment: .leading, spacing: 6) {
                 Text(model.jobTitle).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
                 Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : model.loading ? "Loading estimates…" : model.canLoadMoreEstimates ? "More estimates are available for this job." : "Some estimates still need a refresh")
@@ -262,6 +339,11 @@ struct JobEstimateHandoffView: View {
                 .accessibilityHint("Read this estimate before choosing work")
                 .accessibilityIdentifier("handoff-details-\(record.id)")
             }
+            if model.overviewPriceFailures.contains(record.id) {
+                Button("Retry price") { Task { await model.retryOverviewPrice(record) } }
+                    .font(Theme.customerFont(type.body, weight: .medium))
+                    .accessibilityIdentifier("handoff-retry-price-\(record.id)")
+            }
             if record.status == "approved" {
                 Text("Already approved · no approval needed").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                 if let signer = model.context(for: record.id)?.approvedSignerName {
@@ -282,7 +364,11 @@ struct JobEstimateHandoffView: View {
                                     Image(systemName: model.selection.optionIDs[record.id] == option.id ? "largecircle.fill.circle" : "circle")
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
-                                        Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                                            Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        } else {
+                                            Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                                        }
                                     }
                                 }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
@@ -304,20 +390,27 @@ struct JobEstimateHandoffView: View {
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("handoff-card-\(record.id)")
     }
 
     private func selectionValue(_ record: EstimateRecord) -> String {
         let state = model.selectedIDs.contains(record.id) ? "Selected" : "Not selected"
         let price: String
         if let option = model.options(for: record.id).first(where: { $0.id == model.selection.optionIDs[record.id] }) {
-            price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            } else {
+                price = "\(option.title), price needs current terms"
+            }
         } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
             price = money(revision.totalAmount, currency: revision.currency)
-        } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+        } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
         } else {
-            price = (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+            price = model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                ? "Refresh to check price" : (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
         }
         return "\(state), \(record.status.capitalized), \(price)"
     }
@@ -338,13 +431,18 @@ struct JobEstimateHandoffView: View {
                let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
                 Text(option.title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 Text(money(amount, currency: option.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
+            } else if let receipt = model.overviewReceipt(for: record) {
+                if let title = receipt.optionTitle { Text(title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
+                Text(money(receipt.totalAmount, currency: receipt.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
+            } else if record.status == "sent", let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
                 Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+            } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty {
-                Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Text(model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                     ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else if record.status == "approved" {
                 Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else {

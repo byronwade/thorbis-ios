@@ -17,6 +17,25 @@ final class CustomerJobDocumentBookTests: XCTestCase {
         XCTAssertEqual(state.selected, invoice)
     }
 
+    func testEachDocumentVisitHasDistinctActivation() {
+        let first = CustomerJobDocumentID.estimate("first")
+        let second = CustomerJobDocumentID.estimate("second")
+        var state = CustomerJobDocumentSelection(ids: [first, second], selected: first)
+        let firstVisit = state.activation
+        state.select(first)
+        XCTAssertEqual(state.activation, firstVisit)
+        state.select(second)
+        XCTAssertNotEqual(state.activation, firstVisit)
+        let secondVisit = state.activation
+        state.select(first)
+        XCTAssertNotEqual(state.activation, firstVisit)
+        XCTAssertNotEqual(state.activation, secondVisit)
+        let lastVisit = state.activation
+        state.reconcile([second])
+        XCTAssertNil(state.selected)
+        XCTAssertNotEqual(state.activation, lastVisit)
+    }
+
     func testRemovingSelectedDocumentNeverReusesItsIndexForAnother() {
         let first = CustomerJobDocumentID.estimate("first")
         let second = CustomerJobDocumentID.estimate("second")

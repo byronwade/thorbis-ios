@@ -1,6 +1,9 @@
 import Foundation
 
 /// Frozen commercial facts from the revision endpoint, distinct from the live aggregate.
+/// Issued terms have no verifiable customer-facing monetary scope.
+struct CustomerIssuedEstimateAmountsUnavailable: Error {}
+
 struct CustomerIssuedEstimateRevision: Decodable, Equatable {
     let id: String
     let estimateId: String
@@ -23,6 +26,14 @@ struct CustomerIssuedEstimateRevision: Decodable, Equatable {
               (status == "issued" && expected.status == "sent" ||
                allowApprovedForReading && status == "approved" && expected.status == "approved")
         else { throw customerReviewUnavailable() }
+        guard currency == "USD", !lines.isEmpty,
+              let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
+              amounts.total == totalAmount,
+              (options ?? []).allSatisfy({ option in
+                  guard option.currency == currency, !option.lines.isEmpty,
+                        let optionAmounts = CustomerDocumentAmounts(lines: option.lines, currency: currency) else { return false }
+                  return optionAmounts.total == option.totalAmount
+              }) else { throw CustomerIssuedEstimateAmountsUnavailable() }
     }
 
     /// Retained reader content must still match the record now backing its destination.
