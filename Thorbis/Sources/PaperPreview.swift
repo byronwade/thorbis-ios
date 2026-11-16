@@ -881,6 +881,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if PaperPreview.screen == "job-activity",
+                  ProcessInfo.processInfo.arguments.contains("--paper-preview-job-notes-expired"),
+                  url.path == "/v1/jobs/\(PaperPreview.jobID)/notes-page",
+                  URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.contains(where: { $0.name == "cursor" }) == true {
+            status = 404
+            payload = ["status": 404, "title": "Notes cursor unavailable"]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-review-pending") {
@@ -981,6 +987,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         // `job-activity`: every kind of entry on the timeline: a long note (folds with "More"),
         // a short one, the sent estimate, the booking call, status changes and photos.
+        if PaperPreview.screen == "job-activity", ProcessInfo.processInfo.arguments.contains("--paper-preview-job-notes-paged"),
+           path == "/v1/jobs/\(PaperPreview.jobID)/notes-page" {
+            let cursor = queryItems.first(where: { $0.name == "cursor" })?.value
+            let firstID = "00000000-0000-4000-8000-000000009951"
+            let secondID = "00000000-0000-4000-8000-000000009952"
+            let record: [String: Any] = ["id": cursor == nil ? firstID : secondID, "organizationId": org,
+                                        "jobId": PaperPreview.jobID, "authorUserId": actor,
+                                        "body": cursor == nil ? "Recent page note" : "Earlier page note",
+                                        "createdAt": cursor == nil ? "2026-10-30T09:00:00Z" : "2026-10-29T09:00:00Z"]
+            return cursor == nil ? ["items": [record], "nextCursor": firstID] : ["items": [record]]
+        }
         if PaperPreview.screen == "job-activity" {
             if path == "/v1/jobs/\(PaperPreview.jobID)/notes" {
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-large-activity") {

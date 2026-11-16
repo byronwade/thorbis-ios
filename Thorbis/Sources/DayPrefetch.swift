@@ -59,11 +59,34 @@ final class DayPrefetch {
 
     private func read(job: Job, api: APIClient, session: SessionController, customersRead: inout Set<String>) async {
         let generation = session.generation
-        func current() -> Bool { !Task.isCancelled && session.generation == generation && !session.isOffline }
+        let apiGeneration = api.requestGeneration
+        func current() -> Bool {
+            !Task.isCancelled && session.generation == generation && api.requestGeneration == apiGeneration && !session.isOffline
+        }
         guard current(), let record = try? await api.fieldJob(job.id) else { return }
-        guard current(), record.organizationId == session.activeOrganization?.id else { return }
+        guard current(), record.id == job.id, record.organizationId == session.activeOrganization?.id else { return }
         JobDetailCache.save(record)
-        if let notes = try? await api.fieldNotes(job.id), current() { JobDetailCache.save(notes: notes, jobID: job.id) }
+        if let notesScope = session.verifiedNotesCacheScope(jobID: job.id) {
+            func notesCurrent() -> Bool { current() && session.verifiedNotesCacheScope(jobID: job.id) == notesScope }
+            do {
+                let result = try await api.fieldNotesPage(job.id)
+                if notesCurrent() {
+                    var page = JobNotesPageState(organizationID: notesScope.organizationID, jobID: job.id)
+                    try page.accept(result, requestedCursor: nil)
+                    // A partial page must never replace the last complete offline copy.
+                    if page.nextCursor == nil {
+                        JobDetailCache.save(notes: page.items, jobID: job.id)
+                        JobDetailCache.saveVerifiedNotes(page.items, scope: notesScope)
+                    }
+                }
+            } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
+                if notesCurrent(), let notes = try? await api.fieldNotes(job.id, requireFresh: true), notesCurrent(),
+                   notes.allSatisfy({ $0.jobId == job.id && $0.organizationId == notesScope.organizationID }) {
+                    JobDetailCache.save(notes: notes, jobID: job.id)
+                    JobDetailCache.saveVerifiedNotes(notes, scope: notesScope)
+                }
+            } catch { /* Keep the existing complete offline copy on errors. */ }
+        }
         guard current() else { return }
         _ = try? await api.fieldVisitHistory(job.id)
         guard current() else { return }

@@ -989,6 +989,12 @@ private struct FieldPage<T: Decodable>: Decodable {
     let nextCursor: String?
 }
 
+/// Bounded newest-first job notes. The caller must verify current job/session authority.
+struct JobNotesPage: Decodable {
+    let items: [JobNoteRecord]
+    let nextCursor: String?
+}
+
 struct JobMediaPage: Decodable {
     let items: [MediaAssetRecord]
     let nextCursor: String?
@@ -1110,8 +1116,17 @@ extension APIClient {
         return try fieldPath("\(customerPath)/locations", id: locationID)
     }
 
-    func fieldNotes(_ jobID: String) async throws -> [JobNoteRecord] {
-        let page: FieldPage<JobNoteRecord> = try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/notes"))
+    /// Newer servers support a bounded page; 404/405 may mean a legacy server.
+    func fieldNotesPage(_ jobID: String, cursor: String? = nil) async throws -> JobNotesPage {
+        if let cursor, UUID(uuidString: cursor) == nil {
+            throw Problem(title: "Invalid notes cursor", status: nil, detail: nil)
+        }
+        return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/notes-page"),
+                              queryItems: [URLQueryItem(name: "limit", value: "50")], cursor: cursor, requireFresh: true)
+    }
+
+    func fieldNotes(_ jobID: String, requireFresh: Bool = false) async throws -> [JobNoteRecord] {
+        let page: FieldPage<JobNoteRecord> = try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/notes"), requireFresh: requireFresh)
         return page.items
     }
 

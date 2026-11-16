@@ -34,6 +34,15 @@ struct JobDetailView: View {
     @State private var documentInvoiceID: String?
     @State private var overviewDocument: OverviewJobDocumentRoute?
     @State private var notes: [JobNoteRecord] = []
+    @State private var locallySavedNotes: [JobNoteRecord] = []
+    @State private var notesPage: JobNotesPageState?
+    @State private var notesAuthorityID: String?
+    @State private var notesPageLoading = false
+    @State private var notesPageError: String?
+    @State private var notesCursorExpired = false
+    @State private var notesShowingSaved = false
+    @State private var notesRequest = UUID()
+    @State private var jobLoadRequest = UUID()
     @State private var note = ""
     /// Speech-to-text into `note`; it only fills the draft, saving still goes through `saveNote`.
     @StateObject private var dictation = NoteDictation()
@@ -416,6 +425,15 @@ struct JobDetailView: View {
             }
             #endif
             if customerAuthorityID != customerAuthorityToken {
+                notesRequest = UUID()
+                notesAuthorityID = nil
+                notesPage = nil
+                notes = []
+                locallySavedNotes = []
+                notesPageLoading = false
+                notesPageError = nil
+                notesCursorExpired = false
+                notesShowingSaved = false
                 customerAuthorityID = customerAuthorityToken
                 locations = []
                 locationsContext = nil
@@ -497,6 +515,21 @@ struct JobDetailView: View {
             customerPhone = nil
             contactsLoaded = false
             contactsFailed = false
+        }
+        .onChange(of: notesAuthorityToken) { _, _ in
+            notesRequest = UUID()
+            jobLoadRequest = UUID()
+            notesAuthorityID = nil
+            notes = []
+            locallySavedNotes = []
+            notesPage = nil
+            notesPageLoading = false
+            notesPageError = nil
+            notesCursorExpired = false
+            notesShowingSaved = false
+            if job != nil, session.can("job.view", feature: "jobs"), api.normalizedOrigin != nil {
+                Task { await load() }
+            }
         }
         .onChange(of: paymentAuthorityToken) { _, _ in paymentRoute = nil }
         .onChange(of: scenePhase) { _, phase in
@@ -901,6 +934,11 @@ struct JobDetailView: View {
     private var customerAuthorityToken: String {
         let allowed = session.can("customer.view", feature: "core_crm")
         return "\(session.generation.uuidString)|\(session.authorityRevision.uuidString)|\(session.policyVersion.map(String.init) ?? "unavailable")|\(allowed)"
+    }
+
+    /// Notes additionally retire when the API origin or request generation changes.
+    private var notesAuthorityToken: String {
+        "\(customerAuthorityToken)|\(api.normalizedOrigin ?? "unavailable")|\(api.requestGeneration.uuidString)|\(session.can("job.view", feature: "jobs"))"
     }
 
     /// The job's customer as a navigable record: from the list when it's there, else from the
@@ -2341,6 +2379,25 @@ struct JobDetailView: View {
                     }
                 }
             }
+            if (activityFilter == "All" || activityFilter == "Notes"),
+               notesAuthorityID == notesAuthorityToken, notesShowingSaved {
+                Text("Showing last loaded notes. Connect to refresh.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .accessibilityIdentifier("job-notes-saved-copy")
+            }
+            if (activityFilter == "All" || activityFilter == "Notes"),
+               notesAuthorityID == notesAuthorityToken, let page = notesPage, page.nextCursor != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Showing recent notes").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    if let notesPageError { Text(notesPageError).font(Theme.font(14)).foregroundStyle(Theme.muted) }
+                    Button(notesPageLoading ? "Loading…" : notesShowingSaved ? "Connect to load earlier notes" : notesCursorExpired ? "Reload notes" : notesPageError != nil ? "Retry earlier notes" : "Load earlier notes") {
+                        Task { if notesCursorExpired { await load() } else { await loadEarlierNotes() } }
+                    }
+                    .disabled(notesPageLoading || notesShowingSaved)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("job-notes-load-earlier")
+                }
+            }
         }
     }
 
@@ -2526,7 +2583,7 @@ struct JobDetailView: View {
                 let waiting = entry.state == .pending ? "Note · waiting to sync" : "Note · couldn't sync"
                 return TimelineEntry(id: "queued-\(entry.id)", title: waiting, body: payload.body, date: entry.createdAt, subject: ActivityFeedSubject(kind: "note", jobID: job.id))
             }
-            entries += notes.compactMap { record -> TimelineEntry? in
+            entries += (notesAuthorityID == notesAuthorityToken ? notes : []).compactMap { record -> TimelineEntry? in
                 // Only the signed-in person can be named; other authors need the roster (BYR-1599).
                 let title = record.authorUserId == session.user?.id ? "Note · You" : "Note"
                 return JobFiltering.date(record.createdAt).map { TimelineEntry(id: "note-\(record.id)", title: title, body: record.body, date: $0, subject: ActivityFeedSubject(kind: "note", subjectID: record.id, jobID: job.id)) }
@@ -2964,12 +3021,16 @@ struct JobDetailView: View {
         if let model = invoicePaymentModel { await invoicePaymentLoads.load(model) }
     }
     private func load() async {
+        let loadRequest = UUID()
+        jobLoadRequest = loadRequest
+        notesRequest = UUID()
+        notesPageLoading = false
         let generation = session.generation
         let authorityRevision = session.authorityRevision
         let policyVersion = session.policyVersion
         do {
             let loadedJob = try await api.fieldJob(jobId)
-            guard session.generation == generation, session.authorityRevision == authorityRevision,
+            guard jobLoadRequest == loadRequest, session.generation == generation, session.authorityRevision == authorityRevision,
                   session.policyVersion == policyVersion else { return }
             guard loadedJob.id == jobId, loadedJob.organizationId == session.activeOrganization?.id else {
                 throw Problem(title: "Job could not be verified", status: nil, detail: nil)
@@ -2986,23 +3047,125 @@ struct JobDetailView: View {
             }
             if locationContext != nil { await loadLocations(loadedJob) }
             if let locationContext, contactsContext != locationContext || !contactsLoaded { await loadContacts(loadedJob) }
+            guard jobLoadRequest == loadRequest, session.generation == generation, session.authorityRevision == authorityRevision,
+                  session.policyVersion == policyVersion else { return }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
-            let loadedNotes = try await api.fieldNotes(jobId)
-            guard session.generation == generation else { return }
-            notes = loadedNotes
-            JobDetailCache.save(notes: loadedNotes, jobID: jobId)
+            let request = UUID()
+            notesRequest = request
+            notesPageLoading = false
+            notesPageError = nil
+            notesCursorExpired = false
+            let apiGeneration = api.requestGeneration
+            let authorityID = notesAuthorityToken
+            let current: () -> Bool = {
+                !Task.isCancelled && jobLoadRequest == loadRequest && notesRequest == request && api.requestGeneration == apiGeneration &&
+                session.generation == generation && session.authorityRevision == authorityRevision &&
+                session.policyVersion == policyVersion && session.can("job.view", feature: "jobs") &&
+                session.activeOrganization?.id == loadedJob.organizationId && job?.id == loadedJob.id &&
+                notesAuthorityToken == authorityID
+            }
+            do {
+                let result = try await api.fieldNotesPage(jobId)
+                guard current() else { return }
+                var page = JobNotesPageState(organizationID: loadedJob.organizationId, jobID: jobId)
+                try page.accept(result, requestedCursor: nil)
+                let pageIDs = Set(page.items.map { $0.id.lowercased() })
+                locallySavedNotes.removeAll { pageIDs.contains($0.id.lowercased()) }
+                let local = locallySavedNotes.filter { $0.jobId == jobId && $0.organizationId == loadedJob.organizationId }
+                notes = page.items + local
+                notesPage = page
+                notesAuthorityID = authorityID
+                notesShowingSaved = false
+                if page.nextCursor == nil {
+                    JobDetailCache.save(notes: notes, jobID: jobId)
+                    if let scope = session.verifiedNotesCacheScope(jobID: jobId) { JobDetailCache.saveVerifiedNotes(notes, scope: scope) }
+                }
+            } catch let problem as Problem where problem.status == 404 || problem.status == 405 {
+                guard current() else { return }
+                let loadedNotes = try await api.fieldNotes(jobId, requireFresh: true)
+                guard current() else { return }
+                guard loadedNotes.allSatisfy({ $0.jobId == jobId && $0.organizationId == loadedJob.organizationId }) else {
+                    throw JobNotesPageError.invalid
+                }
+                let loadedIDs = Set(loadedNotes.map { $0.id.lowercased() })
+                locallySavedNotes.removeAll { loadedIDs.contains($0.id.lowercased()) }
+                let local = locallySavedNotes.filter { $0.jobId == jobId && $0.organizationId == loadedJob.organizationId }
+                notes = loadedNotes + local
+                notesPage = nil
+                notesAuthorityID = authorityID
+                notesShowingSaved = false
+                JobDetailCache.save(notes: notes, jobID: jobId)
+                if let scope = session.verifiedNotesCacheScope(jobID: jobId) { JobDetailCache.saveVerifiedNotes(notes, scope: scope) }
+            }
             error = nil
             await loadBrief()
         } catch is CancellationError {} catch {
-            guard session.generation == generation else { return }
+            guard jobLoadRequest == loadRequest, session.generation == generation,
+                  session.authorityRevision == authorityRevision, session.policyVersion == policyVersion else { return }
             if error.isConnectivityFailure {
-                // No signal: the last copy of this job, or what the schedule already knows.
+                // No signal: only show a complete saved copy for this authorized job/workspace.
                 if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
-                if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
-                if job != nil { self.error = nil; return }
+                if let job, job.id == jobId, job.organizationId == session.activeOrganization?.id,
+                   let scope = session.verifiedNotesCacheScope(jobID: jobId) {
+                    if notesAuthorityID != notesAuthorityToken {
+                        guard let saved = JobDetailCache.verifiedNotes(scope: scope) else {
+                            self.error = "Saved notes are unavailable for this account. Connect to refresh."
+                            return
+                        }
+                        notes = saved
+                        notesPage = nil
+                        notesAuthorityID = notesAuthorityToken
+                    }
+                    notesShowingSaved = true
+                    self.error = nil
+                    return
+                }
             }
             self.error = error.localizedDescription
+        }
+    }
+
+    private func loadEarlierNotes() async {
+        guard !notesPageLoading, let oldPage = notesPage, let cursor = oldPage.nextCursor,
+              let currentJob = job, notesAuthorityID == notesAuthorityToken,
+              session.can("job.view", feature: "jobs"), currentJob.organizationId == session.activeOrganization?.id else { return }
+        let request = notesRequest
+        let loadRequest = jobLoadRequest
+        let authorityID = notesAuthorityToken
+        let apiGeneration = api.requestGeneration
+        notesPageLoading = true
+        notesPageError = nil
+        defer { if notesRequest == request { notesPageLoading = false } }
+        do {
+            let result = try await api.fieldNotesPage(jobId, cursor: cursor)
+            guard !Task.isCancelled, jobLoadRequest == loadRequest, notesRequest == request, api.requestGeneration == apiGeneration,
+                  notesAuthorityID == authorityID, notesAuthorityToken == authorityID,
+                  session.can("job.view", feature: "jobs"), job == currentJob,
+                  currentJob.organizationId == session.activeOrganization?.id else { return }
+            var page = oldPage
+            try page.accept(result, requestedCursor: cursor)
+            let loadedIDs = Set(page.items.map { $0.id.lowercased() })
+            locallySavedNotes.removeAll { loadedIDs.contains($0.id.lowercased()) }
+            let localNotes = locallySavedNotes.filter { $0.jobId == jobId && $0.organizationId == currentJob.organizationId }
+            notes = page.items + localNotes
+            notesPage = page
+            if page.nextCursor == nil {
+                JobDetailCache.save(notes: notes, jobID: jobId)
+                if let scope = session.verifiedNotesCacheScope(jobID: jobId) { JobDetailCache.saveVerifiedNotes(notes, scope: scope) }
+            }
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled, jobLoadRequest == loadRequest, notesRequest == request,
+                  api.requestGeneration == apiGeneration, notesAuthorityID == authorityID,
+                  notesAuthorityToken == authorityID, session.can("job.view", feature: "jobs"),
+                  job == currentJob, currentJob.organizationId == session.activeOrganization?.id else { return }
+            if let problem = error as? Problem, problem.status == 404 {
+                notesCursorExpired = true
+                notesPageError = "Notes changed. Reload to continue."
+            } else {
+                notesPageError = "Earlier notes could not be loaded. Try again."
+            }
         }
     }
 
@@ -3218,15 +3381,34 @@ struct JobDetailView: View {
             note = ""
             return
         }
+        guard let currentJob = job, currentJob.id == jobId,
+              currentJob.organizationId == session.activeOrganization?.id,
+              session.can("job.note", feature: "jobs") else { return }
+        let authorityID = notesAuthorityToken
+        let apiGeneration = api.requestGeneration
         busy = true
         defer { busy = false }
         do {
-            let saved = try await api.addFieldNote(jobId, body: note.trimmingCharacters(in: .whitespacesAndNewlines))
-            notes.append(saved)
+            let saved = try await api.addFieldNote(jobId, body: trimmed)
+            guard !Task.isCancelled, api.requestGeneration == apiGeneration,
+                  notesAuthorityToken == authorityID, session.can("job.note", feature: "jobs"),
+                  job == currentJob, session.activeOrganization?.id == currentJob.organizationId,
+                  saved.jobId == jobId, saved.organizationId == currentJob.organizationId else { return }
+            if notesAuthorityID != authorityID {
+                notes = []
+                notesPage = nil
+                notesAuthorityID = authorityID
+                notesShowingSaved = false
+            }
+            if !notes.contains(where: { $0.id == saved.id }) { notes.append(saved) }
+            if !locallySavedNotes.contains(where: { $0.id == saved.id }) { locallySavedNotes.append(saved) }
             note = ""
             error = nil
             await loadCloseout()
         } catch is CancellationError {} catch {
+            guard !Task.isCancelled, api.requestGeneration == apiGeneration,
+                  notesAuthorityToken == authorityID, session.can("job.note", feature: "jobs"),
+                  job == currentJob, session.activeOrganization?.id == currentJob.organizationId else { return }
             if error.isConnectivityFailure {
                 outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
                 note = ""

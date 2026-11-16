@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Network
 
 /// Watches the device's network path so the app can resync the moment signal returns.
@@ -104,6 +105,37 @@ enum JobDetailCache {
     static func estimate(_ id: String) -> EstimateRecord? { read(EstimateRecord.self, "\(id).estimate.json") }
     static func payments(_ invoiceID: String) -> [FieldPaymentRecord]? { read([FieldPaymentRecord].self, "\(invoiceID).payments.json") }
     static func notes(_ id: String) -> [JobNoteRecord] { read([JobNoteRecord].self, "\(id).notes.json") ?? [] }
+    /// Complete notes read while this exact actor and authority could open the job.
+    /// Legacy job-ID-only copies are retained for older callers, but are not identity proof.
+    struct VerifiedNotesScope: Codable, Equatable {
+        let actorID: String
+        let organizationID: String
+        let jobID: String
+        let origin: String
+        let policyVersion: Int
+        let authorityGeneration: String
+        let authorityRevision: UUID
+    }
+    private struct VerifiedNotesCopy: Codable {
+        let scope: VerifiedNotesScope
+        let notes: [JobNoteRecord]
+    }
+    private static func verifiedNotesName(_ scope: VerifiedNotesScope) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let bytes = try? encoder.encode(scope) else { return nil }
+        let key = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+        return "verified-notes-\(key).json"
+    }
+    static func saveVerifiedNotes(_ notes: [JobNoteRecord], scope: VerifiedNotesScope) {
+        guard let name = verifiedNotesName(scope), notes.allSatisfy({ $0.jobId == scope.jobID && $0.organizationId == scope.organizationID }) else { return }
+        write(VerifiedNotesCopy(scope: scope, notes: notes), name)
+    }
+    static func verifiedNotes(scope: VerifiedNotesScope) -> [JobNoteRecord]? {
+        guard let name = verifiedNotesName(scope), let copy = read(VerifiedNotesCopy.self, name), copy.scope == scope,
+              copy.notes.allSatisfy({ $0.jobId == scope.jobID && $0.organizationId == scope.organizationID }) else { return nil }
+        return copy.notes
+    }
     /// "At this address": the last complete copy, so the section still shows without signal.
     struct SavedHistory: Codable { let savedAt: Date; let history: JobPropertyHistory }
     static func save(history: JobPropertyHistory) { write(SavedHistory(savedAt: .now, history: history), "\(history.jobId).history.json") }

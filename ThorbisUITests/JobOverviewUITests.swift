@@ -2,6 +2,38 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
+    func testExpiredNotesCursorOffersReloadAndKeepsRecentNotes() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-activity", "--paper-preview-job-notes-paged", "--paper-preview-job-notes-expired"]
+        app.launch()
+        let button = app.buttons["job-notes-load-earlier"]
+        for _ in 0..<12 where !button.isHittable { app.swipeUp() }
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        XCTAssertTrue(button.isHittable)
+        button.tap()
+        XCTAssertTrue(app.staticTexts["Notes changed. Reload to continue."].waitForExistence(timeout: 10))
+        XCTAssertEqual(button.label, "Reload notes")
+        XCTAssertTrue(app.staticTexts["Recent page note"].exists)
+    }
+
+    func testJobNotesLoadEarlierWithoutHidingRecentNotes() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-activity", "--paper-preview-job-notes-paged"]
+        app.launch()
+        let button = app.buttons["job-notes-load-earlier"]
+        for _ in 0..<12 where !button.exists { app.swipeUp() }
+        XCTAssertTrue(button.waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Showing recent notes"].exists)
+        for _ in 0..<12 where !button.isHittable { app.swipeUp() }
+        XCTAssertTrue(button.isHittable)
+        button.tap()
+        XCTAssertTrue(button.waitForNonExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Earlier page note"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Recent page note"].exists)
+    }
+
     func testLargeSameDayActivityRemainsScrollableAndFilterable() {
         continueAfterFailure = false
         let app = XCUIApplication()

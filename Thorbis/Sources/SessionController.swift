@@ -91,6 +91,17 @@ final class SessionController: ObservableObject {
                                   generation: authorityGeneration, revision: authorityRevision)
     }
 
+    /// Cache binding is valid only for the identity and server authority that admitted the job read.
+    func verifiedNotesCacheScope(jobID: String) -> JobDetailCache.VerifiedNotesScope? {
+        guard can("job.view", feature: "jobs"), let actorID = user?.id,
+              let organizationID = activeOrganization?.id, let policyVersion, policyVersion > 0,
+              let authorityGeneration, !authorityGeneration.isEmpty,
+              let origin = api.normalizedOrigin, authorityOrigin == origin else { return nil }
+        return JobDetailCache.VerifiedNotesScope(actorID: actorID, organizationID: organizationID,
+            jobID: jobID, origin: origin, policyVersion: policyVersion, authorityGeneration: authorityGeneration,
+            authorityRevision: authorityRevision)
+    }
+
     /// Changes before publishing new authority, even when the server policy version is unchanged.
     /// Visible media must reauthorize when this value changes.
     @Published private(set) var authorityRevision = UUID() {
