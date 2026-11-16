@@ -3212,27 +3212,47 @@ struct JobDetailView: View {
         await store.refresh(api)
     }
     private func saveNote() async {
-        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        if session.isOffline {
-            outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
-            note = ""
-            return
+        guard !busy, let currentJob = job, currentJob.id == jobId,
+              let actorID = session.user?.id, let organizationID = session.activeOrganization?.id,
+              currentJob.organizationId == organizationID, session.can("job.note", feature: "jobs") else { return }
+        let submitted = NoteSubmissionSnapshot(note)
+        guard !submitted.body.isEmpty else { return }
+        let authorityID = customerAuthorityToken
+        let apiGeneration = api.requestGeneration
+        let queueContext = outbox.captureContext(matchingActorID: actorID, organizationID: organizationID)
+        let policy = session.policyVersion
+        func isCurrent() -> Bool {
+            !Task.isCancelled && api.requestGeneration == apiGeneration && customerAuthorityToken == authorityID &&
+            session.user?.id == actorID && session.activeOrganization?.id == organizationID &&
+            session.can("job.note", feature: "jobs") && job?.id == currentJob.id &&
+            job?.organizationId == currentJob.organizationId && job?.customerId == currentJob.customerId &&
+            job?.assignedToUserId == currentJob.assignedToUserId && job?.teamId == currentJob.teamId &&
+            job?.locationId == currentJob.locationId
         }
+        func queueSubmitted() {
+            guard isCurrent(), let queueContext,
+                  outbox.captureContext(matchingActorID: actorID, organizationID: organizationID) == queueContext,
+                  outbox.enqueue(.note(.init(jobId: jobId, body: submitted.body)), policyVersion: policy ?? 0) != nil else {
+                if isCurrent() { error = "The note couldn't be queued. Your draft is still here." }
+                return
+            }
+            note = submitted.remainingDraft(current: note)
+        }
+        if session.isOffline { queueSubmitted(); return }
         busy = true
         defer { busy = false }
         do {
-            let saved = try await api.addFieldNote(jobId, body: note.trimmingCharacters(in: .whitespacesAndNewlines))
-            notes.append(saved)
-            note = ""
+            let saved = try await api.addFieldNote(jobId, body: submitted.body)
+            guard isCurrent(), saved.jobId == jobId, saved.organizationId == organizationID else { return }
+            if !notes.contains(where: { $0.id == saved.id }) { notes.append(saved) }
+            note = submitted.remainingDraft(current: note)
             error = nil
             await loadCloseout()
-        } catch is CancellationError {} catch {
-            if error.isConnectivityFailure {
-                outbox.enqueue(.note(.init(jobId: jobId, body: trimmed)), policyVersion: session.policyVersion ?? 0)
-                note = ""
-            } else {
-                self.error = error.localizedDescription
-            }
+        } catch is CancellationError {
+        } catch {
+            guard isCurrent() else { return }
+            if error.isConnectivityFailure { queueSubmitted() }
+            else { self.error = error.localizedDescription }
         }
     }
 }

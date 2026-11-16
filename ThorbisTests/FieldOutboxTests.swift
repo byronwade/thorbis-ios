@@ -29,6 +29,14 @@ final class FieldOutboxTests: XCTestCase {
         APIClient(session: URLProtocolFixture.session(replies), baseURL: "https://app.thorbis.com")
     }
 
+    func testOfflineNoteIsNotAcknowledgedWhenQueueCannotBeWritten() throws {
+        try Data("not a directory".utf8).write(to: directory)
+        let box = outbox()
+        let result = box.enqueue(.note(.init(jobId: jobA, body: "Keep this draft")), policyVersion: 4)
+        XCTAssertNil(result)
+        XCTAssertTrue(box.pending.isEmpty)
+    }
+
     func testQueuedChangesSurviveRelaunchAndStayBoundToTheirIdentity() throws {
         let first = outbox()
         first.enqueue(.progress(.init(jobId: jobA, to: "en_route", etaMinutes: 15)), policyVersion: 4)

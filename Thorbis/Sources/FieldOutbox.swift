@@ -152,7 +152,7 @@ struct OutboxEntry: Codable, Identifiable, Equatable {
     /// Payments and signatures have no other copy once their sheet closes, so they must reach disk.
     var isDurableOnly: Bool {
         switch action {
-        case .invoiceSignature, .payment: true
+        case .invoiceSignature, .payment, .note: true
         default: false
         }
     }
