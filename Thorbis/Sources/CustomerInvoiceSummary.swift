@@ -634,6 +634,48 @@ final class CustomerSummaryHandoffRegistry: ObservableObject {
 }
 
 @MainActor
+extension CustomerSummaryHandoffRegistry {
+    /// Activate only for an authenticated handoff whose job membership is still current.
+    func activate(summary: CustomerInvoiceSummary, api: APIClient, session: SessionController,
+                  authority: CustomerHandoffExitAuthority,
+                  handoffCurrent: @escaping @MainActor () -> Bool) -> Activation? {
+        guard let jobID = summary.jobId,
+              authority.isCurrent(api: api, session: session), handoffCurrent(),
+              session.can("invoice.view", feature: "invoicing"), session.can("invoice.edit", feature: "invoicing") else { return nil }
+        let scope = CustomerSummaryPendingScope(origin: authority.origin, actorID: authority.actor,
+            organizationID: summary.organizationId, customerID: summary.customerId, jobID: jobID, invoiceID: summary.invoiceId)
+        guard let key = CustomerSummaryHandoffKey(summary: summary, scope: scope, authority: authority) else { return nil }
+        return activate(key: key, authorityCurrent: {
+            authority.isCurrent(api: api, session: session) && handoffCurrent() &&
+            session.can("invoice.view", feature: "invoicing") && session.can("invoice.edit", feature: "invoicing")
+        }) { current in
+            CustomerSummaryDurableCoordinator(summary: summary, scope: scope, store: KeychainCustomerSummaryPendingStore.shared,
+                current: current, lookup: {
+                    try await api.currentCustomerSummaryAuthorization(summary, currentAuthority: current)
+                }, upload: { signature in
+                    #if DEBUG
+                    if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing") {
+                        let hash = SHA256.hash(data: signature.png).map { String(format: "%02x", $0) }.joined()
+                        return MediaAssetRecord(id: "00000000-0000-4000-8000-000000009991", organizationId: scope.organizationID,
+                            jobId: jobID, uploaderUserId: scope.actorID, kind: "photo", mime: "image/png", sizeBytes: signature.png.count,
+                            originalFilename: "signature.png", contentHash: hash, storageKey: "preview", capturedAt: signature.signedAt,
+                            uploadState: "stored", tags: ["signature"], caption: nil, archived: false, sourceAssetId: nil,
+                            createdAt: signature.signedAt, updatedAt: signature.signedAt)
+                    }
+                    #endif
+                    guard let capturedAt = ISO8601DateFormatter().date(from: signature.signedAt) else { throw CancellationError() }
+                    return try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: signature.clientAssetID,
+                        kind: "photo", mime: "image/png", originalFilename: "signature.png", data: signature.png,
+                        tags: ["signature"], capturedAt: capturedAt, expectedOrganizationID: scope.organizationID,
+                        currentAuthority: current)
+                }, replay: { pending in
+                    try await api.replayCustomerSummaryPending(pending, scope: pending.scope, currentAuthority: current)
+                })
+        }
+    }
+}
+
+@MainActor
 extension APIClient {
     /// Replays a previously persisted request, including old terms, under the same actor.
     /// An unsigned lookup alone cannot prove an earlier in-flight POST has finished.

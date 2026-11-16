@@ -12,12 +12,18 @@ final class LegacyJobPhotoTests: XCTestCase {
                        contentType: "image/jpeg", byteSize: 3, storageKey: key, createdAt: "2026-01-01T00:00:00Z")
     }
     private func modern(_ key: String, organization: String? = nil, jobID: String? = nil,
-                        state: String = "stored", archived: Bool = false) -> MediaAssetRecord {
+                        state: String = "stored", archived: Bool = false, tags: [String] = []) -> MediaAssetRecord {
         MediaAssetRecord(id: "00000000-0000-4000-8000-000000000004", organizationId: organization ?? org,
                          jobId: jobID ?? job, uploaderUserId: org, kind: "photo", mime: "image/jpeg", sizeBytes: 3,
                          originalFilename: "image.bin", contentHash: "hash", storageKey: key, capturedAt: nil,
-                         uploadState: state, tags: [], caption: nil, archived: archived, sourceAssetId: nil,
+                         uploadState: state, tags: tags, caption: nil, archived: archived, sourceAssetId: nil,
                          createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z")
+    }
+
+    func testCustomerPhotosDoNotIncludeSignatureAsset() {
+        let signature = modern("signature-key", tags: ["signature"])
+        let photos = JobPhotoMerge.combine(modern: [signature], legacy: [], organizationID: org, jobID: job)
+        XCTAssertTrue(photos.isEmpty, "Signature evidence must not appear in the customer's job photo collection")
     }
 
     func testReconciledPhotoRetainsLegacyFallbackAndCountsOnce() {

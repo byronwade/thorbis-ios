@@ -188,6 +188,7 @@ struct JobCustomerDocumentsView: View {
     @State private var editingDetails = false
     @State private var started = false
     @StateObject private var invoiceOverview = CustomerInvoiceOverviewLoader()
+    @StateObject private var summarySigningRegistry = CustomerSummaryHandoffRegistry()
 
     private var currentWorkspace: Bool { sourceGeneration == session.generation && session.user != nil && session.activeOrganization?.id == scope.organizationID }
     private var canViewEstimates: Bool { session.can("estimate.view", feature: "estimates") }
@@ -249,6 +250,8 @@ struct JobCustomerDocumentsView: View {
                         #endif
                         Task { await openInvoice(id, payment: true) }
                     },
+                    signingRegistry: summarySigningRegistry,
+                    signingHandoffCurrent: { currentWorkspace && handoff?.isCurrentJob == true && canViewInvoices && book != nil },
                     canSignInvoice: session.can("invoice.edit", feature: "invoicing"),
                     canPayInvoice: session.can("invoice.payment.create", feature: "payments"),
                     onSelectionChanged: { documentSelectionRevision = UUID(); error = nil })
@@ -532,6 +535,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func beginHandBack() {
+        summarySigningRegistry.retire()
         paperNavigation.invalidatePendingOpen()
         paperGeneration = UUID(); paper = nil
         book = nil

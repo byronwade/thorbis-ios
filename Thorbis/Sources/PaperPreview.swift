@@ -761,6 +761,10 @@ struct SavedWorkPreviewControls: View {
 final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private final class Scenario: @unchecked Sendable {
         let lock = NSLock()
+        var summaryReceipts: [String: [String: Any]] = [:]
+        var summaryLostOnce = false
+        var signingLookupHeldOnce = false
+        var heldSigningLookup: (@Sendable () -> Void)?
         var setupPaymentReads = 0
         var documentHistoryRestored = false
         var failPaymentRecheck = false
@@ -789,7 +793,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.summaryReceipts = [:]; scenario.summaryLostOnce = false; scenario.signingLookupHeldOnce = false; scenario.heldSigningLookup = nil; scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+    }
+    static var hasHeldSigningLookup: Bool { scenario.lock.withLock { scenario.heldSigningLookup != nil } }
+    static func releaseHeldSigningLookup() {
+        let release = scenario.lock.withLock { let result = scenario.heldSigningLookup; scenario.heldSigningLookup = nil; return result }
+        release?()
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -893,7 +902,36 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         let status: Int
         let payload: Any
-        if PaperPreview.isJobDocumentsPreview,
+        if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing"),
+           request.httpMethod == "GET", url.path.hasSuffix("/customer-presentation/summary-authorization") {
+            let base = String(url.path.dropLast("/summary-authorization".count))
+            if let receipt = Self.scenario.lock.withLock({ Self.scenario.summaryReceipts[base] }) {
+                status = 200; payload = ["status": "signed", "receipt": receipt]
+            } else { status = 200; payload = ["status": "unsigned"] }
+        } else if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing"),
+                  request.httpMethod == "POST", url.path.hasSuffix("/customer-presentation/summary-authorizations"),
+                  let input = try? JSONSerialization.jsonObject(with: Self.requestData(request)) as? [String: Any] {
+            let base = String(url.path.dropLast("/summary-authorizations".count))
+            if let shown = Self.fixture(path: base, isFresh: true) as? [String: Any],
+               let consent = shown["summaryConsent"] as? [String: Any], let name = input["signerName"] as? String,
+               let signedAt = input["signedAt"] as? String, input["consentDigest"] as? String == consent["digest"] as? String {
+                let receipt: [String: Any] = ["kind": "signed_customer_invoice_summary", "id": "00000000-0000-4000-8000-000000009990",
+                    "organizationId": shown["organizationId"]!, "customerId": shown["customerId"]!, "jobId": shown["jobId"]!,
+                    "invoiceId": shown["invoiceId"]!, "linesRevision": shown["linesRevision"]!, "issuedSnapshotId": shown["issuedSnapshotId"]!,
+                    "digest": consent["digest"]!, "consentVersion": consent["consentVersion"]!, "consentText": consent["consentText"]!,
+                    "signerName": name, "signedAt": signedAt, "recordedAt": signedAt, "currency": shown["currency"]!,
+                    "totalAmount": shown["totalAmount"]!, "lines": shown["lines"]!]
+                let lose = Self.scenario.lock.withLock {
+                    Self.scenario.summaryReceipts[base] = receipt
+                    if ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing-lost-once"), !Self.scenario.summaryLostOnce {
+                        Self.scenario.summaryLostOnce = true; return true
+                    }
+                    return false
+                }
+                if lose { status = 503; payload = ["title": "Preview response unavailable"] }
+                else { status = 201; payload = receipt }
+            } else { status = 409; payload = ["title": "Preview summary changed"] }
+        } else if PaperPreview.isJobDocumentsPreview,
            ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
            request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
             let foreign = ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice-foreign")
@@ -911,6 +949,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         } else if request.httpMethod != nil && request.httpMethod != "GET" {
             status = 405
             payload = ["status": 405, "title": "Design preview is read-only", "detail": "Sample data cannot be changed. No request was sent to a server."]
+        } else if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-membership-unavailable"),
+                  url.path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+            status = 503
+            payload = ["status": 503, "title": "Sample invoice membership unavailable"]
         } else if PaperPreview.screen.hasPrefix("present-estimate"),
                   url.path == "/v1/estimates/\(PaperPreview.estimate.id)",
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-review-pending") {
@@ -988,6 +1030,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 self.client?.urlProtocolDidFinishLoading(self)
             }
             if PaperPreview.isJobDocumentsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-hold-first-signing-lookup"),
+               url.path == "/v1/invoices/00000000-0000-4000-8000-000000002209/customer-presentation/summary-authorization",
+               Self.scenario.lock.withLock({
+                   guard !Self.scenario.signingLookupHeldOnce else { return false }
+                   Self.scenario.signingLookupHeldOnce = true
+                   Self.scenario.heldSigningLookup = deliver
+                   return true
+               }) {
+                return
+            }
+            if PaperPreview.isJobDocumentsPreview,
                ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
                request.httpMethod == "POST", url.path == "/v1/jobs/\(PaperPreview.jobID)/completion-invoice" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: deliver)
@@ -995,6 +1048,30 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
     override func stopLoading() {}
+
+    private static func requestData(_ request: URLRequest) -> Data {
+        if let body = request.httpBody { return body }
+        guard let stream = request.httpBodyStream else { return Data() }
+        stream.open(); defer { stream.close() }
+        var value = Data(); var buffer = [UInt8](repeating: 0, count: 4096)
+        while stream.hasBytesAvailable {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count <= 0 { break }; value.append(buffer, count: count)
+        }
+        return value
+    }
+
+    private static func customerSummaryFixture(_ original: [String: Any]) -> [String: Any] {
+        guard ProcessInfo.processInfo.arguments.contains("--paper-preview-summary-signing") else { return original }
+        var value = original
+        if var lines = value["lines"] as? [[String: Any]], !lines.isEmpty {
+            lines[0]["id"] = "00000000-0000-4000-8000-000000009989"; value["lines"] = lines
+        }
+        value["summaryConsent"] = ["digest": "sha256:" + String(repeating: "a", count: 64),
+            "consentVersion": "invoice-summary-consent-v1",
+            "consentText": "I approve the customer invoice summary shown above. Payment status is not part of this authorization."]
+        return value
+    }
 
     private static func fixture(path: String, queryItems: [URLQueryItem] = [], isFresh: Bool = false) -> Any? {
         let actor = PaperPreview.actorID
@@ -1163,7 +1240,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 let partialPayment = ProcessInfo.processInfo.arguments.contains("--paper-preview-primary-payment-arrives") && record.id == invoices[0].id
                 let paid = partialPayment && scenario.lock.withLock({ scenario.documentHistoryRestored }) ? 10000 : (oldSummary ? 33000 : record.amountPaid)
                 let summaryStatus = oldSummary ? "issued" : record.status
-                return ["kind": "customer_invoice_presentation", "presentationVersion": 1,
+                return customerSummaryFixture(["kind": "customer_invoice_presentation", "presentationVersion": 1,
                         "presentationScopeId": "invoice:\(record.id):lines:\(record.linesRevision):customer:v1",
                         "isSignedDocument": false, "issuedSnapshotId": record.status == "draft" ? NSNull() : "00000000-0000-4000-8000-000000000001" as Any,
                         "organizationId": record.organizationId, "customerId": record.customerId, "invoiceId": record.id,
@@ -1172,7 +1249,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                         "lines": [["id": "customer-safe-line", "description": ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-summary-long")
                                    ? "This customer-facing service description explains the full work in detail. The technician will complete and test the installation. Final summary detail: leave the work area clean."
                                    : "Customer safe service", "quantity": 1,
-                                   "unitPrice": ["amount": total, "currency": "USD"]]]]
+                                   "unitPrice": ["amount": total, "currency": "USD"]]]])
             }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
                 var object = jsonObject(record) as! [String: Any]
@@ -1467,6 +1544,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             }
         }
         if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-missing-invoice-membership") { return ["items": []] }
             if PaperPreview.screen == "job-invoice-empty" { return ["items": []] }
             return ["items": [try! JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))]]
         }
@@ -1491,7 +1569,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
            path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)/customer-presentation" {
             let record = PaperPreview.issuedInvoice
             let total = paperLinesTotal(record.lines) ?? 0
-            return ["kind": "customer_invoice_presentation", "presentationVersion": 1,
+            return customerSummaryFixture(["kind": "customer_invoice_presentation", "presentationVersion": 1,
                     "presentationScopeId": "invoice:\(record.id):lines:\(record.linesRevision):customer:v1",
                     "isSignedDocument": false, "issuedSnapshotId": "00000000-0000-4000-8000-000000000001",
                     "organizationId": record.organizationId, "customerId": record.customerId, "invoiceId": record.id,
@@ -1501,7 +1579,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "lines": [["id": "customer-safe-line", "description": ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-summary-long")
                                    ? "This customer-facing service description explains the full work in detail. The technician will complete and test the installation. Final summary detail: leave the work area clean."
                                    : "Customer safe service", "quantity": 1,
-                               "unitPrice": ["amount": total, "currency": "USD"]]]]
+                               "unitPrice": ["amount": total, "currency": "USD"]]]])
         }
         if path == "/v1/invoices/\(PaperPreview.issuedInvoice.id)" {
             return try? JSONSerialization.jsonObject(with: JSONEncoder().encode(PaperPreview.issuedInvoice))
@@ -1723,7 +1801,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
         for job in jobs() {
             guard let id = job["id"] as? String else { continue }
-            if path == "/v1/jobs/\(id)" { return job }
+            if path == "/v1/jobs/\(id)" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-changed-invoice-job"), id == PaperPreview.jobID {
+                    var changed = job
+                    changed["customerId"] = "00000000-0000-4000-8000-000000000413"
+                    return changed
+                }
+                return job
+            }
             if path == "/v1/jobs/\(id)/notes" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
