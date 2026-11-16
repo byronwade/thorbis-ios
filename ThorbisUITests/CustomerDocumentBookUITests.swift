@@ -114,15 +114,10 @@ final class CustomerDocumentBookUITests: XCTestCase {
     func testDelayedInvoiceSignDoesNotReopenAfterLeavingDocumentBook() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job",
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-view",
                                "--paper-preview-working-job", "--paper-preview-job-documents",
                                "--paper-preview-delay-invoice-signing"]
         app.launch()
-        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["Job actions"].tap()
-        let menu = thorbisCustomerViewMenuItem(app)
-        XCTAssertTrue(menu.waitForExistence(timeout: 15))
-        menu.tap()
         let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
         XCTAssertTrue(estimate.waitForExistence(timeout: 15))
         estimate.tap()
@@ -144,10 +139,10 @@ final class CustomerDocumentBookUITests: XCTestCase {
         let noEarlyForm = XCTNSPredicateExpectation(predicate: NSPredicate(value: false), object: nil)
         _ = XCTWaiter.wait(for: [noEarlyForm], timeout: 18)
         XCTAssertFalse(app.textFields["Your full name"].exists)
-        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
-        XCTAssertTrue(invoice.waitForExistence(timeout: 10))
-        invoice.tap()
-        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
+        XCTAssertTrue(estimate.waitForExistence(timeout: 10))
+        estimate.tap()
+        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10),
+                      "Reopening the job book must not restore a stale invoice signing destination: \(app.debugDescription)")
         XCTAssertFalse(app.textFields["Your full name"].exists, "A finished old request must not reopen signing")
     }
 
