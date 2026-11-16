@@ -162,6 +162,8 @@ final class CommsLocalStore: ObservableObject {
     @Published private(set) var lastMailSaveFailure: MailSaveFailure?
     @Published private(set) var isActive = true
     @Published private(set) var threads: [CommsLocalThread] = []
+    /// Unsaved text held only in this session after a storage error.
+    @Published private(set) var unsavedText: [String: String] = [:]
     /// Marks on call threads (star, archive, bin, read), by thread id.
     @Published private(set) var callFlags: [String: CommsThreadFlags] = [:]
     @Published private(set) var cannedReplies: [CommsCannedReply] = CommsCannedReply.builtIns
@@ -248,6 +250,7 @@ final class CommsLocalStore: ObservableObject {
     func invalidate() {
         isActive = false
         threads = []
+        unsavedText = [:]
         callFlags = [:]
         cannedReplies = []
     }
@@ -256,20 +259,35 @@ final class CommsLocalStore: ObservableObject {
     private var canMutate: Bool { isActive && !storageBlocked }
     private var stamp: String { ISO8601DateFormatter().string(from: now()) }
 
-    private func save() {
-        guard canMutate, let file else { return }
-        let snapshot = Snapshot(threads: threads, callFlags: callFlags, cannedReplies: cannedReplies)
-        if let data = try? JSONEncoder().encode(snapshot) {
-            try? data.write(to: file, options: [.atomic, .completeFileProtection])
+    /// Writes a complete candidate before publishing it. A write error is
+    /// ambiguous, so all subsequent disk mutations remain blocked until reload.
+    private func publish(threads nextThreads: [CommsLocalThread], flags nextFlags: [String: CommsThreadFlags], replies nextReplies: [CommsCannedReply]) -> Bool {
+        guard canMutate else { return false }
+        if let file {
+            do {
+                let snapshot = Snapshot(threads: nextThreads, callFlags: nextFlags, cannedReplies: nextReplies)
+                let data = try JSONEncoder().encode(snapshot)
+                try data.write(to: file, options: [.atomic, .completeFileProtection])
+            } catch {
+                persistenceUncertain = true
+                lastMailSaveFailure = .storage
+                return false
+            }
         }
+        if threads != nextThreads { threads = nextThreads }
+        if callFlags != nextFlags { callFlags = nextFlags }
+        if cannedReplies != nextReplies { cannedReplies = nextReplies }
+        return true
     }
 
     func thread(_ id: String) -> CommsLocalThread? { threads.first { $0.id == id } }
 
-    private func patch(_ id: String, _ change: (inout CommsLocalThread) -> Void) {
-        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }) else { return }
-        change(&threads[index])
-        save()
+    @discardableResult
+    private func patch(_ id: String, _ change: (inout CommsLocalThread) -> Void) -> Bool {
+        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }) else { return false }
+        var candidate = threads
+        change(&candidate[index])
+        return publish(threads: candidate, flags: callFlags, replies: cannedReplies)
     }
 
     // MARK: Opening conversations
@@ -282,7 +300,7 @@ final class CommsLocalStore: ObservableObject {
         let wanted = CommsCallGrouping.key(phone)
         if let wanted, let existing = threads.first(where: { $0.channel == .sms && CommsCallGrouping.key($0.phone) == wanted }) {
             if existing.flags.place != .inbox {
-                patch(existing.id) { $0.flags.archivedAt = nil; $0.flags.binnedAt = nil }
+                guard patch(existing.id, { $0.flags.archivedAt = nil; $0.flags.binnedAt = nil }) else { return nil }
             }
             return existing.id
         }
@@ -291,17 +309,22 @@ final class CommsLocalStore: ObservableObject {
                                       phone: phone, email: nil, channel: .sms, subject: nil, unread: false,
                                       flags: CommsThreadFlags(), messages: [], composing: nil)
         // Empty on purpose: a new conversation has no history to invent.
-        threads.insert(thread, at: 0)
-        save()
-        return thread.id
+        var candidate = threads
+        candidate.insert(thread, at: 0)
+        return publish(threads: candidate, flags: callFlags, replies: cannedReplies) ? thread.id : nil
     }
 
     // MARK: Texts
 
     func setComposing(_ id: String, _ body: String) {
-        guard canMutate, let index = threads.firstIndex(where: { $0.id == id }), threads[index].composing != body else { return }
-        threads[index].composing = body
-        save()
+        guard isActive, let existing = thread(id) else { return }
+        if storageBlocked {
+            unsavedText[id] = body
+            return
+        }
+        guard existing.composing != body else { return }
+        if patch(id, { $0.composing = body }) { unsavedText.removeValue(forKey: id) }
+        else if isActive && storageBlocked { unsavedText[id] = body }
     }
 
     /// web commitDraft: the text lands as a Draft, or Queued with the time it was scheduled for.
@@ -312,7 +335,8 @@ final class CommsLocalStore: ObservableObject {
         let message = CommsLocalMessage(id: UUID().uuidString.lowercased(), channel: .sms, direction: .outbound, at: stamp, body: text,
                                         status: scheduledAt == nil ? .draft : .queued,
                                         scheduledAt: scheduledAt.map { ISO8601DateFormatter().string(from: $0) })
-        patch(id) { $0.messages.append(message); $0.composing = nil }
+        guard patch(id, { $0.messages.append(message); $0.composing = nil }) else { return false }
+        unsavedText.removeValue(forKey: id)
         return true
     }
 
@@ -326,14 +350,15 @@ final class CommsLocalStore: ObservableObject {
     }
 
     /// Discards a draft message. A conversation that was only ever that draft goes with it.
-    func discardDraft(_ threadID: String, messageID: String) {
-        guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return }
+    @discardableResult
+    func discardDraft(_ threadID: String, messageID: String) -> Bool {
+        guard canMutate, let thread = thread(threadID), thread.messages.contains(where: { $0.id == messageID && $0.status == .draft }) else { return false }
         if thread.messages.count == 1 && thread.channel == .email {
-            threads.removeAll { $0.id == threadID }
-            save()
-        } else {
-            patch(threadID) { $0.messages.removeAll { $0.id == messageID } }
+            var candidate = threads
+            candidate.removeAll { $0.id == threadID }
+            return publish(threads: candidate, flags: callFlags, replies: cannedReplies)
         }
+        return patch(threadID) { $0.messages.removeAll { $0.id == messageID } }
     }
 
     // MARK: Email
@@ -399,38 +424,32 @@ final class CommsLocalStore: ObservableObject {
             candidate.insert(thread, at: 0)
             resultID = thread.id
         }
-        if let file {
-            do {
-                let snapshot = Snapshot(threads: candidate, callFlags: callFlags, cannedReplies: cannedReplies)
-                let data = try JSONEncoder().encode(snapshot)
-                try data.write(to: file, options: [.atomic, .completeFileProtection])
-            } catch {
-                // A failed atomic write can have an unknown outcome. Freeze further writes
-                // until a fresh store reloads the disk; never overwrite or retry blindly.
-                persistenceUncertain = true
-                lastMailSaveFailure = .storage
-                return nil
-            }
+        guard publish(threads: candidate, flags: callFlags, replies: cannedReplies) else {
+            if isActive && storageBlocked { lastMailSaveFailure = .storage }
+            return nil
         }
-        threads = candidate
         return resultID
     }
 
     // MARK: Canned replies
 
-    func saveCannedReply(name: String, body: String) {
-        guard canMutate else { return }
+    @discardableResult
+    func saveCannedReply(name: String, body: String) -> Bool {
+        guard canMutate else { return false }
         let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty else { return false }
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        cannedReplies.append(.init(id: UUID().uuidString.lowercased(), name: title.isEmpty ? String(text.prefix(28)) : title, body: text))
-        save()
+        var candidate = cannedReplies
+        candidate.append(.init(id: UUID().uuidString.lowercased(), name: title.isEmpty ? String(text.prefix(28)) : title, body: text))
+        return publish(threads: threads, flags: callFlags, replies: candidate)
     }
 
-    func deleteCannedReply(_ id: String) {
-        guard canMutate else { return }
-        cannedReplies.removeAll { $0.id == id }
-        save()
+    @discardableResult
+    func deleteCannedReply(_ id: String) -> Bool {
+        guard canMutate else { return false }
+        var candidate = cannedReplies
+        candidate.removeAll { $0.id == id }
+        return publish(threads: threads, flags: callFlags, replies: candidate)
     }
 
     // MARK: Marks (texts, email and call threads alike)
@@ -439,23 +458,21 @@ final class CommsLocalStore: ObservableObject {
         thread(id)?.flags ?? callFlags[id] ?? CommsThreadFlags()
     }
 
-    private func setFlags(_ id: String, _ change: (inout CommsThreadFlags) -> Void) {
-        guard canMutate else { return }
-        if thread(id) != nil {
-            patch(id) { change(&$0.flags) }
-        } else {
-            var flags = callFlags[id] ?? CommsThreadFlags()
-            change(&flags)
-            callFlags[id] = flags
-            save()
-        }
+    @discardableResult
+    private func setFlags(_ id: String, _ change: (inout CommsThreadFlags) -> Void) -> Bool {
+        guard canMutate else { return false }
+        if thread(id) != nil { return patch(id) { change(&$0.flags) } }
+        var candidate = callFlags
+        var flags = candidate[id] ?? CommsThreadFlags()
+        change(&flags)
+        candidate[id] = flags
+        return publish(threads: threads, flags: candidate, replies: cannedReplies)
     }
 
-    func toggleStar(_ id: String) { let stamp = stamp; setFlags(id) { $0.starredAt = $0.starredAt == nil ? stamp : nil } }
-    func archive(_ id: String) { let stamp = stamp; setFlags(id) { $0.archivedAt = stamp; $0.binnedAt = nil } }
-    func bin(_ id: String) { let stamp = stamp; setFlags(id) { $0.binnedAt = stamp } }
-    /// Back to the inbox from Archive or Bin.
-    func moveToInbox(_ id: String) { setFlags(id) { $0.archivedAt = nil; $0.binnedAt = nil } }
+    @discardableResult func toggleStar(_ id: String) -> Bool { let stamp = stamp; return setFlags(id) { $0.starredAt = $0.starredAt == nil ? stamp : nil } }
+    @discardableResult func archive(_ id: String) -> Bool { let stamp = stamp; return setFlags(id) { $0.archivedAt = stamp; $0.binnedAt = nil } }
+    @discardableResult func bin(_ id: String) -> Bool { let stamp = stamp; return setFlags(id) { $0.binnedAt = stamp } }
+    @discardableResult func moveToInbox(_ id: String) -> Bool { setFlags(id) { $0.archivedAt = nil; $0.binnedAt = nil } }
 
     func setUnread(_ id: String, _ unread: Bool) {
         if thread(id) != nil { patch(id) { $0.unread = unread } } else { setFlags(id) { $0.unread = unread } }
@@ -464,8 +481,9 @@ final class CommsLocalStore: ObservableObject {
     /// Opening a call thread reads it; the calls' own seen marks take over again.
     func clearCallUnread(_ id: String) {
         guard canMutate, callFlags[id]?.unread != nil else { return }
-        callFlags[id]?.unread = nil
-        save()
+        var candidate = callFlags
+        candidate[id]?.unread = nil
+        _ = publish(threads: threads, flags: candidate, replies: cannedReplies)
     }
 
     // MARK: Screenshots

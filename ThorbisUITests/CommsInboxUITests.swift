@@ -247,6 +247,19 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertFalse(app.buttons["inbox-mail-send"].isEnabled)
     }
 
+    func testTextStorageFailureKeepsInputAndOffersCopy() {
+        let app = launch(["--paper-preview-inbox-thread", "text", "--paper-preview-inbox-storage-failure"])
+        let field = app.textFields["inbox-text-field"].exists ? app.textFields["inbox-text-field"] : app.textViews["inbox-text-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), app.debugDescription)
+        field.tap()
+        field.typeText("Keep this text")
+        let copy = app.buttons["inbox-text-copy"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue((field.value as? String)?.contains("Keep this text") ?? false)
+        XCTAssertFalse(app.buttons["inbox-save-draft"].isEnabled)
+        XCTAssertTrue(app.staticTexts["Not confirmed saved"].exists)
+    }
+
     /// New text and New email open with the first field ready to type.
     func testComposeSheetsFocusTheirFirstField() {
         for (section, pencil, field) in [("texts", "New text", "inbox-new-text-phone"), ("email", "New email", "inbox-mail-to")] {

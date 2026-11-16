@@ -316,6 +316,48 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), corrupt)
     }
 
+    func testLocalMutationsDoNotPublishWhenStorageFails() throws {
+        func fixture() throws -> (CommsLocalStore, String, URL) {
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let file = dir.appendingPathComponent("inbox.json")
+            let store = CommsLocalStore(file: file, requiresPersistence: true)
+            let thread = try XCTUnwrap(store.threadForPhone("5550100100"))
+            try FileManager.default.removeItem(at: file)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: true)
+            return (store, thread, dir)
+        }
+        do {
+            let (store, id, dir) = try fixture(); defer { try? FileManager.default.removeItem(at: dir) }
+            store.setComposing(id, "Unwritten")
+            XCTAssertNil(store.thread(id)?.composing)
+            XCTAssertTrue(store.storageBlocked)
+            XCTAssertEqual(store.unsavedText[id], "Unwritten")
+            store.setComposing(id, "Unwritten more")
+            XCTAssertEqual(store.unsavedText[id], "Unwritten more")
+            store.invalidate()
+            XCTAssertTrue(store.unsavedText.isEmpty)
+        }
+        do {
+            let (store, id, dir) = try fixture(); defer { try? FileManager.default.removeItem(at: dir) }
+            XCTAssertFalse(store.commitText(id, body: "Unwritten"))
+            XCTAssertTrue(store.thread(id)?.messages.isEmpty == true)
+            XCTAssertTrue(store.storageBlocked)
+        }
+        do {
+            let (store, id, dir) = try fixture(); defer { try? FileManager.default.removeItem(at: dir) }
+            XCTAssertFalse(store.archive(id))
+            XCTAssertEqual(store.flags(id).place, .inbox)
+            XCTAssertTrue(store.storageBlocked)
+        }
+        do {
+            let (store, _, dir) = try fixture(); defer { try? FileManager.default.removeItem(at: dir) }
+            XCTAssertFalse(store.saveCannedReply(name: "New", body: "Unwritten"))
+            XCTAssertFalse(store.cannedReplies.contains(where: { $0.body == "Unwritten" }))
+            XCTAssertTrue(store.storageBlocked)
+        }
+    }
+
     func testStaleEmailEditorCannotOverwriteOrResurrectDraft() throws {
         let store = CommsLocalStore(file: nil)
         let original = CommsLocalStore.Mail(to: ["a@example.com"], subject: "Visit", body: "First")
