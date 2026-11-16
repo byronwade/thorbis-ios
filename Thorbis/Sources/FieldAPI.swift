@@ -1064,6 +1064,10 @@ extension APIClient {
         return try await send("POST", path, body: request)
     }
 
+    func updateFieldContactConditionally(_ customerID: String, _ contactID: String, request: ConditionalContactUpdate) async throws -> CustomerContactRecord {
+        try await send("POST", fieldContactPath(customerID, contactID), body: request)
+    }
+
     func removeFieldContact(_ customerID: String, _ contactID: String) async throws {
         let path = try fieldContactPath(customerID, contactID)
         let _: EmptyResponse = try await send("POST", "\(path)/remove")
@@ -1090,6 +1094,10 @@ extension APIClient {
     func updateFieldLocation(_ customerID: String, _ locationID: String, request: FieldLocationUpdate) async throws -> ServiceLocationRecord {
         let path = try fieldLocationPath(customerID, locationID)
         return try await send("POST", path, body: request)
+    }
+
+    func updateFieldLocationConditionally(_ customerID: String, _ locationID: String, request: ConditionalLocationUpdate) async throws -> ServiceLocationRecord {
+        try await send("POST", fieldLocationPath(customerID, locationID), body: request)
     }
 
     func removeFieldLocation(_ customerID: String, _ locationID: String) async throws {
@@ -1236,7 +1244,7 @@ struct CustomerSmsConsent: Codable, Hashable {
 extension APIClient {
     /// Nil until a decision has been recorded.
     func customerSmsConsent(_ customerID: String) async throws -> CustomerSmsConsent? {
-        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"))
+        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"), requireFresh: true)
     }
 
     /// Records an explicit decision the customer gave staff. Online only; the key makes a retry safe.
