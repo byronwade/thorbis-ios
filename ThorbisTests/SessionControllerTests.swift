@@ -117,6 +117,51 @@ final class SessionControllerTests: XCTestCase {
         XCTAssertFalse(stalePublished, "A request that completes after regrant must not publish its old data")
     }
 
+    func testInFlightMoneyLoadCannotPublishAfterRealRevokeAndRegrant() async throws {
+        let enabledFeatures = features.replacingOccurrences(of: "\"jobs\":", with: "\"core_crm\":{\"enabled\":true,\"released\":true,\"entitled\":true,\"stage\":\"general\"},\"jobs\":")
+        let revoked = catalog.replacingOccurrences(of: #"["job.view","customer.view"]"#, with: #"["job.view"]"#)
+        let (session, api) = controller([
+            .init(200, activeSession), .init(200, oneOrganization), .init(200, catalog), .init(200, enabledFeatures)
+        ])
+        await session.restore()
+        let oldScope = try XCTUnwrap(CustomerRecordsScope.capture(session: session, customerID: first))
+        let gate = URLProtocolFixture.Gate()
+        URLProtocolFixture.setRoutes(["/v1/jobs": .init(200, #"{ "items": [] }"#, gate: gate)])
+        let pending = Task { @MainActor in
+            _ = try await CustomerJobCompilationLoader.load(
+                customerID: oldScope.customerID, organizationID: oldScope.organizationID, api: api,
+                access: oldScope.access, moneyOnly: true, isCurrent: { oldScope.isCurrent(session: session) }
+            )
+        }
+        defer { gate.release(); pending.cancel() }
+        for _ in 0..<250 where !URLProtocolFixture.recorded.contains(where: { $0.url?.path == "/v1/jobs" }) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(URLProtocolFixture.recorded.contains { $0.url?.path == "/v1/jobs" }, "The old Money request must actually be in flight")
+        URLProtocolFixture.setRoutes([
+            "/api/auth/get-session": .init(200, activeSession),
+            "/v1/query/catalog": .init(200, revoked),
+            "/v1/features": .init(200, enabledFeatures)
+        ])
+        await session.revalidate()
+        XCTAssertNil(CustomerRecordsScope.capture(session: session, customerID: first))
+        URLProtocolFixture.setRoutes([
+            "/api/auth/get-session": .init(200, activeSession),
+            "/v1/query/catalog": .init(200, catalog),
+            "/v1/features": .init(200, enabledFeatures)
+        ])
+        await session.revalidate()
+        XCTAssertNotNil(CustomerRecordsScope.capture(session: session, customerID: first))
+        XCTAssertFalse(oldScope.isCurrent(session: session))
+        gate.release()
+        do {
+            _ = try await pending.value
+            XCTFail("The in-flight Money request must not return under restored authority")
+        } catch is CancellationError {
+            // The loader rejected the stale scope.
+        }
+    }
+
     func testRestoreNullSessionLeavesNoAuthority() async {
         let (session, api) = controller([.init(200, "null")])
 
