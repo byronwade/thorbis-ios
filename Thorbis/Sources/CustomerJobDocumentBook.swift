@@ -322,7 +322,10 @@ private struct CustomerEstimateBookPage: View {
             let revision = try await api.customerIssuedEstimateRevision(for: estimate)
             try Task.checkCancellation()
             issued = revision
-        } catch is CancellationError {} catch { self.error = error.customerSentence(.openEstimate) }
+        } catch is CancellationError {
+        } catch is CustomerIssuedEstimateAmountsUnavailable {
+            self.error = "These amounts couldn't be verified. Hand the device back to your technician."
+        } catch { self.error = error.customerSentence(.openEstimate) }
     }
 }
 
