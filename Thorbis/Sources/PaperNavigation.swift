@@ -860,6 +860,15 @@ struct RootView: View {
         case "scorecard": previewPlace(.scorecard)
         case "billing": previewPlace(.billing)
         case "notices", "notice-log": previewPlace(.notices)
+        case "time-clock": previewPlace(.timeClock)
+        case "receipts": previewPlace(.receipts)
+        case "truck-stock": previewPlace(.truckStock)
+        case "training": previewPlace(.training)
+        case "pipeline": previewPlace(.pipeline)
+        case "vendors": previewPlace(.vendors)
+        case "marketing": previewPlace(.marketing)
+        case "business-settings": previewPlace(.businessSettings)
+        case "help": schedulePath.append(PaperRoute.help)
         case "payments": schedulePath.append(PaperRoute.payments)
         case "billing-detail": previewPlace(.billing, then: .billingSchedule("00000000-0000-4000-8000-000000009501"))
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
@@ -1207,6 +1216,7 @@ enum PaperRoute: Hashable {
     case homeList(HomeList)
     case payments
     case businessSetup
+    case timeClock, receipts, truckStock, training, pipeline, vendors, marketing, help
     case companyDetails
     case properties
     case importCustomers
@@ -1274,6 +1284,14 @@ struct PaperRouteView: View {
         case .homeList(let list): OwnerHomeListView(list: list)
         case .payments: PaymentsSetupView()
         case .businessSetup: BusinessSetupView()
+        case .timeClock: TimeClockView().id(session.generation)
+        case .receipts: ReceiptsView().id(session.generation)
+        case .truckStock: TruckStockView().id(session.generation)
+        case .training: TrainingView().id(session.generation)
+        case .pipeline: PipelineView().id(session.generation)
+        case .vendors: VendorsAndOrdersView().id(session.generation)
+        case .marketing: MarketingView().id(session.generation)
+        case .help: HelpView()
         case .companyDetails: CompanyDetailsView()
         case .properties: PropertiesView()
         case .importCustomers: CustomerImportView()

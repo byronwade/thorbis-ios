@@ -147,6 +147,13 @@ struct SettingsView: View {
                         }
                         .buttonStyle(RowPressStyle())
                         WellDivider(leading: Self.rowDivider)
+                        // Paper 98: Help and support sits with the app's own pages.
+                        NavigationLink(value: PaperRoute.help) {
+                            row("Help and support", symbol: "questionmark.circle", value: nil, opens: true)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-help")
+                        WellDivider(leading: Self.rowDivider)
                         // Danger ends the card: the word and its mark in the danger tone.
                         Button { confirmSignOut = true } label: {
                             HStack(spacing: 12) {

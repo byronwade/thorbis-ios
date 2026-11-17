@@ -22,7 +22,8 @@ enum PlaceSection: String, CaseIterable, Identifiable {
     /// The order places take inside their section (C-Nav.dc.html).
     static let canonical: [MenuItem] = [.home, .inbox, .schedule, .jobs, .estimates, .invoices, .team,
                                         .customers, .properties, .money, .billing, .reports, .scorecard,
-                                        .priceBook, .attention, .notices, .drafts, .businessSettings]
+                                        .priceBook, .attention, .notices, .drafts, .businessSettings,
+                                        .timeClock, .receipts, .truckStock, .training, .pipeline, .vendors, .marketing]
 }
 
 extension MenuItem {
@@ -39,7 +40,8 @@ extension MenuItem {
         case .money: .money
         case .reports: .reports
         case .priceBook: .operations
-        case .billing, .scorecard, .attention, .notices, .drafts, .businessSettings: .other
+        case .billing, .scorecard, .attention, .notices, .drafts, .businessSettings, .timeClock, .receipts,
+             .truckStock, .training, .pipeline, .vendors, .marketing: .other
         }
     }
 
@@ -53,7 +55,8 @@ extension MenuItem {
         case .customers, .properties: Theme.markForest
         case .inbox: Theme.markPumpkin
         case .attention, .money: Theme.markBurnt
-        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts, .businessSettings: Theme.markGrey
+        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts, .businessSettings,
+             .timeClock, .receipts, .truckStock, .training, .pipeline, .vendors, .marketing: Theme.markGrey
         }
     }
 }
@@ -82,23 +85,26 @@ struct DrawerSections: Equatable {
         var rows: [Entry] { entries ?? (places.map(Entry.place) + local.map(Entry.local)) }
     }
 
-    /// Paper v2's drawer for each role (Navigation 29N, 57N, 58N), in Paper's order. Places with no
-    /// iOS screen yet (Time clock, Truck stock, Receipts, Training, Pipeline, Marketing, Vendors and
-    /// POs) are left out until their API exists.
+    /// Paper v2's drawer for each role (Navigation 29N, 57N, 58N), in Paper's order. Time clock,
+    /// Receipts, Truck stock, Training, Pipeline, Marketing and Vendors and POs keep their records on
+    /// this phone until the server has them.
     static func paperLayout(_ role: WorkRole) -> (primary: [Entry], heading: PlaceSection, secondary: [Entry]) {
         switch role {
         case .technician:
-            return (primary: [.place(.schedule), .place(.jobs), .place(.customers), .place(.inbox)],
-                    heading: PlaceSection.tools, secondary: [.place(.priceBook), .local(.equipment)])
+            return (primary: [.place(.schedule), .place(.jobs), .place(.customers), .place(.inbox), .place(.timeClock)],
+                    heading: PlaceSection.tools,
+                    secondary: [.place(.priceBook), .place(.receipts), .place(.truckStock), .local(.equipment), .place(.training)])
         case .office:
-            return (primary: [.place(.home), .place(.schedule), .place(.jobs), .place(.money), .place(.customers), .place(.inbox)],
+            return (primary: [.place(.home), .place(.schedule), .place(.jobs), .place(.money), .place(.customers),
+                              .place(.pipeline), .place(.inbox)],
                     heading: PlaceSection.manage,
-                    secondary: [.place(.team), .place(.properties), .local(.equipment), .local(.agreements), .place(.reports)])
+                    secondary: [.place(.team), .place(.vendors), .place(.properties), .local(.equipment), .local(.agreements),
+                                .place(.reports)])
         case .owner:
             return (primary: [.place(.home), .place(.money), .place(.reports), .place(.schedule), .place(.inbox)],
                     heading: PlaceSection.business,
-                    secondary: [.place(.customers), .local(.agreements), .place(.properties), .local(.equipment), .local(.fleet),
-                                .place(.businessSettings)])
+                    secondary: [.place(.customers), .place(.pipeline), .place(.marketing), .local(.agreements), .place(.properties),
+                                .local(.equipment), .local(.fleet), .place(.vendors), .place(.businessSettings)])
         }
     }
 

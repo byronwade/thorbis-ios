@@ -4,6 +4,8 @@ import SwiftUI
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
     case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, scorecard, team, notices, drafts, businessSettings
+    // Paper places kept on this phone until the server has them (29N, 57N, 58N).
+    case timeClock, receipts, truckStock, training, pipeline, vendors, marketing
 
     var id: String { rawValue }
 
@@ -27,6 +29,13 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .notices: "Notification rules"
         case .drafts: "Message drafts"
         case .businessSettings: "Business settings"
+        case .timeClock: "Time clock"
+        case .receipts: "Receipts"
+        case .truckStock: "Truck stock"
+        case .training: "Training"
+        case .pipeline: "Pipeline"
+        case .vendors: "Vendors and POs"
+        case .marketing: "Marketing"
         }
     }
 
@@ -70,6 +79,13 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .notices: "bell.badge"
         case .drafts: "square.and.pencil"
         case .businessSettings: "building.2"
+        case .timeClock: "clock"
+        case .receipts: "receipt"
+        case .truckStock: "cube"
+        case .training: "graduationcap"
+        case .pipeline: "line.3.horizontal.decrease"
+        case .vendors: "cart"
+        case .marketing: "megaphone"
         }
     }
 
@@ -86,7 +102,8 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .invoices, .billing, .money: Theme.markForest
         case .priceBook: Theme.markBurnt
         case .reports, .scorecard: Theme.markOlive
-        case .team, .notices, .drafts, .businessSettings: Theme.markGrey
+        case .team, .notices, .drafts, .businessSettings, .timeClock, .receipts, .truckStock, .training,
+             .pipeline, .vendors, .marketing: Theme.markGrey
         }
     }
 
@@ -135,6 +152,13 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .notices: .notices
         case .drafts: .drafts
         case .businessSettings: .businessSetup
+        case .timeClock: .timeClock
+        case .receipts: .receipts
+        case .truckStock: .truckStock
+        case .training: .training
+        case .pipeline: .pipeline
+        case .vendors: .vendors
+        case .marketing: .marketing
         }
     }
 
@@ -179,6 +203,11 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
         // Paper 58N: the owner's menu ends on Business settings (61N).
         case .businessSettings: session.can("organization.settings.edit")
+        // Kept on this phone: anyone who works jobs has a clock, receipts, a truck and training.
+        case .timeClock, .receipts, .truckStock, .training: session.can("job.view", feature: "jobs")
+        case .pipeline: session.can("customer.view", feature: "core_crm") && WorkRole(session) != .technician
+        case .vendors: WorkRole(session) != .technician
+        case .marketing: session.can("organization.settings.edit")
         }
     }
 }
