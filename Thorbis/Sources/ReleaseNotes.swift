@@ -13,6 +13,34 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-17-office-places",
+            date: "2026-11-17",
+            highlights: [
+                .init(symbol: "line.3.horizontal.decrease", title: "Pipeline",
+                      detail: "Office and owners keep leads by stage, call or text them, and mark them won or lost. Saved on this phone."),
+                .init(symbol: "cart", title: "Vendors and purchase orders",
+                      detail: "Keep vendors, write numbered purchase orders, check items in, and share an order as text or PDF."),
+                .init(symbol: "megaphone", title: "Marketing",
+                      detail: "Owners see where customers came from, show the review link as a code to scan, and keep campaign notes."),
+                .init(symbol: "questionmark.circle", title: "Help and support",
+                      detail: "Settings has Help: search short articles about this app and take a guided tour."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-17-field-places",
+            date: "2026-11-17",
+            highlights: [
+                .init(symbol: "clock", title: "Time clock",
+                      detail: "Clock in and out, take breaks, fix a missed clock-out and see your week. Hours stay on this phone."),
+                .init(symbol: "receipt", title: "Receipts",
+                      detail: "Photograph a receipt and its merchant, date and total are read for you. Share a month as a CSV."),
+                .init(symbol: "cube", title: "Truck stock",
+                      detail: "Count what is on the truck, set a minimum, and share a restock list of everything running low."),
+                .init(symbol: "graduationcap", title: "Training",
+                      detail: "Keep your licences with their expiry dates and card photos, and the courses you are taking."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-17-sheet-titles",
             date: "2026-11-17",
             highlights: [

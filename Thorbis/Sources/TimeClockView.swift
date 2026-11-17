@@ -345,14 +345,27 @@ struct TimeClockView: View {
 
     // MARK: Header
 
+    /// Like the other places kept on this phone: the menu circle rides in the navigation bar, and
+    /// the title row carries the screen's one action, here the ••• menu.
     private var header: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 8) {
-                if let drawer {
-                    DrawerMenuCircle(control: drawer)
-                } else if menuButton {
-                    PaperCircleButton(symbol: "line.3.horizontal", label: "Menu", size: 44, fill: Theme.card, action: openAccount)
+            if drawer != nil || menuButton {
+                HStack(spacing: 8) {
+                    if let drawer {
+                        DrawerMenuCircle(control: drawer)
+                    } else {
+                        PaperCircleButton(symbol: "line.3.horizontal", label: "Menu", size: 44, fill: Theme.card, action: openAccount)
+                    }
+                    Spacer(minLength: 0)
                 }
+                .frame(minHeight: 44)
+            }
+            HStack(alignment: .center, spacing: 12) {
+                Text("Time clock").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("timeclock-root")
+                    .padding(.horizontal, 4)
                 Spacer(minLength: 0)
                 ThorbisMenu(items: [
                     ThorbisMenuItem("Timesheet", icon: "calendar") { route = .timesheet },
@@ -364,12 +377,6 @@ struct TimeClockView: View {
                 }
                 .accessibilityIdentifier("timeclock-more")
             }
-            .frame(minHeight: 44)
-            Text("Time clock").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier("timeclock-root")
-                .padding(.horizontal, 4)
         }
         .padding(.top, 2).padding(.bottom, 14)
     }

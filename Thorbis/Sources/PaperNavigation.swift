@@ -865,7 +865,7 @@ struct RootView: View {
         case "truck-stock": previewPlace(.truckStock)
         case "training": previewPlace(.training)
         case "pipeline": previewPlace(.pipeline)
-        case "vendors": previewPlace(.vendors)
+        case "vendors", "vendors-orders": previewPlace(.vendors)
         case "marketing": previewPlace(.marketing)
         case "business-settings": previewPlace(.businessSettings)
         case "help": schedulePath.append(PaperRoute.help)
