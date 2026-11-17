@@ -40,7 +40,7 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(owner.sections[0].places, [.home, .money, .reports, .schedule, .inbox])
         XCTAssertEqual(owner.sections[1].kind, .business)
         XCTAssertEqual(owner.sections[1].rows, [.place(.customers), .local(.agreements), .place(.properties),
-                                                .local(.equipment), .local(.fleet)])
+                                                .local(.equipment), .local(.fleet), .place(.businessSettings)])
         XCTAssertFalse(PlaceSection.primary.hasHeading, "The main places carry no heading")
         XCTAssertEqual(PlaceSection.business.rawValue, "Business")
     }
@@ -164,7 +164,7 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(owner.sections[3].places, [.money])
         XCTAssertEqual(owner.sections[4].places, [.reports])
         XCTAssertEqual(owner.sections[5].places, [.priceBook])
-        XCTAssertEqual(owner.sections[6].places, [.billing, .scorecard, .attention, .notices, .drafts])
+        XCTAssertEqual(owner.sections[6].places, [.billing, .scorecard, .attention, .notices, .drafts, .businessSettings])
         let technician = sections(.technician)
         XCTAssertEqual(technician.sections.flatMap(\.places).filter { $0 == .schedule }.count, 1)
         XCTAssertTrue(technician.places.contains(.jobs))

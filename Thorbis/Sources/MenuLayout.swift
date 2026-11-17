@@ -3,7 +3,7 @@ import SwiftUI
 /// Everything an owner can place in the tab bar or the More menu. Search and More stay fixed so
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
-    case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, scorecard, team, notices, drafts
+    case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, scorecard, team, notices, drafts, businessSettings
 
     var id: String { rawValue }
 
@@ -26,6 +26,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .team: "Team"
         case .notices: "Notification rules"
         case .drafts: "Message drafts"
+        case .businessSettings: "Business settings"
         }
     }
 
@@ -68,6 +69,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .team: "person.2"
         case .notices: "bell.badge"
         case .drafts: "square.and.pencil"
+        case .businessSettings: "building.2"
         }
     }
 
@@ -84,7 +86,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .invoices, .billing, .money: Theme.markForest
         case .priceBook: Theme.markBurnt
         case .reports, .scorecard: Theme.markOlive
-        case .team, .notices, .drafts: Theme.markGrey
+        case .team, .notices, .drafts, .businessSettings: Theme.markGrey
         }
     }
 
@@ -108,7 +110,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var group: Group {
         switch self {
-        case .team, .notices: .business
+        case .team, .notices, .businessSettings: .business
         case .drafts: .phone
         default: .work
         }
@@ -132,6 +134,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .team: .team
         case .notices: .notices
         case .drafts: .drafts
+        case .businessSettings: .businessSetup
         }
     }
 
@@ -174,6 +177,8 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .notices: session.can("organization.settings.edit", feature: "job_booking_notices")
             || PushNotifications.receivesMorningDigest(session)
         case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
+        // Paper 58N: the owner's menu ends on Business settings (61N).
+        case .businessSettings: session.can("organization.settings.edit")
         }
     }
 }

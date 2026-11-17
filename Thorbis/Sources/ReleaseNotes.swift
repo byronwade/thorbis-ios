@@ -18,6 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "textformat.size", title: "Sheet titles at large text",
                       detail: "On New customer, Add equipment and Add property, Cancel and Save stay on one line at the largest text sizes."),
+                .init(symbol: "building.2", title: "Business settings in the owner's menu",
+                      detail: "Owners open Business settings straight from the menu, under Business. It can also be chosen as the start screen."),
             ]
         ),
         ReleaseNote(

@@ -22,7 +22,7 @@ enum PlaceSection: String, CaseIterable, Identifiable {
     /// The order places take inside their section (C-Nav.dc.html).
     static let canonical: [MenuItem] = [.home, .inbox, .schedule, .jobs, .estimates, .invoices, .team,
                                         .customers, .properties, .money, .billing, .reports, .scorecard,
-                                        .priceBook, .attention, .notices, .drafts]
+                                        .priceBook, .attention, .notices, .drafts, .businessSettings]
 }
 
 extension MenuItem {
@@ -39,7 +39,7 @@ extension MenuItem {
         case .money: .money
         case .reports: .reports
         case .priceBook: .operations
-        case .billing, .scorecard, .attention, .notices, .drafts: .other
+        case .billing, .scorecard, .attention, .notices, .drafts, .businessSettings: .other
         }
     }
 
@@ -53,7 +53,7 @@ extension MenuItem {
         case .customers, .properties: Theme.markForest
         case .inbox: Theme.markPumpkin
         case .attention, .money: Theme.markBurnt
-        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts: Theme.markGrey
+        case .estimates, .invoices, .billing, .reports, .scorecard, .team, .notices, .drafts, .businessSettings: Theme.markGrey
         }
     }
 }
@@ -84,7 +84,7 @@ struct DrawerSections: Equatable {
 
     /// Paper v2's drawer for each role (Navigation 29N, 57N, 58N), in Paper's order. Places with no
     /// iOS screen yet (Time clock, Truck stock, Receipts, Training, Pipeline, Marketing, Vendors and
-    /// POs, Business settings) are left out until their API exists.
+    /// POs) are left out until their API exists.
     static func paperLayout(_ role: WorkRole) -> (primary: [Entry], heading: PlaceSection, secondary: [Entry]) {
         switch role {
         case .technician:
@@ -97,7 +97,8 @@ struct DrawerSections: Equatable {
         case .owner:
             return (primary: [.place(.home), .place(.money), .place(.reports), .place(.schedule), .place(.inbox)],
                     heading: PlaceSection.business,
-                    secondary: [.place(.customers), .local(.agreements), .place(.properties), .local(.equipment), .local(.fleet)])
+                    secondary: [.place(.customers), .local(.agreements), .place(.properties), .local(.equipment), .local(.fleet),
+                                .place(.businessSettings)])
         }
     }
 

@@ -2,7 +2,7 @@ import Foundation
 
 enum StartupDestination: String, CaseIterable {
     case automatic, home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices
-    case billing, priceBook, money, reports, scorecard, team, notices, drafts
+    case billing, priceBook, money, reports, scorecard, team, notices, drafts, businessSettings
     case localFleet = "local-fleet", localEquipment = "local-equipment"
     case localAgreements = "local-agreements", localTeam = "local-team"
 
