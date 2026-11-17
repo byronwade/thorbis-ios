@@ -181,6 +181,10 @@ struct VendorsAndOrdersView: View {
             book.bind(organizationID: organizationID)
             #if DEBUG
             if PaperPreview.enabled, PaperPreview.screen == "vendors-orders" { tab = .orders }
+            if PaperPreview.enabled, PaperPreview.screen == "purchase-order", let draft = book.orders.first(where: { $0.status == .draft }) {
+                tab = .orders
+                route = .order(draft.id)
+            }
             #endif
         }
         .thorbisDestination(item: $route) { route in
