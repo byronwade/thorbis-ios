@@ -13,6 +13,22 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-17-customer-and-settings",
+            date: "2026-11-17",
+            highlights: [
+                .init(symbol: "phone", title: "Texts and calls on a customer",
+                      detail: "A customer's page lists their calls and this phone's drafts to them, newest first."),
+                .init(symbol: "note.text", title: "Customer notes",
+                      detail: "Keep notes on a customer. They stay on this phone; property notes from the office show under them."),
+                .init(symbol: "bell", title: "Notifications",
+                      detail: "The bell in the menu opens your job notices: what was booked, changed or assigned, and what is unread."),
+                .init(symbol: "checklist", title: "Checklists in Business settings",
+                      detail: "Owners edit what techs confirm before finishing a job, and see what customers see in one place."),
+                .init(symbol: "signature", title: "Saved signature",
+                      detail: "Settings keeps your own signature on this phone, ready for when the app needs it."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-17-office-places",
             date: "2026-11-17",
             highlights: [
