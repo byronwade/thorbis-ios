@@ -16,3 +16,53 @@ extension PaperGlyph {
 struct PaperRowChevron: View {
     var body: some View { PaperIcon(.rowChevron14, size: 14, color: Theme.subtleForeground) }
 }
+
+/// A record list's row (Paper 85C / 86 / 87A / 88): the name (16/22 Medium, -0.01em) over one
+/// muted line (14/20), with a status word (14 Medium, in its own ink) or a number trailing the
+/// name. 16 in from the card's edges, 11 above and below. At accessibility sizes the lines wrap.
+struct PaperRecordRow<Trailing: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    var status: String? = nil
+    var statusColor: Color = Theme.muted
+    var dimmed = false
+    @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                let top = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                top {
+                    Text(title).font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                        .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
+                        .lineLimit(stacked ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let status, !status.isEmpty {
+                        Text(status).font(Theme.font(14, weight: .medium)).foregroundStyle(statusColor)
+                            .lineLimit(stacked ? nil : 1).fixedSize(horizontal: !stacked, vertical: true)
+                    }
+                }
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .lineLimit(stacked ? nil : 1)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            trailing
+        }
+        .padding(.horizontal, 16).padding(.vertical, 11)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+extension PaperRecordRow where Trailing == EmptyView {
+    init(title: String, subtitle: String? = nil, status: String? = nil, statusColor: Color = Theme.muted, dimmed: Bool = false) {
+        self.init(title: title, subtitle: subtitle, status: status, statusColor: statusColor, dimmed: dimmed) { EmptyView() }
+    }
+}
