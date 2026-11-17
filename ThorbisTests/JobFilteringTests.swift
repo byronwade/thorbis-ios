@@ -134,9 +134,9 @@ final class JobFilteringTests: XCTestCase {
         // Calendar days, not 24-hour steps: on a 25-hour day (DST ends) now + 24h is still today.
         let calendar = Calendar.current
         let now = Date()
-        XCTAssertTrue(now.visitLabel(now: now, calendar: calendar).hasPrefix("Today "))
+        XCTAssertTrue(now.visitLabel(now: now, calendar: calendar).hasPrefix("Today, "))
         let tomorrow = calendar.date(byAdding: .day, value: 1, to: now)!
-        XCTAssertTrue(tomorrow.visitLabel(now: now, calendar: calendar).hasPrefix("Tomorrow "))
+        XCTAssertTrue(tomorrow.visitLabel(now: now, calendar: calendar).hasPrefix("Tomorrow, "))
         let later = calendar.date(byAdding: .day, value: 5, to: now)!.visitLabel(now: now, calendar: calendar)
         XCTAssertFalse(later.hasPrefix("Today") || later.hasPrefix("Tomorrow"))
     }
@@ -151,9 +151,9 @@ final class JobFilteringTests: XCTestCase {
             let earlyMorning = start.addingTimeInterval(30 * 60)
             // 12:30 a.m. + 24h: 11:30 p.m. the same day on the long day, 1:30 a.m. the next on the short one.
             let label = earlyMorning.addingTimeInterval(86_400).visitLabel(now: earlyMorning, calendar: calendar)
-            XCTAssertTrue(label.hasPrefix(hours > 24 ? "Today " : "Tomorrow "), label)
+            XCTAssertTrue(label.hasPrefix(hours > 24 ? "Today, " : "Tomorrow, "), label)
             let tomorrow = calendar.date(byAdding: .day, value: 1, to: earlyMorning)!
-            XCTAssertTrue(tomorrow.visitLabel(now: earlyMorning, calendar: calendar).hasPrefix("Tomorrow "))
+            XCTAssertTrue(tomorrow.visitLabel(now: earlyMorning, calendar: calendar).hasPrefix("Tomorrow, "))
         }
     }
 

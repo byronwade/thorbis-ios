@@ -77,6 +77,27 @@ no `Menu {}`, `Picker`, `confirmationDialog`, `.buttonStyle(.bordered*)`, or `.b
 Everything is built from `Theme` tokens (see `../Theme.swift`) so it looks the same everywhere,
 in light and dark, and scales with Dynamic Type.
 
+## Paper primitives (fidelity pass, 17 November 2026)
+
+Paper ("Thorbis Mobile", board "DS · Thorbis Mobile primitives") is the source of truth. These
+carry Paper's own values; build screens from them before writing a one-off.
+
+| Paper element | Use | Where |
+|---------------|-----|-------|
+| Any Paper icon, from its SVG path data | `PaperIcon(.menu, size: 20, color:)`, `PaperGlyph` (add new glyphs as `static let`) | `PaperIcon.swift` |
+| Place header: menu circle with dot, blue +, 34 Bold title, muted subtitle | `PaperHeader(title:subtitle:showsCreate:)` | `../PaperComponents.swift` |
+| Search field with filter chips and the filter circle | `PaperSearchBar(placeholder:chips:) { PaperFilterCircle(active:) }` + `PaperFilterChip` | `PaperPrimitives.swift` |
+| Segments (Today / Week / Map) | `PaperTabs(options:selection:)`, `labelSize: 13` on a record | `../PaperComponents.swift` |
+| Group label with count | `PaperCardLabel(title:count:)` or `countText: "4 jobs"` | `PaperPrimitives.swift` |
+| One card of rows | `PaperRowsCard { rows }` with `WellDivider(leading:)` between rows | `PaperPrimitives.swift` |
+| The blue pill / its tinted twin | `PaperPillLabel(title:glyph:height:tinted:)` | `PaperPrimitives.swift` |
+| Quiet 48pt round button (call, message) | `PaperRoundButton(glyph:label:action:)`, `PaperRoundLabel` | `PaperPrimitives.swift` |
+| Avatar chip (initials) | `PaperInitials(name:size:)` / `InitialsAvatar` | `PaperPrimitives.swift`, `StatusGlyph.swift` |
+| Status glyph (ring, half, check) | `StatusGlyph(tone:label:pending:size:)` | `StatusGlyph.swift` |
+| Sheet chips and sort segments | `PaperChoiceChip`, `PaperSheetSegments` | `PaperPrimitives.swift` |
+| Fills | `Theme.quietFill` (ink 9%), `Theme.brandTint` (brand 24%), `Theme.borderStrong`, `Theme.subtleForeground` | `PaperPrimitives.swift` |
+| Times | `date.clockTime` "10:30 AM", `date.visitLabel()` "Today, 2:30 PM" | `../PaperWorkViews.swift`, `../Theme.swift` |
+
 ## What to reach for
 
 | Need | Use | Where |

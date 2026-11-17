@@ -18,9 +18,16 @@ struct DrawerMenuCircle: View {
 
     var body: some View {
         Button(action: control.open) {
-            CreamCircleLabel(symbol: "line.3.horizontal", size: size)
+            // Paper 18: two lines, the lower one short; the 9pt brand dot rides the circle's top
+            // right (1 in), ringed 2pt in the canvas so it reads as cut out of the circle.
+            CreamCircleLabel(symbol: "line.3.horizontal", size: size, glyph: .menu)
                 .overlay(alignment: .topTrailing) {
-                    if control.hasNews { DrawerDot().offset(x: -6, y: 6) }
+                    if control.hasNews {
+                        Circle().fill(Theme.brand).frame(width: 5, height: 5)
+                            .padding(2).background(Theme.background, in: Circle())
+                            .offset(x: -1, y: 1)
+                            .accessibilityHidden(true)
+                    }
                 }
         }
         .buttonStyle(PressStyle())
@@ -176,7 +183,7 @@ struct AppDrawer: View {
     private var searchField: some View {
         Button(action: search) {
             HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                PaperIcon(.searchSmall, size: 16, color: Theme.muted)
                 Text("Search or ask").font(Theme.font(15)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 0)
             }
@@ -193,8 +200,7 @@ struct AppDrawer: View {
 
     /// The + circle: New's choices in a menu, or New job straight away when there is only one.
     @ViewBuilder private func newCircle(_ create: PaperCreateAction) -> some View {
-        let circle = Image(systemName: "plus").font(.system(size: 17, weight: .medium))
-            .foregroundStyle(Theme.foreground)
+        let circle = PaperIcon(.plusLight, size: 18)
             .frame(width: 44, height: 44)
             .background(Theme.card, in: Circle())
         if !create.choices.isEmpty {
@@ -247,7 +253,7 @@ struct AppDrawer: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(personName).font(Theme.font(15, weight: .semibold)).lineLimit(1)
-                Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
@@ -255,7 +261,7 @@ struct AppDrawer: View {
                 Button {
                     if let openNotifications { openNotifications() } else { openPlace(.inbox) }
                 } label: {
-                    Image(systemName: "bell").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                    PaperIcon(.bell, size: 18, color: Theme.muted)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
@@ -264,7 +270,7 @@ struct AppDrawer: View {
             }
             ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses",
                         opensOnAppear: gearOpensForPreview, arrowEdge: .bottom) {
-                Image(systemName: "gearshape").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                PaperIcon(.gear, size: 18, color: Theme.muted)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
                     .overlay(alignment: .topTrailing) {
                         if savedWork?.needsPerson == true { DrawerDot().offset(x: -6, y: 6) }

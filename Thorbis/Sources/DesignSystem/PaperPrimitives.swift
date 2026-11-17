@@ -1,0 +1,369 @@
+import SwiftUI
+
+// Paper's primitives ("DS · Thorbis Mobile primitives" in the main Paper file), with Paper's own
+// values. One search-and-filter field per list, segments on a card track, groups as a 13 Semibold
+// label over one card of rows, one blue pill per screen, quiet 48pt circles for everything else.
+// Every screen builds from these so a change here is a change everywhere.
+
+extension Theme {
+    /// Paper's quiet control fill: ink at 9% over whatever it sits on (the filter circle in the
+    /// search field, the call and message circles on a card, an unchosen chip in a sheet).
+    static let quietFill = foreground.opacity(0.09)
+    /// Paper's chosen-chip fill: brand at 24% (a filter chip in the search field, a chosen sheet chip).
+    static let brandTint = brand.opacity(0.24)
+    /// Paper `border-strong`: the ring of a status that has not started (white 40% / black 18%).
+    static let borderStrong = Color(uiColor: UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        let high = traits.accessibilityContrast == .high
+        return (dark ? UIColor.white : UIColor.black).withAlphaComponent(high ? 0.75 : dark ? 0.40 : 0.18)
+    })
+    /// Paper `subtle-foreground` (#8A8A8A in both themes): a drawer count, a drawer section label,
+    /// the role under the person's name. Light is one shade deeper so it holds 4.5:1 on the sidebar.
+    static let subtleForeground = Color(uiColor: UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        let high = traits.accessibilityContrast == .high
+        if high { return dark ? UIColor(white: 0.93, alpha: 1) : UIColor(white: 0.1, alpha: 1) }
+        return dark ? UIColor(red: 0x8A / 255, green: 0x8A / 255, blue: 0x8A / 255, alpha: 1)
+                    : UIColor(red: 0x6B / 255, green: 0x6B / 255, blue: 0x6B / 255, alpha: 1)
+    })
+}
+
+// MARK: - Search and filter field
+
+/// A filter shown in the search field as a brand chip; × takes it off.
+struct PaperFilterChip: Identifiable {
+    let id: String
+    let title: String
+    let remove: () -> Void
+}
+
+/// Paper 18 / 20: the search field under the title. Card fill, radius 14, 46 tall, 12 in from the
+/// leading edge and 6 from the trailing one, 8 between its parts. The 18pt glass and the words
+/// ("Search or ask", 16 Regular muted) open Search; what narrows the list sits inside as brand
+/// chips; the 40pt filter circle trails. Give it `.paperCardMargin()` (16 from the screen edges).
+///
+///     PaperSearchBar(placeholder: "Search", chips: chips) {
+///         Button { showFilters = true } label: { PaperFilterCircle(active: filtered) }
+///     }
+///     .paperCardMargin()
+struct PaperSearchBar<Filter: View>: View {
+    let placeholder: String
+    var chips: [PaperFilterChip] = []
+    @ViewBuilder var filter: Filter
+    @Environment(\.paperSearch) private var search
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        HStack(spacing: 0) {
+            magnifier
+            // Chips and the words when they fit; otherwise the chips scroll and the glass searches.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    chipRow
+                    searchWords
+                }
+                ScrollView(.horizontal) { chipRow }
+                    .scrollIndicators(.hidden)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The circle's 44pt target overhangs its 40pt face by 2, so 4 + 2 is Paper's 6.
+            filter.padding(.leading, 6)
+        }
+        .padding(.leading, search == nil ? 12 : 0).padding(.trailing, 4)
+        .frame(maxWidth: .infinity, minHeight: 46)
+        .background(Theme.card, in: shape)
+        .clipShape(shape)
+    }
+
+    /// Without the shell's Search (the iPad layout), the field never pretends to search: no glass
+    /// and no words, only the chips and the filter circle.
+    @ViewBuilder private var magnifier: some View {
+        if let search {
+            Button(action: search.run) {
+                PaperIcon(.search, size: 18, color: Theme.muted)
+                    .padding(.leading, 12).padding(.trailing, 8)
+                    .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Search")
+            .accessibilityIdentifier("header-search")
+        }
+    }
+
+    @ViewBuilder private var searchWords: some View {
+        if let search {
+            // The glass is the one VoiceOver stop for Search; the words are a bigger target for a thumb.
+            Button(action: search.run) {
+                Text(placeholder).font(Theme.font(16)).foregroundStyle(Theme.muted).lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityHidden(true)
+        } else {
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder private var chipRow: some View {
+        if !chips.isEmpty {
+            HStack(spacing: 8) {
+                ForEach(chips) { chip in PaperFilterChipButton(chip: chip) }
+            }
+        }
+    }
+}
+
+/// One brand chip in the search field: 36 tall, brand at 24%, 14 Semibold brand text and an 11pt ×.
+struct PaperFilterChipButton: View {
+    let chip: PaperFilterChip
+
+    var body: some View {
+        Button(action: chip.remove) {
+            HStack(spacing: 5) {
+                Text(chip.title).font(Theme.font(14, weight: .semibold)).lineLimit(1)
+                PaperIcon(.close, size: 11, color: Theme.brandText)
+            }
+            .foregroundStyle(Theme.brandText)
+            .padding(.leading, 10).padding(.trailing, 8)
+            .frame(minHeight: 36)
+            .background(Theme.brandTint, in: Capsule())
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .fixedSize()
+        .accessibilityLabel("\(chip.title) filter")
+        .accessibilityHint("Removes this filter")
+    }
+}
+
+/// The search field's filter circle: 40pt, ink at 9%, Paper's three shortening lines; brand-tinted
+/// while a filter narrows the list. A label only: wrap it in a `Button` or a `ThorbisMenu`.
+struct PaperFilterCircle: View {
+    var active = false
+    var body: some View {
+        PaperIcon(.filter, size: 16, color: active ? Theme.brandText : Theme.foreground)
+            .frame(width: 40, height: 40)
+            .background(active ? Theme.brandTint : Theme.quietFill, in: Circle())
+            .frame(width: 44, height: 44).contentShape(Rectangle())
+    }
+}
+
+// MARK: - Groups and cards
+
+/// A group's label (Paper 18 / 20): 13 Semibold muted, the count at the trailing edge in 13
+/// Regular, 4 in from the card's edge (20 from the screen) and 8 above the card. Paper leaves 20–22
+/// above the label: the caller adds that with `.padding(.top, 20)` (22 on Schedule).
+///
+///     PaperCardLabel(title: "In progress", count: 2)
+///     PaperCardLabel(title: "Later today", countText: "4 jobs")
+struct PaperCardLabel<Trailing: View>: View {
+    let title: String
+    var count: Int? = nil
+    /// The count with its unit ("4 jobs", "4 · 7.5h"); wins over `count`.
+    var countText: String? = nil
+    /// Paper 79 prints today's and tomorrow's day label in the muted grey and a later day in ink.
+    var titleColor: Color = Theme.muted
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(titleColor)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let countText {
+                Text(countText).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+            } else if let count, count > 0 {
+                Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+            }
+            trailing
+        }
+        .frame(minHeight: 18)
+        .padding(.horizontal, PaperCardMetrics.margin + 4)
+        .padding(.bottom, 8)
+    }
+}
+
+extension PaperCardLabel where Trailing == EmptyView {
+    init(title: String, count: Int? = nil, countText: String? = nil, titleColor: Color = Theme.muted) {
+        self.init(title: title, count: count, countText: countText, titleColor: titleColor) { EmptyView() }
+    }
+}
+
+/// One card of rows (Paper 18 / 20): the card fill, radius 20, clipped, 16 from the screen's edges.
+/// Rows pad themselves (16 leading and trailing, 11 above and below) and the caller draws the
+/// hairline between them with `WellDivider(leading:)`, inset to where the words start.
+struct PaperRowsCard<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+        VStack(alignment: .leading, spacing: 0) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: shape)
+            .clipShape(shape)
+            .paperCardMargin()
+    }
+}
+
+/// A person's initials (Paper 20's avatar chip): 11 Semibold brand text on the brand surface, 28pt.
+struct PaperInitials: View {
+    let name: String
+    var size: CGFloat = 28
+
+    var body: some View {
+        Text(initials(name))
+            .font(.custom("Inter-Regular", fixedSize: size >= 34 ? 12 : 11).weight(.semibold))
+            .foregroundStyle(Theme.brandText)
+            .frame(width: size, height: size)
+            .background(Theme.brandSurface, in: Circle())
+            .accessibilityLabel("Assigned to \(name)")
+    }
+}
+
+// MARK: - Buttons
+
+/// Paper's one blue pill (the DS board's "Buttons"): brand fill, white 16 Semibold, 48 tall on a
+/// card ("Navigate") and 50 as a sheet's or a screen's commit ("Show 7 jobs"). A label only: wrap
+/// it in a `Button`, a `NavigationLink` or a `ThorbisMenu`. `tinted` is the quieter twin (brand
+/// text on brand at 24%, Paper 19 "Create your first job").
+///
+///     Button(action: go) { PaperPillLabel(title: "Navigate", glyph: .navigate) }.buttonStyle(PressStyle())
+struct PaperPillLabel: View {
+    let title: String
+    var glyph: PaperGlyph? = nil
+    /// An SF Symbol, where Paper draws no glyph of its own for this action.
+    var symbol: String? = nil
+    var height: CGFloat = 48
+    var tinted = false
+    var busy = false
+    /// False hugs the words (24 either side) instead of filling the row.
+    var fills = true
+
+    var body: some View {
+        let ink: Color = tinted ? Theme.brandText : .white
+        HStack(spacing: 8) {
+            if busy {
+                ProgressView().tint(ink)
+            } else if let glyph {
+                PaperIcon(glyph, size: 16, color: ink)
+            } else if let symbol {
+                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).accessibilityHidden(true)
+            }
+            Text(title).font(Theme.font(16, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(ink)
+        .padding(.horizontal, fills ? 16 : 24)
+        .frame(maxWidth: fills ? .infinity : nil, minHeight: height)
+        .background(tinted ? Theme.brandTint : Theme.brand, in: Capsule())
+        .contentShape(Capsule())
+    }
+}
+
+/// Paper's quiet round button: a 48pt circle of ink at 9% with a 20pt glyph (the call and message
+/// circles beside Navigate). 44 in a tighter row. A label only.
+struct PaperRoundLabel: View {
+    var glyph: PaperGlyph? = nil
+    var symbol: String? = nil
+    var size: CGFloat = 48
+
+    var body: some View {
+        Group {
+            if let glyph {
+                PaperIcon(glyph, size: 20)
+            } else if let symbol {
+                Image(systemName: symbol).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.foreground)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Theme.quietFill, in: Circle())
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Circle())
+    }
+}
+
+/// `PaperRoundLabel` as a plain button with its spoken name.
+struct PaperRoundButton: View {
+    var glyph: PaperGlyph? = nil
+    var symbol: String? = nil
+    let label: String
+    var size: CGFloat = 48
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { PaperRoundLabel(glyph: glyph, symbol: symbol, size: size) }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel(label)
+    }
+}
+
+// MARK: - Sheet chips and segments (Paper 20A)
+
+/// A sheet chip's face (Paper 20A): a 40-tall pill of ink at 9% in 14 Medium; chosen, 14 Semibold
+/// brand text on brand at 24%. 44 tall to the touch.
+struct PaperChoiceChipLabel: View {
+    let title: String
+    let isOn: Bool
+
+    var body: some View {
+        Text(title).font(Theme.font(14, weight: isOn ? .semibold : .medium))
+            .foregroundStyle(isOn ? Theme.brandText : Theme.foreground)
+            .lineLimit(1)
+            .padding(.horizontal, 14)
+            .frame(minHeight: 40)
+            .background(isOn ? Theme.brandTint : Theme.quietFill, in: Capsule())
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+/// A sheet chip (Paper 20A) that turns one choice on or off.
+struct PaperChoiceChip: View {
+    let title: String
+    let isOn: Bool
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button(action: action) { PaperChoiceChipLabel(title: title, isOn: isOn) }
+            .buttonStyle(PressStyle())
+            .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: isOn)
+            .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// A sheet's segmented choice (Paper 20A "Sort by"): the same track as `PaperTabs` (radius 11, 2
+/// in, a 36-tall raised segment of ink at 16%), drawn on the sheet's quiet fill.
+struct PaperSheetSegments: View {
+    let options: [String]
+    @Binding var selection: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(options, id: \.self) { option in
+                let on = option == selection
+                Button { selection = option } label: {
+                    Text(option).font(Theme.font(14, weight: on ? .semibold : .medium))
+                        .foregroundStyle(on ? Theme.foreground : Theme.subtle)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.horizontal, 6)
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                        .background {
+                            if on {
+                                RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedSegment)
+                                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+                            }
+                        }
+                        .contentShape(Rectangle().inset(by: -4))
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityAddTraits(on ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(Theme.quietFill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .sensoryFeedback(.selection, trigger: selection)
+    }
+}

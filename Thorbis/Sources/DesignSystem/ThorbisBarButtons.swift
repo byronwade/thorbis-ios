@@ -21,7 +21,8 @@ struct ThorbisBackButton: View {
     var action: (() -> Void)? = nil
 
     var body: some View {
-        PaperCircleButton(symbol: "chevron.left", label: "Back", size: 44, fill: Theme.card, bordered: true) {
+        // Paper 21: a 44pt circle on the card fill with the 20pt chevron; no rim.
+        PaperCircleButton(symbol: "chevron.left", label: "Back", size: 44, fill: Theme.card) {
             if let action { action() } else { dismiss() }
         }
     }
