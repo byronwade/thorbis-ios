@@ -320,7 +320,11 @@ struct RootView: View {
                 case .customer: store.requestedRecord = .customer(item.entry.id)
                 }
             },
-            openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }
+            openSavedWork: { closeDrawer(thenRun: { reviewScope = savedWorkScope }) },
+            // Paper 77: the bell opens Notifications over the place showing. Without access to job
+            // notices there is nothing to show there, so the bell keeps opening Messages.
+            openNotifications: CommsInboxAccess(session).notices
+                ? { closeDrawer(thenRun: { pushOnCurrent(PaperRoute.notifications) }) } : nil
         )
         // VoiceOver: the drawer is a modal group while open; the escape gesture closes it. Closed, it
         // stays built under the card but is out of the accessibility tree: no modal trait to trap
@@ -1205,6 +1209,8 @@ enum PaperRoute: Hashable {
     case billing
     case billingSchedule(String)
     case notices
+    /// Paper 77: the bell's own screen, the person's staff notices.
+    case notifications
     case estimate(String)
     case invoice(String)
     case followUps(jobID: String)
@@ -1274,6 +1280,7 @@ struct PaperRouteView: View {
         case .billing: BillingSchedulesView()
         case .billingSchedule(let id): BillingScheduleDetailView(scheduleID: id)
         case .notices: NoticeSettingsView()
+        case .notifications: NotificationsFeedView().id(session.generation)
         case .estimate(let id): EstimateDetailView(id: id)
         case .invoice(let id): InvoiceDetailView(id: id)
         case .followUps(let jobID): JobFollowUpsView(jobID: jobID)

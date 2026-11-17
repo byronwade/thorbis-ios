@@ -16,6 +16,8 @@ struct SettingsView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var showWorkspaces = false
     @State private var notifications: UNAuthorizationStatus?
+    /// Paper 65 "Saved signature · On file": whether this person has drawn one on this phone.
+    @State private var signatureOnFile = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -140,6 +142,18 @@ struct SettingsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 4)
                     }
+
+                    // Paper 65 "Work preferences": the person's own saved signature (65D). Offline mode
+                    // has no setting: the app always keeps jobs for low signal.
+                    PaperSection("Work preferences", count: nil) {
+                        NavigationLink { SavedSignatureView().thorbisBackButton() } label: {
+                            row("Saved signature", symbol: "signature", value: signatureOnFile ? "On file" : "Not set", opens: true)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-saved-signature")
+                    }
+                    // Coming back from the page shows what it left: On file, or Not set.
+                    .onAppear { signatureOnFile = SavedSignatureStore.isOnFile(actorID: session.user?.id) }
 
                     PaperSection("App", count: nil) {
                         NavigationLink { WhatsNewHistoryView().thorbisBackButton() } label: {

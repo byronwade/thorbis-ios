@@ -388,13 +388,15 @@ private struct CustomerInitials: View {
 
 /// Paper 48N's hub rows, each a page about the customer.
 private enum CustomerHubPart: String, Hashable, Identifiable {
-    case jobs, property, equipment, membership, money
+    case jobs, comms, property, equipment, membership, money, notes
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .jobs: "Jobs"
+        case .comms: "Texts and calls"
+        case .notes: "Notes"
         case .property: "Property"
         case .equipment: "Equipment"
         case .membership: "Membership"
@@ -561,12 +563,28 @@ struct CustomerDetailView: View {
     /// The customer's jobs as GET /v1/jobs?customerId returns them: the notes line for Jobs.
     @State private var jobRecords: [JobRecord] = []
     @State private var visiblePastCount = CustomerJobHistory.initialCount
+    /// Paper 48N "Texts and calls": the business's call log and this phone's drafts, for this customer.
+    @StateObject private var comms = CustomerCommsModel()
+    /// Paper 48N "Notes": what this workspace wrote about the customer on this phone.
+    @StateObject private var phoneNotes = CustomerNotesModel()
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
     @Environment(\.inboxEmail) private var inboxEmail
 
     private var primaryPhone: String? { contacts.first(where: \.primary)?.phone ?? record?.phone }
     private var primaryEmail: String? { contacts.first(where: \.primary)?.email ?? record?.email }
+    /// Every number and address on file: the account's own and each contact's.
+    private var customerNumbers: [String] { ([record?.phone] + contacts.map(\.phone)).compactMap { $0 }.filter { !$0.isEmpty } }
+    private var customerEmails: [String] { ([record?.email] + contacts.map(\.email)).compactMap { $0 }.filter { !$0.isEmpty } }
+    private var callsAvailable: Bool { CallLogRules.available(session) }
+    /// This customer's calls in the business's call log, newest first.
+    private var customerCalls: [BookingCallRecord] {
+        callsAvailable ? CustomerComms.calls(comms.calls, customerID: customer.id, numbers: customerNumbers) : []
+    }
+    private var commsEntries: [CustomerCommsEntry] {
+        CustomerComms.entries(calls: customerCalls,
+                              threads: CustomerComms.threads(comms.threads, numbers: customerNumbers, emails: customerEmails))
+    }
     private var directionsURL: URL? {
         (locations.first?.address ?? record?.address).flatMap { Directions.url(address: $0, coordinates: locations.first?.coordinates) }
     }
@@ -644,6 +662,12 @@ struct CustomerDetailView: View {
         .task { await loadJobEmails() }
         .task(id: customer.id) { pricing = try? await api.memberPricing(customer.id) }
         .task(id: customer.id) { equipment = try? await api.customerEquipment(customer.id) }
+        // The hub's Texts and calls and Notes rows: this sign-in's call log and on-phone books.
+        .task(id: session.generation) {
+            comms.bind(actorID: session.user?.id, organizationID: session.activeOrganization?.id)
+            phoneNotes.bind(organizationID: session.activeOrganization?.id)
+            if callsAvailable { await comms.refresh(api: api) }
+        }
         .task { await loadActivity(reset: true) }
         .task(id: recordsScope) {
             if recordsPublishedScope != recordsScope {
@@ -799,11 +823,36 @@ struct CustomerDetailView: View {
     /// The hub's rows, each with what the app already knows about it; a row with nothing to say
     /// yet shows its title alone.
     private var hubRows: [CustomerHubRow] {
-        [CustomerHubRow(part: .jobs, subtitle: jobsSummary),
-         CustomerHubRow(part: .property, subtitle: propertySummary),
-         CustomerHubRow(part: .equipment, subtitle: equipmentSummary),
-         CustomerHubRow(part: .membership, subtitle: membershipSummary),
-         CustomerHubRow(part: .money, subtitle: "Estimates and invoices")]
+        // Paper 48N's order: Jobs, Texts and calls, Property, Equipment, Membership, Money, Notes.
+        var rows = [CustomerHubRow(part: .jobs, subtitle: jobsSummary)]
+        if session.user?.id != nil && session.activeOrganization?.id != nil {
+            rows.append(CustomerHubRow(part: .comms, subtitle: commsSummary))
+        }
+        rows += [CustomerHubRow(part: .property, subtitle: propertySummary),
+                 CustomerHubRow(part: .equipment, subtitle: equipmentSummary),
+                 CustomerHubRow(part: .membership, subtitle: membershipSummary),
+                 CustomerHubRow(part: .money, subtitle: "Estimates and invoices")]
+        if phoneNotes.isOpen { rows.append(CustomerHubRow(part: .notes, subtitle: notesSummary)) }
+        return rows
+    }
+
+    /// "Missed call · 9:39 AM" or the newest draft's words: the latest thing between this phone and
+    /// the customer. Nothing to say until the call log has answered.
+    private var commsSummary: String? {
+        let entries = commsEntries
+        if let line = CustomerComms.summary(entries) { return line }
+        if callsAvailable && !comms.loaded && !comms.denied { return nil }
+        return "No texts or calls yet"
+    }
+
+    /// "Prefers texts · dog in back yard": the newest notes kept on this phone, else a place's note
+    /// from the server.
+    private var notesSummary: String? {
+        _ = phoneNotes.revision
+        if let line = CustomerNoteRules.summary(phoneNotes.notes(for: customer.id)) { return line }
+        let place = locations.compactMap { $0.notes?.split(whereSeparator: \.isNewline).first.map { String($0) } }
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return place ?? "No notes yet"
     }
 
     /// The first name for a person ("Everything for Danielle"); a business keeps its whole name.
@@ -909,6 +958,14 @@ struct CustomerDetailView: View {
                     CustomerMembershipSection(customerID: customer.id)
                 case .money:
                     moneySection
+                case .comms:
+                    CustomerCommsSection(customerID: customer.id, customerName: record?.name ?? customer.name,
+                                         numbers: customerNumbers, emails: customerEmails,
+                                         dialable: primaryPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil },
+                                         callsAvailable: callsAvailable, model: comms)
+                case .notes:
+                    CustomerNotesSection(customerID: customer.id, customerName: record?.name ?? customer.name,
+                                         locations: locations, model: phoneNotes)
                 }
                 // At accessibility sizes a pinned New job would cover half the screen, so it
                 // follows the content instead.
@@ -927,6 +984,7 @@ struct CustomerDetailView: View {
                 await load()
                 if part == .jobs || part == .money { await loadRecords() }
                 if part == .jobs { await loadJobRecords() }
+                if part == .comms && callsAvailable { await comms.refresh(api: api) }
             }
         }
         // The pushed page presents its own New job and location sheets; the covered customer
@@ -1779,7 +1837,7 @@ struct CustomerDetailView: View {
                     .padding(.horizontal, 4).padding(.bottom, 8)
                     if activityLoading && activity.isEmpty {
                         PaperCard { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
-                    } else if activity.isEmpty {
+                    } else if activity.isEmpty && customerCalls.isEmpty {
                         PaperCard {
                             emptyText(activityError == nil ? "Nothing yet" : "Not loaded")
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1807,9 +1865,14 @@ struct CustomerDetailView: View {
         }
     }
 
-    private static let activityFilters = ["All", "Visits", "Payments"]
+    /// Paper 48G's chips. Calls shows when this role reads the call log; Texts has no chip because
+    /// nothing is sent or received through Thorbis yet.
+    private var activityFilters: [String] {
+        callsAvailable ? ["All", "Calls", "Visits", "Payments"] : ["All", "Visits", "Payments"]
+    }
 
     private func activityMatches(_ event: CustomerHistoryEntry) -> Bool {
+        if activityFilter == "Calls" { return false }
         if activityFilter == "Visits" { return event.kind == "job" }
         if activityFilter == "Payments" { return event.kind == "payment" || event.kind == "invoice" }
         return true
@@ -1819,7 +1882,7 @@ struct CustomerDetailView: View {
     private var activityChips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(CustomerDetailView.activityFilters, id: \.self) { name in
+                ForEach(activityFilters, id: \.self) { name in
                     activityChip(name)
                 }
             }
@@ -1844,15 +1907,41 @@ struct CustomerDetailView: View {
     /// The loaded history under the chosen chip, newest first, in "Today" and month groups.
     private var activityGroups: [CustomerActivityGroup] {
         var groups: [CustomerActivityGroup] = []
-        for event in activity where activityMatches(event) {
-            let title = activityGroupTitle(event.occurredAt)
+        for item in activityItems {
+            let title = activityGroupTitle(item.at)
             if let last = groups.last, last.title == title {
-                groups[groups.count - 1].events.append(event)
+                groups[groups.count - 1].events.append(item)
             } else {
-                groups.append(CustomerActivityGroup(id: groups.count, title: title, events: [event]))
+                groups.append(CustomerActivityGroup(id: groups.count, title: title, events: [item]))
             }
         }
         return groups
+    }
+
+    /// The server's history under the chosen chip, with this customer's calls from the call log
+    /// set among it by time (Paper 48G "Call from Danielle"). While older history is still to load,
+    /// calls older than the oldest loaded event wait with it, so the order stays true.
+    private var activityItems: [CustomerActivityItem] {
+        let events = activity.filter(activityMatches).map(CustomerActivityItem.event)
+        guard activityFilter == "All" || activityFilter == "Calls" else { return events }
+        var calls = customerCalls
+        if activityFilter == "All", activityCursor != nil,
+           let oldest = activity.compactMap({ JobFiltering.date($0.occurredAt) }).min() {
+            calls = calls.filter { ($0.startedDate ?? .distantPast) >= oldest }
+        }
+        var pending = calls.map(CustomerActivityItem.call)[...]
+        if activityFilter == "Calls" || pending.isEmpty || events.isEmpty { return events + Array(pending) }
+        var merged: [CustomerActivityItem] = []
+        for event in events {
+            if let date = JobFiltering.date(event.at) {
+                while let call = pending.first, (JobFiltering.date(call.at) ?? .distantPast) > date {
+                    merged.append(call)
+                    pending = pending.dropFirst()
+                }
+            }
+            merged.append(event)
+        }
+        return merged + Array(pending)
     }
 
     @ViewBuilder private var activityTimeline: some View {
@@ -1868,8 +1957,11 @@ struct CustomerDetailView: View {
                     Text(group.title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                         .accessibilityAddTraits(.isHeader)
                         .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 10)
-                    ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
-                        activityRow(event, last: index == group.events.count - 1)
+                    ForEach(Array(group.events.enumerated()), id: \.element.id) { index, item in
+                        switch item {
+                        case .event(let event): activityRow(event, last: index == group.events.count - 1)
+                        case .call(let call): activityCallRow(call, last: index == group.events.count - 1)
+                        }
                     }
                 }
             }
@@ -1906,6 +1998,52 @@ struct CustomerDetailView: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    /// A call from the business's call log on the timeline: what happened and how long, when, and
+    /// what was said. It opens Texts and calls.
+    private func activityCallRow(_ call: BookingCallRecord, last: Bool) -> some View {
+        let missed = call.kind == .missed || call.kind == .dropped
+        let title = [call.kind.heading, call.length.map { BookingCallRecord.clock($0) }].compactMap { $0 }.joined(separator: " · ")
+        let said = call.summary?.text.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return Button { openPart = .comms } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "phone").font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(missed ? Theme.destructive : Theme.brandText)
+                    .frame(width: 32, height: 32)
+                    .background(missed ? Theme.destructiveSurface : Theme.brandSurface, in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(title).font(Theme.font(15, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.foreground)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(activityTime(call.startedAt)).font(Theme.font(13)).monospacedDigit()
+                            .foregroundStyle(Theme.muted)
+                    }
+                    if !said.isEmpty {
+                        Text(said).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.leading)
+                            .lineLimit(typeSize.isAccessibilitySize ? 4 : 2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, 6)
+            }
+            .padding(.bottom, last ? 8 : 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .topLeading) {
+                if !last {
+                    Rectangle().fill(Theme.hairline).frame(width: 2)
+                        .padding(.leading, 15).padding(.top, 32)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens texts and calls")
     }
 
     private func activityMark(_ kind: String) -> CustomerActivityMark {
@@ -2094,7 +2232,27 @@ enum CustomerJobOrder {
 private struct CustomerActivityGroup: Identifiable {
     let id: Int
     let title: String
-    var events: [CustomerHistoryEntry]
+    var events: [CustomerActivityItem]
+}
+
+/// A timeline row: something from the customer's history, or a call from the call log.
+private enum CustomerActivityItem: Identifiable {
+    case event(CustomerHistoryEntry)
+    case call(BookingCallRecord)
+
+    var id: String {
+        switch self {
+        case .event(let event): "event-\(event.id)"
+        case .call(let call): "call-\(call.id)"
+        }
+    }
+
+    var at: String {
+        switch self {
+        case .event(let event): event.occurredAt
+        case .call(let call): call.startedAt
+        }
+    }
 }
 
 /// A timeline row's 32pt mark: its symbol, ink and surface.

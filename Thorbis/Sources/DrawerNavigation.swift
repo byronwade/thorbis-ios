@@ -92,6 +92,9 @@ struct AppDrawer: View {
     let openRecent: (RecentItems.Item) -> Void
     let openFavorite: (ScopedRecordFavorites.Visible) -> Void
     var openSavedWork: () -> Void = {}
+    /// Paper 77: opens the Notifications screen. Nil when the person has no access to job notices;
+    /// the bell then opens Messages, as before.
+    var openNotifications: (() -> Void)? = nil
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -233,7 +236,7 @@ struct AppDrawer: View {
     }
 
     /// Paper v2: a hairline, then the person (initials on brand surface, name 15 Semibold, role 13),
-    /// the bell (Messages) and the gear (Settings and businesses). The gear wears saved work's dot when
+    /// the bell (Notifications, Paper 77; Messages without access to notices) and the gear (Settings and businesses). The gear wears saved work's dot when
     /// it needs the person; its menu grows up, clear of the home indicator.
     private var footer: some View {
         HStack(alignment: .center, spacing: 10) {
@@ -248,8 +251,10 @@ struct AppDrawer: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
-            if sections.places.contains(.inbox) {
-                Button { openPlace(.inbox) } label: {
+            if openNotifications != nil || sections.places.contains(.inbox) {
+                Button {
+                    if let openNotifications { openNotifications() } else { openPlace(.inbox) }
+                } label: {
                     Image(systemName: "bell").font(.system(size: 17)).foregroundStyle(Theme.muted)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
