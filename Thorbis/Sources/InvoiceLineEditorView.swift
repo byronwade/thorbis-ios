@@ -245,6 +245,19 @@ struct InvoiceLineEditorView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private var headingAddItem: some View {
+        Button { showPriceBook = true } label: {
+            Label("Add item", systemImage: "plus")
+                .font(Theme.font(14, weight: .medium))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(linesDisabled || editor.lines.count >= 500)
+        .accessibilityHint(canUsePriceBook ? "Opens the price book" : "Adds a custom line item")
+        .accessibilityIdentifier("invoice-add-item-heading")
+    }
+
     /// The shared builder line, over an invoice draft line. Quantities still go through
     /// `committedLine` so the editor's own validation runs.
     private func lineRow(_ line: InvoiceLineDraft) -> some View {

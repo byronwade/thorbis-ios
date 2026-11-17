@@ -96,13 +96,135 @@ final class DrawerGearMenuUITests: XCTestCase {
                       "The drawer closes before Settings opens")
     }
 
-    func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
+    func testOnlyPermittedWorkPlaceIsDirectlyReachable() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer check") }
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office"]
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "office",
+                               "--paper-preview-sidebar-job-view-only", "--paper-preview-menu-suite", UUID().uuidString]
+        app.launch(); app.openDrawer()
+        let jobs = app.buttons["drawer-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 15))
+        XCTAssertTrue(jobs.isHittable)
+        XCTAssertFalse(app.buttons["drawer-workspace-work"].exists)
+        XCTAssertFalse(app.buttons["drawer-estimates"].exists)
+        XCTAssertFalse(app.buttons["drawer-invoices"].exists)
+        XCTAssertFalse(app.buttons["drawer-team"].exists)
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 10))
+    }
+
+    func testWorkspaceDisclosureRevealsPlacesWithoutOpeningAnotherScreen() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "--paper-preview-menu-suite", UUID().uuidString]
         app.launch()
         if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
         let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let disclosure = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
+        if disclosure.value as? String == "Collapsed" { disclosure.tap() }
+        XCTAssertEqual(disclosure.value as? String, "Expanded")
+        disclosure.tap()
+        XCTAssertEqual(disclosure.value as? String, "Collapsed")
+        XCTAssertFalse(app.buttons["\(prefix)-estimates"].exists)
+        disclosure.tap()
+        XCTAssertEqual(disclosure.value as? String, "Expanded")
+        XCTAssertTrue(app.buttons["\(prefix)-estimates"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["\(prefix)-invoices"].exists)
+        XCTAssertTrue(app.buttons["\(prefix)-jobs"].exists)
+    }
+
+    func testWorkspaceLabelTogglesPlacesWithoutLeavingMenu() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "--paper-preview-menu-suite", UUID().uuidString]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let group = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(group.waitForExistence(timeout: 15))
+        if group.value as? String == "Collapsed" { group.tap() }
+        XCTAssertGreaterThanOrEqual(group.frame.height, 44)
+        XCTAssertEqual(group.value as? String, "Expanded")
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Collapsed")
+        XCTAssertFalse(app.buttons["\(prefix)-jobs"].exists)
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Expanded")
+        XCTAssertTrue(app.buttons["\(prefix)-jobs"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["\(prefix)-estimates"].exists)
+        XCTAssertTrue(app.buttons["\(prefix)-invoices"].exists)
+    }
+
+    func testWorkDisclosureAndJobsAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "office",
+                               "--paper-preview-menu-suite", UUID().uuidString,
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let group = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(group.waitForExistence(timeout: 20))
+        XCTAssertTrue(group.isHittable)
+        XCTAssertGreaterThanOrEqual(group.frame.height, 44)
+        XCTAssertEqual(group.value as? String, "Expanded")
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Collapsed")
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Expanded")
+        let jobs = app.buttons["\(prefix)-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 10))
+        if !app.usesTabletLayout && !jobs.isHittable { app.revealDrawerRow("jobs") }
+        XCTAssertTrue(jobs.isHittable)
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 15))
+    }
+
+    func testWorkPreferenceSurvivesRelaunchAndJobsCanBeOpened() throws {
+        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer persistence") }
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "office",
+                               "--paper-preview-menu-suite", UUID().uuidString]
+        app.launch()
+        app.openDrawer()
+        let prefix = "drawer"
+        let group = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(group.waitForExistence(timeout: 15))
+        XCTAssertEqual(group.value as? String, "Expanded", "Work is open with fresh preferences")
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Collapsed")
+        app.buttons["drawer-schedule"].tap()
+        app.openDrawer()
+        XCTAssertEqual(group.value as? String, "Collapsed", "The chosen state survives closing the menu")
+        app.terminate()
+        app.launch()
+        app.openDrawer()
+        XCTAssertEqual(group.value as? String, "Collapsed", "The chosen state survives restarting the app")
+        group.tap()
+        XCTAssertEqual(group.value as? String, "Expanded")
+        let jobs = app.buttons["\(prefix)-jobs"]
+        XCTAssertTrue(jobs.waitForExistence(timeout: 5))
+        jobs.tap()
+        XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 10))
+    }
+
+    func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
+                               "--paper-preview-menu-suite", UUID().uuidString]
+        app.launch()
+        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
+        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
+        let work = app.buttons["\(prefix)-workspace-work"]
+        XCTAssertTrue(work.waitForExistence(timeout: 15))
+        if work.value as? String == "Collapsed" { work.tap() }
         if !app.usesTabletLayout {
             XCTAssertTrue(app.buttons["drawer-workspace-menu"].exists)
             XCTAssertTrue(app.buttons["drawer-new-menu"].exists, "Paper's + circle opens New")

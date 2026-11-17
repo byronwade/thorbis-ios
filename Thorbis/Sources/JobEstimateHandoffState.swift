@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import Combine
 
 struct JobEstimateHandoffSelection {
@@ -153,6 +154,7 @@ final class JobEstimateHandoffModel: ObservableObject {
     @Published private(set) var unavailableIDs: [String] = []
     @Published private(set) var complete = false
     @Published private(set) var loading = false
+    @Published private(set) var canLoadMoreEstimates = false
     @Published private(set) var error: String?
     @Published private(set) var retired = false
     @Published private(set) var selection = JobEstimateHandoffSelection()
@@ -161,11 +163,22 @@ final class JobEstimateHandoffModel: ObservableObject {
     var selectedIDs: Set<String> { selection.selectedIDs }
     private let actorID: String
     private let sessionGeneration: UUID
+    private let authorityRevision: UUID
+    private let savedScopeRevision: UUID
     private let apiGeneration: UUID
     private let origin: String?
     private var freshIDs: Set<String> = []
-    private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
+    @Published private var revisions: [String: CustomerIssuedEstimateRevision] = [:]
+    @Published private(set) var overviewPriceFailures: Set<String> = []
+    @Published private(set) var overviewPriceGeneration = UUID()
+    private var overviewPriceReady = false
+    @Published private(set) var overviewPricesNeedRefresh = false
+    @Published private var overviewReceipts: [String: CustomerEstimateAcceptanceReceipt] = [:]
+    private var overviewRequests: [String: UUID] = [:]
     private var request = UUID()
+    private var membershipPager: JobEstimateMembershipPager?
+    private var pageRead: JobDocumentRead<EstimateRecord>?
+    private var retryingPage = false
     private var reviewedGeneration: UUID?
     private var lastSignerName: String?
     var isCurrent: Bool { isCurrentJob && session.can("estimate.view", feature: "estimates") }
@@ -173,7 +186,8 @@ final class JobEstimateHandoffModel: ObservableObject {
     /// additionally need `isCurrent`; invoices and details carry their own permission gates.
     var isCurrentJob: Bool {
         !retired && !actorID.isEmpty && session.user?.id == actorID && session.activeOrganization?.id == scope.organizationID &&
-        session.generation == sessionGeneration && api.requestGeneration == apiGeneration && origin != nil && api.normalizedOrigin == origin &&
+        session.generation == sessionGeneration && session.authorityRevision == authorityRevision &&
+        api.requestGeneration == apiGeneration && api.savedCopyScopeRevision == savedScopeRevision && origin != nil && api.normalizedOrigin == origin &&
         session.can("job.view", feature: "jobs")
     }
     var eligibleIDs: Set<String> {
@@ -209,10 +223,12 @@ final class JobEstimateHandoffModel: ObservableObject {
         self.scope = .init(jobID: job.id, organizationID: job.organizationId, customerID: job.customerId, originEstimateID: job.estimateId)
         self.jobLocationID = job.locationId; self.jobTitle = job.title
         self.customerName = customerName; self.documents = documents; self.api = api; self.session = session
-        actorID = session.user?.id ?? ""; sessionGeneration = session.generation; apiGeneration = api.requestGeneration; origin = api.normalizedOrigin
+        actorID = session.user?.id ?? ""; sessionGeneration = session.generation; authorityRevision = session.authorityRevision
+        apiGeneration = api.requestGeneration; savedScopeRevision = api.savedCopyScopeRevision; origin = api.normalizedOrigin
     }
     func revision(for id: String) -> CustomerIssuedEstimateRevision? {
-        guard let current = records.first(where: { $0.id == id }), let revision = revisions[id],
+        guard let current = records.first(where: { $0.id == id }),
+              detailsCurrent(current, authority: authorityRevision), let revision = revisions[id],
               (try? revision.validate(for: current)) != nil else { return nil }
         return revision
     }
@@ -270,21 +286,93 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     func refresh() async {
         guard isCurrent, !loading else { if !isCurrent { retire() }; return }
+        retryingPage = false
         let ticket = UUID(); request = ticket; loading = true; error = nil
+        overviewPriceReady = false; overviewPricesNeedRefresh = false; revisions = [:]; overviewReceipts = [:]; overviewPriceFailures = []; overviewPriceGeneration = UUID()
         defer { if request == ticket { loading = false } }
         do {
             let fresh = try await api.liveFieldJob(scope.jobID)
             guard isCurrent, request == ticket, !Task.isCancelled else { return }
             guard sameJob(fresh) else { retire(); return }
-            let published = await documents.loadEstimates(scope: scope, api: api) { [weak self] in
-                self?.isCurrent == true && self?.request == ticket
-            }
-            guard isCurrent, published, request == ticket, let read = documents.estimates, read.scope == scope else { return }
-            records = read.records; freshIDs = read.freshIDs; complete = read.isComplete; unavailableIDs = read.unavailableIDs; error = read.issue
-            selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
-        } catch is CancellationError {} catch {
+            membershipPager = JobEstimateMembershipPager(jobID: scope.jobID)
+            pageRead = nil; complete = false; canLoadMoreEstimates = false
+            try await loadPage(ticket: ticket)
+        } catch is CancellationError {
+            if isCurrent, request == ticket { complete = false; overviewPricesNeedRefresh = true; error = "Couldn't finish loading estimates. Your previous selections are still here." }
+        } catch {
             guard isCurrent, request == ticket else { return }
-            complete = false; self.error = "Couldn't refresh all estimates. Your previous selections are still here."
+            complete = false; overviewPricesNeedRefresh = true; self.error = "Couldn't refresh all estimates. Your previous selections are still here."
+        }
+    }
+    func loadMoreEstimates() async {
+        guard isCurrent, !loading, canLoadMoreEstimates else { return }
+        retryingPage = false
+        let ticket = request
+        loading = true; error = nil
+        defer { if request == ticket { loading = false } }
+        do { try await loadPage(ticket: ticket) }
+        catch is CancellationError {
+            if isCurrent, request == ticket { complete = false; retryingPage = true; error = "Couldn't load more estimates. Your selections are still here." }
+        }
+        catch {
+            guard isCurrent, request == ticket else { return }
+            complete = false; retryingPage = true; self.error = "Couldn't load more estimates. Your selections are still here."
+        }
+    }
+    func retryEstimateLoading() async {
+        if retryingPage && canLoadMoreEstimates { await loadMoreEstimates() }
+        else { await refresh() }
+    }
+    private func loadPage(ticket: UUID) async throws {
+        guard let pager = membershipPager, isCurrent, request == ticket else { throw CancellationError() }
+        var preparedRead: JobDocumentRead<EstimateRecord>?
+        try await pager.loadNext(isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, beforeCommit: { [weak self] candidate in
+            guard let self, self.isCurrent, self.request == ticket, !Task.isCancelled else { throw CancellationError() }
+            var ids = candidate.estimateIDs
+            if let origin = self.scope.originEstimateID, !ids.contains(where: { $0.caseInsensitiveCompare(origin) == .orderedSame }) { ids.insert(origin, at: 0) }
+            guard let read = await JobDocumentsLoader.estimatesForPage(scope: self.scope, api: self.api, ids: ids,
+                previous: self.pageRead, membershipFresh: candidate.pagesUsedOnlyFreshResponses,
+                membershipComplete: candidate.scanReachedEnd && candidate.pagesUsedOnlyFreshResponses,
+                isCurrent: { [weak self] in self?.isCurrent == true && self?.request == ticket }, onPartial: { [weak self] partial in
+                    guard let self, self.isCurrent, self.request == ticket, self.pageRead == nil else { return }
+                    self.records = partial.records; self.freshIDs = partial.freshIDs
+                    self.unavailableIDs = partial.unavailableIDs; self.complete = false
+                }) else { throw CancellationError() }
+            guard self.isCurrent, self.request == ticket, !Task.isCancelled else { throw CancellationError() }
+            preparedRead = read
+        }, onCommit: { [weak self] candidate in
+            guard let self, let read = preparedRead else { return }
+            let previousRecords = self.records
+            let retainedRevisions = self.revisions.filter { id, revision in
+                guard let record = read.records.first(where: { $0.id == id }), previousRecords.contains(record),
+                      read.freshIDs.contains(id), self.scope.contains(record, requestedID: id) else { return false }
+                return (try? revision.validate(for: record, allowApprovedForReading: true)) != nil
+            }
+            let retainedReceipts = self.overviewReceipts.filter { id, receipt in
+                guard let revision = retainedRevisions[id] else { return false }
+                return (try? receipt.validate(for: revision)) != nil
+            }
+            self.pageRead = read; self.records = read.records; self.freshIDs = read.freshIDs
+            self.unavailableIDs = read.unavailableIDs; self.complete = read.isComplete
+            self.canLoadMoreEstimates = !candidate.scanReachedEnd
+            self.error = (!read.isComplete && !self.canLoadMoreEstimates) ? read.issue : nil
+            self.selection.reconcile(knownIDs: Set(read.records.map(\.id)), complete: read.isComplete)
+            self.revisions = retainedRevisions; self.overviewReceipts = retainedReceipts
+            self.overviewPriceFailures = []
+            self.overviewPriceReady = true; self.overviewPricesNeedRefresh = false
+            self.overviewPriceGeneration = UUID()
+        }) { [weak self] cursor in
+            guard let self else { throw CancellationError() }
+            let current: @MainActor () -> Bool = { [weak self] in self?.isCurrent == true && self?.request == ticket }
+            let page: APIRead<JobEstimateLinkPage>
+            do {
+                page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, requireFresh: true, isCurrent: current)
+            } catch let problem as Problem where problem.status == nil && problem.title == "Network error" {
+                // A scoped saved page is readable but cannot authorize a signature.
+                page = try await self.api.fieldJobEstimateLinkPage(self.scope.jobID, cursor: cursor, isCurrent: current)
+            }
+            return .init(links: page.value.items, nextCursor: page.value.nextCursor,
+                         isAuthoritative: page.provenance.source == .urlSession(cacheBypassed: true))
         }
     }
     func setSelected(_ id: String, selected: Bool) {
@@ -377,8 +465,8 @@ final class JobEstimateHandoffModel: ObservableObject {
     }
     /// Reading one estimate never selects it or prepares an approval.
     func detailsCurrent(_ record: EstimateRecord, authority: UUID) -> Bool {
-        isCurrent && session.authorityRevision == authority && complete && freshIDs.contains(record.id)
-            && record.status == "sent" && records.contains(record)
+        isCurrent && session.authorityRevision == authority && freshIDs.contains(record.id)
+            && (record.status == "sent" || record.status == "approved") && records.contains(record)
             && scope.contains(record, requestedID: record.id)
     }
 
@@ -390,23 +478,110 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard sameJob(fresh) else {
             throw Problem(title: "This job changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
-        let links = try await api.liveFieldJobEstimateLinks(scope.jobID)
-        guard current() else { throw CancellationError() }
-        guard links.allSatisfy({ $0.jobId == scope.jobID }),
-              links.contains(where: { $0.estimateId == record.id }) || fresh.estimateId == record.id else {
-            throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
-        }
-        let revision = try await api.customerIssuedEstimateRevision(for: record, currentAuthority: current)
+        try await verifyDetailMembership(record, job: fresh, current: current)
+        let revision = try await api.customerIssuedEstimateRevision(for: record, allowApprovedForReading: true, currentAuthority: current)
         guard current() else { throw CancellationError() }
         let verifiedJob = try await api.liveFieldJob(scope.jobID)
         guard current() else { throw CancellationError() }
-        let verifiedLinks = try await api.liveFieldJobEstimateLinks(scope.jobID)
         guard current() else { throw CancellationError() }
-        guard sameJob(verifiedJob), verifiedLinks.allSatisfy({ $0.jobId == scope.jobID }),
-              verifiedLinks.contains(where: { $0.estimateId == record.id }) || verifiedJob.estimateId == record.id else {
+        guard sameJob(verifiedJob) else {
             throw Problem(title: "This job's estimates changed. Ask your technician to reopen it.", status: 409, detail: nil)
         }
+        try await verifyDetailMembership(record, job: verifiedJob, current: current)
         return revision
+    }
+    /// Prices are read from issued revisions, in a small bounded batch for the loaded page.
+    /// Every request uses the existing live job, membership and authority checks.
+    func loadOverviewPrices() async {
+        guard overviewPriceReady else { return }
+        let generation = overviewPriceGeneration
+        let candidates = records.filter { record in
+            guard detailsCurrent(record, authority: authorityRevision) else { return false }
+            if record.status == "sent" { return revision(for: record.id) == nil }
+            if record.status == "approved" { return overviewReceipt(for: record) == nil }
+            return false
+        }
+        await withTaskGroup(of: Void.self) { group in
+            var iterator = candidates.makeIterator()
+            for _ in 0..<3 {
+                if let record = iterator.next() {
+                    group.addTask { await self.loadOverviewPrice(record, generation: generation) }
+                }
+            }
+            while await group.next() != nil {
+                guard !Task.isCancelled, overviewPriceGeneration == generation else { group.cancelAll(); break }
+                if let record = iterator.next() {
+                    group.addTask { await self.loadOverviewPrice(record, generation: generation) }
+                }
+            }
+        }
+    }
+
+    func retryOverviewPrice(_ record: EstimateRecord) async {
+        await loadOverviewPrice(record, generation: overviewPriceGeneration)
+    }
+
+    private func loadOverviewPrice(_ record: EstimateRecord, generation: UUID) async {
+        guard overviewPriceReady, !Task.isCancelled, generation == overviewPriceGeneration,
+              detailsCurrent(record, authority: authorityRevision) else { return }
+        let ticket = UUID()
+        overviewRequests[record.id] = ticket
+        overviewPriceFailures.remove(record.id)
+        defer { if overviewRequests[record.id] == ticket { overviewRequests[record.id] = nil } }
+        do {
+            let issued = try await issuedDetails(record, authority: authorityRevision)
+            let receipt: CustomerEstimateAcceptanceReceipt?
+            if record.status == "approved" {
+                receipt = try await approvedReceipt(record, revision: issued, authority: authorityRevision)
+            } else {
+                receipt = nil
+            }
+            guard !Task.isCancelled, generation == overviewPriceGeneration, overviewRequests[record.id] == ticket,
+                  detailsCurrent(record, authority: authorityRevision) else { return }
+            revisions[record.id] = issued
+            if record.status == "approved" {
+                if let receipt { overviewReceipts[record.id] = receipt }
+                else { overviewReceipts[record.id] = nil; overviewPriceFailures.insert(record.id) }
+            }
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled, generation == overviewPriceGeneration, overviewRequests[record.id] == ticket,
+                  detailsCurrent(record, authority: authorityRevision) else { return }
+            revisions[record.id] = nil
+            overviewReceipts[record.id] = nil
+            overviewPriceFailures.insert(record.id)
+        }
+    }
+
+    func overviewReceipt(for record: EstimateRecord) -> CustomerEstimateAcceptanceReceipt? {
+        guard record.status == "approved", detailsCurrent(record, authority: authorityRevision),
+              let revision = revisions[record.id],
+              (try? revision.validate(for: record, allowApprovedForReading: true)) != nil,
+              let receipt = overviewReceipts[record.id],
+              (try? receipt.validate(for: revision)) != nil else { return nil }
+        return receipt
+    }
+
+    func approvedReceipt(_ record: EstimateRecord, revision: CustomerIssuedEstimateRevision, authority: UUID) async throws -> CustomerEstimateAcceptanceReceipt? {
+        func current() -> Bool { detailsCurrent(record, authority: authority) && !Task.isCancelled }
+        guard current(), record.status == "approved" else { throw CancellationError() }
+        let receipt = try await api.customerEstimateAcceptanceReceipt(for: revision, currentAuthority: current)
+        guard current() else { throw CancellationError() }
+        // Recheck job membership and the live revision after the receipt request.
+        let checked = try await issuedDetails(record, authority: authority)
+        guard current(), checked == revision else { throw CancellationError() }
+        return receipt
+    }
+    private func verifyDetailMembership(_ record: EstimateRecord, job: JobRecord,
+                                        current: @MainActor () -> Bool) async throws {
+        do {
+            try await JobEstimateDetailMembership.verify(jobID: scope.jobID, estimateID: record.id,
+                originID: job.estimateId, isCurrent: current,
+                read: { try await self.api.liveFieldJobEstimateLink(self.scope.jobID, estimateID: record.id) },
+                list: { try await self.api.liveFieldJobEstimateLinks(self.scope.jobID) })
+        } catch is JobEstimateDetailMembership.InvalidMembership {
+            throw Problem(title: "This estimate is no longer on this job", status: 409, detail: nil)
+        }
     }
     func verifyMembership(_ item: JobEstimateReviewedItem) async throws {
         guard isCurrent, approvalAllowed(item) else { throw CancellationError() }
@@ -487,7 +662,9 @@ final class JobEstimateHandoffModel: ObservableObject {
         guard !retired else { return }
         if clearDocuments { documents.reset() }
         retired = true; request = UUID(); loading = false
+        membershipPager = nil; pageRead = nil; canLoadMoreEstimates = false
         records = []; freshIDs = []; unavailableIDs = []; reviewed = []; revisions = [:]
+        overviewPriceReady = false; overviewPricesNeedRefresh = false; overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
         jobTitle = ""; customerName = ""; lastSignerName = nil; error = nil
         for context in contexts.values { context.retire() }
         contexts = [:]
@@ -529,7 +706,42 @@ enum CustomerViewExit: Equatable {
 /// Retains this one protected customer handoff ("Customer view") above workspace and authentication
 /// branches: the job's estimates, invoices and the customer's own details, with one staff hand-back.
 @MainActor
+struct CustomerHandoffExitAuthority {
+    let actor: String, organization: String, origin: String
+    let sessionGeneration: UUID, authorityRevision: UUID, requestGeneration: UUID, scopeRevision: UUID
+
+    @MainActor static func capture(api: APIClient, session: SessionController) -> Self? {
+        guard session.phase == .ready, let actor = session.user?.id,
+              let organization = session.activeOrganization?.id, let origin = api.normalizedOrigin else { return nil }
+        return .init(actor: actor, organization: organization, origin: origin,
+                     sessionGeneration: session.generation, authorityRevision: session.authorityRevision,
+                     requestGeneration: api.requestGeneration, scopeRevision: api.savedCopyScopeRevision)
+    }
+
+    @MainActor func isCurrent(api: APIClient, session: SessionController) -> Bool {
+        session.phase == .ready && session.user?.id == actor && session.activeOrganization?.id == organization &&
+        session.generation == sessionGeneration && session.authorityRevision == authorityRevision &&
+        api.requestGeneration == requestGeneration &&
+        api.savedCopyScopeRevision == scopeRevision && api.normalizedOrigin == origin
+    }
+}
+
+@MainActor
 final class JobEstimateHandoffPresenter: ObservableObject {
+    private let arbiter: CustomerHandoffArbiter
+    private let sceneWindow: CustomerProtectedSceneWindow?
+    private var sceneOwnerID: UUID?
+    @Published private(set) var usesSceneWindow = false
+    init(arbiter: CustomerHandoffArbiter = CustomerHandoffArbiter(), sceneWindow: CustomerProtectedSceneWindow? = nil) {
+        self.arbiter = arbiter; self.sceneWindow = sceneWindow
+    }
+    func claimLegacy() -> LegacyCustomerHandoffLease? {
+        let id = UUID()
+        guard arbiter.claim(.legacy(id)) else { return nil }
+        return LegacyCustomerHandoffLease(arbiter: arbiter, id: id)
+    }
+    var idleRevision: UUID? { arbiter.owner == nil ? arbiter.revision : nil }
+    func isIdleRevision(_ revision: UUID) -> Bool { arbiter.owner == nil && arbiter.revision == revision }
     @Published private(set) var active: JobEstimateHandoffModel?
     private(set) var start: CustomerViewStart = .estimates
     /// The customer's own details, when this person may edit customers.
@@ -538,44 +750,88 @@ final class JobEstimateHandoffPresenter: ObservableObject {
     private(set) var sourceGeneration: UUID?
     private(set) var invoiceUpdated: (InvoiceRecord) -> Void = { _ in }
     private var onAuthenticatedExit: (@MainActor (CustomerViewExit) async -> Void)?
+    private var exitAuthority: CustomerHandoffExitAuthority?
 
-    func present(_ model: JobEstimateHandoffModel, onAuthenticatedExit: @escaping @MainActor () async -> Void) {
+    @discardableResult func present(_ model: JobEstimateHandoffModel, onAuthenticatedExit: @escaping @MainActor () async -> Void) -> Bool {
         present(model, start: .estimates) { _ in await onAuthenticatedExit() }
     }
 
-    func present(_ model: JobEstimateHandoffModel, start: CustomerViewStart, details: CustomerSelfEditModel? = nil,
+    @discardableResult func present(_ model: JobEstimateHandoffModel, start: CustomerViewStart, details: CustomerSelfEditModel? = nil,
                  sourceGeneration: UUID? = nil, invoiceUpdated: @escaping (InvoiceRecord) -> Void = { _ in },
-                 onExit: @escaping @MainActor (CustomerViewExit) async -> Void) {
-        guard active == nil, model.isCurrentJob else { return }
+                 sourceWindow: UIWindow? = nil,
+                 onExit: @escaping @MainActor (CustomerViewExit) async -> Void) -> Bool {
+        guard active == nil, model.isCurrentJob,
+              let authority = CustomerHandoffExitAuthority.capture(api: model.api, session: model.session),
+              arbiter.claim(.documents) else { return false }
+        exitAuthority = authority
         self.start = start; self.details = details
         self.sourceGeneration = sourceGeneration ?? model.session.generation
         self.invoiceUpdated = invoiceUpdated
+        usesSceneWindow = sceneWindow != nil && sourceWindow != nil
         active = model; self.onAuthenticatedExit = onExit
+        if usesSceneWindow, let sceneWindow {
+            let id = UUID(); sceneOwnerID = id
+            let content = AnyView(JobEstimateProtectedOwner(model: model, presenter: self)
+                .environmentObject(model.api).environmentObject(model.session))
+            guard sceneWindow.present(id: id, source: sourceWindow, content: content, onDisconnect: { [weak self, weak model] in
+                guard let self, let model, self.active === model else { return }
+                self.finishExit(.done, runCallback: false)
+            }) else { finishExit(.done, runCallback: false); return false }
+        }
+        return true
+    }
+
+    func authenticatedExit(from model: JobEstimateHandoffModel, _ exit: CustomerViewExit = .done) {
+        guard active === model else { return }
+        authenticatedExit(exit)
     }
 
     func authenticatedExit(_ exit: CustomerViewExit = .done) {
-        let refresh = onAuthenticatedExit
+        if let sceneWindow, let sceneOwnerID {
+            sceneWindow.dismiss(id: sceneOwnerID) { [weak self] restored in self?.finishExit(exit, runCallback: restored) }
+        } else { finishExit(exit, runCallback: true) }
+    }
+
+    private func finishExit(_ exit: CustomerViewExit, runCallback: Bool) {
+        let refresh = onAuthenticatedExit, model = active, authority = exitAuthority
+        let valid = runCallback && (model.map { $0.isCurrentJob && authority?.isCurrent(api: $0.api, session: $0.session) == true } ?? false)
         active?.retire(clearDocuments: false); active = nil; onAuthenticatedExit = nil
+        exitAuthority = nil; sceneOwnerID = nil; usesSceneWindow = false
+        arbiter.release(.documents)
+        let exitRevision = arbiter.revision
         details = nil; invoiceUpdated = { _ in }; start = .estimates
-        Task { await refresh?(exit) }
+        if valid, let model, let authority {
+            Task {
+                guard self.isIdleRevision(exitRevision), authority.isCurrent(api: model.api, session: model.session) else { return }
+                await refresh?(exit)
+            }
+        }
     }
 }
 
 extension JobEstimateHandoffPresenter {
+    enum OpenResult { case presented, unavailable, superseded }
     /// Estimate and invoice detail's "Show to customer": Customer view on the document's own job,
     /// read fresh and checked against this workspace and customer. False when there is no verified
     /// job (the caller keeps its single-document presentation).
     func openCustomerView(jobID: String, customerID: String, customerName: String, start: CustomerViewStart,
                           api: APIClient, session: SessionController,
-                          onExit: @escaping @MainActor (CustomerViewExit) async -> Void) async -> Bool {
-        guard active == nil, session.can("job.view", feature: "jobs") else { return false }
-        let generation = session.generation
-        guard let job = try? await api.fieldJob(jobID), session.generation == generation, active == nil,
-              job.id == jobID, job.organizationId == session.activeOrganization?.id, job.customerId == customerID else { return false }
+                          sourceWindow: UIWindow? = nil,
+                          sourceStillAttached: @escaping @MainActor () -> Bool = { true },
+                          onExit: @escaping @MainActor (CustomerViewExit) async -> Void) async -> OpenResult {
+        guard active == nil, arbiter.owner == nil else { return .superseded }
+        let handoffRevision = arbiter.revision
+        guard let authority = CustomerHandoffExitAuthority.capture(api: api, session: session) else { return .superseded }
+        guard session.can("job.view", feature: "jobs") else { return .unavailable }
+        let job = try? await api.fieldJob(jobID)
+        guard !Task.isCancelled, sourceStillAttached(), active == nil, arbiter.owner == nil, arbiter.revision == handoffRevision,
+              authority.isCurrent(api: api, session: session), session.can("job.view", feature: "jobs") else { return .superseded }
+        guard let job, job.id == jobID, job.organizationId == session.activeOrganization?.id,
+              job.customerId == customerID else { return .unavailable }
         let model = JobEstimateHandoffModel(job: job, customerName: customerName, documents: JobDocumentCollections(), api: api, session: session)
         let details = session.can("customer.edit", feature: "core_crm") ? CustomerSelfEditModel(customerID: job.customerId) : nil
-        present(model, start: start, details: details, onExit: onExit)
-        return active === model
+        present(model, start: start, details: details, sourceWindow: sourceWindow, onExit: onExit)
+        return active === model ? .presented : .superseded
     }
 }
 

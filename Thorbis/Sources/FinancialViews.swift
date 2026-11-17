@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct EstimatesView: View {
     /// Opened from the scorecard: only the estimates behind Close rate (TG-19), until cleared.
@@ -176,8 +177,9 @@ struct EstimateDetailView: View {
     @State private var succeeded = 0
     @State private var showRevisionEditor = false
     @State private var action = ""
-    @State private var showToCustomer = false
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
+    @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var memberPricing: MemberPricing?
     @State private var showPDF = false
     @State private var openCustomer: Customer?
@@ -523,6 +525,9 @@ struct EstimateDetailView: View {
     var body: some View {
         scrollContent
         .background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
+        .onAppear { customerWindowAnchor.visible = true }
+        .onDisappear { customerWindowAnchor.visible = false }
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -565,24 +570,26 @@ struct EstimateDetailView: View {
         } }
         .task { await loadAndMaybePresent() }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
-        .fullScreenCover(isPresented: $showToCustomer) {
-            if let record { customerMode(record) }
-        }
     }
 
-    private func customerMode(_ record: EstimateRecord) -> some View {
-        CustomerModeContainer(onUnlocked: { customerModeClosed() }) { handBack in
+    private func customerMode(_ record: EstimateRecord, lease: LegacyCustomerHandoffLease) -> some View {
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }, authenticateOwner: customerHandoffAuthenticate) { handBack in
             CustomerEstimatePresentation(estimate: record, jobID: jobID, customerName: store.customerName(record.customerId),
                                          financing: session.can("organization.view", feature: FinancingWords.feature),
-                                         onApproved: { if let updated = $0 { self.record = updated } }, onDone: handBack)
+                                         currentAuthority: { legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true },
+                                         onApproved: { if legacyHandoff.active?.lease === lease,
+                                                          legacyHandoff.active?.isCurrent(api: api, session: session) == true,
+                                                          let updated = $0 { self.record = updated } }, onDone: handBack)
         }
         .environmentObject(api)
     }
 
-    private func customerModeClosed() {
-        showToCustomer = false
+    private func customerModeClosed(authority: CustomerHandoffExitAuthority, source: UIWindow) {
+        guard let exitRevision = customerView.idleRevision else { return }
         Task {
+            guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
             await load()
+            guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), authority.isCurrent(api: api, session: session) else { return }
             // TF-06: approved from the job's next step, the job (and its invoice step) comes back.
             if presentsOnOpen, record?.status == "approved" { dismiss() }
         }
@@ -590,13 +597,13 @@ struct EstimateDetailView: View {
     @ViewBuilder private var estimateBar: some View {
         if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
             // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
-            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { Task { await handToCustomer() } }
+            PaperActionBar(title: "Customer view · Estimates", symbol: "iphone", busy: busy) { Task { await handToCustomer() } }
         } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
             PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
         } else if let record, record.status == "sent", canShowSent(record) {
             // On site, the next step is the customer's yes: hand them the options to choose and sign.
             // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { Task { await presentToCustomer() } }
+            PaperActionBar(title: "Customer view · Estimates", symbol: "iphone", busy: busy) { Task { await presentToCustomer() } }
         }
     }
 
@@ -634,16 +641,30 @@ struct EstimateDetailView: View {
     /// job's other estimates, invoices and their own details. Without a job it stays a single document.
     private func presentToCustomer() async {
         guard let record else { return }
+        guard let fallbackAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              let source = customerWindowAnchor.window else { return }
         if let jobID {
             busy = true
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
-                customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session) { _ in
-                customerModeClosed()
+                customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session, sourceWindow: source,
+                sourceStillAttached: { customerWindowAnchor.isAttached(to: source) }) { _ in
+                guard let exitRevision = customerView.idleRevision, customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                await load()
+                guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                if presentsOnOpen, self.record?.status == "approved" { dismiss() }
             }
             busy = false
-            if opened { return }
+            if opened != .unavailable { return }
         }
-        showToCustomer = true
+        guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session),
+              let lease = customerView.claimLegacy() else { return }
+        let content = AnyView(customerMode(record, lease: lease))
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
+            sourceAttached: { customerWindowAnchor.isAttached(to: source) },
+            onDismiss: { _ in customerModeClosed(authority: fallbackAuthority, source: source) }),
+              legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
+            lease.release(); error = "Customer view is unavailable. Please try again."; return
+        }
     }
 
     private func performAction() async {
@@ -854,10 +875,9 @@ struct InvoiceDetailView: View {
     @State private var showCollectPayment = false
     @State private var paymentModel: InvoicePaymentCollectionModel?
     @State private var showSignature = false
-    @State private var showToCustomer = false
     @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
-    /// Set when the customer pressed Pay and the technician unlocked: collect once customer mode closes.
-    @State private var collectAfterCustomer = false
+    @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var showPDF = false
     @State private var showDiscount = false
     @State private var openCustomer: Customer?
@@ -876,8 +896,8 @@ struct InvoiceDetailView: View {
             items.append(ThorbisMenuItem("Customer view", icon: "iphone", isDisabled: busy) { Task { await presentToCustomer() } })
         }
         // Paper 40C: Edit is the pill under the payments.
-        if record.status == "draft", !session.isOffline, session.can("invoice.discount", feature: "invoicing") {
-            items.append(ThorbisMenuItem("Add discount or credit", icon: "tag") { showDiscount = true })
+        if canDiscountInvoice(record) {
+            items.append(ThorbisMenuItem("Add discount or credit", icon: "tag") { if canDiscountInvoice(record) { showDiscount = true } })
         }
         items.append(ThorbisMenuItem("View PDF", icon: "doc.text") { showPDF = true })
         if let application = financingApplications.first, application.isOpen,
@@ -904,8 +924,9 @@ struct InvoiceDetailView: View {
                 if let record {
                     // Paper 40C: the reference and status pill, the customer at 28 Bold and what it
                     // bills; then (16 from the edges) the balance card, payments, Edit, the lines.
-                    let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-                    let due = max(total - record.amountPaid, 0)
+                    let amounts = invoiceAmounts(record)
+                    let total = amounts?.total
+                    let due = amounts?.due
                     invoiceHeader(record)
                         .padding(.horizontal, Theme.gutter).padding(.top, 14)
                     VStack(alignment: .leading, spacing: 12) {
@@ -927,8 +948,8 @@ struct InvoiceDetailView: View {
                             WaitingToSyncLabel()
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    } else if record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
-                        Button { showSignature = true } label: {
+                    } else if amounts != nil, record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
+                        Button { if canSignInvoice(record) { showSignature = true } } label: {
                             Label("Get customer signature", systemImage: "signature")
                                 .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -940,7 +961,7 @@ struct InvoiceDetailView: View {
                         InvoicePaymentsSection(
                             model: paymentModel,
                             invoice: record,
-                            onCollectPayment: { showCollectPayment = true },
+                            onCollectPayment: { startCollection() },
                             onInvoiceUpdated: { _ = accept($0) },
                             invoiceReference: displayReference(record)
                         )
@@ -957,9 +978,10 @@ struct InvoiceDetailView: View {
                     }
                     EstimateDetailView.LinesCard(label: "Line items", lines: record.lines, totalLabel: "Total", total: total,
                                                  currency: record.currency,
-                                                 extraRows: record.amountPaid > 0 && record.status != "draft"
-                                                    ? [("Paid", money(record.amountPaid, currency: record.currency)), ("Balance due", money(due, currency: record.currency))]
-                                                    : [])
+                                                 extraRows: due.map { due in
+                                                     record.amountPaid > 0 && record.status != "draft"
+                                                        ? [("Paid", money(record.amountPaid, currency: record.currency)), ("Balance due", money(due, currency: record.currency))] : []
+                                                 } ?? [])
                     RecordActivitySection(recordType: "invoice", recordID: record.id)
                     }
                     .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
@@ -973,6 +995,9 @@ struct InvoiceDetailView: View {
         .modifier(PaperPreviewScrollAnchor())
         #endif
         .background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
+        .onAppear { customerWindowAnchor.visible = true }
+        .onDisappear { customerWindowAnchor.visible = false }
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -993,28 +1018,29 @@ struct InvoiceDetailView: View {
         }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
         .sheet(isPresented: $showDiscount) { SheetSurface {
-            if let record {
-                InvoiceDiscountSheet(invoice: record) { updated in _ = accept(updated) }
+            if let record, canDiscountInvoice(record) {
+                InvoiceDiscountSheet(invoice: record, canApply: { canDiscountInvoice(record) }) { updated in _ = accept(updated) }
             }
         } }
         .sheet(isPresented: $showSignature) { SheetSurface {
-            if let record, let jobID = record.jobId {
-                let total = record.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
-                SignatureCaptureSheet(title: "Sign for \(money(total, currency: record.currency))",
+            if let record, let jobID = record.jobId, let amounts = invoiceAmounts(record) {
+                SignatureCaptureSheet(title: "Sign for \(money(amounts.total, currency: record.currency))",
                                       summary: "By signing, \(store.customerName(record.customerId)) authorizes the work and charges on this invoice.",
                                       jobID: jobID, suggestedName: store.customerName(record.customerId),
                                       heading: "Sign invoice", summaryTitle: "Invoice summary",
                                       reference: displayReference(record),
                                       lines: signatureLines(record),
-                                      totalText: money(total, currency: record.currency),
+                                      totalText: money(amounts.total, currency: record.currency),
                                       queueOffline: { png, assetID, signer, signedAt in
+                                          guard canSignInvoice(record) else { return false }
                                           // OF-01: the ink stays on the phone and authorizes this exact revision once online.
-                                          outbox.enqueueSignature(png, payload: .init(jobId: jobID, invoiceId: record.id,
+                                          return outbox.enqueueSignature(png, payload: .init(jobId: jobID, invoiceId: record.id,
                                                                                       expectedLinesRevision: record.linesRevision,
                                                                                       signerName: signer, signedAt: signedAt,
                                                                                       clientAssetId: assetID),
                                                                   policyVersion: session.policyVersion ?? 0) != nil
                                       }) { signature in
+                    guard canSignInvoice(record) else { return "Refresh this invoice before signing." }
                     do {
                         let updated = try await api.authorizeFieldInvoice(id, expectedLinesRevision: record.linesRevision, signature: signature)
                         return accept(updated) ? nil : paymentModel?.loadError
@@ -1028,14 +1054,14 @@ struct InvoiceDetailView: View {
             if let paymentModel {
                 InvoiceDetailFooter(
                     model: paymentModel,
-                    canCollect: session.can("invoice.payment.create", feature: "payments"),
-                    canIssue: session.can("invoice.issue", feature: "invoicing"),
+                    canCollect: record.flatMap(invoiceAmounts) != nil && session.can("invoice.payment.create", feature: "payments"),
+                    canIssue: record.flatMap(invoiceAmounts) != nil && session.can("invoice.issue", feature: "invoicing"),
                     issueTitle: issueCollects ? "Issue and collect payment" : "Issue invoice",
                     busy: busy,
-                    onCollect: { showCollectPayment = true },
+                    onCollect: { startCollection() },
                     onIssue: { confirmIssue = true }
                 )
-            } else if let record, record.status == "draft", session.can("invoice.issue", feature: "invoicing") {
+            } else if let record, record.status == "draft", invoiceAmounts(record) != nil, session.can("invoice.issue", feature: "invoicing") {
                 PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                     .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
                     .background(Theme.canvas)
@@ -1060,45 +1086,10 @@ struct InvoiceDetailView: View {
                 .presentationDragIndicator(.visible)
             }
         } }
-        .fullScreenCover(isPresented: $showToCustomer, onDismiss: {
-            if collectAfterCustomer { collectAfterCustomer = false; showCollectPayment = true }
-            Task { await loadFinancing() }
-        }) {
-            if let record {
-                CustomerModeContainer(onUnlocked: { showToCustomer = false }) { handBack in
-                    CustomerInvoicePresentation(
-                        invoice: record, customerName: store.customerName(record.customerId),
-                        canSign: session.can("invoice.edit", feature: "invoicing"),
-                        onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments") ? {
-                            // Taking payment is a staff screen, so the technician unlocks first.
-                            Task {
-                                if await StaffUnlock.unlock(reason: "Unlock to take payment") {
-                                    collectAfterCustomer = true
-                                    showToCustomer = false
-                                }
-                            }
-                        } : nil,
-                        financing: session.can("invoice.payment.create", feature: FinancingWords.feature),
-                        onSigned: { updated in
-                            let paidChanged = updated.amountPaid != self.record?.amountPaid
-                            _ = accept(updated)
-                            // A funded loan is a payment the model has not seen: reload its history
-                            // so the remaining balance can still be taken.
-                            if paidChanged, let paymentModel {
-                                Task {
-                                    await paymentModel.load()
-                                    // The model is not observed here; re-reading the record redraws onPay.
-                                    if let loaded = paymentModel.invoice { self.record = loaded }
-                                }
-                            }
-                        },
-                        onDone: handBack)
-                }
-                .environmentObject(api)
-            }
-        }
         .sheet(isPresented: $showCollectPayment, onDismiss: returnIfPaid) {
-            if let paymentModel, let record {
+            if let paymentModel, let record, let paymentInvoice = paymentModel.invoice,
+               paymentInvoice.id == record.id, invoiceAmounts(record) != nil, invoiceAmounts(paymentInvoice) != nil,
+               session.can("invoice.payment.create", feature: "payments") {
                 InvoicePaymentCollectionSheet(model: paymentModel, invoice: record, invoiceReference: displayReference(record))
                     .thorbisSheetSurface()
                     .presentationDetents([.large])
@@ -1163,18 +1154,20 @@ struct InvoiceDetailView: View {
     /// Paper 40C's balance card: what's owed now (or the total, or what was paid) in the 28 Bold
     /// heading (Paper draws 30), and on the trailing side when it was issued, paid or voided. Red
     /// only when the server says overdue.
-    @ViewBuilder private func balanceCard(_ record: InvoiceRecord, total: Int, due: Int) -> some View {
+    @ViewBuilder private func balanceCard(_ record: InvoiceRecord, total: Int?, due: Int?) -> some View {
+        // A total that can't be worked out safely reads "Unavailable" instead of a wrong figure.
         let paidInFull = due == 0 && record.amountPaid > 0
         let label = record.status == "draft" ? "Total" : paidInFull ? "Paid in full" : "Balance due"
-        let cents = paidInFull ? record.amountPaid : record.status == "draft" ? total : due
+        let cents: Int? = paidInFull ? record.amountPaid : record.status == "draft" ? total : due
         let overdue = record.status == "overdue"
         let date = invoiceDate(record)
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(label).font(Theme.font(13, weight: .semibold))
                     .foregroundStyle(overdue ? Theme.destructive : Theme.muted)
-                Text(money(cents, currency: record.currency))
+                Text(cents.map { money($0, currency: record.currency) } ?? "Unavailable")
                     .font(Theme.heading()).monospacedDigit().tracking(-0.7)
+                    .accessibilityIdentifier(cents == nil ? "invoice-invalid-total" : "document-figure")
                     .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
                     .lineLimit(1).minimumScaleFactor(0.6)
                     .contentTransition(.numericText())
@@ -1235,29 +1228,118 @@ struct InvoiceDetailView: View {
         }
     }
 
+    private func customerInvoiceMode(_ record: InvoiceRecord, lease: LegacyCustomerHandoffLease) -> some View {
+        CustomerModeContainer(onUnlocked: { legacyHandoff.authenticatedExit(for: lease) }, authenticateOwner: customerHandoffAuthenticate) { handBack in
+            CustomerInvoicePresentation(
+                invoice: record, customerName: store.customerName(record.customerId),
+                canSign: session.can("invoice.edit", feature: "invoicing"),
+                onPay: paymentModel?.canRecordPayment == true && session.can("invoice.payment.create", feature: "payments") ? {
+                    Task {
+                        guard await StaffUnlock.unlock(reason: "Unlock to take payment"),
+                              legacyHandoff.active?.lease === lease,
+                              legacyHandoff.active?.isCurrent(api: api, session: session) == true else { return }
+                        legacyHandoff.authenticatedExit(for: lease, .collect)
+                    }
+                } : nil,
+                financing: session.can("invoice.payment.create", feature: FinancingWords.feature),
+                currentAuthority: { legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true },
+                onSigned: { updated in
+                    guard legacyHandoff.active?.lease === lease,
+                          legacyHandoff.active?.isCurrent(api: api, session: session) == true else { return }
+                    let paidChanged = updated.amountPaid != self.record?.amountPaid
+                    _ = accept(updated)
+                    if paidChanged, let paymentModel {
+                        Task {
+                            await paymentModel.load()
+                            guard legacyHandoff.active?.lease === lease,
+                                  legacyHandoff.active?.isCurrent(api: api, session: session) == true else { return }
+                            if let loaded = paymentModel.invoice { self.record = loaded }
+                        }
+                    }
+                }, onDone: handBack)
+        }.environmentObject(api)
+    }
+
     /// On a job, the invoice opens in that job's Customer view, with its payments and balance beside
     /// the job's other documents. Without a verified job it stays a single document.
     private func presentToCustomer() async {
         guard let record else { return }
+        guard let fallbackAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              let source = customerWindowAnchor.window else { return }
         if let jobID = record.jobId, expectedJobScope.map({ $0.contains(record) }) != false {
             busy = true
+            let handoffAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session)
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
-                customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session) { exit in
-                await load()
+                customerName: store.customerName(record.customerId), start: .invoice(record.id), api: api, session: session, sourceWindow: source,
+                sourceStillAttached: { customerWindowAnchor.isAttached(to: source) }) { exit in
+                guard let exitRevision = customerView.idleRevision, customerWindowAnchor.isAttached(to: source), let handoffAuthority,
+                      handoffAuthority.isCurrent(api: api, session: session) else { return }
+                await load(currentAuthority: { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && handoffAuthority.isCurrent(api: api, session: session) })
+                guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), handoffAuthority.isCurrent(api: api, session: session) else { return }
                 guard case .collect(let invoiceID) = exit, invoiceID == id, paymentModel?.canRecordPayment == true,
+                      paymentModel?.invoice?.id == invoiceID,
+                      paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true, paymentModel?.loadError == nil,
                       session.can("invoice.payment.create", feature: "payments") else { return }
-                showCollectPayment = true
+                startCollection()
             }
             busy = false
-            if opened { return }
+            if opened != .unavailable { return }
         }
-        showToCustomer = true
+        guard customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session),
+              let lease = customerView.claimLegacy() else { return }
+        let content = AnyView(customerInvoiceMode(record, lease: lease))
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
+            capability: "invoice.view", feature: "invoicing",
+            sourceAttached: { customerWindowAnchor.isAttached(to: source) }, onDismiss: { exit in
+                guard let exitRevision = customerView.idleRevision else { return }
+                Task {
+                    guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                    if case .collect = exit {
+                        await load(currentAuthority: { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
+                        guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                        guard paymentModel?.invoice?.id == record.id, paymentModel?.canRecordPayment == true,
+                              paymentModel?.offlineCopy == false, paymentModel?.historyComplete == true,
+                              paymentModel?.loadError == nil, session.can("invoice.payment.create", feature: "payments") else {
+                            error = "Refresh this invoice before collecting payment."
+                            return
+                        }
+                        startCollection()
+                    }
+                    guard customerView.isIdleRevision(exitRevision), customerWindowAnchor.isAttached(to: source), fallbackAuthority.isCurrent(api: api, session: session) else { return }
+                    await loadFinancing(currentAuthority: { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session) })
+                }
+            }), legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
+            lease.release(); error = "Customer view is unavailable. Please try again."; return
+        }
     }
 
     /// TF-08: issuing and collecting are one step for the tech; payment opens right after.
+    private func invoiceAmounts(_ invoice: InvoiceRecord) -> CustomerDocumentAmounts? {
+        CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+    }
+
+    private func canSignInvoice(_ invoice: InvoiceRecord) -> Bool {
+        guard let current = record, current == invoice, current.status != "void",
+              current.jobId != nil, invoiceAmounts(current) != nil else { return false }
+        return session.can("invoice.edit", feature: "invoicing")
+    }
+
+    private func canDiscountInvoice(_ invoice: InvoiceRecord) -> Bool {
+        guard let current = record, current == invoice, current.status == "draft",
+              invoiceAmounts(current) != nil, !session.isOffline else { return false }
+        return session.can("invoice.discount", feature: "invoicing")
+    }
+
+    private func startCollection() {
+        guard let record, invoiceAmounts(record) != nil, let paymentModel,
+              paymentModel.invoice == record, paymentModel.canRecordPayment,
+              session.can("invoice.payment.create", feature: "payments") else { return }
+        showCollectPayment = true
+    }
+
     private func issueThenCollect() async {
         guard await issue(), issueCollects, paymentModel?.canRecordPayment == true else { return }
-        showCollectPayment = true
+        startCollection()
     }
 
     private func returnIfPaid() {
@@ -1268,7 +1350,8 @@ struct InvoiceDetailView: View {
         session.can("invoice.issue", feature: "invoicing") && session.can("invoice.payment.create", feature: "payments")
     }
     @discardableResult private func issue() async -> Bool {
-        guard let current = record else { return false }
+        guard let current = record, current.status == "draft", invoiceAmounts(current) != nil,
+              session.can("invoice.issue", feature: "invoicing") else { return false }
         busy = true
         defer { busy = false }
         do {
@@ -1292,7 +1375,8 @@ struct InvoiceDetailView: View {
         return true
     }
 
-    private func load() async {
+    private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority() else { return }
         let generation = session.generation
         guard expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
             record = nil
@@ -1306,14 +1390,14 @@ struct InvoiceDetailView: View {
         }
         guard let paymentModel else { return }
         await paymentModel.load()
-        guard session.generation == generation else { return }
+        guard currentAuthority(), session.generation == generation else { return }
         record = paymentModel.invoice
         if paymentModel.invoice != nil {
             error = nil
         } else if let loadError = paymentModel.loadError {
             error = loadError
         }
-        await loadFinancing()
+        await loadFinancing(currentAuthority: currentAuthority)
     }
 
     private func cancelFinancing(_ application: FinancingApplication) async {
@@ -1326,14 +1410,16 @@ struct InvoiceDetailView: View {
     }
 
     /// Reads applications back from the lender; a newly funded loan reloads the payments.
-    private func loadFinancing() async {
-        guard let record, record.status != "draft", record.status != "void",
+    private func loadFinancing(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), let record, record.status != "draft", record.status != "void",
               session.can("invoice.view", feature: FinancingWords.feature),
               let latest = try? await api.refreshFinancingApplications(invoiceID: id) else { return }
+        guard currentAuthority() else { return }
         let newlyFunded = latest.contains { $0.status == "funded" } && !financingApplications.contains { $0.status == "funded" }
         financingApplications = latest
         if newlyFunded, let paymentModel {
             await paymentModel.load()
+            guard currentAuthority() else { return }
             if let invoice = paymentModel.invoice { self.record = invoice }
         }
     }
@@ -1473,23 +1559,38 @@ struct DocumentLinesSection: View {
     let currency: String
     var extraRows: [(String, String)] = []
     var memberLine: String? = nil
+    var onEdit: (() -> Void)? = nil
+    var editDisabled = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The column hint only when the label fits beside it on one line; a long option name
             // ("Option 1 · Full system replacement") keeps the row to itself instead of wrapping.
-            ViewThatFits(in: .horizontal) {
+            if let onEdit {
                 SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
-                    if !lines.isEmpty && !typeSize.isAccessibilitySize {
-                        Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                    }
+                    if !typeSize.isAccessibilitySize { editItemsButton(onEdit) }
                 }
-                SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) { EmptyView() }
+                if typeSize.isAccessibilitySize { editItemsButton(onEdit) }
+                if !lines.isEmpty && !typeSize.isAccessibilitySize {
+                    Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .accessibilityHidden(true)
+                        .padding(.horizontal, 4).padding(.bottom, 2)
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) {
+                        if !lines.isEmpty && !typeSize.isAccessibilitySize {
+                            Text("Qty · Amount").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    SectionHeader(title: label, count: lines.isEmpty ? nil : lines.count) { EmptyView() }
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 2)
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.bottom, 2)
             Well {
                 if !note.isEmpty {
                     Text(note).font(Theme.font(15)).foregroundStyle(Theme.subtle)
@@ -1522,6 +1623,20 @@ struct DocumentLinesSection: View {
                     .padding(.horizontal, 4).padding(.top, 8)
             }
         }
+    }
+
+    private func editItemsButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label("Edit items", systemImage: "pencil")
+                .font(Theme.font(14, weight: .medium))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Theme.brandText)
+        .disabled(editDisabled)
+        .accessibilityHint("Opens the invoice editor")
+        .accessibilityIdentifier("invoice-detail-edit-items")
     }
 }
 
@@ -1650,18 +1765,38 @@ func money(_ cents: Int, currency: String) -> String {
 func estimatesSummary(_ estimates: [EstimateRecord]) -> String {
     let open = estimates.filter { $0.status != "approved" && $0.status != "declined" }
     let waiting = estimates.filter { $0.status == "sent" }
-    let total = waiting.compactMap { paperLinesTotal($0.lines) }.reduce(0, +)
     if open.isEmpty { return "Nothing open" }
     let count = "\(open.count) open"
-    return waiting.isEmpty ? "\(count) · nothing waiting on customers" : "\(count) · \(money(total, currency: "USD")) waiting on customers"
+    guard !waiting.isEmpty else { return "\(count) · nothing waiting on customers" }
+    var total = 0
+    for estimate in waiting {
+        guard let amount = CustomerDocumentAmounts(lines: estimate.lines, currency: "USD")?.total else {
+            return "\(count) · total unavailable"
+        }
+        let (next, overflow) = total.addingReportingOverflow(amount)
+        guard !overflow else { return "\(count) · total unavailable" }
+        total = next
+    }
+    return "\(count) · \(money(total, currency: "USD")) waiting on customers"
 }
 
 /// The Invoices header's subtitle (Paper 20F): "$8,615 unpaid · 5 invoices". Invoices carry no due
 /// date yet, so the overdue figure Paper shows beside it is left out.
 func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
     let unpaid = invoices.filter { $0.status == "issued" }
-    let owed = unpaid.compactMap { invoice in paperLinesTotal(invoice.lines).map { max(0, $0 - invoice.amountPaid) } }.reduce(0, +)
-    return unpaid.isEmpty ? "Everything is paid" : "\(money(owed, currency: "USD"))\u{00A0}unpaid · \(unpaid.count) invoice\(unpaid.count == 1 ? "" : "s")"
+    guard !unpaid.isEmpty else { return "Everything is paid" }
+    let count = "\(unpaid.count) invoice\(unpaid.count == 1 ? "" : "s")"
+    var owed = 0
+    for invoice in unpaid {
+        guard invoice.currency == "USD",
+              let amount = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid) else {
+            return "Balance unavailable · \(count)"
+        }
+        let (next, overflow) = owed.addingReportingOverflow(amount.due)
+        guard !overflow else { return "Balance unavailable · \(count)" }
+        owed = next
+    }
+    return "\(money(owed, currency: "USD"))\u{00A0}unpaid · \(count)"
 }
 
 /// Paper 20E/20F's search field: a card well 48 tall, radius 14, the magnifier and 16pt words.
@@ -1809,12 +1944,11 @@ extension View {
     }
 }
 
-
-
 /// Web parity: discount a draft invoice. The amount and a reason the customer sees ("Discount —
 /// Loyalty"), checked here against the total so the server's refusal is the rare case.
 struct InvoiceDiscountSheet: View {
     let invoice: InvoiceRecord
+    let canApply: () -> Bool
     let applied: (InvoiceRecord) -> Void
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
@@ -1826,7 +1960,7 @@ struct InvoiceDiscountSheet: View {
     @State private var busy = false
     @FocusState private var amountFocused: Bool
 
-    private var total: Int { invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount } }
+    private var total: Int? { CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)?.total }
 
     /// "150", "150.5", "$1,250.00" → cents; nil when it isn't a plain amount.
     private var cents: Int? {
@@ -1885,8 +2019,8 @@ struct InvoiceDiscountSheet: View {
                         .padding(.horizontal, 4)
                 }
             }
-            if let off = cents, off <= total {
-                newTotalCard(off)
+            if let off = cents, let total, off <= total {
+                newTotalCard(off, total: total)
             }
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
         }
@@ -1895,7 +2029,7 @@ struct InvoiceDiscountSheet: View {
     }
 
     /// Paper 40D: what the invoice comes to with this discount, and what it was.
-    private func newTotalCard(_ off: Int) -> some View {
+    private func newTotalCard(_ off: Int, total: Int) -> some View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("New total").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.success)
@@ -1916,6 +2050,7 @@ struct InvoiceDiscountSheet: View {
     /// Validate on commit: say what's missing under the field instead of locking the button.
     private func press() async {
         guard !busy else { return }
+        guard canApply(), let total else { error = "Invoice total unavailable. Refresh before applying a discount."; return }
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let cents else { amountProblem = "Enter an amount, like 50.00."; return }
         guard cents <= total else { amountProblem = "A discount can\u{2019}t be more than the invoice total."; return }

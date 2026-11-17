@@ -7,6 +7,62 @@ import XCTest
 final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private let itemID = "price-book-item-00000000-0000-4000-8000-000000009999"
 
+    func testDraftInvoiceOffersDirectLineItemEditing() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<8 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 20))
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["invoice-add-item"].exists)
+    }
+
+    func testDirectLineEditingAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<20 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        XCTAssertTrue(edit.isHittable)
+        XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+    }
+
+    func testDirectLineEditingRequiresDraftAndPermission() {
+        for arguments in [["--paper-preview-invoice-detail-draft", "--paper-preview-deny-document-edit"], []] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail"] + arguments
+            app.launch()
+            XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 20))
+            XCTAssertFalse(app.buttons["invoice-detail-edit-items"].exists)
+            app.terminate()
+        }
+    }
+
+    func testInvalidDraftStillAllowsEditingForCorrection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-overflow"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
+        let edit = app.buttons["invoice-detail-edit-items"]
+        for _ in 0..<8 where !edit.isHittable { app.swipeUp() }
+        XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        XCTAssertTrue(edit.isHittable)
+        edit.tap()
+        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+    }
+
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -14,6 +70,84 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
         return app
+    }
+
+    func testLongInvoiceCanAddFromTheSectionHeading() {
+        let app = launch(["--paper-preview-long-catalog-sections"])
+        let add = app.buttons["invoice-add-item-heading"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertTrue(add.isHittable, "The catalog should be reachable before scrolling through the lines")
+        XCTAssertGreaterThanOrEqual(add.frame.height, 44)
+        XCTAssertEqual(lineCount(app), 12)
+        add.tap()
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("Camera sewer inspection")
+        let item = app.buttons[itemID]
+        XCTAssertTrue(item.waitForExistence(timeout: 10)); item.tap()
+        app.buttons["price-book-done"].tap()
+        XCTAssertTrue(search.waitForNonExistence(timeout: 10))
+        XCTAssertEqual(lineCount(app), 13)
+        _ = openLineIdentity(app)
+    }
+
+    func testHeadingCatalogKeepsAnUnsavedLineEdit() {
+        let app = launch(["--paper-preview-long-catalog-sections"])
+        let first = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sample work item 1")).firstMatch
+        XCTAssertTrue(first.waitForExistence(timeout: 10))
+        first.tap()
+        let identity = openLineIdentity(app)
+        let quantity = app.textFields["invoice-line-quantity-" + identity]
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        reveal(quantity, in: app); quantity.tap()
+        replaceQuantity(quantity, with: "2", in: app)
+        XCTAssertEqual(quantity.value as? String, "2")
+        app.buttons["Done"].firstMatch.tap()
+        let add = app.buttons["invoice-add-item-heading"]
+        for _ in 0..<8 where !add.isHittable { app.swipeDown() }
+        XCTAssertTrue(add.isHittable); add.tap()
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("Camera sewer inspection")
+        let done = app.buttons["price-book-done"]
+        XCTAssertTrue(done.isHittable, "The catalog action must be reachable after the keyboard settles")
+        done.tap()
+        XCTAssertTrue(app.textFields["invoice-catalog-search"].waitForNonExistence(timeout: 10))
+        if !quantity.exists { first.tap() }
+        XCTAssertTrue(quantity.waitForExistence(timeout: 10))
+        XCTAssertEqual(quantity.value as? String, "2", "Opening the catalog must keep the unsaved edit")
+    }
+
+    func testLongInvoiceHeadingActionAtLargestText() {
+        let app = launch(["--paper-preview-long-catalog-sections", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let add = app.buttons["invoice-add-item-heading"]
+        for _ in 0..<8 where !add.exists { app.swipeUp() }
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        for _ in 0..<8 where !add.isHittable { app.swipeUp() }
+        XCTAssertTrue(add.isHittable)
+        XCTAssertGreaterThanOrEqual(add.frame.height, 44)
+        add.tap()
+        XCTAssertTrue(app.textFields["invoice-catalog-search"].waitForExistence(timeout: 10))
+    }
+
+    func testHeadingActionRespectsInvoiceEditPermission() {
+        let app = launch(["--paper-preview-long-catalog-sections", "--paper-preview-deny-document-edit"])
+        let add = app.buttons["invoice-add-item-heading"]
+        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        XCTAssertFalse(add.isEnabled)
+    }
+
+    func testHeadingActionRespectsInvoiceLineLimit() {
+        let app = launch(["--paper-preview-max-catalog-sections"])
+        let add = app.buttons["invoice-add-item-heading"]
+        XCTAssertTrue(add.waitForExistence(timeout: 20))
+        XCTAssertFalse(add.isEnabled, "The heading action must respect the same 500-line limit")
+    }
+
+    func testShortInvoiceKeepsOnlyItsExistingAddAction() {
+        let app = launch()
+        XCTAssertFalse(app.buttons["invoice-add-item-heading"].exists)
+        XCTAssertTrue(app.buttons["invoice-add-item"].exists)
     }
 
     /// "Line items · N" read from its identifier, so additions are counted, not guessed.

@@ -172,6 +172,7 @@ struct JobContactsSection: View {
     let failed: Bool
     /// When known, each real contact opens its own record; the account fallback never does.
     var customerID: String? = nil
+    let jobID: String
     /// The account's name as the job already shows it: a contact with the same name leads with
     /// its role instead of repeating the name (each fact once).
     var customerName: String? = nil
@@ -210,7 +211,8 @@ struct JobContactsSection: View {
                             .padding(.horizontal, 16).padding(.top, 10)
                     }
                     ForEach(people) { person in
-                        JobContactRow(person: person, divided: person.id != people.first?.id,
+                        JobContactRow(person: person, emailContext: "job:\(jobID):contact:\(person.id)",
+                                      divided: person.id != people.first?.id,
                                       route: customerID.flatMap { id in
                                           person.id.hasPrefix("customer-") ? nil : PaperRoute.contact(customerID: id, contactID: person.id)
                                       })
@@ -225,11 +227,13 @@ struct JobContactsSection: View {
 /// brand tone), the name at 16 Medium over the role at 14, then Call and Text as 44pt circles.
 private struct JobContactRow: View {
     let person: JobContacts.Person
+    let emailContext: String
     /// A hairline above the row's words (every row but the first).
     var divided = false
     var route: PaperRoute? = nil
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
 
     var body: some View {
         let reach = person.reach
@@ -257,7 +261,7 @@ private struct JobContactRow: View {
                 if let call = reach.call { glyph("phone", label: "Call \(person.name)") { openURL(call) } }
                 if let text = reach.text { glyph("message", label: "Text \(person.name)") { inboxText(text, name: person.name, openURL: openURL) } }
                 // Paper draws Call and Text; Email takes their place for a contact with no number.
-                if reach.call == nil, let email = reach.email { glyph("envelope", label: "Email \(person.name)") { openURL(email) } }
+                if reach.call == nil, let email = reach.email { glyph("envelope", label: "Email \(person.name)") { inboxEmail(email, context: emailContext) } }
             }
             .padding(.trailing, 12).padding(.vertical, 6)
             .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)

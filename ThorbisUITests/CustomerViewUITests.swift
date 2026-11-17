@@ -14,9 +14,12 @@ final class CustomerViewUITests: XCTestCase {
                                "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"]
         app.launch()
 
-        let door = app.buttons["job-customer-view"]
+        let door = app.buttons["job-onsite-show-customer"]
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
+        for _ in 0..<10 where !door.exists { app.swipeUp() }
         XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one visible Customer view door")
-        XCTAssertEqual(door.label, "Show customer")
+        app.scrollClearOfFoot(door)
+        XCTAssertTrue(door.label.contains("Customer view"))
         door.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         capture(app, "Customer view home")
@@ -127,7 +130,7 @@ final class CustomerViewUITests: XCTestCase {
 
     /// The detail screen's own door, not the job header's one still in the stack beneath it.
     private func detailDoor(_ app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Show customer", "job-customer-view")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Customer view · Estimates", "job-customer-view")).firstMatch
     }
 
     private func ownerExit(_ app: XCUIApplication) {
@@ -162,6 +165,7 @@ final class CustomerViewUITests: XCTestCase {
             guard list.exists else { return }
             list.swipeUp(velocity: .slow)
         }
+        XCTFail("Customer view control must be hittable and clear of navigation and hand-back controls")
     }
 
     private func back(_ app: XCUIApplication) {

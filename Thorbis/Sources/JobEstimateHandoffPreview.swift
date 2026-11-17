@@ -27,6 +27,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private var choosingWorkspace = false
     private var unlocks = 0
     private var interruptMembership = false
+    private var rejectMembership = false
     private var interruptUpload = false
     private var unlockAllowed = true
     private var changedRevision = false
@@ -35,12 +36,18 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private var flags: [String] { ProcessInfo.processInfo.arguments }
     private var org: String { workspaceChanged ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID }
     private var now: String { ISO8601DateFormatter().string(from: Date()) }
-    private var ids: [String] { flags.contains("--paper-preview-handoff-third-sent") ? [Self.a, Self.b, Self.c] : flags.contains("--paper-preview-handoff-all-statuses") ? [Self.a, Self.b, Self.c, Self.d] : [Self.a,Self.b] }
-    func reset() { lock.withLock { approved = [:]; acceptances = [:]; assets = [:]; clients = [:]; bytes = [:]; attempts = []; requests = []; lost = false; workspaceChanged = false; sessionEnded = false; choosingWorkspace = false; unlocks = 0; interruptMembership = false; interruptUpload = false; changedRevision = false; changedFirstRevision = false; removedFirst = false; unlockAllowed = !flags.contains("--paper-preview-handoff-denied-unlock") } }
+    private var ids: [String] {
+        if flags.contains("--paper-preview-handoff-many-estimates") {
+            return [Self.a, Self.b] + (1...38).map { String(format: "00000000-0000-4000-8000-%012d", 82000 + $0) }
+        }
+        return flags.contains("--paper-preview-handoff-third-sent") ? [Self.a, Self.b, Self.c] : flags.contains("--paper-preview-handoff-all-statuses") ? [Self.a, Self.b, Self.c, Self.d] : [Self.a,Self.b]
+    }
+    func reset() { lock.withLock { approved = [:]; acceptances = [:]; assets = [:]; clients = [:]; bytes = [:]; attempts = []; requests = []; lost = false; workspaceChanged = false; sessionEnded = false; choosingWorkspace = false; unlocks = 0; interruptMembership = false; rejectMembership = false; interruptUpload = false; changedRevision = false; changedFirstRevision = false; removedFirst = false; unlockAllowed = !flags.contains("--paper-preview-handoff-denied-unlock") } }
     func changeWorkspace() { lock.withLock { workspaceChanged = true } }
     func endSession() { lock.withLock { sessionEnded = true } }
     func chooseWorkspace() { lock.withLock { choosingWorkspace = true } }
     func interruptNextMembership() { lock.withLock { interruptMembership = true } }
+    func rejectNextMembership() { lock.withLock { rejectMembership = true } }
     func interruptNextUpload() { lock.withLock { interruptUpload = true } }
     func allowUnlock() { lock.withLock { unlockAllowed = true } }
     func authenticate() -> Bool { lock.withLock { unlocks += 1; return unlockAllowed } }
@@ -52,6 +59,9 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         return String(data: try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), encoding: .utf8)!
     } }
     private func title(_ id: String) -> String {
+        if id == Self.a, flags.contains("--paper-preview-handoff-long-title") {
+            return "Replace the water heater and restore the service area"
+        }
         if flags.contains("--paper-preview-handoff-duplicate-titles") { return "Sample service" }
         return id == Self.a ? "Sample repair" : id == Self.b ? "Sample additional work" : id == Self.c ? "Previously approved work" : "Draft work"
     }
@@ -81,16 +91,28 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func status(_ id: String) -> String {
         if id == Self.c, flags.contains("--paper-preview-handoff-third-sent"), approved[id] == nil { return "sent" }
-        if approved[id] != nil || id == Self.c || (id == Self.a && flags.contains("--paper-preview-handoff-mixed")) { return "approved" }
+        if approved[id] != nil || id == Self.c || (id == Self.a && flags.contains("--paper-preview-handoff-mixed")) || (id == Self.b && flags.contains("--handoff-test-second-approved")) { return "approved" }
         return id == Self.d ? "draft" : "sent"
     }
     private func options(_ id: String) -> [[String: Any]] {
+        if id == Self.b, flags.contains("--handoff-test-empty-option") {
+            return [["id": "00000000-0000-4000-8000-000000008202", "title": "Empty package", "description": "",
+                     "lines": [["id": "sample-option", "description": "Unverified package", "quantity": 1,
+                                "unitPrice": ["amount": 25000, "currency": "USD"]]], "totalAmount": 25000, "currency": "USD"]]
+        }
         guard id == Self.a, flags.contains("--paper-preview-handoff-options") else { return [] }
-        let scope: [[String: Any]] = [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 25000, "currency": "USD"]]]
+        let scope: [[String: Any]] = flags.contains("--paper-preview-handoff-receipt")
+            ? [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 20000, "currency": "USD"]],
+               ["id": "private-material", "description": "Private internal material", "quantity": 1, "unitPrice": ["amount": 5000, "currency": "USD"], "showToCustomer": false]]
+            : [["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 25000, "currency": "USD"]]]
         let description = flags.contains("--paper-preview-handoff-long-description")
             ? "This package includes a complete inspection and preparation before installation.\n\nFinal package detail: test all equipment and explain the finished work."
             : "One package within this estimate"
-        return [["id": "00000000-0000-4000-8000-000000008201", "title": "Sample package", "description": description, "lines": scope, "totalAmount": 25000, "currency": "USD"]]
+        var result: [[String: Any]] = [["id": "00000000-0000-4000-8000-000000008201", "title": "Sample package", "description": description, "lines": scope, "totalAmount": 25000, "currency": "USD"]]
+        if flags.contains("--paper-preview-handoff-receipt") {
+            result.append(["id": "00000000-0000-4000-8000-000000008202", "title": "Other package", "description": "Not selected", "lines": [["id": "other-line", "description": "Unselected package scope", "quantity": 1, "unitPrice": ["amount": 30000, "currency": "USD"]]], "totalAmount": 30000, "currency": "USD"])
+        }
+        return result
     }
     private func estimate(_ id: String) -> [String: Any] {
         var value: [String: Any] = ["id": id, "organizationId": org, "customerId": PaperPreview.customerID, "createdByUserId": PaperPreview.actorID, "status": status(id), "currentRevisionNumber": (changedRevision && id == Self.b) || (changedFirstRevision && id == Self.a) ? 2 : 1, "title": title(id), "lines": lines(id), "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z"]
@@ -103,8 +125,27 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     }
     private func revision(_ id: String) -> [String: Any] {
         let number = changedFirstRevision && id == Self.a ? 2 : 1
-        return ["id": id.replacingOccurrences(of: "0081", with: "0091"), "estimateId": id, "organizationId": org, "customerId": PaperPreview.customerID,
-         "revisionNumber": number, "status": "issued", "title": title(id), "lines": lines(id), "options": options(id), "totalAmount": amount(id), "currency": "USD"]
+        var value: [String: Any] = ["id": id.replacingOccurrences(of: "0081", with: "0091"), "estimateId": id, "organizationId": org, "customerId": PaperPreview.customerID,
+         "revisionNumber": number, "status": status(id) == "approved" ? "approved" : "issued", "title": title(id), "lines": lines(id), "options": options(id), "totalAmount": amount(id), "currency": "USD"]
+        if id == Self.b {
+            if flags.contains("--handoff-test-empty-base") { value["lines"] = []; value["totalAmount"] = 0 }
+            if flags.contains("--handoff-test-empty-option") {
+                value["options"] = [["id": "00000000-0000-4000-8000-000000008202", "title": "Empty package",
+                                     "description": "", "lines": [], "totalAmount": 0, "currency": "USD"]]
+            }
+            if flags.contains("--handoff-test-non-usd") {
+                value["currency"] = "EUR"
+                value["lines"] = [["id": id, "description": "Non-USD sample", "quantity": 1,
+                                    "unitPrice": ["amount": amount(id), "currency": "EUR"]]]
+            }
+            if flags.contains("--handoff-test-mismatch") { value["totalAmount"] = amount(id) + 1 }
+            if flags.contains("--handoff-test-zero-line") {
+                value["lines"] = [["id": id, "description": "Included sample service", "quantity": 1,
+                                    "unitPrice": ["amount": 0, "currency": "USD"]]]
+                value["totalAmount"] = 0
+            }
+        }
+        return value
     }
     private func job() -> [String: Any] {
         ["id": PaperPreview.jobID, "organizationId": org, "customerId": PaperPreview.customerID, "title": "Sample service visit", "status": "in_progress", "createdAt": "2026-10-29T00:00:00Z", "updatedAt": "2026-10-29T00:00:00Z", "allowedTransitions": ["completed", "paused"]]
@@ -134,7 +175,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     func response(_ request: URLRequest) -> Response? { lock.withLock {
         guard let url = request.url else { return .init(status: 400, payload: [:]) }
         let path = url.path, method = request.httpMethod ?? "GET"
-        requests.append(["method": method, "path": path])
+        requests.append(["method": method, "path": path, "query": url.query ?? ""])
         let input = data(request)
         let body = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] ?? [:]
         let expiry = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
@@ -157,14 +198,65 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
            flags.contains("--paper-preview-handoff-membership-fails-after-approval"), !approved.isEmpty {
             return .init(status: 200, payload: [:], error: URLError(.networkConnectionLost))
         }
+        if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates", rejectMembership {
+            rejectMembership = false; return .init(status:503,payload:["status":503,"title":"Sample membership unavailable"])
+        }
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates", interruptMembership {
             interruptMembership = false; return .init(status: 200, payload: [:], error: URLError(.networkConnectionLost))
         }
-        if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates" { return .init(status:200,payload:["items":ids.filter { !removedFirst || $0 != Self.a }.map { ["id":$0,"jobId":PaperPreview.jobID,"estimateId":$0,"linkedAt":now] }]) }
+        if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates" {
+            let all = ids.filter { !removedFirst || $0 != Self.a }
+            if flags.contains("--paper-preview-handoff-many-estimates") {
+                let cursor = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "cursor" })?.value
+                let start = cursor.flatMap { all.firstIndex(of: $0).map { $0 + 1 } } ?? 0
+                let end = min(start + 10, all.count)
+                let slice = Array(all[start..<end])
+                var payload: [String: Any] = ["items": slice.map { ["id":$0,"jobId":PaperPreview.jobID,"estimateId":$0,"linkedAt":now] }]
+                if end < all.count { payload["nextCursor"] = slice.last }
+                return .init(status: 200, payload: payload)
+            }
+            return .init(status:200,payload:["items":all.map { ["id":$0,"jobId":PaperPreview.jobID,"estimateId":$0,"linkedAt":now] }])
+        }
         if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/invoices" { return .init(status:200,payload:["items":[]]) }
         for id in ids {
+            if method == "GET", path == "/v1/jobs/\(PaperPreview.jobID)/estimates/\(id)" {
+                if removedFirst && id == Self.a { return .init(status:404,payload:["status":404,"title":"Not found"]) }
+                return .init(status:200,payload:["id":id,"jobId":PaperPreview.jobID,"estimateId":id,"linkedAt":now])
+            }
             if method == "GET", path == "/v1/estimates/\(id)" { return .init(status:200,payload:estimate(id)) }
-            if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" { return .init(status:200,payload:revision(id)) }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/\(changedFirstRevision && id == Self.a ? 2 : 1)" {
+                if id == Self.b, flags.contains("--handoff-test-second-price-fails-once"), requests.filter({ $0["method"] == "GET" && $0["path"] == path }).count == 1 {
+                    return .init(status:503,payload:["title":"Sample estimate unavailable","status":503])
+                }
+                if id == Self.b, flags.contains("--paper-preview-handoff-second-details-fail") {
+                    return .init(status:503,payload:["title":"Sample estimate unavailable","status":503])
+                }
+                return .init(status:200,payload:revision(id))
+            }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/1/acceptance", id == Self.b,
+               flags.contains("--handoff-test-approved-receipt") {
+                let revisionID = flags.contains("--handoff-test-approved-receipt-wrong-revision")
+                    ? "00000000-0000-4000-8000-000000009199"
+                    : id.replacingOccurrences(of: "0081", with: "0091")
+                return .init(status:200,payload:["id":"00000000-0000-4000-8000-000000007101", "estimateId":id,
+                    "revisionId":revisionID, "revisionNumber":1, "contentHash":String(repeating:"b",count:64),
+                    "signerName":"Sample customer", "acceptedAt":now, "totalAmount":amount(id), "currency":"USD", "lines":lines(id)])
+            }
+            if method == "GET", path == "/v1/estimates/\(id)/revisions/1/acceptance" {
+                guard flags.contains("--paper-preview-handoff-receipt"), let acceptance = acceptances[id],
+                      let optionID = acceptance["optionId"] as? String,
+                      let option = options(id).first(where: { $0["id"] as? String == optionID }) else {
+                    return .init(status: 404, payload: ["status": 404, "title": "Not found"])
+                }
+                if flags.contains("--paper-preview-handoff-remove-link-after-receipt") { removedFirst = true }
+                return .init(status: 200, payload: ["id": acceptance["id"]!, "estimateId": id,
+                    "revisionId": flags.contains("--paper-preview-handoff-wrong-receipt") ? "00000000-0000-4000-8000-000000009999" : id.replacingOccurrences(of: "0081", with: "0091"), "revisionNumber": 1,
+                    "contentHash": String(repeating: "a", count: 64), "optionId": optionID,
+                    "optionTitle": option["title"]!, "signerName": acceptance["signerName"]!,
+                    "acceptedAt": now, "totalAmount": option["totalAmount"]!, "currency": "USD", "lines": [
+                        ["id": "sample-package-line", "description": "Selected package scope", "quantity": 1, "unitPrice": ["amount": 20000, "currency": "USD"]],
+                        ["id": "private-material", "description": "Materials", "quantity": 1, "unitPrice": ["amount": 5000, "currency": "USD"]]]])
+            }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
             if method == "POST", path == "/v1/estimates/\(id)/action-tokens" { return .init(status:200,payload:["token":"sample-\(id)"]) }
             if method == "GET", path == "/v1/public/document-actions/sample-\(id)" { return .init(status:200,payload:action(id)) }

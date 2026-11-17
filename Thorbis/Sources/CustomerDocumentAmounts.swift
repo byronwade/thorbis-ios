@@ -11,6 +11,22 @@ func customerEstimateProjection(_ lines: [FieldLine], currency: String) -> [Fiel
                      unitPrice: FieldMoney(amount: total, currency: currency), source: nil)]
 }
 
+/// Customer-visible estimate lines and their consistent breakdown.
+struct CustomerEstimateDisplay {
+    let lines: [FieldLine]
+    let amounts: CustomerDocumentAmounts
+}
+
+/// Derive every displayed amount from the same customer projection, while
+/// independently checking it preserves the verified canonical total.
+func customerEstimateDisplay(_ lines: [FieldLine], currency: String) -> CustomerEstimateDisplay? {
+    guard let canonical = CustomerDocumentAmounts(lines: lines, currency: currency),
+          let projected = customerEstimateProjection(lines, currency: currency),
+          let visible = CustomerDocumentAmounts(lines: projected, currency: currency),
+          visible.total == canonical.total else { return nil }
+    return CustomerEstimateDisplay(lines: projected, amounts: visible)
+}
+
 /// Display-only breakdown of canonical document lines, using exact minor units.
 struct CustomerDocumentAmounts: Equatable {
     let subtotal: Int

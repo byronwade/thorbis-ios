@@ -1213,6 +1213,22 @@ struct EstimateBuilderSection<Header: View>: View {
     var addMaterials: (() -> Void)? = nil
     @ViewBuilder var header: Header
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var headingAddItem: some View {
+        Button(action: addItem) {
+            Label("Add item", systemImage: "plus")
+                .font(Theme.font(14, weight: .medium))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled || lines.count >= [EstimateRevisionLineDraft].maximumLines)
+        .accessibilityValue(label)
+        .accessibilityHint("Opens the price book")
+        .accessibilityIdentifier("estimate-add-item-heading")
+    }
+
     var body: some View {
         if addItemAbove {
             VStack(alignment: .leading, spacing: 10) {
@@ -1341,6 +1357,7 @@ struct EstimateBuilderSection<Header: View>: View {
                     .accessibilityAddTraits(.isHeader)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
+                if lines.count > 3 && !dynamicTypeSize.isAccessibilitySize { headingAddItem }
                 if !menuItems.isEmpty {
                     ThorbisMenu(items: menuItems, title: label, accessibilityLabel: "Actions for \(label)") {
                         Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
@@ -1352,6 +1369,7 @@ struct EstimateBuilderSection<Header: View>: View {
             // Flush with the card and the fields above it, so every left edge on the sheet lines up.
             .frame(minHeight: 32)
             .padding(.horizontal, 4)
+            if lines.count > 3 && dynamicTypeSize.isAccessibilitySize { headingAddItem }
             if let caption {
                 Text(caption).font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1444,6 +1462,7 @@ struct LineRemovedToast: View {
 
 /// The running total pinned above the commit (MF-04, EB-14), with the member price under it.
 struct EstimateBuilderTotal: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
     var label = "Total"
     let value: String
     var detail: String? = nil
@@ -1462,6 +1481,23 @@ struct EstimateBuilderTotal: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
+            if typeSize.isAccessibilitySize {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(label).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.muted)
+                    ForEach(Array(value.components(separatedBy: "–").enumerated()), id: \.offset) { index, part in
+                        let text = index == 0 ? part : "– " + part
+                        ViewThatFits(in: .horizontal) {
+                            Text(text).font(Theme.monoFont(24, weight: .medium)).fixedSize()
+                            Text(text).font(.system(size: 24, weight: .medium, design: .monospaced)).fixedSize()
+                            Text(text).font(Theme.monoFont(24, weight: .medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(Theme.foreground)
+                        .accessibilityIdentifier("estimate-total-value-\(index)")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
             HStack(alignment: .firstTextBaseline) {
                 Text(label).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 12)
@@ -1470,6 +1506,7 @@ struct EstimateBuilderTotal: View {
                     .foregroundStyle(Theme.foreground)
                     .contentTransition(.numericText())
                     .lineLimit(1).minimumScaleFactor(0.6)
+            }
             }
             if let detail {
                 Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)

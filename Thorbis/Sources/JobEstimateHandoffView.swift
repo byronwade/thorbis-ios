@@ -8,6 +8,8 @@ private struct CustomerHandoffEstimateDetails: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var revision: CustomerIssuedEstimateRevision?
     @State private var loading = false
+    @State private var receipt: CustomerEstimateAcceptanceReceipt?
+    @State private var unsigned = false
     @State private var error: String?
 
     init(model: JobEstimateHandoffModel, record: EstimateRecord) {
@@ -44,7 +46,22 @@ private struct CustomerHandoffEstimateDetails: View {
                 } else if let revision, revisionMatches {
                     Text(revision.title).font(Theme.customerFont(type.heading, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
-                    if let options = revision.options, !options.isEmpty {
+                    if record.status == "approved", let receipt {
+                        Text("Approved · Signed by \(receipt.signerName)")
+                            .font(Theme.customerFont(type.body, weight: .medium))
+                        if let title = receipt.optionTitle {
+                            Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                        }
+                        if let option = revision.options?.first(where: { $0.id == receipt.optionId }), !option.description.isEmpty {
+                            ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: access,
+                                                        customerFacing: true, accessibilityContext: "Estimate EST-\(record.id.suffix(4).uppercased()), approved package")
+                        }
+                        lines(receipt.lines, currency: receipt.currency, total: receipt.totalAmount,
+                              context: "Estimate EST-\(record.id.suffix(4).uppercased()), approved work")
+                    } else if record.status == "approved", unsigned {
+                        Text("No signed customer receipt is available for this approval. Ask your technician for details.")
+                            .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    } else if let options = revision.options, !options.isEmpty {
                         ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
@@ -90,10 +107,9 @@ private struct CustomerHandoffEstimateDetails: View {
     #endif
 
     @ViewBuilder private func lines(_ lines: [FieldLine], currency: String, total: Int, context: String) -> some View {
-        if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency), amounts.total == total,
-           let projected = customerEstimateProjection(lines, currency: currency) {
+        if let display = customerEstimateDisplay(lines, currency: currency), display.amounts.total == total {
             CustomerIncludedLabel(type: type)
-            CustomerIncludedLines(lines: projected, type: type, rows: customerAmountRows(amounts, currency: currency, invoice: false),
+            CustomerIncludedLines(lines: display.lines, type: type, rows: customerAmountRows(display.amounts, currency: currency, invoice: false),
                                   readingAccess: access, descriptionContext: context)
         } else {
             Text("These amounts couldn't be verified. Hand the device back to your technician.")
@@ -103,11 +119,17 @@ private struct CustomerHandoffEstimateDetails: View {
 
     private func load() async {
         guard current, !loading else { return }
-        loading = true; revision = nil; error = nil
+        loading = true; revision = nil; receipt = nil; unsigned = false; error = nil
         defer { loading = false }
         do {
             let issued = try await model.issuedDetails(record, authority: authority)
             guard current, !Task.isCancelled else { return }
+            if record.status == "approved" {
+                let signed = try await model.approvedReceipt(record, revision: issued, authority: authority)
+                guard current, !Task.isCancelled else { return }
+                receipt = signed
+                unsigned = signed == nil
+            }
             revision = issued
         } catch is CancellationError {} catch {
             guard current else { return }
@@ -116,16 +138,85 @@ private struct CustomerHandoffEstimateDetails: View {
     }
 }
 
+/// Browse only fresh, verified estimates already loaded for this job. Each destination
+/// retains the existing issued-revision read and never changes the selected work.
+private struct CustomerHandoffEstimateBrowser: View {
+    @ObservedObject var model: JobEstimateHandoffModel
+    @State private var currentID: String
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
+    init(model: JobEstimateHandoffModel, initial: EstimateRecord) {
+        self.model = model
+        _currentID = State(initialValue: initial.id)
+    }
+
+    private var type: CustomerType { CustomerType(sizeClass) }
+    private var readable: [EstimateRecord] {
+        model.records.filter { model.detailsCurrent($0, authority: model.session.authorityRevision) }
+    }
+    private var index: Int? { readable.firstIndex { $0.id == currentID } }
+
+    var body: some View {
+        Group {
+            if let record = readable.first(where: { $0.id == currentID }) {
+                CustomerHandoffEstimateDetails(model: model, record: record)
+                    .id(record)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 50).onEnded { value in
+                            let horizontal = value.translation.width
+                            guard value.startLocation.x > 30,
+                                  abs(horizontal) > 70,
+                                  abs(horizontal) > abs(value.translation.height) * 2 else { return }
+                            move(horizontal < 0 ? 1 : -1)
+                        }
+                    )
+            } else {
+                CustomerStateMessage(symbol: "lock", title: "This estimate needs a refresh",
+                                     message: "Hand the device back to your technician to reopen this estimate.")
+                    .padding(Theme.gutter)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if let index, readable.count > 1 {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { browseControls(index: index) }
+                    VStack(spacing: 8) { browseControls(index: index) }
+                }
+                .padding(Theme.gutter)
+                .background(Theme.canvas)
+            }
+        }
+    }
+
+    @ViewBuilder private func browseControls(index: Int) -> some View {
+        CustomerSecondaryButton(title: "Previous estimate", type: type) { move(-1) }
+            .disabled(index == 0)
+            .accessibilityIdentifier("handoff-previous-estimate")
+        CustomerSecondaryButton(title: "Next estimate", type: type) { move(1) }
+            .disabled(index + 1 >= readable.count)
+            .accessibilityIdentifier("handoff-next-estimate")
+    }
+
+    private func move(_ offset: Int) {
+        let current = readable
+        guard let index = current.firstIndex(where: { $0.id == currentID }),
+              current.indices.contains(index + offset) else { return }
+        currentID = current[index + offset].id
+    }
+}
+
 /// Customer-only destinations inside the existing protected customer navigation owner.
 struct JobEstimateHandoffView: View {
     @ObservedObject var model: JobEstimateHandoffModel
     let handBack: () -> Void
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @State private var reviewing = false
     @State private var checkpointID: String?
     @State private var detailsID: String?
+    @State private var footerHeight: CGFloat = 0
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -133,14 +224,19 @@ struct JobEstimateHandoffView: View {
             if model.isCurrent {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if reviewing { selectedReview } else { overview }
+                        if reviewing { selectedReview } else {
+                            overview.task(id: model.overviewPriceGeneration) { await model.loadOverviewPrices() }
+                        }
                     }
                     // Paper v2: cards sit 16 from the screen edge.
                     .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+                    .padding(.bottom, footerHeight)
                     .frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("job-estimate-handoff")
-                .safeAreaInset(edge: .bottom) { footer }
+                .safeAreaInset(edge: .bottom) {
+                    footer.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
+                }
             } else {
                 VStack(spacing: 20) {
                     Text("Hand the device back to your technician").font(Theme.customerFont(type.heading, weight: .medium))
@@ -169,8 +265,8 @@ struct JobEstimateHandoffView: View {
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
         .thorbisDestination(item: $detailsID) { id in
             if let record = model.records.first(where: { $0.id == id }) {
-                CustomerHandoffEstimateDetails(model: model, record: record)
-                    .id(record)
+                CustomerHandoffEstimateBrowser(model: model, initial: record)
+                    .id(record.id)
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             }
         }
@@ -178,13 +274,21 @@ struct JobEstimateHandoffView: View {
 
     private var overview: some View {
         // Paper 38C: cards 16 apart under the title.
-        VStack(alignment: .leading, spacing: 16) {
+        LazyVStack(alignment: .leading, spacing: 16) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
+                Button("Fail sample refresh") {
+                    JobEstimateHandoffPreview.shared.rejectNextMembership()
+                    Task { await model.refresh() }
+                }
+            }
+            #endif
             // Paper 38C: "Approve estimates" in the largest Bold, one quiet line under it.
             VStack(alignment: .leading, spacing: 2) {
                 Text("Approve estimates").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
                     .accessibilityAddTraits(.isHeader)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(model.complete ? "Choose what you want done today" : "Some estimates still need a refresh")
+                Text(model.complete ? "Choose what you want done today" : model.loading ? "Loading estimates…" : model.canLoadMoreEstimates ? "More estimates are available for this job." : "Some estimates still need a refresh")
                     .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -197,12 +301,19 @@ struct JobEstimateHandoffView: View {
                     .padding(.horizontal, 4)
             }
             if model.hasResults { results }
-            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.refresh() } }
+            if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.retryEstimateLoading() } }
             if model.loading {
                 if model.records.isEmpty { CustomerSkeleton(caption: "Opening current job estimates…", lines: 2) }
                 else { Text("Opening current job estimates…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
             }
             ForEach(model.records) { record in estimateCard(record) }
+            if model.canLoadMoreEstimates {
+                CustomerSecondaryButton(title: "Load more estimates", type: type) {
+                    Task { await model.loadMoreEstimates() }
+                }
+                .disabled(model.loading)
+                .accessibilityIdentifier("handoff-load-more-estimates")
+            }
             ForEach(model.unavailableIDs, id: \.self) { id in
                 VStack(alignment: .leading, spacing: 8) {
                     Text("EST-\(id.suffix(4).uppercased()) · Unavailable").font(Theme.customerFont(type.body, weight: .medium))
@@ -246,6 +357,11 @@ struct JobEstimateHandoffView: View {
                 .accessibilityHint("Read this estimate before choosing work")
                 .accessibilityIdentifier("handoff-details-\(record.id)")
             }
+            if model.overviewPriceFailures.contains(record.id) {
+                Button("Retry price") { Task { await model.retryOverviewPrice(record) } }
+                    .font(Theme.customerFont(type.body, weight: .medium))
+                    .accessibilityIdentifier("handoff-retry-price-\(record.id)")
+            }
             if record.status == "approved" {
                 Text("Already approved · no approval needed").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                 if let signer = model.context(for: record.id)?.approvedSignerName {
@@ -268,7 +384,11 @@ struct JobEstimateHandoffView: View {
                                         .foregroundStyle(model.selection.optionIDs[record.id] == option.id ? Theme.brand : Theme.muted)
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
-                                        Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                                            Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+                                        } else {
+                                            Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                                        }
                                     }
                                 }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
                             }.buttonStyle(.plain)
@@ -291,29 +411,39 @@ struct JobEstimateHandoffView: View {
         .padding(PaperCardMetrics.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelBackground()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("handoff-card-\(record.id)")
     }
 
     private func selectionValue(_ record: EstimateRecord) -> String {
         let state = model.selectedIDs.contains(record.id) ? "Selected" : "Not selected"
         let price: String
         if let option = model.options(for: record.id).first(where: { $0.id == model.selection.optionIDs[record.id] }) {
-            price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            if model.revision(for: record.id)?.options?.contains(where: { $0 == option }) == true {
+                price = "\(option.title), \(money(option.totalAmount, currency: option.currency))"
+            } else {
+                price = "\(option.title), price needs current terms"
+            }
         } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
             price = money(revision.totalAmount, currency: revision.currency)
-        } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+        } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                   let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
             price = money(amounts.total, currency: currency)
         } else {
-            price = (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
+            price = model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                ? "Refresh to check price" : (record.options ?? []).isEmpty ? "Price needs current terms" : "Choose a package"
         }
         return "\(state), \(record.status.capitalized), \(price)"
     }
 
     private func estimateSummary(_ record: EstimateRecord) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
+            let titleLayout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            titleLayout {
                 Text(record.title).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 CustomerStatusWord(status: record.status, type: type)
             }
             Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.customerMonoFont(type.small)).foregroundStyle(Theme.muted)
@@ -322,13 +452,18 @@ struct JobEstimateHandoffView: View {
                let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
                 Text(option.title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 Text(money(amount, currency: option.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
+            } else if let receipt = model.overviewReceipt(for: record) {
+                if let title = receipt.optionTitle { Text(title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
+                Text(money(receipt.totalAmount, currency: receipt.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
+            } else if record.status == "sent", let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
                 Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+            } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
                       let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
                 Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
             } else if (record.options ?? []).isEmpty {
-                Text("Price needs current terms").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Text(model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                     ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else if record.status == "approved" {
                 Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             } else {
@@ -360,11 +495,10 @@ struct JobEstimateHandoffView: View {
                     }
                 }
                 let lines = option?.lines ?? item.revision.lines, currency = option?.currency ?? item.revision.currency
-                if let amounts = CustomerDocumentAmounts(lines: lines, currency: currency),
-                   let projected = customerEstimateProjection(lines, currency: currency) {
+                if let display = customerEstimateDisplay(lines, currency: currency) {
                     CustomerIncludedLabel(type: type)
-                    CustomerIncludedLines(lines: projected, type: type,
-                                          rows: customerAmountRows(amounts, currency: currency, invoice: false),
+                    CustomerIncludedLines(lines: display.lines, type: type,
+                                          rows: customerAmountRows(display.amounts, currency: currency, invoice: false),
                                           readingAccess: descriptionAccess(for: item),
                                           descriptionContext: reference)
                 } else {
@@ -463,6 +597,13 @@ struct JobEstimateHandoffView: View {
     @ViewBuilder private var footer: some View {
         if reviewing || !model.complete || !model.eligibleIDs.isEmpty {
         VStack(spacing: 8) {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-handoff-paging-diagnostic") {
+                Text("Paging diagnostic").font(.system(size: 1))
+                    .accessibilityIdentifier("handoff-paging-diagnostic")
+                    .accessibilityValue("count=\(model.records.count); loading=\(model.loading); complete=\(model.complete); more=\(model.canLoadMoreEstimates); error=\(model.error ?? "none"); requests=\(JobEstimateHandoffPreview.shared.receipt)")
+            }
+            #endif
             if reviewing {
                 if let next = nextPending(after: nil) {
                     CustomerPresentationCommit(title: "Continue to signatures", enabled: true, busy: false, type: type) { checkpointID = next }
@@ -474,7 +615,9 @@ struct JobEstimateHandoffView: View {
                 }
                 CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
             } else {
-                CustomerPresentationCommit(title: "Review selected (\(model.selectedIDs.count))", enabled: model.canReview, busy: model.loading, type: type) {
+                CustomerPresentationCommit(title: "Review selected (\(model.selectedIDs.count))",
+                                           compactTitle: "Review (\(model.selectedIDs.count))",
+                                           enabled: model.canReview, busy: model.loading, type: type) {
                     Task { await model.reviewSelected(); if !model.reviewed.isEmpty { reviewing = true } }
                 }
                 .accessibilityIdentifier("handoff-review-selected")
@@ -496,6 +639,7 @@ struct JobEstimateHandoffView: View {
             let _ = { context.continueTitle = nextPending(after: id) == nil ? "See approvals" : "Next estimate" }()
             CustomerEstimatePresentation(estimate: item.estimate, jobID: model.scope.jobID, customerName: model.customerName,
                 preselectedOptionID: item.optionID, handoff: context,
+                currentAuthority: { context.current() && context.canApprove() },
                 onApproved: { _ in }, onDone: {
                     if let next = nextPending(after: id) { checkpointID = next }
                     else { checkpointID = nil; reviewing = false }
@@ -520,9 +664,12 @@ struct JobEstimateProtectedOwner: View {
     @State private var reviewingDetails: CustomerViewExit?
     var body: some View {
         Group {
-            if let exit = reviewingDetails, let details = presenter.details {
+            if let exit = reviewingDetails, let details = presenter.details, model.isCurrentJob,
+               session.can("customer.edit", feature: "core_crm") {
                 // Staff side, after authentication: the existing review and audited save.
-                CustomerSelfEditReview(model: details) { presenter.authenticatedExit(exit) }
+                CustomerSelfEditReview(model: details, currentAuthority: {
+                    presenter.active === model && model.isCurrentJob && session.can("customer.edit", feature: "core_crm")
+                }) { presenter.authenticatedExit(from: model, exit) }
             } else {
                 CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
                     JobCustomerDocumentsView(scope: model.scope, documents: model.documents, sourceGeneration: presenter.sourceGeneration,
@@ -542,7 +689,7 @@ struct JobEstimateProtectedOwner: View {
         if model.isCurrentJob, presenter.details?.hasChanges == true, session.can("customer.edit", feature: "core_crm") {
             reviewingDetails = exit
         } else {
-            presenter.authenticatedExit(exit)
+            presenter.authenticatedExit(from: model, exit)
         }
     }
     private func authenticateOwner() async -> Bool {

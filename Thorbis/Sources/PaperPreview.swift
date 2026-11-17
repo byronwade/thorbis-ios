@@ -104,7 +104,8 @@ enum PaperPreview {
     @MainActor static var descriptionOpened = false
     @MainActor static func expireDocumentSessionForTesting(_ session: SessionController) async {
         let args = ProcessInfo.processInfo.arguments
-        guard isJobDocumentsPreview, args.contains("--paper-preview-description-expire-session") || args.contains("--paper-preview-description-revoke-permission") || args.contains("--paper-preview-description-replace-session") else { return }
+        guard isJobDocumentsPreview || (screen == "present-estimate" && args.contains("--paper-preview-option-long-description")),
+              args.contains("--paper-preview-description-expire-session") || args.contains("--paper-preview-description-revoke-permission") || args.contains("--paper-preview-description-replace-session") else { return }
         try? await Task.sleep(for: .seconds(10))
         guard !Task.isCancelled else { return }
         if args.contains("--paper-preview-description-revoke-permission") {
@@ -145,12 +146,24 @@ enum PaperPreview {
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-approved-unknown-total") {
             draft = changed(draft, ["status": "approved", "options": NSNull()])
         }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-empty-draft") {
+            draft = changed(draft, ["lines": []])
+        }
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-invalid-money") {
             let invalid = FieldLine(id: "00000000-0000-4000-8000-000000009299", description: "Unverifiable sample amount", quantity: 2,
                                     unitPrice: FieldMoney(amount: Int.max, currency: "USD"), source: nil)
             draft = changed(draft, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([invalid]))])
         }
         var main = changed(estimate, ["title": "Main drain repair", "options": NSNull()])
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-empty-issued") {
+            main = changed(main, ["lines": [], "options": NSNull()])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-zero-issued"),
+           let first = main.lines.first {
+            let zero = FieldLine(id: first.id, description: "No charge inspection", quantity: 1,
+                                 unitPrice: FieldMoney(amount: 0, currency: "USD"), source: first.source)
+            main = changed(main, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode([zero])), "options": NSNull()])
+        }
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-review-states") {
             main = changed(main, ["status": "declined"])
             draft = changed(draft, ["status": "approved"])
@@ -183,6 +196,21 @@ enum PaperPreview {
         if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-draft") {
             primary = changed(primary, ["status": "draft"])
         }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-credit-balance"),
+           var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines)) as? [[String: Any]],
+           !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+            price["amount"] = -100
+            lines[0]["unitPrice"] = price
+            primary = changed(primary, ["lines": lines])
+        }
+        if isJobDocumentsPreview && ProcessInfo.processInfo.arguments.contains("--paper-preview-job-large-balance"),
+           var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines)) as? [[String: Any]],
+           !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+            price["amount"] = 1_000_000_000_000
+            lines[0]["unitPrice"] = price
+            lines[0]["quantity"] = 1
+            primary = changed(primary, ["lines": [lines[0]], "amountPaid": 0])
+        }
         let original = primary
         if isJobDocumentsMoneyPreview {
             let discount = FieldLine(id: "00000000-0000-4000-8000-000000009104", description: "Member discount", quantity: 1,
@@ -190,12 +218,31 @@ enum PaperPreview {
             primary = changed(primary, ["lines": try! JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines + [discount])),
                                         "amountPaid": 15_000])
         }
+        if isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-mixed-currency"),
+           var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(primary.lines)) as? [[String: Any]],
+           !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+            price["currency"] = "EUR"
+            lines[0]["unitPrice"] = price
+            primary = changed(primary, ["lines": lines])
+        }
         let equalBalances = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-equal-balances")
+        let mixedBalance = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-mixed-balance")
+        var alternate = original
+        if mixedBalance, var lines = try? JSONSerialization.jsonObject(with: JSONEncoder().encode(original.lines)) as? [[String: Any]] {
+            for index in lines.indices {
+                if var price = lines[index]["unitPrice"] as? [String: Any] {
+                    price["currency"] = "EUR"
+                    lines[index]["unitPrice"] = price
+                }
+            }
+            alternate = changed(original, ["currency": "EUR", "lines": lines])
+        }
         return [primary,
-         changed(original, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
+         changed(alternate, ["id": ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoice-reference-collision")
                             ? "00000000-0000-4000-8000-000000012209" : "00000000-0000-4000-8000-000000002240",
-                           "status": equalBalances ? "issued" : "paid", "origin": "estimate_deposit",
-                           "amountPaid": equalBalances ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
+                           "status": equalBalances || mixedBalance ? "issued" : "paid", "origin": "estimate_deposit",
+                           "currency": mixedBalance ? "EUR" : original.currency,
+                           "amountPaid": equalBalances || mixedBalance ? 0 : 34000, "createdAt": "2026-10-27T12:00:00Z",
                            "paidAt": equalBalances ? NSNull() : "2026-10-27T12:05:00Z"]),
          changed(issuedInvoice, ["id": "00000000-0000-4000-8000-000000002241", "jobId": "00000000-0000-4000-8000-000000002215"])]
     }
@@ -222,6 +269,15 @@ enum PaperPreview {
         fields.forEach { object[$0.key] = $0.value }
         return try! JSONDecoder().decode(T.self, from: JSONSerialization.data(withJSONObject: object))
     }
+    /// Synthetic long lists for catalog-entry navigation checks; no writes or real records.
+    private static func longCatalogLines(offset: Int = 0) -> [FieldLine] {
+        let count = ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") ? 500 : 12
+        return (0..<count).map { index in
+            FieldLine(id: String(format: "00000000-0000-4000-8000-%012d", 88000 + offset + index),
+                      description: "Sample work item \(index + 1)", quantity: 1,
+                      unitPrice: FieldMoney(amount: offset > 0 && ProcessInfo.processInfo.arguments.contains("--paper-preview-large-option-range") ? 9_999_999 : 1000, currency: "USD"), source: nil)
+        }
+    }
     /// `job-history`: the job is at the customer's Home, with past visits there and its equipment.
     /// `job-history-empty`: nothing on file for the place, so the section stays hidden.
     static var isPropertyHistoryPreview: Bool { enabled && screen == "job-history" }
@@ -232,7 +288,11 @@ enum PaperPreview {
     static var isWorkingJobPreview: Bool { enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-working-job") }
     /// `job`, `job-onsite`, `job-activity`: the redesigned job screen, at its Home site with photos.
     static var isJobScreenPreview: Bool { enabled && ["job", "job-onsite", "job-activity"].contains(screen) }
-    static var isPaymentCollectionPreview: Bool { screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview }
+    static var isPaymentCollectionPreview: Bool {
+        screen == "invoice-payment" || screen == "job-invoice" || isWorkingJobPreview ||
+        (enabled && screen == "invoice-detail" && (ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-overflow") ||
+                                        ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-collection-authorized")))
+    }
     static var paymentLinkPreview: FieldInvoicePayLink? {
         let args = ProcessInfo.processInfo.arguments
         guard enabled, screen == "invoice-payment",
@@ -250,7 +310,19 @@ enum PaperPreview {
     }
     static var estimate: EstimateRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002218","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","createdByUserId":"00000000-0000-4000-8000-000000000001","status":"sent","currentRevisionNumber":2,"title":"AC repair and compressor replacement","lines":[{"id":"00000000-0000-4000-8000-000000009211","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}},{"id":"00000000-0000-4000-8000-000000009212","description":"Replace compressor","quantity":1,"unitPrice":{"amount":85000,"currency":"USD"},"source":{"kind":"price_book","priceBookItemId":"00000000-0000-4000-8000-000000009201","priceBookRevision":4,"originalDescription":"Replace compressor","originalUnitPrice":{"amount":85000,"currency":"USD"},"addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z","overriddenFields":[]}}],"options":[{"id":"00000000-0000-4000-8000-000000009213","title":"Full system replacement","description":"Includes new compressor and efficiency inspection","lines":[{"id":"00000000-0000-4000-8000-000000009214","description":"System replacement","quantity":1,"unitPrice":{"amount":225000,"currency":"USD"},"source":{"kind":"manual","addedByUserId":"00000000-0000-4000-8000-000000000001","capturedAt":"2026-07-18T12:00:00Z"}}],"totalAmount":225000,"currency":"USD"}],"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z","sentAt":"2026-07-20T12:00:00Z"}"#
-        return try! JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+        let record = try! JSONDecoder().decode(EstimateRecord.self, from: Data(json.utf8))
+        guard (ProcessInfo.processInfo.arguments.contains("--paper-preview-long-catalog-sections") ||
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections")),
+              let option = record.options?.first else { return record }
+        let lines = longCatalogLines()
+        let extended = FieldEstimateOption(id: option.id, title: option.title, description: option.description,
+                                           lines: lines, totalAmount: lines.count * 1000, currency: "USD")
+        let otherLines = longCatalogLines(offset: 1000)
+        let second = FieldEstimateOption(id: "00000000-0000-4000-8000-000000000103", title: "Second system option",
+                                         description: "Another sample option.", lines: otherLines,
+                                         totalAmount: otherLines.count * 1000, currency: "USD")
+        let options = try! JSONSerialization.jsonObject(with: JSONEncoder().encode([extended, second]))
+        return changed(record, ["options": options])
     }
     /// Never-issued draft of the sample estimate, so the editor can be screenshotted before it is sent.
     static var draftEstimate: EstimateRecord {
@@ -280,9 +352,12 @@ enum PaperPreview {
         let replace = [line(6, "3-ton high-efficiency condenser matched to your existing furnace and coil.", 1, 690_000, list: 766_700),
                        line(7, "Installation and haul-away of the old unit, permit and an efficiency check after install.", 1, 220_000),
                        line(8, "Ten-year warranty registration with the manufacturer.", 1, 75_000)]
+        let repairDescription = ProcessInfo.processInfo.arguments.contains("--paper-preview-option-long-description")
+            ? "Replace the failed capacitor and clean the coil. We will protect the work area, check the electrical connections, clean both coils and test the system under normal conditions.\n\nFinal detail: we will explain the results and leave the work area clean."
+            : "Replace the failed capacitor and clean the coil."
         return EstimateRecord(id: estimate.id, organizationId: estimate.organizationId, customerId: customerID, createdByUserId: estimate.createdByUserId,
                               locationId: nil, status: "sent", currentRevisionNumber: 2, title: "AC not cooling", lines: [],
-                              options: [option(1, "Repair", "Replace the failed capacitor and clean the coil.", repair),
+                              options: [option(1, "Repair", repairDescription, repair),
                                         option(2, "Repair and protect", "The repair plus a surge protector and a one-year parts warranty.", better),
                                         option(3, "Replace", "A new high-efficiency unit with a ten-year warranty.", replace)],
                               createdAt: estimate.createdAt, updatedAt: estimate.updatedAt, sentAt: estimate.sentAt, approvedAt: nil, declinedAt: nil)
@@ -313,17 +388,34 @@ enum PaperPreview {
     }
     static var invoice: InvoiceRecord {
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"draft","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":null,"paidAt":null,"voidedAt":null,"createdAt":"2026-07-18T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
-        return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
+        let record = try! JSONDecoder().decode(InvoiceRecord.self, from: Data(json.utf8))
+        guard ProcessInfo.processInfo.arguments.contains("--paper-preview-long-catalog-sections") ||
+              ProcessInfo.processInfo.arguments.contains("--paper-preview-max-catalog-sections") else { return record }
+        let lines = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(longCatalogLines()))
+        return changed(record, ["lines": lines])
     }
     static var issuedInvoice: InvoiceRecord {
+        if screen == "invoice-detail", ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-detail-draft") {
+            let draft = invoice
+            guard ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-overflow") else { return draft }
+            var lines = try! JSONSerialization.jsonObject(with: JSONEncoder().encode(draft.lines)) as! [[String: Any]]
+            lines[0]["quantity"] = 2
+            lines[0]["unitPrice"] = ["amount": Int.max, "currency": draft.currency]
+            return changed(draft, ["lines": lines])
+        }
         let json = #"{"id":"00000000-0000-4000-8000-000000002209","organizationId":"00000000-0000-4000-8000-000000000002","customerId":"00000000-0000-4000-8000-000000000412","jobId":"00000000-0000-4000-8000-000000002214","createdByUserId":"00000000-0000-4000-8000-000000000001","locationId":null,"scheduleId":null,"origin":"job_completion","sourceOperationKey":"paper-preview-invoice","sourceEstimateId":null,"sourceEstimateRevisionNumber":null,"manualPhysicalServiceEvidence":null,"status":"issued","lines":[{"id":"00000000-0000-4000-8000-000000009101","description":"Compressor diagnostic","quantity":1,"unitPrice":{"amount":12000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009102","description":"Refrigerant recharge","quantity":2,"unitPrice":{"amount":9000,"currency":"USD"},"source":{"kind":"manual"}},{"id":"00000000-0000-4000-8000-000000009103","description":"Trip fee","quantity":1,"unitPrice":{"amount":4000,"currency":"USD"},"source":{"kind":"manual"}}],"linesRevision":3,"amountPaid":0,"currency":"USD","issuedAt":"2026-07-20T12:00:00Z","paidAt":null,"voidedAt":null,"createdAt":"2026-07-20T12:00:00Z","updatedAt":"2026-07-20T12:00:00Z"}"#
         let args = ProcessInfo.processInfo.arguments
-        let fixture: String
-        if args.contains("--paper-preview-extreme-invoice") {
+        var fixture: String
+        if args.contains("--paper-preview-invoice-overflow") {
+            fixture = json.replacingOccurrences(of: #""quantity":1,"unitPrice":{"amount":12000"#, with: #""quantity":2,"unitPrice":{"amount":9223372036854775807"#)
+        } else if args.contains("--paper-preview-extreme-invoice") {
             fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":999999940000")
         } else if args.contains("--paper-preview-large-invoice") {
             fixture = json.replacingOccurrences(of: "\"amount\":12000", with: "\"amount\":123456789")
         } else { fixture = json }
+        if args.contains("--paper-preview-legacy-handoff-test") && !args.contains("--paper-preview-job-linked-invoice") {
+            fixture = fixture.replacingOccurrences(of: "\"jobId\":\"00000000-0000-4000-8000-000000002214\"", with: "\"jobId\":null")
+        }
         return try! JSONDecoder().decode(InvoiceRecord.self, from: Data(fixture.utf8))
     }
     /// The issued invoice with a condenser replacement on it, inside the lender's range.
@@ -689,8 +781,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let lock = NSLock()
         var setupPaymentReads = 0
         var documentHistoryRestored = false
+        var failPaymentRecheck = false
         var paymentPermissionRevoked = false
         var invoiceReads = 0
+        var overviewInvoiceListReads = 0
         var reviewConnectionRestored = false
         var ownerAuthenticated = false
         var estimateUnavailable = false
@@ -703,6 +797,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         var savedWorkEditingRevoked = false
         var priceBookViewRevoked = false
         var documentEstimateViewRevoked = false
+        var invoiceEditRevoked = false
         var jobMediaViewRevoked = false
         var priceBookReads = 0
         var priceBookQueryFailed = false
@@ -712,7 +807,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     private static let scenario = Scenario()
     static func resetScenario() {
         if PaperPreview.isJobEstimateHandoff { JobEstimateHandoffPreview.shared.reset() }
-        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
+        scenario.lock.withLock { scenario.setupPaymentReads = 0; scenario.documentHistoryRestored = false; scenario.failPaymentRecheck = false; scenario.paymentPermissionRevoked = false; scenario.invoiceReads = 0; scenario.overviewInvoiceListReads = 0; scenario.reviewConnectionRestored = false; scenario.ownerAuthenticated = false; scenario.estimateUnavailable = false; scenario.documentStatusesChanged = false; scenario.completionCreates = 0; scenario.completionCreated = false; scenario.completionViewRevoked = false; scenario.savedWorkOffline = false; scenario.savedWorkWorkspaceChanged = false; scenario.savedWorkEditingRevoked = false; scenario.priceBookViewRevoked = false; scenario.documentEstimateViewRevoked = false; scenario.invoiceEditRevoked = false; scenario.jobMediaViewRevoked = false; scenario.priceBookReads = 0; scenario.priceBookQueryFailed = false; scenario.savedWorkMutationCount = 0 }
     }
     static var sampleCompletionCreates: Int { scenario.lock.withLock { scenario.completionCreates } }
     static func revokeInvoiceViewForCreate() { scenario.lock.withLock { scenario.completionViewRevoked = true } }
@@ -725,8 +820,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
     static var savedWorkMutationCount: Int { scenario.lock.withLock { scenario.savedWorkMutationCount } }
     static func revokePaymentPermission() { scenario.lock.withLock { scenario.paymentPermissionRevoked = true } }
     static func restoreDocumentHistory() { scenario.lock.withLock { scenario.documentHistoryRestored = true } }
+    static func failDocumentPaymentRecheck() { scenario.lock.withLock { scenario.failPaymentRecheck = true } }
     static func revokeSavedWorkEditing() { scenario.lock.withLock { scenario.savedWorkEditingRevoked = true } }
     static func revokeDocumentEstimateView() { scenario.lock.withLock { scenario.documentEstimateViewRevoked = true } }
+    static func revokeInvoiceEditForSigning() { scenario.lock.withLock { scenario.invoiceEditRevoked = true } }
     static func revokeJobMediaView() { scenario.lock.withLock { scenario.jobMediaViewRevoked = true } }
     static func revokePriceBookView() { scenario.lock.withLock { scenario.priceBookViewRevoked = true } }
     static func failPriceBookQuery() { scenario.lock.withLock { scenario.priceBookQueryFailed = true } }
@@ -844,6 +941,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             status = 503
             payload = ["status": 503, "title": "The estimate could not be opened. Try again."]
         } else if PaperPreview.isJobDocumentsPreview,
+                  url.path.hasPrefix("/v1/invoices/"), url.path.hasSuffix("/payments"),
+                  Self.scenario.lock.withLock({ Self.scenario.failPaymentRecheck }) {
+            status = 503
+            payload = ["status": 503, "title": "Sample payment history unavailable"]
+        } else if PaperPreview.isJobDocumentsPreview,
                   ProcessInfo.processInfo.arguments.contains("--paper-preview-job-history-fail-once"),
                   url.path == "/v1/invoices/00000000-0000-4000-8000-000000002240/payments",
                   Self.scenario.lock.withLock({ !Self.scenario.documentHistoryRestored }) {
@@ -929,6 +1031,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         // a short one, the sent estimate, the booking call, status changes and photos.
         if PaperPreview.screen == "job-activity" {
             if path == "/v1/jobs/\(PaperPreview.jobID)/notes" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-large-activity") {
+                    let notes: [[String: Any]] = (0..<80).map { index in
+                        ["id": String(format: "00000000-0000-4000-8001-%012d", index),
+                         "organizationId": org, "jobId": PaperPreview.jobID, "authorUserId": actor,
+                         "body": "Sample activity note \(index)", "createdAt": today(hour: 9, minute: 15)]
+                    }
+                    return ["items": notes]
+                }
                 return ["items": [
                     ["id": "00000000-0000-4000-8000-000000009002", "organizationId": org, "jobId": PaperPreview.jobID, "authorUserId": actor,
                      "body": "Sample note: Outdoor unit is behind the shed; the path floods after rain, so bring boot covers. The dog is friendly but jumps, keep the side gate shut. Customer works from home and asked for a text before anyone rings the bell. Upstairs thermostat was replaced last spring by another company.",
@@ -1013,10 +1123,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 }]
             }
             if path == "/v1/jobs/\(PaperPreview.jobID)/invoices" {
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-collect-delayed") {
+                    let read = scenario.lock.withLock { scenario.overviewInvoiceListReads += 1; return scenario.overviewInvoiceListReads }
+                    if read > 1 { Thread.sleep(forTimeInterval: 6) }
+                }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") {
                     return ["items": scenario.lock.withLock { scenario.completionCreated } ? [jsonObject(PaperPreview.invoice)!] : []]
                 }
-                return ["items": invoices.filter { $0.jobId == PaperPreview.jobID }.map { jsonObject($0)! }]
+                let rows = ProcessInfo.processInfo.arguments.contains("--paper-preview-job-partial-balance")
+                    ? invoices : invoices.filter { $0.jobId == PaperPreview.jobID }
+                return ["items": rows.map { jsonObject($0)! }]
             }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice"),
                scenario.lock.withLock({ scenario.completionCreated }), path == "/v1/invoices/\(PaperPreview.invoice.id)" {
@@ -1035,7 +1151,22 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return object
             }
             if let record = estimates.first(where: { path == "/v1/estimates/\($0.id)/revisions/\($0.currentRevisionNumber ?? 0)" }) {
-                return reviewRevision(record)
+                var revision = reviewRevision(record)
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-empty-issued-mismatch") {
+                    revision["totalAmount"] = 25000
+                }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-option-total-mismatch"),
+                   var options = revision["options"] as? [[String: Any]], !options.isEmpty {
+                    options[0]["totalAmount"] = 1
+                    revision["options"] = options
+                }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-estimate-option-empty"),
+                   var options = revision["options"] as? [[String: Any]], !options.isEmpty {
+                    options[0]["lines"] = []
+                    options[0]["totalAmount"] = 0
+                    revision["options"] = options
+                }
+                return revision
             }
             if let record = invoices.first(where: { path == "/v1/invoices/\($0.id)" }) {
                 var object = jsonObject(record) as! [String: Any]
@@ -1376,9 +1507,17 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/api/auth/organization/list": return [["id": org, "name": changedWorkspace ? "Sample workspace B" : "Wade’s Plumbing · Preview"]]
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-discount-authorized") { capabilities.append("invoice.discount") }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-deny-document-edit") {
+                capabilities.removeAll { ["invoice.edit", "estimate.create"].contains($0) }
+            }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-no-customer-handoff") {
+                capabilities.removeAll { ["estimate.view", "invoice.view", "customer.edit"].contains($0) }
+            }
             if PaperPreview.screen == "job-media", scenario.lock.withLock({ scenario.jobMediaViewRevoked }) { capabilities.removeAll { $0 == "job.view" } }
             if PaperPreview.isSavedWorkPreview, scenario.lock.withLock({ scenario.savedWorkEditingRevoked }) { capabilities.removeAll { $0 == "job.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.documentEstimateViewRevoked }) { capabilities.removeAll { $0 == "estimate.view" } }
+            if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.invoiceEditRevoked }) { capabilities.removeAll { $0 == "invoice.edit" } }
             if PaperPreview.isJobDocumentsPreview, scenario.lock.withLock({ scenario.completionViewRevoked }) { capabilities.removeAll { $0 == "invoice.view" } }
             if PaperPreview.screen == "price-book", scenario.lock.withLock({ scenario.priceBookViewRevoked }) { capabilities.removeAll { $0 == "pricebook.view" } }
             if PaperPreview.isPaymentCollectionPreview, !scenario.lock.withLock({ scenario.paymentPermissionRevoked }) {
@@ -1397,6 +1536,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             case "tech": capabilities.removeAll { $0 == "job.assign" }
             case "owner": capabilities += ["organization.settings.edit", "organization.members.manage"]
             default: break
+            }
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-sidebar-job-view-only") {
+                capabilities = ["job.view"]
             }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
                     "capabilities": capabilities,
@@ -1556,6 +1698,26 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return ["items": [["id": "00000000-0000-4000-8000-000000009001", "organizationId": org, "jobId": id, "authorUserId": actor, "body": "Sample note: Customer confirmed access to the outdoor unit.", "createdAt": today(hour: 9, minute: 15)]]]
             }
             if path == "/v1/jobs/\(id)/media", PaperPreview.isCustomerRecordsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-document-rollup") {
+                guard id.hasSuffix("2214") || id.hasSuffix("2201") else { return ["items": []] }
+                let first = id.hasSuffix("2214")
+                let file: [String: Any] = ["id": first ? "00000000-0000-4000-8000-000000031777" : "00000000-0000-4000-8000-000000031778", "organizationId": org, "jobId": id,
+                    "uploaderUserId": actor, "kind": "document", "mime": "application/pdf", "sizeBytes": 128,
+                    "originalFilename": first ? "Service report.pdf" : "Drain report.pdf", "contentHash": "preview", "storageKey": "preview/report.pdf",
+                    "uploadState": "stored", "tags": [String](), "caption": first ? "Service report" : "Drain report", "archived": false,
+                    "createdAt": now, "updatedAt": now]
+                if !first { return ["items": [file]] }
+                var pending = file
+                pending["id"] = "00000000-0000-4000-8000-000000031779"
+                pending["caption"] = "Uploading report"
+                pending["uploadState"] = "pending"
+                var failed = file
+                failed["id"] = "00000000-0000-4000-8000-000000031780"
+                failed["caption"] = "Failed report"
+                failed["uploadState"] = "failed"
+                return ["items": [file, pending, failed]]
+            }
+            if path == "/v1/jobs/\(id)/media", PaperPreview.isCustomerRecordsPreview,
                (ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-photo-rollup") ||
                 ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")) {
                 let mixed = ProcessInfo.processInfo.arguments.contains("--paper-preview-mixed-photo-rollup")
@@ -1583,13 +1745,19 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                    "contentType": "image/png", "byteSize": 73, "storageKey": key, "createdAt": now]]]
             }
             if path == "/v1/jobs/\(id)/media", PaperPreview.screen == "job-media" {
-                let first: [String: Any] = [
+                var first: [String: Any] = [
                     "id": "00000000-0000-4000-8000-000000009301", "organizationId": org, "jobId": id,
                     "uploaderUserId": actor, "kind": "photo", "mime": "image/jpeg", "sizeBytes": 120_000,
                     "originalFilename": "outdoor-unit.jpg", "contentHash": "preview", "storageKey": "preview/outdoor-unit.jpg",
                     "uploadState": "stored", "tags": ["Before"], "caption": "Outdoor unit", "archived": false,
                     "createdAt": now, "updatedAt": now
                 ]
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-wrong-job") {
+                    first["jobId"] = "00000000-0000-4000-8000-000000009999"
+                }
+                if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-wrong-org") {
+                    first["organizationId"] = "00000000-0000-4000-8000-000000009998"
+                }
                 // Media redesign screenshots: a visit's worth of sample photos (thumbnails are drawn
                 // as labelled SAMPLE tiles in DEBUG), three stages and two documents.
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-media-grid") {
@@ -1881,6 +2049,13 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "createdAt": "2026-07-20T12:00:00Z", "updatedAt": today(hour: 9, minute: 0),
              "notes": "Sample job: Upstairs zone blowing warm air since Sunday. Customer suspects the capacitor.",
              "allowedTransitions": status == "completed" ? [] : (status == "dispatched" ? ["en_route"] : ["arrived", "in_progress", "paused"])] as [String: Any]
+        }
+        if arguments.contains("--paper-preview-customer-two-open-jobs"),
+           let original = listed.first(where: { ($0["id"] as? String) == PaperPreview.jobID }) {
+            var second = original
+            second["id"] = "00000000-0000-4000-8000-000000002299"
+            second["title"] = "Water heater service"
+            listed.append(second)
         }
         if PaperPreview.isJobScreenPreview || PaperPreview.screen == "customer-jobs",
            let index = listed.firstIndex(where: { ($0["id"] as? String) == PaperPreview.jobID }) {

@@ -3,14 +3,13 @@ import XCTest
 @MainActor
 /// The job's ••• door to Customer view. The header or bar door has the same name, so this picks the menu row.
 func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
-                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view")).firstMatch
+    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
+                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view", "job-onsite-show-customer")).firstMatch
 }
 
-/// The Money door into Customer view. #170 renamed it "Show customer" (identifiers unchanged); the
-/// header circle has the same words, so this excludes it.
+/// The Money door opens the estimates section of Customer view.
 func thorbisShowCustomerDoor(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Show customer", "job-customer-view")).firstMatch
+    app.buttons.matching(NSPredicate(format: "identifier == %@ OR identifier == %@", "job-customer-view-bar", "job-money-customer-view")).firstMatch
 }
 
 /// A job section in the segmented row. #163 added the balance/count to its spoken label
@@ -21,7 +20,7 @@ func thorbisSection(_ app: XCUIApplication, _ name: String) -> XCUIElement {
 
 /// The job has loaded with its balance. Since #189 an in-progress job's bar reads "Wrap up · N left"
 /// (collecting is a wrap-up row and Money's bar), so the balance is read from the Money section,
-/// whose spoken label carries it ("Money, $340.00 due"; identifier "job-section-money").
+/// whose spoken label carries it ("Estimates, invoices and payments, $340.00 due"; identifier "job-section-money").
 func thorbisJobBalanceLoaded(_ app: XCUIApplication, _ amount: String) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "job-section-money", amount)).firstMatch
 }
@@ -86,6 +85,38 @@ func thorbisTapStableButton(_ app: XCUIApplication, _ identifier: String) -> XCU
 
 @MainActor
 final class JobEstimateHandoffUITests: XCTestCase {
+    func testLongEstimateTitleAndStatusAtNormalText() {
+        let app = open(["--paper-preview-handoff-long-title", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let card = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(card.waitForExistence(timeout: 30)); visible(app, card)
+        XCTAssertTrue(card.label.contains("Replace the water heater and restore the service area"))
+        XCTAssertTrue((card.value as? String)?.contains("Sent") == true)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long estimate title and status, normal text"; shot.lifetime = .keepAlways; add(shot)
+        card.tap()
+        XCTAssertTrue((card.value as? String)?.hasPrefix("Selected,") == true)
+
+    }
+    func testLongEstimateTitleAndStatusAtLargestText() {
+        let app = open(["--paper-preview-handoff-long-title", "--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let card = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(card.waitForExistence(timeout: 30)); visible(app, card)
+        XCTAssertTrue(card.label.contains("Replace the water heater and restore the service area"))
+        XCTAssertTrue((card.value as? String)?.contains("Sent") == true)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Long estimate title and status, largest text"; shot.lifetime = .keepAlways; add(shot)
+        card.tap()
+        XCTAssertTrue((card.value as? String)?.hasPrefix("Selected,") == true)
+        let review = app.buttons["handoff-review-selected"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); XCTAssertTrue(review.isEnabled)
+        XCTAssertTrue(review.label.contains("Review selected (1)"))
+        XCTAssertLessThan(review.frame.height, 100, "The review action should leave space for reading estimates")
+        let selectedShot = XCTAttachment(screenshot: app.screenshot()); selectedShot.name = "Selected estimate review action, largest text"; selectedShot.lifetime = .keepAlways; add(selectedShot)
+        review.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "separate estimates. You'll approve and sign each one.")).firstMatch.waitForExistence(timeout: 20))
+    }
     override func tearDown() { XCUIApplication().terminate(); super.tearDown() }
     private func open(_ extra: [String] = []) -> XCUIApplication {
         continueAfterFailure = false
@@ -155,6 +186,354 @@ final class JobEstimateHandoffUITests: XCTestCase {
         }, object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [selected], timeout: 10), .completed, "Each real selection must stick before the next tap")
     }
+    private func revealPrecisely(_ element: XCUIElement, in app: XCUIApplication, scrollID: String) {
+        let scroll = app.scrollViews[scrollID]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 10))
+        for _ in 0..<24 {
+            let footerIDs = ["handoff-review-selected", "handoff-previous-estimate", "handoff-next-estimate"]
+            let footerTop = footerIDs.flatMap { app.buttons.matching(identifier: $0).allElementsBoundByIndex }
+                .filter { $0.exists && $0.frame.intersects(app.frame) }.map { $0.frame.minY }.min() ?? app.frame.maxY
+            let top = app.frame.minY + 105
+            let point = element.frame.midY
+            if element.isHittable && point > top && point < footerTop { return }
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: point <= top ? 0.68 : 0.42))
+            start.press(forDuration: 0.05, thenDragTo: end)
+        }
+        XCTFail("The customer control must have an unobscured tap point")
+    }
+
+    func testEstimateBrowseKeepsLongDescriptionReadOnlyAndEdgeBackWorks() {
+        let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls",
+                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); revealPrecisely(first, in: app, scrollID: "job-estimate-handoff")
+        capture(app, "Largest text estimate detail action")
+        first.tap()
+        let more = app.buttons["Show more, Estimate EST-8101, item 1"]
+        XCTAssertTrue(more.waitForExistence(timeout: 30)); revealPrecisely(more, in: app, scrollID: "handoff-estimate-details"); more.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.textViews.firstMatch.exists)
+        capture(app, "Largest text read-only estimate description")
+        app.buttons["Done"].tap()
+        let details = app.scrollViews["handoff-estimate-details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 10))
+        details.swipeLeft()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        capture(app, "Largest text second estimate before edge back")
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.01, dy: 0.5))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: end)
+        XCTAssertTrue(app.scrollViews["job-estimate-handoff"].waitForExistence(timeout: 15), "The system edge-back gesture must return to the estimate overview")
+    }
+
+    func testOverviewLoadsBothVerifiedPricesBeforeSelection() {
+        let app = open(["--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); XCTAssertTrue(second.waitForExistence(timeout: 30))
+        let firstPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
+        let secondPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPrice, secondPrice], timeout: 45), .completed, "Both verified prices should be available without selecting either estimate")
+        XCTAssertTrue((first.value as? String ?? "").contains("Not selected"))
+        XCTAssertTrue((second.value as? String ?? "").contains("Not selected"))
+    }
+
+    func testOverviewCanRetryAnUnavailablePrice() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-second-price-fails-once"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let retry = app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 45), "A failed issued read must have a retry")
+        visible(app, retry); retry.tap()
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        let price = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [price], timeout: 45), .completed)
+        XCTAssertFalse(retry.exists)
+    }
+
+    func testApprovedOverviewShowsMatchingVerifiedReceipt() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-second-approved", "--handoff-test-approved-receipt"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let approvedCard = app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(approvedCard.staticTexts["$320.00"].waitForExistence(timeout: 45), "The accepted receipt's verified total should be visible in its own card")
+        XCTAssertFalse(app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"].exists)
+    }
+
+    func testApprovedOverviewRejectsReceiptForDifferentRevision() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-second-approved", "--handoff-test-approved-receipt", "--handoff-test-approved-receipt-wrong-revision"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let retry = app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 45), "A receipt for another revision must fail validation")
+        XCTAssertFalse(app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"].staticTexts["$320.00"].exists)
+    }
+
+    func testLoadingNextPageReusesVerifiedPrices() throws {
+        let app = open(["--paper-preview-handoff-hide-controls", "--paper-preview-handoff-many-estimates"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 45))
+        let firstPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [firstPrice], timeout: 45), .completed)
+        let path = "/v1/estimates/00000000-0000-4000-8000-000000008101/revisions/1"
+        func firstReadCount() throws -> Int {
+            let proof = try receipt(app)
+            let requests = try XCTUnwrap(proof["requests"] as? [[String: String]])
+            return requests.filter { $0["method"] == "GET" && $0["path"] == path }.count
+        }
+        XCTAssertEqual(try firstReadCount(), 1)
+        let more = app.buttons["handoff-load-more-estimates"]
+        let list = app.scrollViews["job-estimate-handoff"]
+        for _ in 0..<30 where !more.isHittable { list.swipeUp() }
+        XCTAssertTrue(more.isHittable); more.tap()
+        let next = app.buttons["handoff-select-00000000-0000-4000-8000-000000082018"]
+        for _ in 0..<30 where !next.isHittable { list.swipeUp() }
+        XCTAssertTrue(next.waitForExistence(timeout: 45))
+        let nextPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: next)
+        XCTAssertEqual(XCTWaiter.wait(for: [nextPrice], timeout: 45), .completed)
+        XCTAssertEqual(try firstReadCount(), 1, "Loading another page must reuse the first fresh validated revision")
+    }
+
+    func testFailedRefreshShowsUnavailablePriceThenRecovers() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--handoff-test-failed-refresh"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
+        let initialPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [initialPrice], timeout: 45), .completed)
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        let secondPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: second)
+        XCTAssertEqual(XCTWaiter.wait(for: [secondPrice], timeout: 45), .completed, "Finish both initial prefetches before injecting the refresh failure")
+        let fail = app.buttons["Fail sample refresh"]
+        XCTAssertTrue(fail.waitForExistence(timeout: 30)); visible(app, fail); fail.tap()
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30), "The forced refresh must finish with an error")
+        let unavailable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "Refresh to check price"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [unavailable], timeout: 30), .completed)
+        XCTAssertFalse((first.value as? String ?? "").contains("$190.00"))
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 30)); visible(app, retry); retry.tap()
+        let recovered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$190.00"), object: first)
+        XCTAssertEqual(XCTWaiter.wait(for: [recovered], timeout: 45), .completed)
+    }
+
+    private func openSecondEstimateForValidation(_ flag: String, extraArgs: [String] = []) -> XCUIApplication {
+        let app = open(["--paper-preview-handoff-hide-controls", flag] + extraArgs)
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        let next = app.buttons["handoff-next-estimate"]
+        XCTAssertTrue(next.waitForExistence(timeout: 15)); next.tap()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        return app
+    }
+
+    private func assertInvalidSecondEstimate(_ flag: String) {
+        let app = openSecondEstimateForValidation(flag)
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30))
+        let details = app.scrollViews["handoff-estimate-details"]
+        XCTAssertFalse(details.staticTexts["Sample additional work"].exists)
+        XCTAssertFalse(details.staticTexts["Anonymized service scope"].exists)
+    }
+
+    private func returnFromRejectedSecondEstimate(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30), "The issued-revision read must finish and reject these terms")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["handoff-review-selected"].waitForExistence(timeout: 15))
+    }
+
+    func testUnverifiedSentAmountIsHiddenAndCannotAdvanceReview() {
+        let app = openSecondEstimateForValidation("--handoff-test-empty-base")
+        returnFromRejectedSecondEstimate(app)
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(second.waitForExistence(timeout: 30))
+        XCTAssertFalse((second.value as? String ?? "").contains("$320.00"), "The accessible selection must not describe the unverified record amount")
+        capture(app, "Unverified sent estimate price is withheld")
+        let card = app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"]
+        XCTAssertFalse(card.staticTexts["$320.00"].exists, "The customer estimate card must not show an unverified issued total")
+        visible(app, second); selectEstimate(app, second)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30), "Review must finish with a validation failure")
+        XCTAssertFalse(app.buttons["Continue to signatures"].exists)
+        XCTAssertFalse(app.textFields["Your full name"].exists)
+    }
+
+    func testUnverifiedPackagePriceIsHidden() {
+        let app = openSecondEstimateForValidation("--handoff-test-empty-option")
+        returnFromRejectedSecondEstimate(app)
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(second.waitForExistence(timeout: 30)); visible(app, second); selectEstimate(app, second)
+        let option = app.buttons["handoff-option-00000000-0000-4000-8000-000000008102-00000000-0000-4000-8000-000000008202"]
+        XCTAssertTrue(option.waitForExistence(timeout: 15)); visible(app, option); option.tap()
+        XCTAssertFalse(app.staticTexts["$250.00"].exists, "Unverified package totals must not be presented as issued prices")
+        let value = second.value as? String ?? ""
+        XCTAssertTrue(value.contains("Empty package"), "Accessibility should identify the selected package")
+        XCTAssertFalse(value.contains("$250.00"), "Accessibility must not announce an unverified package price")
+    }
+
+    func testUnverifiedApprovedAmountIsHidden() {
+        let app = openSecondEstimateForValidation("--handoff-test-empty-base", extraArgs: ["--handoff-test-second-approved"])
+        returnFromRejectedSecondEstimate(app)
+        XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.otherElements["handoff-card-00000000-0000-4000-8000-000000008102"].staticTexts["$320.00"].exists, "An approved record amount is not a verified issued receipt")
+    }
+
+    func testBrowserRejectsEmptyIssuedBase() { assertInvalidSecondEstimate("--handoff-test-empty-base") }
+    func testBrowserRejectsEmptyIssuedOption() { assertInvalidSecondEstimate("--handoff-test-empty-option") }
+    func testBrowserRejectsNonUSDRevision() { assertInvalidSecondEstimate("--handoff-test-non-usd") }
+    func testBrowserRejectsMismatchedRevisionTotal() { assertInvalidSecondEstimate("--handoff-test-mismatch") }
+
+    func testBrowserAllowsNonemptyZeroPricedScope() {
+        let app = openSecondEstimateForValidation("--handoff-test-zero-line")
+        let details = app.scrollViews["handoff-estimate-details"]
+        XCTAssertTrue(details.staticTexts["Included sample service"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["Try again"].exists)
+    }
+
+    func testEstimateBrowsingDoesNotShowPriorTermsWhenNextReadFails() {
+        let app = open(["--paper-preview-handoff-hide-controls", "--paper-preview-handoff-second-details-fail"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        app.buttons["handoff-next-estimate"].tap()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 30))
+        capture(app, "Second estimate failed without prior terms")
+        XCTAssertFalse(app.scrollViews["handoff-estimate-details"].staticTexts["Sample repair"].exists, "The prior estimate's terms must not remain inside the new estimate")
+        app.buttons["handoff-previous-estimate"].tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+    }
+
+    func testEstimateBrowsingRetiresAfterSessionEndsOnSecondEstimate() {
+        let app = open(["--paper-preview-handoff-slow-invalidation"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
+        toggleSampleControls(app); app.buttons["End sample session shortly"].tap(); toggleSampleControls(app)
+        visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        app.buttons["handoff-next-estimate"].tap()
+        XCTAssertTrue(app.staticTexts["Sample additional work"].waitForExistence(timeout: 15))
+        let detail = app.staticTexts["Sample additional work"]
+        let retired = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: detail)
+        XCTAssertEqual(XCTWaiter.wait(for: [retired], timeout: 30), .completed)
+        XCTAssertFalse(app.buttons["handoff-next-estimate"].exists)
+        XCTAssertFalse(app.buttons["handoff-previous-estimate"].exists)
+    }
+
+    func testCustomerCanBrowseJobEstimatesUsingAccessibleControls() {
+        let app = open(["--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30)); visible(app, first); first.tap()
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30))
+        let previous = app.buttons["handoff-previous-estimate"]
+        let next = app.buttons["handoff-next-estimate"]
+        XCTAssertTrue(previous.exists); XCTAssertFalse(previous.isEnabled)
+        XCTAssertTrue(next.exists); XCTAssertTrue(next.isEnabled); next.tap()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 15))
+        XCTAssertTrue(previous.isEnabled); previous.tap()
+        XCTAssertTrue(app.navigationBars["EST-8101"].waitForExistence(timeout: 15))
+    }
+
+    func testCustomerSwipesBetweenJobEstimateDetailsWithoutChangingSelection() {
+        let app = open(["--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30))
+        thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 30))
+        visible(app, first)
+        first.tap()
+        let details = app.scrollViews["handoff-estimate-details"]
+        XCTAssertTrue(details.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.navigationBars["EST-8101"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 30), "The current estimate must finish loading before swiping")
+        details.swipeLeft()
+        XCTAssertTrue(app.navigationBars["EST-8102"].waitForExistence(timeout: 10),
+                      "Swiping should open the next estimate for this job")
+        details.swipeRight()
+        XCTAssertTrue(app.navigationBars["EST-8101"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let select = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(select.waitForExistence(timeout: 10))
+        XCTAssertTrue((select.value as? String)?.hasPrefix("Not selected,") == true)
+    }
+
+    func testLongEstimateListKeepsSelectionsFromBothEnds() {
+        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls", "--paper-preview-handoff-paging-diagnostic"])
+        let door = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 45)); door.tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 45)); selectEstimate(app, first)
+        let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(details.exists, "A loaded estimate can be read before loading every page")
+        visible(app, details); details.tap()
+        XCTAssertTrue(app.scrollViews["handoff-estimate-details"].waitForExistence(timeout: 45))
+        XCTAssertTrue(app.staticTexts["Sample repair"].waitForExistence(timeout: 45), "Issued terms must open while other pages remain unloaded")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertFalse(app.buttons["handoff-review-selected"].isEnabled, "Partial membership must not authorize approval")
+        let more = app.buttons["handoff-load-more-estimates"]
+        let list = app.scrollViews["job-estimate-handoff"]
+        for suffix in ["082018", "082028", "082038"] {
+            // The lazy stack may not instantiate the footer while it is offscreen.
+            for _ in 0..<30 where !more.exists { list.swipeUp() }
+            XCTAssertTrue(more.exists, "The next-page action must be reachable in the list")
+            let pageReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                more.exists && more.isEnabled
+            }, object: more)
+            XCTAssertEqual(XCTWaiter.wait(for: [pageReady], timeout: 45), .completed,
+                           "The previous page must finish before requesting another")
+            for _ in 0..<30 where !more.isHittable { list.swipeUp() }
+            XCTAssertTrue(more.isHittable && more.isEnabled, "The next page action must be visible and enabled")
+            let review = app.buttons["handoff-review-selected"]
+            for _ in 0..<8 where more.frame.maxY > review.frame.minY { list.swipeUp() }
+            XCTAssertLessThanOrEqual(more.frame.maxY, review.frame.minY, "The full Load more control must be clear of the fixed review bar")
+            more.tap()
+            if suffix == "082028" {
+                let diagnostic = app.staticTexts["handoff-paging-diagnostic"]
+                let loaded = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    (diagnostic.value as? String)?.contains("count=30;") == true
+                }, object: diagnostic)
+                _ = XCTWaiter.wait(for: [loaded], timeout: 5)
+                print("PAGING DIAGNOSTIC: \(diagnostic.value ?? "missing")")
+                print("PAGING HIERARCHY: \(app.debugDescription)")
+            }
+            let nextPageEnd = app.buttons["handoff-select-00000000-0000-4000-8000-000000\(suffix)"]
+            for _ in 0..<30 where !nextPageEnd.isHittable { list.swipeUp() }
+            let markerReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                nextPageEnd.exists && nextPageEnd.isHittable
+            }, object: nextPageEnd)
+            XCTAssertEqual(XCTWaiter.wait(for: [markerReady], timeout: 45), .completed,
+                           "Each requested page must load before requesting the next one")
+        }
+        let last = app.buttons["handoff-select-00000000-0000-4000-8000-000000082038"]
+        for _ in 0..<60 where !last.isHittable { list.swipeUp() }
+        XCTAssertTrue(last.isHittable, "The last estimate must remain reachable without obscuring its control")
+        selectEstimate(app, last)
+        XCTAssertTrue(app.buttons["Review selected (2)"].waitForExistence(timeout: 10))
+        for _ in 0..<60 where !first.isHittable { list.swipeDown() }
+        XCTAssertTrue(first.isHittable)
+        XCTAssertTrue((first.value as? String)?.hasPrefix("Selected,") == true)
+    }
+    func testLoadMoreIsClearOfReviewBarAtLargestText() {
+        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls",
+                        "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let door = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 45)); door.tap()
+        let list = app.scrollViews["job-estimate-handoff"], more = app.buttons["handoff-load-more-estimates"]
+        let review = app.buttons["handoff-review-selected"]
+        for _ in 0..<50 where !more.exists || !more.isHittable || more.frame.maxY > review.frame.minY { list.swipeUp() }
+        XCTAssertTrue(more.exists && more.isHittable && more.isEnabled)
+        XCTAssertLessThanOrEqual(more.frame.maxY, review.frame.minY, "Load more must be fully above the fixed review bar at accessibility sizes")
+        more.tap()
+        let nextPage = app.buttons["handoff-select-00000000-0000-4000-8000-000000082018"]
+        for _ in 0..<50 where !nextPage.isHittable { list.swipeUp() }
+        XCTAssertTrue(nextPage.isHittable, "The unobscured action must actually load the next page")
+    }
     func testSelectedReviewFoldsHiddenMaterialsWithoutExposingTheirDescription() {
         let app = open(["--paper-preview-handoff-hidden-material", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
@@ -174,12 +553,40 @@ final class JobEstimateHandoffUITests: XCTestCase {
         thorbisStableButton(app, "handoff-submit-approval").tap()
         XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15))
     }
+    func testCustomerCanReadApprovedAndSentEstimatesForTheSameJob() {
+        let app = open(["--paper-preview-handoff-mixed", "--paper-preview-handoff-options", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 45))
+        thorbisShowCustomerDoor(app).tap()
+        let approved = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(approved.waitForExistence(timeout: 45))
+        visible(app, approved); approved.tap()
+        XCTAssertTrue(app.otherElements["handoff-estimate-details"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Sample package"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Selected package scope"].exists)
+        XCTAssertTrue(app.staticTexts["These are the options on the issued estimate. Which option was approved isn't shown here."].exists)
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
+        let sent = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        XCTAssertTrue(sent.waitForExistence(timeout: 10))
+        visible(app, sent); sent.tap()
+        XCTAssertTrue(app.buttons["Review selected (1)"].exists)
+    }
     func testCustomerCanReadEstimateBeforeSelectingIt() {
         let app = open(["--paper-preview-handoff-long-description", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10))
         thorbisShowCustomerDoor(app).tap()
         let selected = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
-        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        let loaded = selected.waitForExistence(timeout: 45)
+        if !loaded {
+            let hierarchy = XCTAttachment(string: app.debugDescription)
+            hierarchy.name = "Customer estimate handoff hierarchy"; hierarchy.lifetime = .keepAlways; add(hierarchy)
+            let ledger = app.descendants(matching: .any).matching(identifier: "handoff-canonical-receipt").firstMatch
+            if let value = ledger.value as? String {
+                let attachment = XCTAttachment(string: value)
+                attachment.name = "Anonymized handoff request ledger"; attachment.lifetime = .keepAlways; add(attachment)
+            }
+        }
+        XCTAssertTrue(loaded)
         let details = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         visible(app, details)
@@ -706,7 +1113,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         // At accessibility sizes the section row is one pinned chooser (a40f825), not tabs.
         let tabs = app.buttons["job-section-chooser"]
         XCTAssertTrue(tabs.exists)
-        XCTAssertTrue(tabs.label.contains("Money"))
+        XCTAssertTrue(tabs.label.contains("Estimates"))
         // At accessibility sizes Present scrolls with the content (a40f825) instead of pinning
         // above the bottom edge, so the card must fit between the pinned chooser and the screen's
         // bottom; while Present is still pinned below the card, it must clear that too.
@@ -727,6 +1134,22 @@ final class JobEstimateHandoffUITests: XCTestCase {
         capture(app, "Job estimates at largest text")
     }
 
+    func testLargestTextCanReturnToCustomerPresentationFromInvoices() {
+        let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let jump = app.buttons["job-money-jump-menu"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 30))
+        jump.tap()
+        app.buttons["Invoices"].firstMatch.tap()
+        XCTAssertTrue(jump.waitForExistence(timeout: 10))
+        jump.tap()
+        app.buttons["Estimates"].firstMatch.tap()
+        let present = app.buttons["job-money-customer-view"]
+        XCTAssertTrue(present.waitForExistence(timeout: 10), "The estimate presentation action must remain in the estimates section at large text")
+        XCTAssertTrue(present.isHittable)
+        present.tap()
+        XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 15))
+    }
+
     func testAllEstimatesUseOnePrimaryEntryAndKeepAddVisible() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30), "Existing estimates need one obvious customer presentation action")
@@ -744,5 +1167,15 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(spoken?.contains("Sent") == true)
         XCTAssertTrue(spoken?.contains("$190.00") == true, "Integrated selection must expose price and status to VoiceOver")
         capture(app, "All current-job estimates together")
+    }
+
+    func testTechnicianCanPrepareNewEstimateFromPagedJob() {
+        let app = open(["--paper-preview-handoff-many-estimates", "--paper-preview-handoff-hide-controls"])
+        XCTAssertTrue(app.buttons["job-estimate-00000000-0000-4000-8000-000000008101"].waitForExistence(timeout: 45))
+        let add = app.buttons["job-add-estimate"]
+        XCTAssertTrue(add.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["job-load-more-estimates"].exists, "The job remains paged before creation is requested")
+        add.tap()
+        XCTAssertTrue(app.staticTexts["New estimate"].waitForExistence(timeout: 45), "Creation opens only after the scoped complete read")
     }
 }

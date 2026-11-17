@@ -261,6 +261,86 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-11-14-inbox-draft-actions",
+            date: "2026-11-14",
+            highlights: [
+                .init(symbol: "tray", title: "Keep draft actions clear",
+                      detail: "Inbox explains when a text can't open and keeps an email draft open if discard fails."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-14-text-draft-recovery",
+            date: "2026-11-14",
+            highlights: [
+                .init(symbol: "doc.on.doc", title: "Keep text when saving fails",
+                      detail: "If a text draft can't be saved on this device, copy your words before closing."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-13-present-estimates",
+            date: "2026-11-13",
+            highlights: [
+                .init(symbol: "iphone", title: "Show estimates sooner",
+                      detail: "Open customer view before scrolling through a job’s estimates."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-13-savings-label",
+            date: "2026-11-13",
+            highlights: [
+                .init(symbol: "tag", title: "See savings clearly",
+                      detail: "Customer estimates and invoices show price reductions as savings."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-13-customer-email",
+            date: "2026-11-13",
+            highlights: [
+                .init(symbol: "envelope", title: "Write customer emails",
+                      detail: "Start an email in your inbox, save a draft, or send with Mail."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-13-find-work",
+            date: "2026-11-13",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Find work in the menu",
+                      detail: "Jobs and documents are easy to find, and tapping a section opens or closes it."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-12-job-document-shortcuts",
+            date: "2026-11-12",
+            highlights: [
+                .init(symbol: "arrow.up.arrow.down", title: "Move between job documents",
+                      detail: "Switch between estimates and invoices while scrolling through a job's documents."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-12-job-and-inbox",
+            date: "2026-11-12",
+            highlights: [
+                .init(symbol: "doc.text", title: "Open job documents faster",
+                      detail: "Tap an estimate or invoice on the job overview to open that document."),
+                .init(symbol: "clock.arrow.circlepath", title: "Browse past jobs in batches",
+                      detail: "Load more past jobs on a customer profile, or show the full history."),
+                .init(symbol: "envelope", title: "Keep an email draft",
+                      detail: "Save a draft before choosing a recipient and recover your words if saving fails."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-11-customer-handoff",
+            date: "2026-11-11",
+            highlights: [
+                .init(symbol: "person.text.rectangle", title: "Review customer changes",
+                      detail: "Review saved customer changes together before trying an interrupted update again."),
+                .init(symbol: "creditcard", title: "Return to the right invoice",
+                      detail: "After customer review, return to the invoice you opened to collect its payment."),
+                .init(symbol: "arrow.clockwise", title: "Know when payment needs a check",
+                      detail: "If payment details need a refresh, the customer sees what to do next."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-05-ipad-schedule-list",
             date: "2026-11-05",
             highlights: [

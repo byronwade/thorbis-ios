@@ -342,6 +342,19 @@ func compactMoney(_ cents: Int, currency: String = "USD") -> String {
 
 // MARK: - The sidebar's list (phone drawer and iPad column)
 
+@MainActor private enum SidebarPreferenceStore {
+    static let work: UserDefaults = {
+        #if DEBUG
+        let args = ProcessInfo.processInfo.arguments
+        if PaperPreview.enabled, let index = args.firstIndex(of: "--paper-preview-menu-suite"),
+           args.indices.contains(index + 1), let uuid = UUID(uuidString: args[index + 1]) {
+            return UserDefaults(suiteName: "thorbis.preview.menu.\(uuid.uuidString)") ?? .standard
+        }
+        #endif
+        return .standard
+    }()
+}
+
 /// The grouped places: a 12 Medium heading per section, then rows. A row is the place's mark in its
 /// quiet hue (filled when it is the place), the word in body (lifted to ink when here) and a count in
 /// tabular figures at the trailing edge. The place showing sits on the selected fill.
@@ -351,6 +364,8 @@ struct PlacesList: View {
     @ObservedObject private var recordFavorites = ScopedRecordFavorites.shared
     @AppStorage("thorbis.sidebar.favoritesCollapsed") private var favoritesCollapsed = false
     @AppStorage("thorbis.sidebar.customCollapsed") private var customCollapsed = false
+    @AppStorage("thorbis.sidebar.workCollapsed", store: SidebarPreferenceStore.work) private var workCollapsed = false
+    @State private var workspaceExpansion: [PlaceSection: Bool] = [:]
     let sections: DrawerSections
     let title: (MenuItem) -> String
     let isCurrent: (MenuItem) -> Bool
@@ -423,6 +438,9 @@ struct PlacesList: View {
                 savedWorkRow(savedWork)
             }
         }
+        .onChange(of: sections.places.first(where: isCurrent)) { _, place in
+            if let place, place.placeSection != .work { workspaceExpansion[place.placeSection] = true }
+        }
         .onChange(of: favoriteScope, initial: true) { recordFavorites.bind(favoriteScope) }
         .task(id: FavoritesReload(scope: favoriteScope, entries: recordFavorites.entries)) {
             let expected = favoriteScope
@@ -469,6 +487,11 @@ struct PlacesList: View {
                 }
             }
         }
+    }
+
+    private func toggleWorkspace(_ section: PlaceSection, expanded: Bool) {
+        if section == .work { workCollapsed = expanded }
+        else { workspaceExpansion[section] = !expanded }
     }
 
     private func place(_ item: MenuItem, prefix: String? = nil) -> some View {

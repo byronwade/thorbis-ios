@@ -1,6 +1,19 @@
 import SwiftUI
 import UIKit
 
+enum CustomerJobHistory {
+    static let initialCount = 4
+    static func nextCount(total: Int, visible: Int) -> Int {
+        min(25, max(0, total - visible))
+    }
+    static func firstByID<Record, ID: Hashable>(_ records: [Record], id: KeyPath<Record, ID>) -> [ID: Record] {
+        records.reduce(into: [:]) { result, record in
+            let key = record[keyPath: id]
+            if result[key] == nil { result[key] = record }
+        }
+    }
+}
+
 /// Native translation of Paper's Customers and Customer detail artboards.
 struct CustomersView: View {
     @EnvironmentObject var api: APIClient
@@ -10,6 +23,7 @@ struct CustomersView: View {
     @State private var newJobFor: Customer?
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
     @State private var newName = ""
     /// Paper 47 opens on the alphabetical book; Recent and Archived sit behind the filter circle.
     @State private var selectedView = CustomerListScope.all.rawValue
@@ -469,6 +483,9 @@ struct CustomerDetailView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var store: Store
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject private var customerView: JobEstimateHandoffPresenter
+    @EnvironmentObject private var legacyHandoff: LegacyCustomerPresenter
+    @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @Environment(\.dismiss) private var dismiss
     @State private var record: CustomerRecord?
     @State private var contactState = CustomerContactCollectionState()
@@ -503,6 +520,13 @@ struct CustomerDetailView: View {
     @State private var recordsLoadGeneration = 0
     @State private var recordsPublishedScope: CustomerRecordsScope?
     @State private var recordsRequestedScope: CustomerRecordsScope?
+    // Money is compiled independently so slow job media never blocks financial records.
+    @State private var moneyRecords: CustomerJobCompilation?
+    @State private var moneyRecordsLoading = false
+    @State private var moneyRecordsError: String?
+    @State private var moneyRecordsLoadGeneration = 0
+    @State private var moneyRecordsPublishedScope: CustomerRecordsScope?
+    @State private var moneyRecordsRequestedScope: CustomerRecordsScope?
     private var recordsScope: CustomerRecordsScope? { CustomerRecordsScope.capture(session: session, customerID: customer.id) }
     @State private var smsConsent: CustomerSmsConsent?
     @State private var smsConsentLoaded = false
@@ -513,7 +537,6 @@ struct CustomerDetailView: View {
     @State private var smsConsentKey = UUID().uuidString
     @State private var smsConsentChoice: Bool?
     @State private var smsConsentError: String?
-    @State private var showCustomerMode = false
     @State private var showEditCustomer = false
     /// Paper 48B "Archive customer", pushed from Customer actions or from Edit customer.
     @State private var showArchive = false
@@ -535,9 +558,10 @@ struct CustomerDetailView: View {
     @State private var equipment: [EquipmentRecord]?
     /// The customer's jobs as GET /v1/jobs?customerId returns them: the notes line for Jobs.
     @State private var jobRecords: [JobRecord] = []
-    @State private var showAllPast = false
+    @State private var visiblePastCount = CustomerJobHistory.initialCount
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
 
     private var primaryPhone: String? { contacts.first(where: \.primary)?.phone ?? record?.phone }
     private var primaryEmail: String? { contacts.first(where: \.primary)?.email ?? record?.email }
@@ -577,6 +601,7 @@ struct CustomerDetailView: View {
         #endif
         }
         .foregroundStyle(Theme.foreground).background(Theme.canvas)
+        .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -622,9 +647,15 @@ struct CustomerDetailView: View {
                 recordsPublishedScope = nil
                 recordsError = nil
             }
-            if tab != "Overview" { await loadRecords() }
+            if moneyRecordsPublishedScope != recordsScope {
+                moneyRecords = nil
+                moneyRecordsPublishedScope = nil
+                moneyRecordsError = nil
+            }
+            await loadSelectedRecords()
         }
         .onAppear {
+            customerWindowAnchor.visible = true
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
             #if DEBUG
             // Once: coming back from the pushed page must not push it again.
@@ -635,15 +666,16 @@ struct CustomerDetailView: View {
             }
             #endif
         }
+        .onDisappear { customerWindowAnchor.visible = false }
         .onChange(of: tab, initial: true) { _, selectedTab in
-            if selectedTab != "Overview" { Task { await loadRecords() } }
+            if selectedTab != "Overview" { Task { await loadSelectedRecords() } }
             if selectedTab == "Jobs" { Task { await loadJobRecords() } }
         }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
                 await loadActivity(reset: true)
-                if tab != "Overview" { await loadRecords() }
+                await loadSelectedRecords()
                 if tab == "Jobs" { await loadJobRecords() }
             }
         }
@@ -659,9 +691,6 @@ struct CustomerDetailView: View {
         }) {
             EditCustomerSheet(customerID: customer.id, onSaved: { _ in Task { await load() } },
                               onArchive: { archiveAfterEdit = true })
-        }
-        .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
-            CustomerSelfEditView(customerID: customer.id) { showCustomerMode = false }
         }
         .sheet(item: $contactSheet, onDismiss: { Task { await load() } }) { item in SheetSurface {
             CustomerContactSheet(customerID: customer.id, contact: item.contact) { contact in
@@ -1018,7 +1047,7 @@ struct CustomerDetailView: View {
                         detailLine("Phone") { ContactActions(phone: phone, email: nil) }
                     }
                     if let email = record.email, !email.isEmpty, !CustomerFacts.email(email, isIn: contacts.compactMap(\.email)) {
-                        detailLine("Email") { ContactActions(phone: nil, email: email) }
+                        detailLine("Email") { ContactActions(phone: nil, email: email, emailContext: "customer:\(customer.id)") }
                     }
                     if let industry = record.industry { detailLine("Industry") { Text(industry) } }
                     if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
@@ -1042,17 +1071,30 @@ struct CustomerDetailView: View {
             // One heading and one word: "Open job", and "Late" when a booked visit's time has passed
             // (never "Past scheduled time" above a row that says "Scheduled").
             let late = ["scheduled", "dispatched"].contains(job.status) && (JobFiltering.date(job.scheduledFor).map { $0 < .now } ?? false)
-            PaperSection(summary.openCount > 1 ? "Open jobs" : "Open job", count: summary.openCount > 1 ? summary.openCount : nil) {
-                NavigationLink(value: job) {
-                    // The jobs row grammar: the street, the problem, when and who; the status word trails.
-                    JobRoomRow(job: job, street: street(for: job.locationId),
-                               when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
-                               who: tech(job.assignedToUserId), late: late, titleLines: 3, inset: PaperCardMetrics.inset)
+            VStack(alignment: .leading, spacing: 0) {
+                PaperSection(title: summary.openCount > 1 ? "Open jobs" : "Open job", count: summary.openCount > 1 ? summary.openCount : nil) {
+                    NavigationLink(value: job) {
+                        // The jobs row grammar: the street, the problem, when and who; the status word trails.
+                        JobRoomRow(job: job, street: street(for: job.locationId),
+                                   when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
+                                   who: tech(job.assignedToUserId), late: late, titleLines: 3, inset: PaperCardMetrics.inset)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityIdentifier("customer-next-visit")
+                } accessory: {
+                    if summary.openCount > 1 && !typeSize.isAccessibilitySize { seeAllJobs }
                 }
-                .buttonStyle(RowPressStyle())
-                .accessibilityIdentifier("customer-next-visit")
+                if summary.openCount > 1 && typeSize.isAccessibilitySize { seeAllJobs }
             }
         }
+    }
+
+    private var seeAllJobs: some View {
+        Button("See all jobs") { tab = "Jobs" }
+            .font(Theme.font(14, weight: .medium))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .accessibilityIdentifier("customer-see-all-jobs")
     }
 
     private func street(for locationID: String?) -> String? {
@@ -1086,7 +1128,7 @@ struct CustomerDetailView: View {
             items.append(ThorbisMenuItem("Edit customer", icon: "pencil") { showEditCustomer = true })
             // Customer view: hands the phone to the customer to check and fix their details.
             items.append(ThorbisMenuItem("Customer view", icon: "person.crop.rectangle",
-                                         subtitle: "Hand the phone over to check their details") { showCustomerMode = true })
+                                         subtitle: "Hand the phone over to check their details") { presentCustomerDetails() })
             items.append(ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add })
             items.append(ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add })
         }
@@ -1118,6 +1160,36 @@ struct CustomerDetailView: View {
         }
     }
 
+    private func presentCustomerDetails() {
+        guard canEdit, let record, record.id == customer.id,
+              record.organizationId == session.activeOrganization?.id,
+              let authority = CustomerHandoffExitAuthority.capture(api: api, session: session),
+              let source = customerWindowAnchor.window, customerWindowAnchor.isAttached(to: source),
+              let lease = customerView.claimLegacy() else {
+            error = "Customer details aren't ready. Refresh and try again."
+            return
+        }
+        let content = AnyView(CustomerSelfEditView(customerID: customer.id, currentAuthority: {
+            legacyHandoff.active?.lease === lease && legacyHandoff.active?.isCurrent(api: api, session: session) == true &&
+            session.can("customer.edit", feature: "core_crm")
+        }, onFinished: { legacyHandoff.authenticatedExit(for: lease) })
+            .environmentObject(api).environmentObject(session))
+        guard let handoff = LegacyCustomerHandoff(lease: lease, content: content, api: api, session: session,
+            capability: "customer.edit", feature: "core_crm", sourceAttached: { customerWindowAnchor.isAttached(to: source) },
+            onDismiss: { _ in
+                guard let exitRevision = customerView.idleRevision else { return }
+                Task {
+                    let current: @MainActor () -> Bool = { customerView.isIdleRevision(exitRevision) && customerWindowAnchor.isAttached(to: source) && authority.isCurrent(api: api, session: session) }
+                    guard current() else { return }
+                    await load(currentAuthority: current)
+                    guard current() else { return }
+                    await loadSmsConsent(currentAuthority: current)
+                }
+            }), legacyHandoff.present(handoff, sourceWindow: source, api: api, session: session) else {
+            lease.release(); error = "Customer view is unavailable. Please try again."; return
+        }
+    }
+
     private func contactMenuItems(_ contact: CustomerContactRecord) -> [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
         if let phone = contactDialable(contact) {
@@ -1125,7 +1197,7 @@ struct CustomerDetailView: View {
             if let text = URL(string: "sms:\(phone)") { items.append(ThorbisMenuItem("Text", icon: "message") { inboxText(text, name: contact.name, openURL: openURL) }) }
         }
         if let mail = MailDraft(recipient: contact.email) {
-            items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
+            items.append(ThorbisMenuItem("Email", icon: "envelope") { inboxEmail(mail, context: "customer:\(customer.id):contact:\(contact.id)") })
         }
         items.append(ThorbisMenuItem("Save to Contacts", icon: "person.crop.circle.badge.plus") {
             handoff = .contact(ContactCardDraft.make(contact: contact, customerName: record?.name ?? customer.name, address: record?.address))
@@ -1252,10 +1324,12 @@ struct CustomerDetailView: View {
         return (smsConsent.decision == "grant" ? "Allowed" : "Stopped") + date
     }
 
-    private func loadSmsConsent() async {
-        guard session.can("customer.view", feature: "core_crm") else { return }
+    private func loadSmsConsent(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority(), session.can("customer.view", feature: "core_crm") else { return }
         do {
-            smsConsent = try await api.customerSmsConsent(customer.id)
+            let loaded = try await api.customerSmsConsent(customer.id)
+            guard currentAuthority() else { return }
+            smsConsent = loaded
             smsConsentLoaded = true
         } catch {
             // An older server or no access: leave the row out rather than show a guess.
@@ -1468,15 +1542,17 @@ struct CustomerDetailView: View {
         let ordered = CustomerJobOrder.sorted(jobs)
         let open = ordered.filter { !["completed", "canceled"].contains($0.status) }
         let past = ordered.filter { ["completed", "canceled"].contains($0.status) }
-        // CustomerJobs.dc.html: four past jobs, then "Show N older jobs" (nothing is dropped).
-        let shownPast = showAllPast ? past : Array(past.prefix(4))
+        // Keep history approachable and avoid constructing every old row at once.
+        let shownPast = Array(past.prefix(visiblePastCount))
+        let nextCount = CustomerJobHistory.nextCount(total: past.count, visible: shownPast.count)
+        let recordsByID = CustomerJobHistory.firstByID(jobRecords, id: \.id)
         return VStack(alignment: .leading, spacing: 18) {
             if !open.isEmpty {
                 PaperSection("Open", count: open.count) {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(open.enumerated()), id: \.element.id) { index, job in
                             if index > 0 { WellDivider(leading: JobListRowContent.dividerInset) }
-                            customerJobRow(job, open: true)
+                            customerJobRow(job, open: true, record: recordsByID[job.id])
                         }
                     }
                 }
@@ -1484,18 +1560,26 @@ struct CustomerDetailView: View {
             if !past.isEmpty {
                 VStack(spacing: 0) {
                     PaperSection("Past jobs", count: past.count) {
-                        VStack(spacing: 0) {
+                        LazyVStack(spacing: 0) {
                             ForEach(Array(shownPast.enumerated()), id: \.element.id) { index, job in
                                 if index > 0 { WellDivider() }
-                                customerJobRow(job, open: false)
+                                customerJobRow(job, open: false, record: recordsByID[job.id])
                             }
                         }
                     }
                     if past.count > shownPast.count {
-                        Button { withMotion { showAllPast = true } } label: {
-                            Text("Show \(past.count - shownPast.count) older job\(past.count - shownPast.count == 1 ? "" : "s")")
-                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                        let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 12))
+                        actions {
+                            Button { withMotion { visiblePastCount += nextCount } } label: {
+                                Text("Show next \(nextCount) older job\(nextCount == 1 ? "" : "s")")
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                            }
+                            if past.count - shownPast.count > nextCount {
+                                Button("Show all") { withMotion { visiblePastCount = past.count } }
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                    .frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil, minHeight: 44)
+                            }
                         }
                         .buttonStyle(PressStyle())
                         .padding(.top, 4)
@@ -1512,8 +1596,7 @@ struct CustomerDetailView: View {
         }
     }
 
-    private func customerJobRow(_ job: Job, open: Bool) -> some View {
-        let full = jobRecords.first { $0.id == job.id }
+    private func customerJobRow(_ job: Job, open: Bool, record full: JobRecord?) -> some View {
         return NavigationLink(value: job) {
             if open {
                 // Open work, in the jobs row grammar: the street, the problem, when and who.
@@ -1571,25 +1654,29 @@ struct CustomerDetailView: View {
     }
 
     /// Money: the customer's estimates and invoices, on and off jobs.
-    private var moneySection: some View { recordsParts([.estimates, .invoices]) }
+    private var moneySection: some View { recordsParts([.estimates, .invoices], moneyOnly: true) }
 
-    private func recordsParts(_ parts: Set<CustomerRecordsPart>) -> some View {
+    private func recordsParts(_ parts: Set<CustomerRecordsPart>, moneyOnly: Bool = false) -> some View {
         let scope = recordsScope
-        let visible = visibleRecords
-        let visibleError = scope != nil && recordsRequestedScope == scope ? recordsError : nil
+        let visible = moneyOnly ? (scope != nil && moneyRecordsPublishedScope == scope ? moneyRecords : nil) : visibleRecords
+        let visibleError = moneyOnly
+            ? (scope != nil && moneyRecordsRequestedScope == scope ? moneyRecordsError : nil)
+            : (scope != nil && recordsRequestedScope == scope ? recordsError : nil)
         return VStack(alignment: .leading, spacing: 10) {
             if scope == nil {
                 emptyText("You don’t have access to this customer’s records.")
             } else {
                 if let visibleError {
                     ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) {
-                        await loadRecords()
+                        if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
                     }.accessibilityIdentifier("customer-records-retry")
                 }
                 if visible == nil && visibleError == nil {
                     SkeletonRows(count: 3, inset: 0)
                 } else if let visible {
-                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() }, parts: parts)
+                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: {
+                        if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
+                    }, parts: parts)
                 }
             }
         }
@@ -1600,6 +1687,39 @@ struct CustomerDetailView: View {
         let generation = session.generation
         guard let loaded = try? await api.fieldJobs(customerID: customer.id), session.generation == generation else { return }
         jobRecords = loaded.filter { $0.customerId == customer.id && $0.organizationId == organizationID }
+    }
+
+    private func loadSelectedRecords() async {
+        switch tab {
+        case "Money": await loadMoneyRecords()
+        case "Jobs", "Photos": await loadRecords()
+        default: break
+        }
+    }
+
+    private func loadMoneyRecords() async {
+        guard let scope = recordsScope else { return }
+        guard !moneyRecordsLoading || moneyRecordsRequestedScope != scope else { return }
+        moneyRecordsLoadGeneration += 1
+        let request = moneyRecordsLoadGeneration
+        moneyRecordsLoading = true
+        moneyRecordsRequestedScope = scope
+        moneyRecordsError = nil
+        defer { if moneyRecordsLoadGeneration == request { moneyRecordsLoading = false } }
+        do {
+            let recordsSession = session
+            let compiled = try await CustomerJobCompilationLoader.load(customerID: scope.customerID,
+                organizationID: scope.organizationID, api: api, access: scope.access, moneyOnly: true,
+                isCurrent: { scope.isCurrent(session: recordsSession) })
+            guard !Task.isCancelled, moneyRecordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
+            moneyRecords = compiled
+            moneyRecordsPublishedScope = scope
+            moneyRecordsError = nil
+        } catch is CancellationError {
+        } catch {
+            guard !Task.isCancelled, moneyRecordsLoadGeneration == request, scope.isCurrent(session: session) else { return }
+            moneyRecordsError = error.localizedDescription
+        }
     }
 
     private func loadRecords() async {
@@ -1904,20 +2024,21 @@ struct CustomerDetailView: View {
 
     private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
-    private func load() async {
+    private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
+        guard currentAuthority() else { return }
         loadGeneration += 1
         let requestGeneration = loadGeneration
         let locationRequestGeneration = locationState.beginLoad()
         let contactRequestGeneration = contactState.beginLoading()
         do {
             let loadedRecord = try await api.fieldCustomer(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), loadGeneration == requestGeneration else { return }
             record = loadedRecord
             let loadedContacts = try await api.fieldContacts(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), loadGeneration == requestGeneration else { return }
             contactState.receive(loadedContacts, generation: contactRequestGeneration)
             let loadedLocations = try await api.fieldLocations(customer.id)
-            guard loadGeneration == requestGeneration else { return }
+            guard currentAuthority(), loadGeneration == requestGeneration else { return }
             if locationState.receive(loadedLocations, generation: locationRequestGeneration) {
                 locationError = nil
             }
@@ -1930,8 +2051,11 @@ struct CustomerDetailView: View {
 }
 
 private struct CustomerContactIcon: View {
+    @Environment(\.openURL) private var openURL
+    @Environment(\.inboxEmail) private var inboxEmail
     let value: String
     let isPhone: Bool
+    let emailContext: String
     var size: CGFloat = 30
     private var url: URL? {
         let address = isPhone ? value.filter { $0.isNumber || $0 == "+" } : value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? ""
@@ -1940,7 +2064,9 @@ private struct CustomerContactIcon: View {
     }
     var body: some View {
         if let url {
-            Link(destination: url) {
+            Button {
+                if isPhone { openURL(url) } else { inboxEmail(url, context: emailContext) }
+            } label: {
                 Image(systemName: isPhone ? "phone" : "envelope").font(Theme.font(size == 46 ? 17 : 13)).foregroundStyle(Theme.foreground)
                     .frame(width: size, height: size).background(size == 46 ? Theme.card : Theme.fill, in: RoundedRectangle(cornerRadius: size == 46 ? 12 : 15, style: .continuous))
                     .frame(width: 44, height: 44).contentShape(Rectangle())

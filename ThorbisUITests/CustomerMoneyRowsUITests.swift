@@ -29,6 +29,23 @@ final class CustomerMoneyRowsUITests: XCTestCase {
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
     }
 
+    func testMoneyLoadsWhenJobMediaDoesNotRespond() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--paper-preview", "--paper-preview-screen", "customer-money",
+            "--paper-preview-hold-path", "/v1/jobs/00000000-0000-4000-8000-000000002214/media"
+        ]
+        app.launch()
+        let estimate = app.buttons["customer-estimate-00000000-0000-4000-8000-000000002218"]
+        XCTAssertTrue(estimate.waitForExistence(timeout: 45),
+                      "Customer Money must not wait for unrelated job media")
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        for _ in 0..<10 where !invoice.exists { app.swipeUp() }
+        XCTAssertTrue(invoice.waitForExistence(timeout: 10),
+                      "Invoices remain available while job media is stalled")
+    }
+
     func testMoneyShowsDocumentIdentityStatusAndInvoiceTotal() {
         continueAfterFailure = false
         let app = XCUIApplication()

@@ -71,7 +71,7 @@ struct CustomerRecordsView: View {
             ? [GridItem(.flexible())]
             // Paper 48F: three tiles across, 8 apart.
             : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
-        return VStack(alignment: .leading, spacing: 8) {
+        return LazyVStack(alignment: .leading, spacing: 8) {
             heading("Photos", count: compilation.photoCount, symbol: "photo", incomplete: incomplete)
             if incomplete {
                 ErrorBanner(message: "Some photos may be missing or duplicated. Please try again.") {
@@ -144,8 +144,26 @@ struct CustomerRecordsView: View {
 
     private func mediaSection(_ title: String, total: Int, groups: [CustomerJobGroup<MediaAssetRecord>], symbol: String, incomplete: Bool = false) -> some View {
         section(title, total: total, symbol: symbol, groups: groups, incomplete: incomplete) { asset in
-            Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
-                .font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(2)
+            NavigationLink(value: PaperRoute.media(jobID: asset.jobId, assetID: asset.id)) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if asset.uploadState != "stored" {
+                            Text("File is not ready yet").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .disabled(asset.uploadState != "stored")
+            .accessibilityHint(asset.uploadState == "stored" ? "Opens the file" : "File is not ready yet")
+            .accessibilityIdentifier("customer-document-\(asset.id)")
         }
     }
 
@@ -291,19 +309,34 @@ struct CustomerRecordsView: View {
                         .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, 4).frame(minHeight: 44)
+                .contentShape(Rectangle())
             } else {
                 // A quiet link to the job that groups the records under it, so it never reads as one of them.
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
-                    Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                    Spacer(minLength: 0)
-                }.frame(minHeight: 44)
+                VStack(alignment: .leading, spacing: 4) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if !dynamicTypeSize.isAccessibilitySize {
+                            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                        Spacer(minLength: 8)
+                        Text("Open job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: true, vertical: false).accessibilityHidden(true)
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    }
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
         }.buttonStyle(RowPressStyle())
         .accessibilityLabel("Job: \(title), \(incomplete ? "partial" : "\(count)")")
         .accessibilityHint("Opens the job")
+        .accessibilityIdentifier("customer-records-job-\(jobID)")
     }
 
     private func moneyLink(_ row: CustomerMoneyRow) -> some View {

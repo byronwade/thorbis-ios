@@ -1,5 +1,6 @@
 import AVFoundation
 import SwiftUI
+import UIKit
 
 // MARK: - Recording playback
 
@@ -169,12 +170,12 @@ struct CommsThreadMenu: View {
             ThorbisMenuItem(unread ? "Mark read" : "Mark unread", icon: unread ? "envelope.open" : "envelope.badge") { store.setUnread(id, !unread) },
         ]
         if flags.place == .inbox {
-            items.append(ThorbisMenuItem("Archive", icon: "archivebox") { store.archive(id); onMoved() })
+            items.append(ThorbisMenuItem("Archive", icon: "archivebox") { if store.archive(id) { onMoved() } })
         } else {
             items.append(ThorbisMenuItem("Move to Inbox", icon: "tray") { store.moveToInbox(id) })
         }
         if flags.place != .bin {
-            items.append(ThorbisMenuItem("Move to Bin", icon: "trash", role: .destructive) { store.bin(id); onMoved() })
+            items.append(ThorbisMenuItem("Move to Bin", icon: "trash", role: .destructive) { if store.bin(id) { onMoved() } })
         }
         return ThorbisMenu(items: items, title: name, accessibilityLabel: "Conversation options") {
             CreamCircleLabel(symbol: "ellipsis")
@@ -233,6 +234,18 @@ private struct CommsCallCircle: View {
 
 // MARK: - Call thread
 
+private struct CommsThreadStorageWarning: View {
+    var body: some View {
+        Text("Couldn't save changes on this device. Copy unsaved work before restarting the app, then check saved messages.")
+            .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
+            .background(Theme.canvas)
+            .accessibilityIdentifier("inbox-thread-storage-error")
+    }
+}
+
 /// Every call from one number, newest first (web thread.tsx calls): each a card with when, how
 /// long, its status, the recording, what was said, and the job it is linked to.
 struct CommsCallThreadView: View {
@@ -260,6 +273,9 @@ struct CommsCallThreadView: View {
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
+        .safeAreaInset(edge: .top) {
+            if local.storageBlocked { CommsThreadStorageWarning() }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -531,6 +547,7 @@ struct CommsLocalThreadView: View {
     @ObservedObject var store: CommsLocalStore
     @Environment(\.dismiss) private var dismiss
     @State private var mail: CommsMailDraft?
+    @State private var recoveredThreadID: String?
 
     var body: some View {
         let thread = store.thread(threadID)
@@ -559,6 +576,9 @@ struct CommsLocalThreadView: View {
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
+        .safeAreaInset(edge: .top) {
+            if store.storageBlocked && thread?.channel == .email { CommsThreadStorageWarning() }
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -590,7 +610,13 @@ struct CommsLocalThreadView: View {
             }
         }
         .sheet(item: $mail) { draft in
-            CommsMailSheet(draft: draft, store: store) { _ in mail = nil } onClose: { mail = nil }
+            CommsMailSheet(draft: draft, store: store) { id in
+                mail = nil
+                if id != threadID { recoveredThreadID = id }
+            } onClose: { mail = nil }
+        }
+        .thorbisDestination(item: $recoveredThreadID) { id in
+            CommsLocalThreadView(threadID: id, store: store).tabletReadable()
         }
         .onAppear { if thread?.unread == true { store.setUnread(threadID, false) } }
     }
@@ -616,8 +642,7 @@ struct CommsLocalThreadView: View {
         if message.status == .draft {
             items.append(ThorbisMenuItem("Discard draft", icon: "trash", role: .destructive) {
                 let leaving = thread.channel == .email && thread.messages.count == 1
-                store.discardDraft(thread.id, messageID: message.id)
-                if leaving { dismiss() }
+                if store.discardDraft(thread.id, messageID: message.id), leaving { dismiss() }
             })
         }
         return items
@@ -746,15 +771,31 @@ struct CommsTextComposer: View {
             }
             // A footnote, not content: capped so at the largest sizes it doesn't take the room the
             // conversation needs.
-            HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                Text("Drafts stay on this device").font(Theme.font(12)).foregroundStyle(Theme.muted)
-                if let counter = CommsSMS.counter(body_) {
-                    Text(counter).font(Theme.font(12)).monospacedDigit().foregroundStyle(Theme.muted)
+            if store.storageBlocked {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Couldn't save this text on your device. Copy it before closing.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("inbox-text-storage-error")
+                    if !body_.isEmpty {
+                        Button("Copy text") { UIPasteboard.general.string = body_ }
+                            .font(Theme.font(14, weight: .medium))
+                            .frame(minHeight: 44)
+                            .accessibilityIdentifier("inbox-text-copy-unsaved")
+                    }
                 }
-                Spacer(minLength: 0)
+                .padding(.horizontal, 4)
+            } else {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    Text("Drafts stay on this device").font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    if let counter = CommsSMS.counter(body_) {
+                        Text(counter).font(Theme.font(12)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .dynamicTypeSize(...DynamicTypeSize.accessibility1)
             }
-            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
         .background(Theme.background)
@@ -899,14 +940,30 @@ private struct CommsCannedRepliesSheet: View {
             PaperFormField("New canned reply") {
                 VStack(spacing: 8) {
                     TextField("Name", text: $name, prompt: .placeholder("Name")).font(Theme.font(16)).fieldWell()
+                        .accessibilityIdentifier("inbox-canned-name")
                     TextField("Reply", text: $text, prompt: .placeholder("What it says"), axis: .vertical)
                         .lineLimit(2...5).font(Theme.font(16)).fieldWell()
+                        .accessibilityIdentifier("inbox-canned-reply")
+                }
+            }
+            if store.storageBlocked {
+                Text("Couldn't save this reply on your device. Copy it before closing.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("inbox-canned-storage-error")
+                if !name.isEmpty || !text.isEmpty {
+                    Button("Copy reply") {
+                        UIPasteboard.general.string = name.isEmpty ? text : "\(name)\n\(text)"
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("inbox-canned-copy-unsaved")
                 }
             }
             Button {
-                store.saveCannedReply(name: name, body: text)
-                name = ""
-                text = ""
+                if store.saveCannedReply(name: name, body: text) {
+                    name = ""
+                    text = ""
+                }
             } label: { Text("Save reply").inkCommit(enabled: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) }
                 .buttonStyle(PressStyle())
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -930,6 +987,7 @@ struct CommsComposeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var phone = ""
     @State private var name = ""
+    @State private var textOpenFailed = false
     @FocusState private var phoneFocused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -951,8 +1009,21 @@ struct CommsComposeSheet: View {
                 Text("An existing conversation with this number opens instead of a new one. Drafts stay on this device.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                if textOpenFailed {
+                    Text("Couldn't open this text. Copy any unsaved work before restarting the app, then check saved messages.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("inbox-new-text-storage-error")
+                }
                 let ready = CommsCallGrouping.key(phone) != nil
-                Button { onOpen(store.threadForPhone(phone, contactName: name)) } label: {
+                Button {
+                    if let id = store.threadForPhone(phone, contactName: name) {
+                        textOpenFailed = false
+                        onOpen(id)
+                    } else {
+                        textOpenFailed = true
+                    }
+                } label: {
                     Text("Start text").inkCommit(enabled: ready)
                 }
                 .buttonStyle(PressStyle())
@@ -983,6 +1054,14 @@ struct CommsMailDraft: Identifiable {
         self.subject = subject
     }
 
+    init(mail: MailDraft) {
+        to = mail.recipients.joined(separator: ", ")
+        cc = mail.cc.joined(separator: ", ")
+        bcc = mail.bcc.joined(separator: ", ")
+        subject = mail.subject ?? ""
+        body = mail.body ?? ""
+    }
+
     init(message: CommsLocalMessage, threadID: String) {
         self.threadID = threadID
         messageID = message.id
@@ -1005,38 +1084,157 @@ struct CommsMailDraft: Identifiable {
     var mail: CommsLocalStore.Mail {
         .init(to: Self.addresses(to), cc: Self.addresses(cc), bcc: Self.addresses(bcc), subject: subject, body: body)
     }
+
+    /// Explicit recovery copy, including all fields the technician entered.
+    var recoveryText: String {
+        "To: \(to)\nCc: \(cc)\nBcc: \(bcc)\nSubject: \(subject)\n\n\(body)"
+    }
 }
 
 /// The email composer (web compose.tsx): To, Cc and Bcc, subject, body. Save draft keeps it on
-/// this device; Send queues it, because no email provider is connected.
+/// this device; queued messages do not send automatically.
 struct CommsMailSheet: View {
+    #if DEBUG
+    @EnvironmentObject private var session: SessionController
+    #endif
     @State var draft: CommsMailDraft
     @ObservedObject var store: CommsLocalStore
     let onSaved: (String) -> Void
     let onClose: () -> Void
     @State private var showCopies = false
+    @State private var confirmClose = false
+    @State private var saveFailure: CommsLocalStore.MailSaveFailure?
+    @State private var mailHandoff: DeviceHandoff?
+    @State private var recoveryCandidate: CommsEmailRecovery?
+    @State private var recoveryError: String?
+    @State private var recoveryLoaded = false
+    @State private var recoveryBlocked = false
+    @State private var savedThreadAwaitingCleanup: String?
+    private let recoveryScope: CommsEmailRecoveryScope?
+    private let recoveryCurrent: @MainActor () -> Bool
+    private let recoveryStore: CommsEmailRecoveryStoring
+    private let original: CommsLocalStore.Mail
     @FocusState private var toFocused: Bool
+
+    init(draft: CommsMailDraft, store: CommsLocalStore, recoveryScope: CommsEmailRecoveryScope? = nil,
+         recoveryCurrent: @escaping @MainActor () -> Bool = { true },
+         recoveryStore: CommsEmailRecoveryStoring = KeychainCommsEmailRecoveryStore.shared,
+         onSaved: @escaping (String) -> Void, onClose: @escaping () -> Void) {
+        _draft = State(initialValue: draft)
+        self.original = draft.mail
+        self.store = store; self.recoveryScope = recoveryScope; self.recoveryCurrent = recoveryCurrent; self.recoveryStore = recoveryStore
+        self.onSaved = onSaved
+        self.onClose = onClose
+    }
+
+    private func recoveryField(_ key: WritableKeyPath<CommsMailDraft, String>) -> Binding<String> {
+        Binding(get: { draft[keyPath: key] }, set: { value in
+            guard store.isActive, recoveryCurrent(), recoveryCandidate == nil, !recoveryBlocked, savedThreadAwaitingCleanup == nil else { return }
+            var next = draft; next[keyPath: key] = value
+            if let recoveryScope {
+                do { try recoveryStore.save(CommsEmailRecovery(next), scope: recoveryScope); recoveryError = nil }
+                catch { recoveryError = "This draft could not be protected. Copy it before leaving this screen." }
+            }
+            draft = next
+        })
+    }
+
+    private func removeRecovery() -> Bool {
+        guard let recoveryScope else { return true }
+        guard store.isActive, recoveryCurrent() else { return false }
+        do { try recoveryStore.remove(scope: recoveryScope); return true }
+        catch { recoveryError = "The saved recovery copy could not be removed. Try again."; return false }
+    }
+
+    private func loadRecovery() {
+        guard !recoveryLoaded, store.isActive, recoveryCurrent() else { return }
+        recoveryLoaded = true
+        guard let recoveryScope else { return }
+        do { recoveryCandidate = try recoveryStore.load(scope: recoveryScope); recoveryBlocked = false; recoveryError = nil }
+        catch { recoveryBlocked = true; recoveryError = "Saved email recovery could not be checked. Try again before editing." }
+    }
+
+    private var hasChanges: Bool { draft.mail != original }
+    private var canSave: Bool {
+        let mail = draft.mail
+        return !mail.to.isEmpty || !mail.cc.isEmpty || !mail.bcc.isEmpty ||
+            !mail.subject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !mail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var deviceMail: MailDraft? {
+        let mail = draft.mail
+        return MailDraft(recipients: mail.to, cc: mail.cc, bcc: mail.bcc, subject: mail.subject, body: mail.body)
+    }
 
     var body: some View {
         let ready = !draft.mail.to.isEmpty
-        ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: onClose) {
+        ThorbisSheetScaffold(title: draft.messageID != nil ? "Edit draft" : draft.threadID != nil ? "Reply" : "New email", onClose: requestClose) {
+            #if DEBUG
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-email-session-replace") {
+                Button("Replace email session (test)") { Task { await session.restore() } }
+                    .accessibilityIdentifier("inbox-mail-replace-session")
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-invalidate-inbox") {
+                Button("Invalidate inbox session (test)") { store.invalidate() }
+                    .accessibilityIdentifier("inbox-test-invalidate")
+            }
+            if PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-conflict-inbox"),
+               let threadID = draft.threadID, let messageID = draft.messageID {
+                Button("Remove original draft (test)") { store.discardDraft(threadID, messageID: messageID) }
+                    .accessibilityIdentifier("inbox-test-conflict")
+            }
+            #endif
+            if let recoveryCandidate, store.isActive, recoveryCurrent() {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("A protected email to \(recoveryCandidate.to) is available. It may be older or already saved; review drafts before sending.")
+                        .font(Theme.font(14)).fixedSize(horizontal: false, vertical: true)
+                    Button("Restore email draft") {
+                        guard store.isActive, recoveryCurrent() else { return }
+                        var restored = draft; recoveryCandidate.applying(to: &restored); draft = restored; self.recoveryCandidate = nil
+                    }
+                    Button("Discard recovered email", role: .destructive) {
+                        if removeRecovery() { self.recoveryCandidate = nil }
+                    }
+                }
+            }
+            if let savedThreadAwaitingCleanup {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Your email was saved, but its recovery copy could not be removed. Check drafts before restoring it later.")
+                        .font(Theme.font(14)).fixedSize(horizontal: false, vertical: true)
+                    Button("Close saved email") { onSaved(savedThreadAwaitingCleanup) }
+                }
+            }
+            if let recoveryError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(recoveryError).font(Theme.font(14)).foregroundStyle(Theme.warning)
+                    if recoveryBlocked {
+                        Button("Retry recovery") { recoveryLoaded = false; loadRecovery() }
+                    } else {
+                        Button("Copy email") { UIPasteboard.general.string = draft.recoveryText }
+                    }
+                }
+            }
             PaperFormField("To") {
-                TextField("To", text: $draft.to, prompt: .placeholder("name@example.com"))
+                TextField("To", text: recoveryField(\.to), prompt: .placeholder("name@example.com"))
                     .keyboardType(.emailAddress).textContentType(.emailAddress).textInputAutocapitalization(.never)
                     .autocorrectionDisabled().font(Theme.font(16)).fieldWell()
                     .focused($toFocused)
                     .accessibilityIdentifier("inbox-mail-to")
+                    .disabled(recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
             }
             if showCopies || !draft.cc.isEmpty || !draft.bcc.isEmpty {
                 PaperFormField("Cc") {
-                    TextField("Cc", text: $draft.cc, prompt: .placeholder("Optional"))
+                    TextField("Cc", text: recoveryField(\.cc), prompt: .placeholder("Optional"))
                         .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(Theme.font(16)).fieldWell()
+                        .accessibilityLabel("Cc").accessibilityIdentifier("inbox-mail-cc").disabled(recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
                 }
                 PaperFormField("Bcc") {
-                    TextField("Bcc", text: $draft.bcc, prompt: .placeholder("Optional"))
+                    TextField("Bcc", text: recoveryField(\.bcc), prompt: .placeholder("Optional"))
                         .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                         .font(Theme.font(16)).fieldWell()
+                        .accessibilityLabel("Bcc").accessibilityIdentifier("inbox-mail-bcc").disabled(recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
                 }
             } else {
                 Button { showCopies = true } label: {
@@ -1046,30 +1244,75 @@ struct CommsMailSheet: View {
                 .buttonStyle(PressStyle())
             }
             PaperFormField("Subject") {
-                TextField("Subject", text: $draft.subject, prompt: .placeholder("What it\u{2019}s about")).font(Theme.font(16)).fieldWell()
+                TextField("Subject", text: recoveryField(\.subject), prompt: .placeholder("What it\u{2019}s about")).font(Theme.font(16)).fieldWell()
+                    .accessibilityLabel("Subject").accessibilityIdentifier("inbox-mail-subject").disabled(recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
             }
             PaperFormField("Message") {
-                TextField("Message", text: $draft.body, prompt: .placeholder("Write your email"), axis: .vertical)
+                TextField("Message", text: recoveryField(\.body), prompt: .placeholder("Write your email"), axis: .vertical)
                     .lineLimit(6...14).font(Theme.font(16)).fieldWell()
+                    .accessibilityIdentifier("inbox-mail-body").disabled(recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
             }
-            Text("Send queues it \u{2014} no email provider is connected. Drafts stay on this device.")
+            Text("Email is not connected. Queued messages stay on this device and are not sent automatically.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
+            if let saveFailure {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(saveFailure == .storage
+                         ? "The save could not be confirmed. Copy your email, reopen the app, and check drafts before trying again."
+                         : saveFailure == .recipient ? "Add a recipient before queueing this email."
+                         : "This draft or conversation changed. Your text is still here; save a new draft to keep it.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if saveFailure == .conflict {
+                        Button("Save as new draft") { saveSeparateDraft() }
+                            .font(Theme.font(15, weight: .medium))
+                            .accessibilityIdentifier("inbox-mail-save-copy")
+                    } else if saveFailure == .storage {
+                        Button("Copy email") { UIPasteboard.general.string = draft.recoveryText }
+                            .font(Theme.font(15, weight: .medium))
+                            .accessibilityIdentifier("inbox-mail-copy-text")
+                    }
+                }
+            }
             VStack(spacing: 4) {
-                Button { commit(send: true) } label: { Text("Send").inkCommit(enabled: ready) }
+                Button {
+                    guard store.isActive, recoveryCurrent(), let mail = deviceMail else { return }
+                    mailHandoff = .mail(mail)
+                } label: {
+                    Text("Send with Mail").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(deviceMail == nil || recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
+                .accessibilityHint("Opens your mail app with this message. Thorbis does not mark it sent.")
+                Button { commit(send: true) } label: { Text("Queue on device").inkCommit(enabled: ready) }
                     .buttonStyle(PressStyle())
-                    .disabled(!ready)
-                    .accessibilityHint("Queues the email. It won\u{2019}t go out until an email provider is connected.")
+                    .disabled(!ready || saveFailure == .storage || recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
+                    .accessibilityHint("Saves the email on this device. It will not send automatically.")
                     .accessibilityIdentifier("inbox-mail-send")
                 Button { commit(send: false) } label: {
                     Text("Save draft").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
-                .disabled(!ready)
+                .disabled(!canSave || saveFailure == .storage || recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
             }
         }
         .thorbisSheetPresentation([.large])
+        .deviceHandoffs($mailHandoff, isCurrent: { store.isActive && recoveryCurrent() })
+        .interactiveDismissDisabled(hasChanges && store.isActive)
+        .disabled(!store.isActive)
+        .onAppear { if !store.isActive { onClose() } else { loadRecovery() } }
+        .onChange(of: store.isActive) { _, active in
+            if !active { onClose() }
+        }
+        .alert("Keep your changes?", isPresented: $confirmClose) {
+            if canSave && saveFailure != .storage { Button("Save draft") { commit(send: false) } }
+            Button("Discard changes", role: .destructive) { if removeRecovery() { onClose() } }
+            Button("Keep editing", role: .cancel) { }
+        } message: {
+            Text(canSave ? "Save this draft on your device or discard your changes." : "Keep editing or discard your changes.")
+        }
         // A new email starts at To; a reply or a saved draft already has one.
         .task {
             guard draft.to.isEmpty else { return }
@@ -1078,8 +1321,32 @@ struct CommsMailSheet: View {
         }
     }
 
+    private func requestClose() {
+        if let savedThreadAwaitingCleanup { onSaved(savedThreadAwaitingCleanup); return }
+        guard hasChanges else {
+            if recoveryCandidate != nil || recoveryBlocked || removeRecovery() { onClose() }
+            return
+        }
+        // The keyboard can cover the confirmation's cancel action on iPhone.
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        confirmClose = true
+    }
+
     private func commit(send: Bool) {
-        guard let id = store.commitMail(draft.mail, send: send, threadID: draft.threadID, editing: draft.messageID) else { return }
-        onSaved(id)
+        guard saveFailure != .storage, savedThreadAwaitingCleanup == nil, recoveryCurrent() else { return }
+        guard let id = store.commitMail(draft.mail, send: send, threadID: draft.threadID, editing: draft.messageID,
+                                        expected: draft.messageID == nil ? nil : original) else {
+            if store.isActive { saveFailure = store.lastMailSaveFailure ?? .storage }
+            return
+        }
+        if removeRecovery() { onSaved(id) } else { savedThreadAwaitingCleanup = id }
+    }
+
+    private func saveSeparateDraft() {
+        guard savedThreadAwaitingCleanup == nil, recoveryCurrent(), let id = store.commitMail(draft.mail, send: false) else {
+            if store.isActive { saveFailure = store.lastMailSaveFailure ?? .storage }
+            return
+        }
+        if removeRecovery() { onSaved(id) } else { savedThreadAwaitingCleanup = id }
     }
 }

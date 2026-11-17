@@ -107,11 +107,13 @@ struct CustomerEstimatePresentation: View {
     let customerName: String
     let onApproved: (EstimateRecord?) -> Void
     let onDone: () -> Void
+    let currentAuthority: () -> Bool
     let returnToDocuments: (() -> Void)?
     /// True when the company offers financing; the lender decides per amount (CP-13, CP-14).
     let financing: Bool
 
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var flow: CustomerEstimateFlow
@@ -125,10 +127,10 @@ struct CustomerEstimatePresentation: View {
     @State private var signedName = ""
     @State private var offer = FinancingOffer.off
     @State private var showTerms = false
-    @State private var isMember = false
     @State private var openingReview = false
     @State private var openingError: String?
     @State private var reviewGeneration: UUID?
+    @State private var reviewSessionGeneration: UUID?
     @State private var reviewRequestID = UUID()
     @StateObject private var handoffObservation: CustomerEstimateHandoffObservation
     private var handoff: CustomerEstimateHandoffContext? { handoffObservation.context }
@@ -137,12 +139,14 @@ struct CustomerEstimatePresentation: View {
     init(estimate: EstimateRecord, jobID: String?, customerName: String, preselectedOptionID: String? = nil,
          financing: Bool = false,
          handoff: CustomerEstimateHandoffContext? = nil, returnToDocuments: (() -> Void)? = nil,
+         currentAuthority: @escaping () -> Bool = { true },
          onApproved: @escaping (EstimateRecord?) -> Void, onDone: @escaping () -> Void) {
         self.jobID = jobID
         self.financing = financing
         self.customerName = customerName
         self.onApproved = onApproved
         self.onDone = onDone
+        self.currentAuthority = currentAuthority
         self.returnToDocuments = returnToDocuments
         _handoffObservation = StateObject(wrappedValue: CustomerEstimateHandoffObservation(handoff))
         var flow = CustomerEstimateFlow(estimate: estimate)
@@ -225,7 +229,6 @@ struct CustomerEstimatePresentation: View {
         .animation(.easeOut(duration: 0.2), value: flow.step)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadOffer() }
-        .task { isMember = await api.customerIsMember(flow.estimate.customerId) }
         .toolbar {
             // PresentDetail.dc.html: a round back circle opposite the lock. Only where this screen is
             // the customer-mode root; pushed hosts (handoff, job documents) already show their back.
@@ -294,14 +297,8 @@ struct CustomerEstimatePresentation: View {
                             .font(Theme.customerFont(type.body, weight: .bold)).monospacedDigit()
                             .minimumScaleFactor(0.6).lineLimit(1)
                     }
-                    if !option.description.isEmpty {
-                        Text(option.description).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 2)
-                    }
                     if let saved = customerSavingsText(option.lines, currency: option.currency) {
-                        Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
+                        Text("Includes savings of \(saved)")
                             .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                             .padding(.top, 6)
                     }
@@ -331,6 +328,12 @@ struct CustomerEstimatePresentation: View {
             .accessibilityLabel(selected ? "\(option.title), selected" : "Choose \(option.title)")
             .accessibilityValue("Total \(total)")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            if !option.description.isEmpty {
+                optionDescription(option)
+                    .foregroundStyle(Theme.subtle)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 12)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Selection is the brand ring and the chosen pill; the screen's only fill is the commit (CP-07).
@@ -338,6 +341,26 @@ struct CustomerEstimatePresentation: View {
         .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
             .strokeBorder(Theme.brand, lineWidth: selected ? 1.5 : 0))
         .animation(.easeOut(duration: 0.15), value: selected)
+    }
+
+    @ViewBuilder private func optionDescription(_ option: FieldEstimateOption) -> some View {
+        if let jobID, let revision = flow.issuedRevision {
+            let record = flow.estimate
+            let scope = JobDocumentScope(jobID: jobID, organizationID: record.organizationId, customerID: record.customerId)
+            let access = DocumentDescriptionAccess(
+                identity: .estimate(scope: scope, record: record, issued: revision),
+                organizationID: record.organizationId, capability: "estimate.view", feature: "estimates",
+                sourceGeneration: reviewSessionGeneration, fresh: reviewReady,
+                active: flow.step == .choose && currentAuthority() && handoff?.current() != false,
+                scopeValid: scope.contains(record, requestedID: record.id) && revision.estimateId == record.id &&
+                    revision.revisionNumber == record.currentRevisionNumber &&
+                    (revision.options?.contains(where: { $0.id == option.id }) == true))
+            ReadOnlyDocumentDescription(text: option.description, fontSize: type.small, access: access,
+                                        customerFacing: true, accessibilityContext: "\(option.title) option")
+        } else {
+            // Standalone presentations without a job retain their complete original description.
+            Text(option.description).font(Theme.customerFont(type.small)).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// "What's included": the chosen option (or the single scope) with every line in full,
@@ -356,7 +379,7 @@ struct CustomerEstimatePresentation: View {
             if let projected = verifiedCustomerLines {
                 CustomerSummaryLabel(count: projected.count, type: type)
                 CustomerIncludedLines(lines: projected, type: type,
-                                      rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
+                                      rows: customerSavingsRows(flow.lines, currency: flow.currency)
                                           + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
             } else {
                 Text("These amounts couldn't be verified. Hand the device back to your technician.")
@@ -622,13 +645,13 @@ struct CustomerEstimatePresentation: View {
 
     /// One request for every total on screen; any failure simply shows no financing.
     private func loadOffer() async {
-        guard financing else { return }
+        guard financing, currentAuthority() else { return }
         let amounts = flow.hasOptions ? flow.options.map(\.totalAmount) : (flow.total.map { [$0] } ?? [])
         offer = await api.financingOffer(amounts: amounts)
     }
 
     private func openReview() async {
-        guard flow.estimate.status != "approved" else { return }
+        guard currentAuthority(), flow.estimate.status != "approved" else { return }
         if let handoff {
             guard handoff.current() else { return }
             if handoff.signature != nil || handoff.outcome != nil || handoff.running {
@@ -636,12 +659,14 @@ struct CustomerEstimatePresentation: View {
                 flow.selectedOptionID = handoff.reviewed.optionID
                 flow.step = handoff.outcome?.isApproved == true ? .done : .sign
                 reviewGeneration = api.requestGeneration
+                reviewSessionGeneration = session.generation
                 return
             }
         }
-        let requestID = UUID(), generation = api.requestGeneration
+        let requestID = UUID(), generation = api.requestGeneration, sessionGeneration = session.generation
         reviewRequestID = requestID
         reviewGeneration = nil
+        reviewSessionGeneration = nil
         openingReview = true
         openingError = nil
         error = nil
@@ -651,16 +676,17 @@ struct CustomerEstimatePresentation: View {
         defer { if reviewRequestID == requestID { openingReview = false } }
         do {
             if let handoff { try await handoff.validate() }
-            let revision = try await api.customerIssuedEstimateRevision(for: flow.estimate, currentAuthority: { handoff?.current() != false })
+            let revision = try await api.customerIssuedEstimateRevision(for: flow.estimate, currentAuthority: { currentAuthority() && handoff?.current() != false })
             try Task.checkCancellation()
             if let handoff {
                 guard handoff.current(), handoff.canApprove(), revision == handoff.reviewed.revision else {
                     throw Problem(title: "This estimate changed. Review its current terms again.", status: 409, detail: nil)
                 }
             }
-            guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
+            guard currentAuthority(), reviewRequestID == requestID, generation == api.requestGeneration else { return }
             try flow.useIssuedRevision(revision)
             reviewGeneration = generation
+            reviewSessionGeneration = sessionGeneration
         } catch is CancellationError {
         } catch {
             guard reviewRequestID == requestID, generation == api.requestGeneration else { return }
@@ -670,7 +696,7 @@ struct CustomerEstimatePresentation: View {
 
     private func startSigning() async {
         error = nil
-        guard handoff?.current() != false, handoff?.canApprove() != false, reviewReady,
+        guard currentAuthority(), handoff?.current() != false, handoff?.canApprove() != false, reviewReady,
               verifiedCustomerLines != nil, let revision = flow.issuedRevision else {
             openingError = "Ask your technician to reopen the current estimate."
             reviewGeneration = nil
@@ -683,9 +709,9 @@ struct CustomerEstimatePresentation: View {
         do {
             let opened: (token: String, action: PublicEstimateAction)
             if let retained = handoff?.link { opened = retained }
-            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { handoff?.current() != false && handoff?.canApprove() != false }) }
+            else { opened = try await api.openInPersonEstimateApproval(revision, currentAuthority: { currentAuthority() && handoff?.current() != false && handoff?.canApprove() != false }) }
             try Task.checkCancellation()
-            guard generation == api.requestGeneration else { return }
+            guard currentAuthority(), generation == api.requestGeneration else { return }
             guard handoff?.current() != false, handoff?.canApprove() != false else { return }
             link = opened
             consentText = opened.action.consentText
@@ -697,7 +723,7 @@ struct CustomerEstimatePresentation: View {
     }
 
     private func approve() async {
-        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
+        guard currentAuthority(), reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
         let signer = handoff?.signature?.signerName ?? name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) || handoff?.signature != nil else { return }
         guard handoff?.current() != false, handoff?.canApprove() != false else { return }
@@ -713,12 +739,12 @@ struct CustomerEstimatePresentation: View {
             if drawnApproval, let jobID {
                 let mediaID = try await uploadSignature(jobID: jobID)
                 try Task.checkCancellation()
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 guard handoff?.current() != false, handoff?.canApprove() != false else { return }
                 let input = FieldSignatureInput(signerName: signer, signedAt: handoff?.signature?.signedAt ?? ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
                 handoff?.submissionStarted = true; handoff?.retryVerified = false
                 let approved = try await api.approveFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber, signature: input)
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 if let handoff {
                     guard handoff.current() else { return }
                     guard handoff.canApprove() else { handoff.report(.unknown); return }
@@ -734,7 +760,7 @@ struct CustomerEstimatePresentation: View {
                 // The drawing is kept with the job; the server records the typed name and option.
                 if let jobID { _ = try? await uploadSignature(jobID: jobID) }
                 try Task.checkCancellation()
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 guard handoff?.current() != false, handoff?.canApprove() != false else { return }
                 let decision = handoff?.publicDecision ?? PublicEstimateActionDecision.approve(
                     revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
@@ -742,7 +768,7 @@ struct CustomerEstimatePresentation: View {
                 handoff?.publicDecision = decision
                 handoff?.submissionStarted = true; handoff?.retryVerified = false
                 let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
-                guard generation == api.requestGeneration else { return }
+                guard currentAuthority(), generation == api.requestGeneration else { return }
                 if let handoff {
                     guard handoff.current() else { return }
                     guard handoff.canApprove() else { handoff.report(.unknown); return }
@@ -769,6 +795,7 @@ struct CustomerEstimatePresentation: View {
     @State private var uploadedSignature: (strokes: [[CGPoint]], mediaID: String)?
 
     private func uploadSignature(jobID: String) async throws -> String {
+        guard currentAuthority() else { throw CancellationError() }
         if let handoff {
             guard handoff.current(), handoff.canApprove(), let intent = handoff.signature else { throw CancellationError() }
             if let id = handoff.uploadedMediaID { return id }
@@ -793,18 +820,20 @@ struct CustomerEstimatePresentation: View {
         transfer = MediaTransfer(api: api)
         #endif
         let asset = try await transfer.upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
-                                                             originalFilename: "signature.png", data: data, tags: ["signature"])
+            originalFilename: "signature.png", data: data, tags: ["signature"],
+            expectedOrganizationID: flow.estimate.organizationId, currentAuthority: { currentAuthority() })
+        guard currentAuthority() else { throw CancellationError() }
         uploadedSignature = (strokes, asset.id)
         return asset.id
     }
 
     private func decline() async {
-        guard reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
+        guard currentAuthority(), reviewReady, let revision = flow.issuedRevision, let generation = reviewGeneration else { return }
         busy = true
         defer { busy = false }
         do {
             let declined = try await api.declineFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber)
-            guard generation == api.requestGeneration else { return }
+            guard currentAuthority(), generation == api.requestGeneration else { return }
             onApproved(declined)
             onDone()
         } catch is CancellationError {
@@ -829,6 +858,7 @@ struct CustomerInvoicePresentation: View {
     let financing: Bool
     let onSigned: (InvoiceRecord) -> Void
     let onDone: () -> Void
+    let currentAuthority: () -> Bool
 
     @EnvironmentObject private var api: APIClient
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -840,7 +870,6 @@ struct CustomerInvoicePresentation: View {
     @State private var applicationKey = UUID().uuidString
     @State private var sent: FinancingApplication?
     @State private var showTerms = false
-    @State private var isMember = false
     /// The invoice as re-read after the lender funded it while this screen was open.
     @State private var reloadedInvoice: InvoiceRecord?
     private var invoice: InvoiceRecord { reloadedInvoice ?? openedInvoice }
@@ -855,7 +884,7 @@ struct CustomerInvoicePresentation: View {
     private let opensPayChoice: Bool
 
     init(invoice: InvoiceRecord, customerName: String, canSign: Bool, onPay: (() -> Void)?, financing: Bool = false,
-         initiallySigning: Bool = false, opensPayChoice: Bool = false,
+         initiallySigning: Bool = false, opensPayChoice: Bool = false, currentAuthority: @escaping () -> Bool = { true },
          onSigned: @escaping (InvoiceRecord) -> Void, onDone: @escaping () -> Void) {
         openedInvoice = invoice
         self.opensPayChoice = opensPayChoice
@@ -865,6 +894,7 @@ struct CustomerInvoicePresentation: View {
         self.financing = financing
         self.onSigned = onSigned
         self.onDone = onDone
+        self.currentAuthority = currentAuthority
         _name = State(initialValue: customerName)
         _signing = State(initialValue: initiallySigning)
     }
@@ -895,7 +925,6 @@ struct CustomerInvoicePresentation: View {
         .animation(.easeOut(duration: 0.2), value: payChoice)
         .sheet(isPresented: $showTerms) { FinancingTermsSheet(offer: offer, type: type) }
         .task { await loadFinancing() }
-        .task { isMember = await api.customerIsMember(invoice.customerId) }
     }
 
     /// The lender's example for the amount due, when the company finances it (CP-13, range rule).
@@ -984,7 +1013,7 @@ struct CustomerInvoicePresentation: View {
     /// CP: Total, Paid, Amount due as labelled rows, amount due last and largest; savings sit
     /// above them as their own labelled row (CP-06).
     private var amountRows: [CustomerAmountRow] {
-        customerSavingsRows(invoice.lines, currency: invoice.currency, isMember: isMember)
+        customerSavingsRows(invoice.lines, currency: invoice.currency)
             + (CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
                 .map { customerAmountRows($0, currency: invoice.currency) } ?? [])
     }
@@ -1190,23 +1219,27 @@ struct CustomerInvoicePresentation: View {
 
     /// With financing on the table the customer chooses first; otherwise straight to payment.
     private func pay() {
+        guard currentAuthority() else { return }
         guard dueExample != nil else { onPay?(); return }
         payChoice = CustomerPayChoice(dueText: dueText, canPayInFull: onPay != nil, canFinance: true,
                                       selected: onPay == nil ? .overTime : nil)
     }
 
     private func loadFinancing() async {
-        guard financing else { return }
+        guard financing, currentAuthority() else { return }
         if due > 0 {
             offer = await api.financingOffer(amounts: [due])
+            guard currentAuthority() else { return }
             if offer.available, opensPayChoice { pay() }
         }
         // A paid invoice still says "Paid by Wisetack", so the history loads whatever is due.
         let latest = (try? await api.refreshFinancingApplications(invoiceID: invoice.id)) ?? []
+        guard currentAuthority() else { return }
         applications = latest
         // A loan funded since the invoice was opened is a payment: show the balance it leaves.
         if latest.contains(where: { $0.status == "funded" }), invoice.amountPaid < (paperLinesTotal(invoice.lines) ?? 0),
            let updated = try? await api.fieldInvoice(invoice.id) {
+            guard currentAuthority() else { return }
             reloadedInvoice = updated
             onSigned(updated)
             // The offer answered for the old balance; ask again for what the loan left.
@@ -1215,11 +1248,13 @@ struct CustomerInvoicePresentation: View {
     }
 
     private func apply(phone: String?) async {
+        guard currentAuthority() else { return }
         busy = true
         defer { busy = false }
         error = nil
         do {
             let application = try await api.sendFinancingApplication(invoiceID: invoice.id, idempotencyKey: applicationKey, phone: phone)
+            guard currentAuthority() else { return }
             applications.insert(application, at: 0)
             sent = application
         } catch is CancellationError {
@@ -1235,7 +1270,7 @@ struct CustomerInvoicePresentation: View {
 
     private func sign() async {
         let signer = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let jobID = invoice.jobId, !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) else { return }
+        guard currentAuthority(), let jobID = invoice.jobId, !signer.isEmpty, signer.count <= 120, SignatureInk.hasInk(strokes) else { return }
         busy = true
         defer { busy = false }
         error = nil
@@ -1245,9 +1280,12 @@ struct CustomerInvoicePresentation: View {
                 return
             }
             let asset = try await MediaTransfer(api: api).upload(jobID: jobID, clientAssetID: UUID().uuidString, kind: "photo", mime: "image/png",
-                                                                 originalFilename: "signature.png", data: data, tags: ["signature"])
+                originalFilename: "signature.png", data: data, tags: ["signature"],
+                expectedOrganizationID: invoice.organizationId, currentAuthority: { currentAuthority() })
+            guard currentAuthority() else { return }
             let input = FieldSignatureInput(signerName: signer, signedAt: ISO8601DateFormatter().string(from: Date()), imageMediaId: asset.id)
             let updated = try await api.authorizeFieldInvoice(invoice.id, expectedLinesRevision: invoice.linesRevision, signature: input)
+            guard currentAuthority() else { return }
             onSigned(updated)
             signedBy = signer
             signing = false
@@ -1258,9 +1296,8 @@ struct CustomerInvoicePresentation: View {
     }
 }
 
-/// What the customer saves off list price on these lines: each price book line records the list
-/// price it came from, and the server charges a member the member price (CP: savings show only
-/// when the amount already includes them). Invoice lines carry the estimate line's provenance.
+/// The difference between captured price-book amounts and charged amounts. This comparison does
+/// not establish why a price changed. Invoice lines may carry estimate-line provenance.
 func customerSavings(_ lines: [FieldLine]) -> Int {
     lines.reduce(0) { sum, line in
         let source = line.source?.kind == "price_book" ? line.source?.originalUnitPrice
@@ -1276,22 +1313,10 @@ func customerSavingsText(_ lines: [FieldLine], currency: String) -> String? {
     return saved > 0 ? money(saved, currency: currency) : nil
 }
 
-/// "Member savings" when the customer holds a membership; otherwise the plain word.
-func savingsLabel(_ isMember: Bool) -> String { isMember ? "Member savings" : "Savings" }
-
 /// A labelled savings row (CP-06), shown above the total and never as a strike-through alone.
-func customerSavingsRows(_ lines: [FieldLine], currency: String, isMember: Bool) -> [CustomerAmountRow] {
+func customerSavingsRows(_ lines: [FieldLine], currency: String) -> [CustomerAmountRow] {
     guard let saved = customerSavingsText(lines, currency: currency) else { return [] }
-    return [CustomerAmountRow(label: savingsLabel(isMember), amount: "−\(saved)", emphasis: false)]
-}
-
-@MainActor
-extension APIClient {
-    /// Whether to call savings "member savings". Technicians may not read memberships yet, so any
-    /// refusal reads as not known and the row says "Savings".
-    func customerIsMember(_ customerID: String) async -> Bool {
-        (try? await memberPricing(customerID))?.isMember ?? false
-    }
+    return [CustomerAmountRow(label: "Savings", amount: "−\(saved)", emphasis: false)]
 }
 
 // MARK: - Shared pieces
@@ -1394,13 +1419,13 @@ struct CustomerLinesCard: View {
     }
 }
 
-func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true) -> [CustomerAmountRow] {
+func customerAmountRows(_ amounts: CustomerDocumentAmounts, currency: String, invoice: Bool = true, totalLabel: String = "Total") -> [CustomerAmountRow] {
     var rows: [CustomerAmountRow] = []
     if amounts.credits < 0 {
         rows.append(.init(label: "Subtotal", amount: money(amounts.subtotal, currency: currency), emphasis: false))
         rows.append(.init(label: "Discounts and credits", amount: money(amounts.credits, currency: currency), emphasis: false))
     }
-    rows.append(.init(label: "Total", amount: money(amounts.total, currency: currency), emphasis: !invoice))
+    rows.append(.init(label: totalLabel, amount: money(amounts.total, currency: currency), emphasis: !invoice))
     if invoice {
         if amounts.paid > 0 { rows.append(.init(label: "Paid", amount: money(amounts.paid, currency: currency), emphasis: false)) }
         rows.append(.init(label: "Amount due", amount: money(amounts.due, currency: currency), emphasis: true))
@@ -1671,7 +1696,7 @@ struct CustomerStatusWord: View {
         let tint = StatusWord.documentTint(status)
         HStack(spacing: 8) {
             if let tint { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
-            Text(status == "issued" ? "Unpaid" : status.statusLabel).font(Theme.customerFont(type.small, weight: .medium))
+            Text(status.statusLabel).font(Theme.customerFont(type.small, weight: .medium))
                 .foregroundStyle(tint == nil ? Theme.muted : Theme.foreground)
         }
         .fixedSize()
