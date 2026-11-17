@@ -438,6 +438,12 @@ struct JobDetailView: View {
             guard PaperPreview.enabled else { return }
             let opensAssign = PaperPreview.screen == "job-assign"
             let opensPause = ProcessInfo.processInfo.arguments.contains("--paper-preview-pause")
+            // `--paper-preview-at-address`: Paper 21O opens over the job.
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-at-address") {
+                try? await Task.sleep(for: .seconds(2))
+                showAtAddress = true
+                return
+            }
             guard opensAssign || opensPause else { return }
             try? await Task.sleep(for: .seconds(1.5))
             if opensAssign { showAssign = true } else { showPause = true }
@@ -625,7 +631,7 @@ struct JobDetailView: View {
             // Paper 21E "Pause this job": reason chips, a note for the office, when to come back.
             ThorbisModalSheet(title: "Pause this job", subtitle: job.map { "\(menuTitle($0)) \u{00B7} \(jobNumber($0))" },
                               closeLabel: "Cancel", onClose: { showPause = false },
-                              detents: [.medium, .large], commitTitle: "Pause job", busy: busy,
+                              detents: [.height(500), .large], commitTitle: "Pause job", busy: busy,
                               commitIdentifier: "pause-commit", commit: { attemptPause() }) {
                 pauseForm
             }
@@ -697,11 +703,20 @@ struct JobDetailView: View {
                     .accessibilityIdentifier("pause-note")
                 if let pauseReasonProblem { FieldProblem(message: pauseReasonProblem) }
             }
-            ThorbisSheetField(label: "Come back", help: "The office sees both on the job.",
-                              error: pauseNextProblem ?? error) {
-                TextField("Tomorrow morning", text: $nextAction, prompt: .placeholder("Tomorrow morning"), axis: .vertical)
-                    .font(Theme.font(16)).lineLimit(1...5).fieldWell()
-                    .accessibilityIdentifier("pause-come-back")
+            // Paper 21E: "Come back" is one row, its answer on the right ("Tomorrow morning").
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 12) {
+                    Text("Come back").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .fixedSize()
+                    TextField("Tomorrow morning", text: $nextAction, prompt: .placeholder("Tomorrow morning"))
+                        .font(Theme.font(16))
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityLabel("Come back")
+                        .accessibilityHint("The office sees this on the job")
+                        .accessibilityIdentifier("pause-come-back")
+                }
+                .fieldWell()
+                if let problem = pauseNextProblem ?? error { FieldProblem(message: problem) }
             }
         }
     }
@@ -718,7 +733,7 @@ struct JobDetailView: View {
                 .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 40)
-                .background(selected ? Theme.brandSurface : Theme.fill, in: Capsule())
+                .background(selected ? Theme.brandTint : Theme.fill, in: Capsule())
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
@@ -2463,50 +2478,19 @@ struct JobDetailView: View {
     /// Paper's Overview (service addresses, membership, the booking call, follow-ups and the
     /// record's own dates) follow them here.
     private func atAddressScreen(_ job: JobRecord) -> some View {
-        let history = JobPropertyHistory.make(job: job, locations: [], equipment: [], visits: visits, listedJobs: store.jobs,
-                                              currentUserID: session.user?.id)
-        let count = history.visits.count
-        let subtitle = [street(job), visitsLoaded ? "\(count) \(count == 1 ? "visit" : "visits")" : nil].compactMap { $0 }
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("At this address").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    if !subtitle.isEmpty {
-                        Text(subtitle.joined(separator: " \u{00B7} ")).font(Theme.font(15)).foregroundStyle(Theme.subtle)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 4)
-                if !visitsLoaded || count > 0 {
-                    JobPropertyHistorySection(job: job, part: .visits, locations: customerLocations,
-                                              locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
-                                              visits: visits, visitsLoaded: visitsLoaded)
-                }
-                JobPropertyHistorySection(job: job, part: .place, locations: customerLocations,
-                                          locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
-                                          visits: visits, visitsLoaded: visitsLoaded)
-                JobNoticesSection(jobID: job.id)
-                if let bookingCall { JobBookingCallSection(call: bookingCall) }
-                if session.can("customer.view", feature: "core_crm") {
-                    let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
-                    JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
-                                               loaded: placesCurrent, failed: locationsFailed,
-                                               headerStreet: displayTitle(job),
-                                               factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
-                }
-                CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
-                followUpsPanel
-                detailsGroup(job)
+        JobAtAddressView(job: job, street: street(job), visits: visits, visitsLoaded: visitsLoaded, locations: customerLocations) {
+            if let bookingCall { JobBookingCallSection(call: bookingCall) }
+            if session.can("customer.view", feature: "core_crm") {
+                let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
+                JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
+                                           loaded: placesCurrent, failed: locationsFailed,
+                                           headerStreet: displayTitle(job),
+                                           factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 28)
+            CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
+            followUpsPanel
+            detailsGroup(job)
         }
-        .background(Theme.canvas)
-        .foregroundStyle(Theme.foreground)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Theme.canvas, for: .navigationBar)
-        .accessibilityIdentifier("job-at-address")
     }
 
     /// The drive to the job's place while it is still ahead, on a card (it was under the header).
