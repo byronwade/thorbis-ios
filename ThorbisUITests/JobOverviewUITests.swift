@@ -168,14 +168,9 @@ final class JobOverviewUITests: XCTestCase {
         let bar = app.navigationBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 5))
         assertTitleClearOfBarControls(title, in: app)
-        // Cream sheet: the balance is the Money cluster's "Due on site" row ("$340.00 due"); it opens Money.
-        let balance = app.buttons["job-chip-amount"]
-        XCTAssertTrue(balance.waitForExistence(timeout: 20))
-        XCTAssertTrue(balance.label.hasSuffix("due"), balance.label)
-        scrollUntilHittable(balance, in: app)
-        XCTAssertTrue(balance.isHittable)
+        // Paper 21: Overview carries no balance; Money is one tap away on the sections.
         capture(app, name: "Job header before invoice")
-        balance.tap()
+        thorbisTapStableButton(app, "job-section-money")
         let invoices = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Invoices")).firstMatch
         XCTAssertTrue(invoices.waitForExistence(timeout: 10), "Tapping the balance should open invoice content")
         XCTAssertTrue(app.buttons["job-section-money"].isSelected)
@@ -228,17 +223,13 @@ final class JobOverviewUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "-thorbis.appearance", "dark"]
         app.launch()
         let title = app.staticTexts["job-title"]
-        // v2: the balance is the header's "$340.00 due" chip; the work is the bar's one commit.
-        let payment = app.buttons["job-chip-amount"]
+        // Paper 21: the work is the bar's one commit; the balance lives on Money.
         let work = app.buttons["job-commit"]
         XCTAssertTrue(title.waitForExistence(timeout: 20))
-        XCTAssertTrue(payment.waitForExistence(timeout: 20))
         XCTAssertTrue(work.waitForExistence(timeout: 20))
         XCTAssertTrue(title.isHittable)
         assertTitleClearOfBarControls(title, in: app)
         XCTAssertTrue(work.isHittable)
-        scrollUntilHittable(payment, in: app)
-        XCTAssertTrue(payment.isHittable)
         capture(app, name: "Dark job overview")
     }
 
@@ -305,24 +296,31 @@ final class JobOverviewUITests: XCTestCase {
     }
 
     func testJobOverviewKeepsVisitActionsBeforeCustomerDetails() {
-        let app = preview("job", working: true)
-        // v2 on site: the visit's tools (photo, note, …) lead; the account's addresses follow.
-        let visit = app.staticTexts["Tools"]
-        let locations = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Service addresses")).firstMatch
-        XCTAssertTrue(visit.waitForExistence(timeout: 20))
-        XCTAssertTrue(locations.waitForExistence(timeout: 20))
-        XCTAssertLessThan(visit.frame.minY, locations.frame.minY)
-        XCTAssertTrue(app.buttons["job-tool-note"].exists)
+        // Paper F4: out on the visit, field mode leads with the capture tiles.
+        let app = preview("job", working: true, field: true)
+        XCTAssertTrue(app.buttons["job-tool-note"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["job-tool-photo"].exists)
+        // Paper 21O: the account's addresses and the record's own dates are More › At this address.
+        app.buttons["Job actions"].tap()
+        let lead = button(startingWith: "Full job details", in: app)
+        XCTAssertTrue(lead.waitForExistence(timeout: 5)); lead.tap()
+        XCTAssertTrue(app.buttons["job-section-money"].waitForExistence(timeout: 10), "Full job details opens Job details")
+        app.buttons["Job actions"].tap()
+        let address = button(startingWith: "At this address", in: app)
+        XCTAssertTrue(address.waitForExistence(timeout: 5))
+        revealMenuRow(address, in: app)
+        address.tap()
+        let locations = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Service addresses")).firstMatch
+        XCTAssertTrue(locations.waitForExistence(timeout: 20))
         let details = app.buttons["More job details"]
+        for _ in 0..<12 where !details.isHittable { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(details.waitForExistence(timeout: 5))
-        revealAboveJobBar(details, in: app)
         XCTAssertGreaterThanOrEqual(details.frame.height, 44, "The whole details row toggles")
         details.tap()
-        // v2: the job number lives in the header's eyebrow; the details fold out when it was booked.
+        // The job number lives in the header's eyebrow; the details fold out when it was booked.
         let booked = app.staticTexts["Booked"]
         XCTAssertTrue(booked.waitForExistence(timeout: 5))
-        revealAboveJobBar(booked, in: app)
+        for _ in 0..<6 where !booked.isHittable { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(booked.isHittable)
     }
 
@@ -346,8 +344,8 @@ final class JobOverviewUITests: XCTestCase {
     /// for Overview's own actions.)
     func testDocumentTabsKeepTheJobHeaderWithoutRepeatingOverviewCards() {
         let app = preview("job", working: true)
-        XCTAssertTrue(app.buttons["job-tool-photo"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.buttons["job-customer-view"].exists)
+        // Paper 21: a job under way leads Overview with its field-mode card.
+        XCTAssertTrue(app.buttons["job-field-mode-card"].waitForExistence(timeout: 20))
         XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 20))
         for tab in ["Money", "Activity"] {
             thorbisSection(app, tab).tap()
@@ -356,15 +354,16 @@ final class JobOverviewUITests: XCTestCase {
             // The header's status chip: a menu button when the status can move, a word otherwise.
             let status = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Job status,")).firstMatch
             XCTAssertTrue(status.waitForExistence(timeout: 5), "\(tab) keeps the header's status chip")
-            XCTAssertFalse(app.buttons["job-tool-photo"].exists, "\(tab) must not repeat Overview's capture tiles")
+            XCTAssertFalse(app.buttons["job-field-mode-card"].exists, "\(tab) must not repeat Overview's field-mode card")
             XCTAssertFalse(app.buttons["job-customer-link"].exists, "\(tab) must not repeat the customer line")
-            XCTAssertFalse(app.buttons["job-customer-view"].exists, "\(tab) must not repeat the header's Customer view")
-            XCTAssertFalse(app.buttons["job-chip-amount"].exists, "\(tab) must not repeat the balance")
-            XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Step ")).firstMatch.exists)
+            XCTAssertFalse(app.otherElements["job-field-steps"].exists, "\(tab) must not show field mode's steps")
         }
         thorbisSection(app, "Overview").tap()
+        XCTAssertTrue(app.buttons["job-field-mode-card"].waitForExistence(timeout: 5))
+        // Resume opens field mode: the steps and the capture tiles, no sections.
+        app.buttons["job-field-mode-card"].tap()
         XCTAssertTrue(app.buttons["job-tool-photo"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["job-customer-view"].exists)
+        XCTAssertFalse(app.buttons["job-section-money"].exists, "Field mode has no sections")
     }
 
     func testSingleEstimateOptionUsesSingularLabel() {
@@ -631,10 +630,12 @@ final class JobOverviewUITests: XCTestCase {
         }
     }
 
-    private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false) -> XCUIApplication {
+    /// `field` opens the job in field mode (Paper F2 to F8); otherwise the preview opens Job details.
+    private func preview(_ screen: String, accessibleText: Bool = false, working: Bool = false, field: Bool = false) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", screen]
         if working { app.launchArguments += ["--paper-preview-working-job"] }
+        if field { app.launchArguments += ["--paper-preview-field-mode"] }
         if accessibleText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL", "-thorbis.appearance", "dark"]
         }

@@ -14,12 +14,11 @@ final class CustomerViewUITests: XCTestCase {
                                "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"]
         app.launch()
 
-        let door = app.buttons["job-customer-view"]
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
-        for _ in 0..<10 where !door.exists { app.swipeUp() }
-        XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one visible Customer view door")
-        app.scrollClearOfFoot(door)
-        XCTAssertEqual(door.label, "Show customer")
+        // Paper 21K: the job's Customer view door is a row in More.
+        let door = thorbisCustomerViewDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one Customer view door in More")
+        XCTAssertTrue(door.label.hasPrefix("Customer view"), door.label)
         door.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         capture(app, "Customer view home")
@@ -100,10 +99,10 @@ final class CustomerViewUITests: XCTestCase {
 
     func testChangedDetailsStillGoThroughStaffReviewAfterHandBack() {
         let app = launch()
-        let door = app.buttons["job-customer-view"]
+        // Paper 21K: the door is More › Customer view.
+        let door = thorbisCustomerViewDoor(app)
         XCTAssertTrue(door.waitForExistence(timeout: 20))
-        // The door is a row in the job's details, which can start under the job's bar.
-        app.scrollClearOfFoot(door); door.tap()
+        door.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         let details = revealCustomerDetails(in: app)
         XCTAssertTrue(details.waitForExistence(timeout: 10))
@@ -118,7 +117,8 @@ final class CustomerViewUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Review changes"].waitForExistence(timeout: 10), "Customer edits need the technician's review")
         capture(app, "Customer view details review")
         app.buttons["Discard changes"].tap()
-        XCTAssertTrue(door.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
+        XCTAssertTrue(thorbisCustomerViewDoor(app).waitForExistence(timeout: 10))
     }
 
     private func launch(screen: String = "job") -> XCUIApplication {
@@ -132,7 +132,7 @@ final class CustomerViewUITests: XCTestCase {
 
     /// The detail screen's own door, not the job header's one still in the stack beneath it.
     private func detailDoor(_ app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Show customer", "job-customer-view")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label == %@", "Show customer")).firstMatch
     }
 
     private func ownerExit(_ app: XCUIApplication) {

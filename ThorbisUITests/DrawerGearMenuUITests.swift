@@ -10,15 +10,21 @@ final class DrawerGearMenuUITests: XCTestCase {
         let id = "00000000-0000-4000-8000-000000002214"
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-role", "office"]
         app.launch()
-        let star = app.buttons["record-favorite-job-\(id)"]
-        XCTAssertTrue(star.waitForExistence(timeout: 30))
-        if star.label == "Remove from favorites" { star.tap() }
-        XCTAssertEqual(star.label, "Add to favorites")
-        XCTAssertGreaterThanOrEqual(star.frame.height, 43.99)
-        star.tap()
-        XCTAssertEqual(star.label, "Remove from favorites")
-        star.tap()
-        XCTAssertEqual(star.label, "Add to favorites")
+        _ = id
+        // Paper 21: the job's bar is Back, Share and More; the favorite is a row in More, which
+        // closes on each choice and reads the new state when opened again.
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 30))
+        var row = thorbisJobFavoriteRow(app)
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        if row.label == "Remove from favorites" { row.tap(); row = thorbisJobFavoriteRow(app) }
+        XCTAssertEqual(row.label, "Add to favorites")
+        XCTAssertGreaterThanOrEqual(row.frame.height, 43.99)
+        row.tap()
+        row = thorbisJobFavoriteRow(app)
+        XCTAssertEqual(row.label, "Remove from favorites")
+        row.tap()
+        row = thorbisJobFavoriteRow(app)
+        XCTAssertEqual(row.label, "Add to favorites")
     }
 
     func testCurrentCustomerCanBeAddedAndRemovedFromFavorites() {
@@ -43,9 +49,11 @@ final class DrawerGearMenuUITests: XCTestCase {
         let id = "00000000-0000-4000-8000-000000002214"
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-role", "office"]
         app.launch()
-        let star = app.buttons["record-favorite-job-\(id)"]
-        XCTAssertTrue(star.waitForExistence(timeout: 30))
-        if star.label == "Add to favorites" { star.tap() }
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 30))
+        let row = thorbisJobFavoriteRow(app)
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        // Either choice closes More: add it, or leave it added.
+        if row.label == "Add to favorites" { row.tap() } else { app.swipeDown(velocity: .fast) }
         app.showSidebar()
         let favorite = app.buttons["sidebar-favorite-record-\(id)"]
         XCTAssertTrue(favorite.waitForExistence(timeout: 15)); favorite.tap()

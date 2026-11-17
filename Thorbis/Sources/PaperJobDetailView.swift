@@ -174,7 +174,17 @@ struct JobDetailView: View {
     /// Paper's map: a job out on its visit opens in Field mode (F2 to F8), a screen of its own with
     /// no sections. "More › Full job details" closes it onto Job details (Paper 21), whose
     /// "Field mode" card opens it again.
-    @State private var fieldModeOpen = !(PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-full-details"))
+    @State private var fieldModeOpen = JobDetailView.opensInFieldMode
+    /// The design preview opens Job details (Paper 21) for every job screen name, as it did before
+    /// field mode was a screen of its own; `job-onsite`, `--paper-preview-field-mode` and
+    /// `--paper-preview-field-step` open field mode. The app itself always starts in field mode.
+    private static var opensInFieldMode: Bool {
+        guard PaperPreview.enabled else { return true }
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--paper-preview-full-details") { return false }
+        return PaperPreview.screen == "job-onsite" || arguments.contains("--paper-preview-field-mode")
+            || arguments.contains("--paper-preview-field-step")
+    }
     /// Paper 21O "At this address", pushed from More.
     @State private var showAtAddress = false
     /// Paper F5: the tech moved on from Working to Wrap up without an estimate to approve first.
@@ -985,6 +995,12 @@ struct JobDetailView: View {
         let share = ThorbisMenuItem("Share job", icon: "square.and.arrow.up") { shareJob = sharedJobText(job) }
         // The bar's star moved here (Paper 21's bar is Back, Share and More).
         if let favorite = favoriteMenuItem(job) { actions.append(favorite) }
+        // Money's "Show customer" door moved here (Paper 23 has no such row): the job's estimates,
+        // handed to the customer to choose from.
+        if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
+            actions.append(ThorbisMenuItem("Show estimates", icon: "iphone", subtitle: "Hand the estimates to the customer",
+                                           isDisabled: !canOpenCustomerView) { openCustomerView(.estimates) })
+        }
         let cancel = cancelMenuItem(job, icon: "xmark.circle")
         var items: [ThorbisMenuItem] = []
         if inField(job) {
@@ -1078,7 +1094,7 @@ struct JobDetailView: View {
         case .followUps:
             return ThorbisMenuItem("Follow-ups", icon: "list.bullet") { showFollowUps = true }
         case .customerView:
-            return ThorbisMenuItem("Customer view", icon: "person.crop.rectangle") { openCustomerView(.home) }
+            return ThorbisMenuItem("Customer view", icon: "person.crop.rectangle", isDisabled: !canOpenCustomerView) { openCustomerView(.home) }
         case .copyID:
             return ThorbisMenuItem("Copy job ID", icon: "doc.on.doc") { UIPasteboard.general.string = job.id }
         case .runningLate:
@@ -3862,7 +3878,10 @@ struct JobDetailView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(RowPressStyle())
-                .accessibilityLabel("Collect payment for invoice \(reference)")
+                // One invoice: "Collect payment", as Money's bar named it (which invoice is the hint).
+                // Several: each pill names its invoice.
+                .accessibilityLabel(invoices.count == 1 ? "Collect payment" : "Collect payment for invoice \(reference)")
+                .accessibilityHint(invoices.count == 1 ? "For invoice \(reference)" : "")
                 .accessibilityIdentifier("job-invoice-collect-\(invoice.id)")
             }
             if !invoice.lines.isEmpty, fresh, invoices.count > 1 {

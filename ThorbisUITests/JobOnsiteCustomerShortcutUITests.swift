@@ -12,15 +12,13 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
     func testOnsiteShortcutOpensOnlyThisJobsCustomerDocuments() {
         continueAfterFailure = false
         let app = open()
-        // Paper keeps one door in the job's details in every state, on site included.
-        let shortcut = app.buttons["job-customer-view"]
+        // Paper 21K / F8: the job's one customer door is More › Customer view, on site included.
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
-        for _ in 0..<10 where !shortcut.exists { app.swipeUp() }
+        let shortcut = thorbisCustomerViewDoor(app)
         XCTAssertTrue(shortcut.waitForExistence(timeout: 10))
-        app.scrollClearOfFoot(shortcut)
         XCTAssertTrue(shortcut.isHittable)
         XCTAssertGreaterThanOrEqual(shortcut.frame.height, 44)
-        XCTAssertEqual(app.buttons.matching(identifier: "job-customer-view").count, 1, "On-site should have one customer-home action")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Customer view")).count, 1, "On-site should have one customer-home action")
         shortcut.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 20))
         for id in ["00000000-0000-4000-8000-000000002218", "00000000-0000-4000-8000-000000002238"] {
@@ -33,7 +31,9 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
         let handBack = app.buttons["Hand back to the technician"]
         XCTAssertTrue(handBack.exists)
         handBack.tap()
-        XCTAssertTrue(shortcut.waitForExistence(timeout: 20))
+        // Back on the job, the door is in More again.
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20))
+        XCTAssertTrue(thorbisCustomerViewDoor(app).waitForExistence(timeout: 10))
     }
 
     func testOtherJobStatesKeepCustomerViewInCustomerPanel() {
@@ -42,10 +42,9 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"]
         app.launch()
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
-        let door = app.buttons["job-customer-view"]
-        for _ in 0..<10 where !door.exists { app.swipeUp() }
+        // A job not yet on its visit keeps the same door: More › Customer view.
+        let door = thorbisCustomerViewDoor(app)
         XCTAssertTrue(door.waitForExistence(timeout: 10))
-        app.scrollClearOfFoot(door)
         door.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 20))
     }
@@ -53,21 +52,18 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
     func testOnsiteShortcutIsUnavailableWithoutCustomerHandoffPermissions() {
         let app = open(["--paper-preview-no-customer-handoff"])
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
-        let door = app.buttons["job-customer-view"]
-        for _ in 0..<10 where !door.exists { app.swipeUp() }
-        XCTAssertTrue(door.waitForExistence(timeout: 10))
-        XCTAssertFalse(door.isEnabled, "Without a customer permission the door is shown but can't be used")
+        // Without a customer permission More either leaves the door out or shows it disabled.
+        let door = thorbisCustomerViewDoor(app)
+        XCTAssertFalse(door.exists && door.isEnabled, "Without a customer permission the door can't be used")
     }
 
     func testOnsiteShortcutAtLargestText() {
         continueAfterFailure = false
         let app = open(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        let shortcut = app.buttons["job-customer-view"]
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
-        for _ in 0..<8 where !shortcut.exists { app.swipeUp() }
+        let shortcut = thorbisCustomerViewDoor(app)
         XCTAssertTrue(shortcut.waitForExistence(timeout: 10))
-        app.scrollClearOfFoot(shortcut)
-        for _ in 0..<8 where !shortcut.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !shortcut.isHittable { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(shortcut.isHittable)
         XCTAssertGreaterThanOrEqual(shortcut.frame.height, 44)
         shortcut.tap()
