@@ -14,10 +14,16 @@ struct TeamInvitation: Codable, Identifiable, Hashable {
 
     static let roles: [(id: String, label: String)] = [
         ("technician", "Technician"), ("apprentice", "Apprentice"), ("dispatcher", "Dispatcher"),
-        ("customer_service", "Customer service"), ("office_manager", "Office manager"), ("admin", "Admin"),
+        ("csr", "Customer service"), ("office_manager", "Office manager"), ("accountant", "Accountant"),
+        ("admin", "Admin"),
     ]
 
-    var roleLabel: String { Self.roles.first { $0.id == role }?.label ?? role.statusLabel }
+    /// The server's role ids (packages/permissions ROLE_IDS). An invite sent as "customer_service"
+    /// was refused; older rows may still carry it, so it keeps its label.
+    var roleLabel: String {
+        if role == "customer_service" { return "Customer service" }
+        return Self.roles.first { $0.id == role }?.label ?? role.statusLabel
+    }
 }
 
 private struct InvitationPage: Decodable { let items: [TeamInvitation]; let nextCursor: String? }

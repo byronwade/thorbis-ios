@@ -19,7 +19,9 @@ enum ReleaseNotes {
                 .init(symbol: "textformat.size", title: "Sheet titles at large text",
                       detail: "On New customer, Add equipment and Add property, Cancel and Save stay on one line at the largest text sizes."),
                 .init(symbol: "building.2", title: "Business settings in the owner's menu",
-                      detail: "Owners open Business settings straight from the menu, under Business. It can also be chosen as the start screen."),
+                      detail: "Owners open Business settings straight from the menu, under Business. It can also be the start screen."),
+                .init(symbol: "person.badge.plus", title: "Customer service and accountant invites",
+                      detail: "An invite for Customer service no longer fails, and Accountant is now a role you can invite."),
             ]
         ),
         ReleaseNote(
