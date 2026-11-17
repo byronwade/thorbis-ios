@@ -177,7 +177,7 @@ struct AccountPageTitle: View {
             if let subtitle {
                 Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 0)
+                    .padding(.top, eyebrow == nil ? 0 : 4)
             }
         }
         .padding(.horizontal, 4)

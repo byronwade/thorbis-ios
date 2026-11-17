@@ -443,6 +443,8 @@ struct CustomizeMenuView: View {
 
     /// Two columns need this much room; a narrower iPad window keeps the phone's one list.
     private static let wideWidth: CGFloat = 640
+    /// Paper 65A: rows are 56 tall, their words 16 from the card's edge.
+    private static let rowInsets = EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
 
     var body: some View {
         Group {
@@ -454,7 +456,7 @@ struct CustomizeMenuView: View {
                 phoneList
             }
         }
-        .background(Theme.canvas)
+        .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .thorbisDestination(isPresented: $showingWhatsNew) { WhatsNewHistoryView() }
         .task { await layout.refreshCompanyLayout(api: api) }
@@ -470,7 +472,10 @@ struct CustomizeMenuView: View {
             Section {
                 titleBlock
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 0, trailing: 4))
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 14)
+                    .listRowInsets(EdgeInsets(top: 14, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
             }
             // Paper 65A: every start place as a radio row, then "Your menu", then More.
             startSection(radio: true)
@@ -481,8 +486,11 @@ struct CustomizeMenuView: View {
             actionSection
         }
         .listStyle(.insetGrouped)
-        .listSectionSpacing(20)
+        .listSectionSpacing(22)
         .listRowSeparatorTint(Theme.hairline)
+        .contentMargins(.horizontal, PaperCardMetrics.margin, for: .scrollContent)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .environment(\.defaultMinListRowHeight, 56)
         .environment(\.editMode, .constant(editable ? .active : .inactive))
         .scrollContentBackground(.hidden)
     }
@@ -523,7 +531,9 @@ struct CustomizeMenuView: View {
                 .lineLimit(2).minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
             Text("Make the menu yours").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(Theme.foreground)
     }
 
@@ -543,6 +553,7 @@ struct CustomizeMenuView: View {
                         startRadioRow(destination, scope: scope)
                     }
                     .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
                 } else {
                     ThorbisMenu(items: choices.map { destination in
                         ThorbisMenuItem(destination.displayTitle, isSelected: startupDestination == destination) {
@@ -562,6 +573,7 @@ struct CustomizeMenuView: View {
                     }
                     .accessibilityHint("Applies the next time you open the app on this device")
                     .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
                 }
             } header: {
                 sectionLabel("Open the app to")
@@ -603,6 +615,7 @@ struct CustomizeMenuView: View {
             .moveDisabled(!editable)
             .deleteDisabled(!editable)
             .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
         } header: {
             sectionLabel(title)
         } footer: {
@@ -625,6 +638,7 @@ struct CustomizeMenuView: View {
                     }
                 }
                 .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
             } header: {
                 sectionLabel("Pin to the top")
             }
@@ -642,6 +656,7 @@ struct CustomizeMenuView: View {
                 .disabled(!editable)
             }
             .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
         } header: {
             sectionLabel("Show in menu")
         } footer: {
@@ -657,14 +672,14 @@ struct CustomizeMenuView: View {
                 HStack(spacing: 8) {
                     Text("What's new").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    PaperIcon(.acctChevron, size: 14, color: Theme.muted)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(RowPressStyle())
             .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
         } header: {
             sectionLabel("More")
         }
@@ -705,6 +720,7 @@ struct CustomizeMenuView: View {
     /// Paper's section label: 13 Semibold, muted, sentence case.
     private func sectionLabel(_ title: String) -> some View {
         Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted).textCase(nil)
+            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 8, trailing: 4))
     }
 
     private func sectionNote(_ text: String) -> some View {
