@@ -83,7 +83,7 @@ struct CustomersView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(active.count) \(active.count == 1 ? "customer" : "customers") · \(activeJobs) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
                 // Paper 47: "Search or ask" on the card, the book's filter circle inside it.
-                searchBar.padding(.top, 2)
+                searchBar
                 if let error = error ?? store.error {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
                         .padding(.top, 12)
@@ -92,18 +92,16 @@ struct CustomersView: View {
                 // Paper 47: a letter label (13 Semibold, count trailing) over one card per letter;
                 // Recent keeps its newest-first order in one group.
                 ForEach(Array(sections.enumerated()), id: \.element.0) { index, section in
-                    PaperSection(section.0, count: section.1.count) {
-                        // Clipped to the card, so a swiped row's Archive cell keeps the card's corners.
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(section.1.enumerated()), id: \.element.id) { rowIndex, customer in
-                                if rowIndex > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? 16 : 60) }
-                                customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
-                            }
+                    // 22 under the search field, then 16 between a card and the next letter.
+                    PaperCardLabel(title: section.0, count: section.1.count)
+                        .padding(.top, index == 0 ? 22 : 16)
+                    // Clipped to the card, so a swiped row's Archive cell keeps the card's corners.
+                    PaperRowsCard {
+                        ForEach(Array(section.1.enumerated()), id: \.element.id) { rowIndex, customer in
+                            if rowIndex > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? 16 : 60) }
+                            customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous))
                     }
-                    .padding(.horizontal, PaperCardMetrics.margin)
-                    .padding(.top, index == 0 ? 14 : 8)
                 }
                 if items.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recordsLoading {
                     ListRoomEmpty(title: "No customers match.", message: "Try a name, street or phone number.")
@@ -215,46 +213,48 @@ struct CustomersView: View {
 
     /// "Search or ask" on the card (46 tall, radius 14) with the book's filter circle inside it.
     /// On the phone it hands over to Search; elsewhere it narrows this book.
-    private var searchBar: some View {
-        HStack(spacing: 8) {
-            if let openSearch {
-                Button(action: openSearch.run) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                        Text("Search or ask").font(Theme.font(16)).lineLimit(1)
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Search")
-                .accessibilityIdentifier("customers-search")
-            } else {
-                Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                TextField("Search customers", text: $query, prompt: .placeholder("Search customers"))
-                    .font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .frame(minHeight: 46)
-                    .accessibilityIdentifier("customers-search")
-                if !query.isEmpty {
-                    Button { query = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
-                            .frame(width: 32, height: 44).contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("Clear search")
-                }
-            }
-            ThorbisMenu(items: filterItems, title: "Show", accessibilityLabel: "Filter customers") {
-                PaperCircleLabel(symbol: "line.3.horizontal.decrease", size: 40,
-                                 fill: scope == .all ? Theme.fill : Theme.brandSurface)
-            }
-            .accessibilityValue(scope.rawValue)
-            .accessibilityIdentifier("header-filter")
+    @ViewBuilder private var searchBar: some View {
+        if openSearch != nil {
+            PaperSearchBar(placeholder: "Search or ask", chips: scopeChips) { filterMenu }
+                .paperCardMargin()
+        } else {
+            localSearchBar
         }
-        .padding(.leading, 12).padding(.trailing, 3)
+    }
+
+    /// Recent is the one thing that narrows the book; it shows in the field as a chip.
+    private var scopeChips: [PaperFilterChip] {
+        scope == .all ? [] : [PaperFilterChip(id: "scope", title: scope.rawValue) { selectedView = CustomerListScope.all.rawValue }]
+    }
+
+    private var filterMenu: some View {
+        ThorbisMenu(items: filterItems, title: "Show", accessibilityLabel: "Filter customers") {
+            PaperFilterCircle(active: scope != .all)
+        }
+        .accessibilityValue(scope.rawValue)
+        .accessibilityIdentifier("header-filter")
+    }
+
+    /// Where the shell has no Search (iPad), the field narrows this book itself.
+    private var localSearchBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            TextField("Search customers", text: $query, prompt: .placeholder("Search customers"))
+                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .frame(minHeight: 46)
+                .accessibilityIdentifier("customers-search")
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
+                        .frame(width: 32, height: 44).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Clear search")
+            }
+            filterMenu
+        }
+        .padding(.leading, 12).padding(.trailing, 4)
         .frame(minHeight: 46)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(.horizontal, PaperCardMetrics.margin)
@@ -334,7 +334,7 @@ private struct CustomerBookRow: View {
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                     if let street, !street.isEmpty {
-                        Text(street).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                        Text(street).font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .lineLimit(stacked ? nil : 1)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -373,9 +373,9 @@ private struct CustomerInitials: View {
 
     var body: some View {
         Text(Self.initials(name))
-            .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.subtle)
+            .font(Theme.font(11, weight: .semibold)).foregroundStyle(Theme.subtle)
             .frame(width: 32, height: 32)
-            .background(Theme.fill, in: Circle())
+            .background(Theme.quietFill, in: Circle())
             .dynamicTypeSize(...DynamicTypeSize.large)
             .accessibilityHidden(true)
     }
@@ -389,6 +389,8 @@ private struct CustomerInitials: View {
 /// Paper 48N's hub rows, each a page about the customer.
 private enum CustomerHubPart: String, Hashable, Identifiable {
     case jobs, comms, property, equipment, membership, money, notes
+    /// Not hub rows: what Customer actions opens (contacts, details and preferences; the timeline).
+    case details, activity
 
     var id: String { rawValue }
 
@@ -401,6 +403,8 @@ private enum CustomerHubPart: String, Hashable, Identifiable {
         case .equipment: "Equipment"
         case .membership: "Membership"
         case .money: "Money"
+        case .details: "Contacts and details"
+        case .activity: "Activity"
         }
     }
 
@@ -480,6 +484,7 @@ struct CustomerRecordsScope: Equatable, Sendable {
 }
 
 struct CustomerDetailView: View {
+    @ObservedObject private var favorites = ScopedRecordFavorites.shared
     @Environment(\.dynamicTypeSize) private var typeSize
     let customer: Customer
     @EnvironmentObject var api: APIClient
@@ -602,11 +607,7 @@ struct CustomerDetailView: View {
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.top, 16)
                 }
-                VStack(alignment: .leading, spacing: 20) {
-                    hub
-                    overview
-                }
-                .padding(.top, 20)
+                hub.padding(.top, 20)
                 Color.clear.frame(height: 1).id("customer-end")
             }
             .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
@@ -627,11 +628,6 @@ struct CustomerDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
         .toolbar {
-            if let record, record.id == customer.id {
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    FavoriteRecordButton(kind: .customer, id: record.id, organizationID: record.organizationId)
-                }
-            }
             let items = customerMenuItems
             if !items.isEmpty {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -691,6 +687,8 @@ struct CustomerDetailView: View {
                 previewOpened = true
                 if ["customer-records", "customer-jobs"].contains(PaperPreview.screen) { openPart = .jobs }
                 if PaperPreview.screen == "customer-money" { openPart = .money }
+                if PaperPreview.screen == "customer-activity" { openPart = .activity }
+                if PaperPreview.screen == "customer-details" { openPart = .details }
             }
             #endif
         }
@@ -749,21 +747,6 @@ struct CustomerDetailView: View {
                 Task { await removeContact(contact) }
             }]
         })
-    }
-
-    /// What has no row in Paper 48N's hub stays on the page under it: the open job, the account's
-    /// details, the contacts, then the customer's activity.
-    @ViewBuilder private var overview: some View {
-        if session.can("job.view", feature: "jobs") { nextVisit }
-        if record == nil && error == nil {
-            PaperSection("Details") { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
-        } else {
-            details
-            contactPreferences
-        }
-        contactsSection.id("customer-contacts")
-        activitySection
-        recordSection
     }
 
     /// Paper 48A "Contact preferences": how this customer may be reached about their jobs, each
@@ -914,14 +897,13 @@ struct CustomerDetailView: View {
                     Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
                     if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                        Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                PaperRowChevron()
             }
             .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
@@ -963,6 +945,17 @@ struct CustomerDetailView: View {
                                          numbers: customerNumbers, emails: customerEmails,
                                          dialable: primaryPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil },
                                          callsAvailable: callsAvailable, model: comms)
+                case .details:
+                    if record == nil && error == nil {
+                        PaperSection("Details") { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
+                    } else {
+                        details
+                        contactPreferences
+                    }
+                    contactsSection.id("customer-contacts")
+                    recordSection
+                case .activity:
+                    activitySection
                 case .notes:
                     CustomerNotesSection(customerID: customer.id, customerName: record?.name ?? customer.name,
                                          locations: locations, model: phoneNotes)
@@ -1045,7 +1038,7 @@ struct CustomerDetailView: View {
     /// A 50pt card circle beside New job.
     private func reachCircle(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.foreground)
+            PaperIcon(symbol == "phone" ? .handset : .bubble, size: 18)
                 .frame(width: 50, height: 50)
                 .background(Theme.card, in: Circle())
                 .contentShape(Circle())
@@ -1064,7 +1057,7 @@ struct CustomerDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             if let line = identityLine {
-                Text(line).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text(line).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1185,6 +1178,17 @@ struct CustomerDetailView: View {
         if let record {
             items.append(ThorbisMenuItem("Save to Contacts", icon: "person.crop.circle.badge.plus") {
                 handoff = .contact(ContactCardDraft.make(customer: record))
+            })
+        }
+        // What Paper 48N's page no longer carries under the hub: the people and details, the timeline.
+        items.append(ThorbisMenuItem("Contacts and details", icon: "person.2") { openPart = .details })
+        items.append(ThorbisMenuItem("Activity", icon: "clock") { openPart = .activity })
+        if let record, record.id == customer.id, let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
+           scope.organizationID.caseInsensitiveCompare(record.organizationId) == .orderedSame {
+            let starred = favorites.isBound(to: scope) && favorites.entries.contains { $0.kind == .customer && $0.id == record.id.lowercased() }
+            items.append(ThorbisMenuItem(starred ? "Remove from favorites" : "Add to favorites", icon: starred ? "star.slash" : "star") {
+                favorites.bind(scope)
+                favorites.toggle(.customer, id: record.id)
             })
         }
         if canEdit {

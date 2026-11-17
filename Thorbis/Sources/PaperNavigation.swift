@@ -897,7 +897,7 @@ struct RootView: View {
                 // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
             }
-        case "customer", "customer-activity", "customer-records", "customer-jobs", "customer-money":
+        case "customer", "customer-activity", "customer-details", "customer-records", "customer-jobs", "customer-money":
             if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                 primaryTab = .customers
                 customersPath.append(customer)
