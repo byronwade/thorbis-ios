@@ -143,7 +143,7 @@ final class JobDocumentsUITests: XCTestCase {
         app.scrollClearOfFoot(row)
         XCTAssertTrue(row.isHittable)
         row.tap()
-        XCTAssertTrue(app.staticTexts["Estimate 2218"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["EST-2218"].waitForExistence(timeout: 10))
     }
 
     func testOverviewInvoiceRetiresWhenSessionIsReplaced() {
@@ -398,14 +398,14 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(first.label.contains("EST-2218"))
         XCTAssertTrue(second.label.contains("EST-2238"))
         XCTAssertFalse(app.buttons["job-estimate-00000000-0000-4000-8000-000000002239"].exists, "Other jobs' estimates must not appear")
-        // The $340 owed takes Money's bar; Customer view remains before the estimate list.
+        // The $340 owed takes Money's bar; the estimates' Customer view stays beneath them, quieter.
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
         let present = app.buttons["job-money-customer-view"]
         XCTAssertTrue(present.waitForExistence(timeout: 5))
-        XCTAssertEqual(present.label, "Customer view · Estimates")
+        XCTAssertEqual(present.label, "Show customer")
         XCTAssertTrue(present.isHittable)
-        XCTAssertLessThanOrEqual(present.frame.maxY, first.frame.minY, "The customer presentation action should precede the estimate list")
+        XCTAssertLessThanOrEqual(second.frame.maxY, present.frame.minY, "Both estimates should be visible above the presentation action")
         XCTAssertLessThanOrEqual(present.frame.maxY, collect.frame.minY, "The estimates' door must not sit under the bar")
         for _ in 0..<5 where !first.isHittable { app.swipeUp() }
         XCTAssertTrue(first.isHittable)
@@ -446,7 +446,7 @@ final class JobDocumentsUITests: XCTestCase {
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15))
         chooser.tap()
-        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch
+        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
         XCTAssertTrue(money.waitForExistence(timeout: 5))
         money.tap()
         let first = app.buttons["job-estimate-\(estimateA)"]
@@ -463,20 +463,9 @@ final class JobDocumentsUITests: XCTestCase {
         second.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EST-2238")).firstMatch.waitForExistence(timeout: 10))
         app.navigationBars.buttons["Back"].firstMatch.tap()
-        jumpAtLargeText(app, to: "Estimates")
         let present = app.buttons["job-money-customer-view"]
         revealJobItem(present, in: app)
         XCTAssertTrue(present.isHittable)
-    }
-
-    private func jumpAtLargeText(_ app: XCUIApplication, to section: String) {
-        let menu = app.buttons["job-money-jump-menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 15))
-        XCTAssertTrue(menu.isHittable)
-        menu.tap()
-        let choice = app.buttons[section].firstMatch
-        XCTAssertTrue(choice.waitForExistence(timeout: 10))
-        choice.tap()
     }
 
     private func revealJobItem(_ element: XCUIElement, in app: XCUIApplication) {
@@ -589,7 +578,7 @@ final class JobDocumentsUITests: XCTestCase {
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15))
         chooser.tap()
-        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Estimates & invoices", "job-section-chooser")).firstMatch
+        let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
         XCTAssertTrue(money.waitForExistence(timeout: 5))
         money.tap()
         let items = app.buttons["job-invoice-items-\(invoiceA)"]
@@ -855,7 +844,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5)); revalidate.tap()
         // Verify that the job screen is usable and payment controls are no longer reachable
         // after revalidation, independently of the sheet navigation-bar query.
-        let handoff = app.buttons["Customer view · Estimates"]
+        let handoff = app.buttons["Show customer"]
         let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: handoff)], timeout: 20)
         if result != .completed {
             let hierarchy = XCTAttachment(string: app.debugDescription)
@@ -935,7 +924,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "This invoice couldn't be verified")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["INV-2209"].exists)
         XCTAssertFalse(app.buttons["Customer view"].exists)
-        XCTAssertFalse(app.buttons["Customer view · Estimates"].exists)
+        XCTAssertFalse(app.buttons["Show customer"].exists)
         XCTAssertFalse(app.buttons["Collect payment"].exists)
     }
 

@@ -1101,6 +1101,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if path == "/v1/estimates/\(record.id)" { return jsonObject(record) }
             if path == "/v1/estimates/\(record.id)/revisions/2" {
                 var object = reviewRevision(record)
+                // The sample has options only; an issued revision always carries lines and their total.
+                if record.lines.isEmpty, let first = (object["options"] as? [[String: Any]])?.first {
+                    object["lines"] = first["lines"]; object["totalAmount"] = first["totalAmount"]
+                }
                 if ProcessInfo.processInfo.arguments.contains("--paper-preview-canonical-estimate"),
                    var options = object["options"] as? [[String: Any]], options.count > 1 {
                     options[1]["title"] = "Reviewed protection"

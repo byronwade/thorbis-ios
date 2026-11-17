@@ -29,7 +29,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
         XCTAssertTrue(invoice.label.contains("$150.00"))
-        XCTAssertTrue(invoice.label.contains("Issued"), invoice.label)
+        XCTAssertTrue(invoice.label.contains("due"), invoice.label)
         XCTAssertFalse(invoice.label.contains("Unpaid"), invoice.label)
         invoice.tap()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))

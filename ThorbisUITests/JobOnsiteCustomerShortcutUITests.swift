@@ -12,14 +12,17 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
     func testOnsiteShortcutOpensOnlyThisJobsCustomerDocuments() {
         continueAfterFailure = false
         let app = open()
-        let shortcut = app.buttons["job-onsite-show-customer"]
-        XCTAssertTrue(shortcut.waitForExistence(timeout: 30))
+        // Paper keeps one door in the job's details in every state, on site included.
+        let shortcut = app.buttons["job-customer-view"]
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
+        for _ in 0..<10 where !shortcut.exists { app.swipeUp() }
+        XCTAssertTrue(shortcut.waitForExistence(timeout: 10))
         app.scrollClearOfFoot(shortcut)
         XCTAssertTrue(shortcut.isHittable)
         XCTAssertGreaterThanOrEqual(shortcut.frame.height, 44)
-        XCTAssertFalse(app.buttons["job-customer-view"].exists, "On-site should have one customer-home action")
+        XCTAssertEqual(app.buttons.matching(identifier: "job-customer-view").count, 1, "On-site should have one customer-home action")
         shortcut.tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 20))
         for id in ["00000000-0000-4000-8000-000000002218", "00000000-0000-4000-8000-000000002238"] {
             XCTAssertTrue(app.buttons["customer-estimate-\(id)"].exists)
         }
@@ -44,19 +47,22 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
         XCTAssertTrue(door.waitForExistence(timeout: 10))
         app.scrollClearOfFoot(door)
         door.tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 20))
     }
 
     func testOnsiteShortcutIsUnavailableWithoutCustomerHandoffPermissions() {
         let app = open(["--paper-preview-no-customer-handoff"])
-        XCTAssertTrue(app.descendants(matching: .any)["job-toolkit"].waitForExistence(timeout: 30))
-        XCTAssertFalse(app.buttons["job-onsite-show-customer"].exists)
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
+        let door = app.buttons["job-customer-view"]
+        for _ in 0..<10 where !door.exists { app.swipeUp() }
+        XCTAssertTrue(door.waitForExistence(timeout: 10))
+        XCTAssertFalse(door.isEnabled, "Without a customer permission the door is shown but can't be used")
     }
 
     func testOnsiteShortcutAtLargestText() {
         continueAfterFailure = false
         let app = open(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        let shortcut = app.buttons["job-onsite-show-customer"]
+        let shortcut = app.buttons["job-customer-view"]
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
         for _ in 0..<8 where !shortcut.exists { app.swipeUp() }
         XCTAssertTrue(shortcut.waitForExistence(timeout: 10))
@@ -65,6 +71,6 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
         XCTAssertTrue(shortcut.isHittable)
         XCTAssertGreaterThanOrEqual(shortcut.frame.height, 44)
         shortcut.tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 20))
     }
 }

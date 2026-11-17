@@ -60,7 +60,7 @@ final class InvoicePaymentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 30))
         let menu = app.buttons["Customer view, edit or open the PDF"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
-        let discount = app.buttons["Add discount"]
+        let discount = app.buttons["Add discount or credit"]
         XCTAssertTrue(discount.waitForExistence(timeout: 10)); discount.tap()
         XCTAssertTrue(app.buttons["invoice-discount-apply"].waitForExistence(timeout: 10))
     }
@@ -73,7 +73,7 @@ final class InvoicePaymentUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
         let menu = app.buttons["Customer view, edit or open the PDF"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
-        XCTAssertFalse(app.buttons["Add discount"].exists)
+        XCTAssertFalse(app.buttons["Add discount or credit"].exists)
     }
     func testReceivedPaymentMenuKeepsBankAndCardChoicesAndDirectCashCheck() {
         continueAfterFailure = false

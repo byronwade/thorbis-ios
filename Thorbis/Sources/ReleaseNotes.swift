@@ -13,6 +13,22 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-17-customer-pages-open",
+            date: "2026-11-17",
+            highlights: [
+                .init(symbol: "hand.tap", title: "Customer pages open what you tap",
+                      detail: "On a customer's Money and Jobs pages, estimates, invoices, photos, documents and jobs open again."),
+                .init(symbol: "iphone", title: "Show customer, in one place",
+                      detail: "The job keeps one Show customer row in its details in every state, and the Money tab is called Money again."),
+                .init(symbol: "envelope", title: "Email sends from the composer",
+                      detail: "Send is the main button again; Send with Mail and Save draft sit under it."),
+                .init(symbol: "signature", title: "Signature box for VoiceOver",
+                      detail: "The box customers sign in is announced, with whether a signature has been entered."),
+                .init(symbol: "list.bullet", title: "See all jobs works",
+                      detail: "On a customer with several open jobs, See all jobs opens the Jobs page."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-16-office-pages",
             date: "2026-11-16",
             highlights: [

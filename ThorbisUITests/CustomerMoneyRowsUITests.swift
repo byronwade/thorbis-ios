@@ -67,7 +67,7 @@ final class CustomerMoneyRowsUITests: XCTestCase {
         for _ in 0..<8 where !estimate.isHittable { app.swipeDown() }
         XCTAssertTrue(estimate.isHittable)
         estimate.tap()
-        XCTAssertTrue(app.staticTexts["Estimate 2218"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["EST-2218"].waitForExistence(timeout: 10))
         app.navigationBars.buttons["Back"].tap()
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
         for _ in 0..<8 where !invoice.isHittable { app.swipeUp() }

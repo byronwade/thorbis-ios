@@ -17,6 +17,9 @@ struct CustomerRecordsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.paperGroupedWells) private var wells
     @State private var openedLegacy: LegacyCustomerPhoto?
+    /// These rows sit on a hub page pushed by state (Paper 48N), where a value link never opens:
+    /// each row pushes its own destination by state too.
+    @State private var openedRoute: PaperRoute?
 
     /// The record a Records-tab activity row opens. A payment with no invoice id stays closed.
     static func activityDestination(_ entry: CustomerHistoryEntry, customerID: String) -> ActivityDestination? {
@@ -63,6 +66,7 @@ struct CustomerRecordsView: View {
         .thorbisDestination(item: $openedLegacy) { photo in
             LegacyCustomerPhotoDetail(photo: photo)
         }
+        .thorbisDestination(item: $openedRoute) { PaperRouteView(route: $0).tabletReadable() }
     }
 
     private var photosSection: some View {
@@ -103,7 +107,7 @@ struct CustomerRecordsView: View {
                 .buttonStyle(.plain).accessibilityLabel("Photo, \(title)")
                 .accessibilityIdentifier("customer-photo-\(asset.id)")
             } else {
-                NavigationLink(value: PaperRoute.media(jobID: jobID, assetID: asset.id)) {
+                Button { openedRoute = .media(jobID: jobID, assetID: asset.id) } label: {
                     photoCardBody(title: title, status: asset.uploadState == "stored" ? nil : asset.uploadState.statusLabel) {
                         MediaThumbnail(record: asset)
                     }
@@ -144,7 +148,7 @@ struct CustomerRecordsView: View {
 
     private func mediaSection(_ title: String, total: Int, groups: [CustomerJobGroup<MediaAssetRecord>], symbol: String, incomplete: Bool = false) -> some View {
         section(title, total: total, symbol: symbol, groups: groups, incomplete: incomplete) { asset in
-            NavigationLink(value: PaperRoute.media(jobID: asset.jobId, assetID: asset.id)) {
+            Button { openedRoute = .media(jobID: asset.jobId, assetID: asset.id) } label: {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
@@ -299,7 +303,7 @@ struct CustomerRecordsView: View {
     }
 
     private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false, photos: Bool = false) -> some View {
-        NavigationLink(value: PaperRoute.job(jobID)) {
+        Button { openedRoute = .job(jobID) } label: {
             if photos {
                 // Paper 48F: the job in 15 Semibold over its tiles, "6 photos" in 13 muted trailing.
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -319,15 +323,12 @@ struct CustomerRecordsView: View {
                     }
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         if !dynamicTypeSize.isAccessibilitySize {
-                            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                         }
                         Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                        Spacer(minLength: 8)
-                        Text("Open job").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: true, vertical: false).accessibilityHidden(true)
                         Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        Spacer(minLength: 0)
                     }
                 }
                 .frame(minHeight: 44)
@@ -340,7 +341,7 @@ struct CustomerRecordsView: View {
     }
 
     private func moneyLink(_ row: CustomerMoneyRow) -> some View {
-        NavigationLink(value: row.route) {
+        Button { openedRoute = row.route } label: {
             DocumentListRowContent(status: row.status, title: row.title, subtitle: row.reference,
                                    meta: row.meta, amount: row.amount, amountNote: row.amountNote)
                 .environment(\.paperRowInset, 0)

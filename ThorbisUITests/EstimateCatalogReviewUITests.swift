@@ -15,6 +15,11 @@ final class EstimateCatalogReviewUITests: XCTestCase {
             .matching(NSPredicate(format: "value CONTAINS %@", "Full system replacement")).firstMatch
         for _ in 0..<8 where !add.exists { app.swipeUp() }
         XCTAssertTrue(add.waitForExistence(timeout: 10))
+        // Clear of the pinned total and commit at the bottom, which cover the lower part of the page.
+        for _ in 0..<10 where !add.isHittable || add.frame.maxY > app.frame.height * 0.7 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)))
+        }
         XCTAssertTrue(add.isHittable)
         XCTAssertGreaterThanOrEqual(add.frame.height, 44)
         add.tap()

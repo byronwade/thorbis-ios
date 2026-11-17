@@ -106,110 +106,9 @@ final class DrawerGearMenuUITests: XCTestCase {
         let jobs = app.buttons["drawer-jobs"]
         XCTAssertTrue(jobs.waitForExistence(timeout: 15))
         XCTAssertTrue(jobs.isHittable)
-        XCTAssertFalse(app.buttons["drawer-workspace-work"].exists)
         XCTAssertFalse(app.buttons["drawer-estimates"].exists)
         XCTAssertFalse(app.buttons["drawer-invoices"].exists)
         XCTAssertFalse(app.buttons["drawer-team"].exists)
-        jobs.tap()
-        XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 10))
-    }
-
-    func testWorkspaceDisclosureRevealsPlacesWithoutOpeningAnotherScreen() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
-                               "--paper-preview-menu-suite", UUID().uuidString]
-        app.launch()
-        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
-        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
-        let disclosure = app.buttons["\(prefix)-workspace-work"]
-        XCTAssertTrue(disclosure.waitForExistence(timeout: 15))
-        if disclosure.value as? String == "Collapsed" { disclosure.tap() }
-        XCTAssertEqual(disclosure.value as? String, "Expanded")
-        disclosure.tap()
-        XCTAssertEqual(disclosure.value as? String, "Collapsed")
-        XCTAssertFalse(app.buttons["\(prefix)-estimates"].exists)
-        disclosure.tap()
-        XCTAssertEqual(disclosure.value as? String, "Expanded")
-        XCTAssertTrue(app.buttons["\(prefix)-estimates"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["\(prefix)-invoices"].exists)
-        XCTAssertTrue(app.buttons["\(prefix)-jobs"].exists)
-    }
-
-    func testWorkspaceLabelTogglesPlacesWithoutLeavingMenu() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
-                               "--paper-preview-menu-suite", UUID().uuidString]
-        app.launch()
-        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
-        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
-        let group = app.buttons["\(prefix)-workspace-work"]
-        XCTAssertTrue(group.waitForExistence(timeout: 15))
-        if group.value as? String == "Collapsed" { group.tap() }
-        XCTAssertGreaterThanOrEqual(group.frame.height, 44)
-        XCTAssertEqual(group.value as? String, "Expanded")
-        group.tap()
-        XCTAssertEqual(group.value as? String, "Collapsed")
-        XCTAssertFalse(app.buttons["\(prefix)-jobs"].exists)
-        group.tap()
-        XCTAssertEqual(group.value as? String, "Expanded")
-        XCTAssertTrue(app.buttons["\(prefix)-jobs"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["\(prefix)-estimates"].exists)
-        XCTAssertTrue(app.buttons["\(prefix)-invoices"].exists)
-    }
-
-    func testWorkDisclosureAndJobsAtLargestText() {
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "office",
-                               "--paper-preview-menu-suite", UUID().uuidString,
-                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        app.launch()
-        if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
-        let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
-        let group = app.buttons["\(prefix)-workspace-work"]
-        XCTAssertTrue(group.waitForExistence(timeout: 20))
-        XCTAssertTrue(group.isHittable)
-        XCTAssertGreaterThanOrEqual(group.frame.height, 44)
-        XCTAssertEqual(group.value as? String, "Expanded")
-        group.tap()
-        XCTAssertEqual(group.value as? String, "Collapsed")
-        group.tap()
-        XCTAssertEqual(group.value as? String, "Expanded")
-        let jobs = app.buttons["\(prefix)-jobs"]
-        XCTAssertTrue(jobs.waitForExistence(timeout: 10))
-        if !app.usesTabletLayout && !jobs.isHittable { app.revealDrawerRow("jobs") }
-        XCTAssertTrue(jobs.isHittable)
-        jobs.tap()
-        XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 15))
-    }
-
-    func testWorkPreferenceSurvivesRelaunchAndJobsCanBeOpened() throws {
-        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer persistence") }
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "schedule", "--paper-preview-role", "office",
-                               "--paper-preview-menu-suite", UUID().uuidString]
-        app.launch()
-        app.openDrawer()
-        let prefix = "drawer"
-        let group = app.buttons["\(prefix)-workspace-work"]
-        XCTAssertTrue(group.waitForExistence(timeout: 15))
-        XCTAssertEqual(group.value as? String, "Expanded", "Work is open with fresh preferences")
-        group.tap()
-        XCTAssertEqual(group.value as? String, "Collapsed")
-        app.buttons["drawer-schedule"].tap()
-        app.openDrawer()
-        XCTAssertEqual(group.value as? String, "Collapsed", "The chosen state survives closing the menu")
-        app.terminate()
-        app.launch()
-        app.openDrawer()
-        XCTAssertEqual(group.value as? String, "Collapsed", "The chosen state survives restarting the app")
-        group.tap()
-        XCTAssertEqual(group.value as? String, "Expanded")
-        let jobs = app.buttons["\(prefix)-jobs"]
-        XCTAssertTrue(jobs.waitForExistence(timeout: 5))
         jobs.tap()
         XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 10))
     }
@@ -222,11 +121,8 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.launch()
         if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
         let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
-        let work = app.buttons["\(prefix)-workspace-work"]
-        XCTAssertTrue(work.waitForExistence(timeout: 15))
-        if work.value as? String == "Collapsed" { work.tap() }
         if !app.usesTabletLayout {
-            XCTAssertTrue(app.buttons["drawer-workspace-menu"].exists)
+            XCTAssertTrue(app.buttons["drawer-workspace-menu"].waitForExistence(timeout: 15))
             XCTAssertTrue(app.buttons["drawer-new-menu"].exists, "Paper's + circle opens New")
             XCTAssertTrue(app.buttons["drawer-settings"].exists)
         }
@@ -273,19 +169,19 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.launch()
         if app.usesTabletLayout { return assertClosedSidebarIsOutOfTheTree(app) }
         XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 30))
-        XCTAssertFalse(app.drawerRow("new").exists, "The closed drawer's New job must not be in the tree")
+        XCTAssertFalse(app.drawerRow("new-menu").exists, "The closed drawer's New job must not be in the tree")
         XCTAssertFalse(app.drawerRow("settings").exists, "The closed drawer's gear must not be in the tree")
         XCTAssertFalse(app.drawerRow("search").exists)
         XCTAssertFalse(app.scrollViews["drawer-rows"].exists, "The closed drawer's (empty) scroll view must not be in the tree")
         app.openDrawer()
-        XCTAssertTrue(app.drawerRow("new").waitForExistence(timeout: 5))
+        XCTAssertTrue(app.drawerRow("new-menu").waitForExistence(timeout: 5))
         XCTAssertTrue(app.drawerRow("settings").exists)
         XCTAssertTrue(app.scrollViews["drawer-rows"].exists)
         // Closing takes everything out again once the drawer has slid shut.
         app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         // The UIKit-hosted controls leave as the close starts (VoiceOver returns to the place then);
         // only the rows stay through the slide.
-        XCTAssertFalse(app.drawerRow("new").exists, "New job must leave the tree as the drawer starts closing")
+        XCTAssertFalse(app.drawerRow("new-menu").exists, "New job must leave the tree as the drawer starts closing")
         XCTAssertFalse(app.drawerRow("settings").exists, "The gear must leave the tree as the drawer starts closing")
         XCTAssertTrue(app.scrollViews["drawer-rows"].waitForNonExistence(timeout: 5))
     }

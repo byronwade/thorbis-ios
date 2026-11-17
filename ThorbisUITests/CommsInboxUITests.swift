@@ -397,7 +397,7 @@ final class CommsInboxUITests: XCTestCase {
         app.buttons["Keep editing"].tap()
         to.tap()
         to.typeText("customer@example.com")
-        XCTAssertTrue(app.buttons["Queue on device"].exists)
+        XCTAssertTrue(app.buttons["inbox-mail-send"].exists)
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
         app.buttons["Keep editing"].tap()

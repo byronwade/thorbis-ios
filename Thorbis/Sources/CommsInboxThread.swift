@@ -779,8 +779,7 @@ struct CommsTextComposer: View {
                         .accessibilityIdentifier("inbox-text-storage-error")
                     if !body_.isEmpty {
                         Button("Copy text") { UIPasteboard.general.string = body_ }
-                            .font(Theme.font(14, weight: .medium))
-                            .frame(minHeight: 44)
+                            .inboxQuietAction()
                             .accessibilityIdentifier("inbox-text-copy-unsaved")
                     }
                 }
@@ -955,7 +954,7 @@ private struct CommsCannedRepliesSheet: View {
                     Button("Copy reply") {
                         UIPasteboard.general.string = name.isEmpty ? text : "\(name)\n\(text)"
                     }
-                    .frame(minHeight: 44)
+                    .inboxQuietAction()
                     .accessibilityIdentifier("inbox-canned-copy-unsaved")
                 }
             }
@@ -1193,9 +1192,11 @@ struct CommsMailSheet: View {
                         guard store.isActive, recoveryCurrent() else { return }
                         var restored = draft; recoveryCandidate.applying(to: &restored); draft = restored; self.recoveryCandidate = nil
                     }
+                    .inboxQuietAction()
                     Button("Discard recovered email", role: .destructive) {
                         if removeRecovery() { self.recoveryCandidate = nil }
                     }
+                    .inboxQuietAction(destructive: true)
                 }
             }
             if let savedThreadAwaitingCleanup {
@@ -1203,6 +1204,7 @@ struct CommsMailSheet: View {
                     Text("Your email was saved, but its recovery copy could not be removed. Check drafts before restoring it later.")
                         .font(Theme.font(14)).fixedSize(horizontal: false, vertical: true)
                     Button("Close saved email") { onSaved(savedThreadAwaitingCleanup) }
+                        .inboxQuietAction()
                 }
             }
             if let recoveryError {
@@ -1210,8 +1212,10 @@ struct CommsMailSheet: View {
                     Text(recoveryError).font(Theme.font(14)).foregroundStyle(Theme.warning)
                     if recoveryBlocked {
                         Button("Retry recovery") { recoveryLoaded = false; loadRecovery() }
+                            .inboxQuietAction()
                     } else {
                         Button("Copy email") { UIPasteboard.general.string = draft.recoveryText }
+                            .inboxQuietAction()
                     }
                 }
             }
@@ -1252,7 +1256,7 @@ struct CommsMailSheet: View {
                     .lineLimit(6...14).font(Theme.font(16)).fieldWell()
                     .accessibilityIdentifier("inbox-mail-body").disabled(recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
             }
-            Text("Email is not connected. Queued messages stay on this device and are not sent automatically.")
+            Text("Send queues it \u{2014} no email provider is connected. Drafts stay on this device.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             if let saveFailure {
@@ -1265,16 +1269,21 @@ struct CommsMailSheet: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if saveFailure == .conflict {
                         Button("Save as new draft") { saveSeparateDraft() }
-                            .font(Theme.font(15, weight: .medium))
+                            .inboxQuietAction()
                             .accessibilityIdentifier("inbox-mail-save-copy")
                     } else if saveFailure == .storage {
                         Button("Copy email") { UIPasteboard.general.string = draft.recoveryText }
-                            .font(Theme.font(15, weight: .medium))
+                            .inboxQuietAction()
                             .accessibilityIdentifier("inbox-mail-copy-text")
                     }
                 }
             }
             VStack(spacing: 4) {
+                Button { commit(send: true) } label: { Text("Send").inkCommit(enabled: ready) }
+                    .buttonStyle(PressStyle())
+                    .disabled(!ready || saveFailure == .storage || recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
+                    .accessibilityHint("Saves the email on this device. It will not send automatically.")
+                    .accessibilityIdentifier("inbox-mail-send")
                 Button {
                     guard store.isActive, recoveryCurrent(), let mail = deviceMail else { return }
                     mailHandoff = .mail(mail)
@@ -1285,11 +1294,6 @@ struct CommsMailSheet: View {
                 .buttonStyle(PressStyle())
                 .disabled(deviceMail == nil || recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
                 .accessibilityHint("Opens your mail app with this message. Thorbis does not mark it sent.")
-                Button { commit(send: true) } label: { Text("Queue on device").inkCommit(enabled: ready) }
-                    .buttonStyle(PressStyle())
-                    .disabled(!ready || saveFailure == .storage || recoveryCandidate != nil || recoveryBlocked || savedThreadAwaitingCleanup != nil)
-                    .accessibilityHint("Saves the email on this device. It will not send automatically.")
-                    .accessibilityIdentifier("inbox-mail-send")
                 Button { commit(send: false) } label: {
                     Text("Save draft").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
@@ -1348,5 +1352,17 @@ struct CommsMailSheet: View {
             return
         }
         if removeRecovery() { onSaved(id) } else { savedThreadAwaitingCleanup = id }
+    }
+}
+
+private extension View {
+    /// The inbox's quiet text action (recovery and copy): 15 Medium in the foreground, 44 tall,
+    /// pressed like every other Thorbis text button instead of the system's tinted default.
+    func inboxQuietAction(destructive: Bool = false) -> some View {
+        font(Theme.font(15, weight: .medium))
+            .foregroundStyle(destructive ? Theme.destructive : Theme.foreground)
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+            .buttonStyle(PressStyle())
     }
 }

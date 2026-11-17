@@ -115,8 +115,10 @@ final class LegacyCustomerPresenter: ObservableObject {
               scene.activationState == .foregroundActive, handoff.isCurrent(api: api, session: session) else { return false }
         let window = UIWindow(windowScene: scene)
         window.windowLevel = .normal + 1
+        // Its own window sits outside the app root, so the root's type, ink and tint are set again.
         let view = LegacyCustomerProtectedView(handoff: handoff, presenter: self)
             .environmentObject(api).environmentObject(session)
+            .font(Theme.font(15)).foregroundStyle(Theme.foreground).tint(Theme.brandText)
         let host = UIHostingController(rootView: view)
         host.overrideUserInterfaceStyle = sourceWindow.traitCollection.userInterfaceStyle
         host.view.accessibilityViewIsModal = true
@@ -207,7 +209,7 @@ final class LegacyCustomerPresenter: ObservableObject {
             guard privacyShield == nil else { return }
             let shield = UIView(frame: hostView.bounds)
             shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            shield.backgroundColor = .systemBackground
+            shield.backgroundColor = UIColor(Theme.background)
             shield.isAccessibilityElement = true
             shield.accessibilityLabel = "Customer view is hidden while the app is inactive."
             shield.accessibilityViewIsModal = true
@@ -289,7 +291,8 @@ final class CustomerProtectedSceneWindow: ObservableObject {
         #else
         let hostedContent = content
         #endif
-        let host = UIHostingController(rootView: hostedContent)
+        // Its own window sits outside the app root, so the root's type, ink and tint are set again.
+        let host = UIHostingController(rootView: hostedContent.font(Theme.font(15)).foregroundStyle(Theme.foreground).tint(Theme.brandText))
         host.overrideUserInterfaceStyle = source.traitCollection.userInterfaceStyle
         host.view.accessibilityViewIsModal = true
         next.rootViewController = host
@@ -324,7 +327,7 @@ final class CustomerProtectedSceneWindow: ObservableObject {
         sceneActive = false
         let view = UIView(frame: host.bounds)
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = UIColor(Theme.background)
         view.isAccessibilityElement = true
         view.accessibilityLabel = "Customer view is hidden while the app is inactive."
         view.accessibilityViewIsModal = true

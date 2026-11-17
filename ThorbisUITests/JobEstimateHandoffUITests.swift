@@ -3,8 +3,8 @@ import XCTest
 @MainActor
 /// The job's ••• door to Customer view. The header or bar door has the same name, so this picks the menu row.
 func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
-                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view", "job-onsite-show-customer")).firstMatch
+    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
+                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view")).firstMatch
 }
 
 /// The Money door opens the estimates section of Customer view.
@@ -20,7 +20,7 @@ func thorbisSection(_ app: XCUIApplication, _ name: String) -> XCUIElement {
 
 /// The job has loaded with its balance. Since #189 an in-progress job's bar reads "Wrap up · N left"
 /// (collecting is a wrap-up row and Money's bar), so the balance is read from the Money section,
-/// whose spoken label carries it ("Estimates, invoices and payments, $340.00 due"; identifier "job-section-money").
+/// whose spoken label carries it ("Money, $340.00 due"; identifier "job-section-money").
 func thorbisJobBalanceLoaded(_ app: XCUIApplication, _ amount: String) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "job-section-money", amount)).firstMatch
 }
@@ -55,12 +55,14 @@ func thorbisStableButton(_ app: XCUIApplication, _ identifier: String) -> XCUIEl
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: down ? 0.56 : 0.46))
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
-    for _ in 0..<10 where onScreenHittable().isEmpty {
+    // `where` runs on every pass, and each query is slow: ask once per nudge, not once per pass.
+    var found = !onScreenHittable().isEmpty
+    for _ in 0..<10 where !found {
         let frame = element.frame
         let tooHigh = frame.height.isFinite && frame.height > 1 && frame.midY.isFinite && frame.midY < app.frame.minY + 80
-        nudge(down: tooHigh)
+        nudge(down: tooHigh); found = !onScreenHittable().isEmpty
     }
-    for _ in 0..<8 where onScreenHittable().isEmpty { nudge(down: true) }
+    for _ in 0..<8 where !found { nudge(down: true); found = !onScreenHittable().isEmpty }
     var previous: CGRect?
     let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
         guard let frame = onScreenHittable().first?.frame else { previous = nil; return false }
@@ -560,10 +562,10 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let approved = app.buttons["handoff-details-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(approved.waitForExistence(timeout: 45))
         visible(app, approved); approved.tap()
-        XCTAssertTrue(app.otherElements["handoff-estimate-details"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Sample package"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Selected package scope"].exists)
-        XCTAssertTrue(app.staticTexts["These are the options on the issued estimate. Which option was approved isn't shown here."].exists)
+        XCTAssertTrue(app.scrollViews["handoff-estimate-details"].waitForExistence(timeout: 10))
+        // With no signed receipt to verify, the approved estimate says so and shows no package scope.
+        XCTAssertTrue(app.staticTexts["No signed customer receipt is available for this approval. Ask your technician for details."].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Selected package scope"].exists)
         app.navigationBars.buttons["Back"].firstMatch.tap()
         XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
         let sent = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
@@ -1045,7 +1047,9 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let select = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(select.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
-        XCTAssertTrue(app.staticTexts["$190.00"].firstMatch.exists); XCTAssertTrue(app.staticTexts["$0.00"].firstMatch.exists)
+        // The approved one has no verified receipt, so it offers a price retry and shows no amount.
+        XCTAssertTrue(app.buttons["handoff-retry-price-00000000-0000-4000-8000-000000008101"].waitForExistence(timeout: 15))
+        XCTAssertTrue((select.value as? String)?.contains("$0.00") == true, select.value as? String ?? "")
         capture(app, "Same-title approved and zero-dollar sent estimates together")
         selectEstimate(app, select); thorbisStableButton(app, "handoff-review-selected").tap()
         XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10)); thorbisStableButton(app, "handoff-continue-signatures").tap()
@@ -1136,15 +1140,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
 
     func testLargestTextCanReturnToCustomerPresentationFromInvoices() {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        let jump = app.buttons["job-money-jump-menu"]
-        XCTAssertTrue(jump.waitForExistence(timeout: 30))
-        jump.tap()
-        app.buttons["Invoices"].firstMatch.tap()
-        XCTAssertTrue(jump.waitForExistence(timeout: 10))
-        jump.tap()
-        app.buttons["Estimates"].firstMatch.tap()
+        // Paper's Money is one page with no jump chips: scroll down to the invoices and back.
         let present = app.buttons["job-money-customer-view"]
-        XCTAssertTrue(present.waitForExistence(timeout: 10), "The estimate presentation action must remain in the estimates section at large text")
+        XCTAssertTrue(present.waitForExistence(timeout: 30), "The estimate presentation action must remain in the estimates section at large text")
+        for _ in 0..<6 { app.swipeUp() }
+        for _ in 0..<16 where !present.isHittable { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(present.isHittable)
         present.tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 15))

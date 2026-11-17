@@ -1217,12 +1217,13 @@ struct EstimateBuilderSection<Header: View>: View {
 
     private var headingAddItem: some View {
         Button(action: addItem) {
+            // The heading's own ink and size, like the menu beside it; the tap target stays 44.
             Label("Add item", systemImage: "plus")
-                .font(Theme.font(14, weight: .medium))
+                .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .disabled(disabled || lines.count >= [EstimateRevisionLineDraft].maximumLines)
         .accessibilityValue(label)
         .accessibilityHint("Opens the price book")
@@ -1357,7 +1358,8 @@ struct EstimateBuilderSection<Header: View>: View {
                     .accessibilityAddTraits(.isHeader)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                if lines.count > 3 && !dynamicTypeSize.isAccessibilitySize { headingAddItem }
+                // 44 to tap, 32 in the row, so the heading keeps Paper's height.
+                if lines.count > 3 && !dynamicTypeSize.isAccessibilitySize { headingAddItem.padding(.vertical, -6) }
                 if !menuItems.isEmpty {
                     ThorbisMenu(items: menuItems, title: label, accessibilityLabel: "Actions for \(label)") {
                         Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)

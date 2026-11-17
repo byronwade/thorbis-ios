@@ -46,7 +46,8 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
             XCTAssertTrue(select.waitForExistence(timeout: 30), app.debugDescription)
             let lowerHalf = select.frame.midY > app.windows.firstMatch.frame.midY
             select.tap()
-            let row = app.buttons[option]
+            // Paper's price book also has a category tab with this name behind the sheet.
+            let row = app.thorbisFrontButton(matching: NSPredicate(format: "label == %@", option))
             if lowerHalf {
                 assertMenuRow(row, opensAbove: select, in: app)
             } else {

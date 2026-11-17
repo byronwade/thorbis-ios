@@ -512,6 +512,8 @@ struct CustomerDetailView: View {
     @State private var tab = "Overview"
     /// Paper 48N: the hub row whose page is pushed ("Everything for Danielle").
     @State private var openPart: CustomerHubPart?
+    /// A job opened from the Jobs page. That page is pushed by state, where a value link never opens.
+    @State private var openedJob: Job?
     /// DEBUG previews open a hub page once.
     @State private var previewOpened = false
     @State private var records: CustomerJobCompilation?
@@ -620,7 +622,9 @@ struct CustomerDetailView: View {
                 }
             }
         }
-        .thorbisDestination(item: $openPart) { part in hubPage(part) }
+        .thorbisDestination(item: $openPart) { part in
+            hubPage(part).thorbisDestination(item: $openedJob) { JobDetailView(jobId: $0.id).tabletReadable() }
+        }
         .thorbisDestination(isPresented: $showArchive) {
             ArchiveCustomerView(customerID: customer.id, customerName: record?.name ?? customer.name) { saved in
                 record = saved
@@ -1082,7 +1086,7 @@ struct CustomerDetailView: View {
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("customer-next-visit")
                 } accessory: {
-                    if summary.openCount > 1 && !typeSize.isAccessibilitySize { seeAllJobs }
+                    if summary.openCount > 1 && !typeSize.isAccessibilitySize { seeAllJobs.padding(.vertical, -9) }
                 }
                 if summary.openCount > 1 && typeSize.isAccessibilitySize { seeAllJobs }
             }
@@ -1090,11 +1094,13 @@ struct CustomerDetailView: View {
     }
 
     private var seeAllJobs: some View {
-        Button("See all jobs") { tab = "Jobs" }
-            .font(Theme.font(14, weight: .medium))
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-            .accessibilityIdentifier("customer-see-all-jobs")
+        // The section label's own ink and size; 44 to tap.
+        Button { openPart = .jobs } label: {
+            Text("See all jobs").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityIdentifier("customer-see-all-jobs")
     }
 
     private func street(for locationID: String?) -> String? {
@@ -1568,18 +1574,12 @@ struct CustomerDetailView: View {
                         }
                     }
                     if past.count > shownPast.count {
-                        let actions = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 12))
-                        actions {
-                            Button { withMotion { visiblePastCount += nextCount } } label: {
-                                Text("Show next \(nextCount) older job\(nextCount == 1 ? "" : "s")")
-                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                            }
-                            if past.count - shownPast.count > nextCount {
-                                Button("Show all") { withMotion { visiblePastCount = past.count } }
-                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil, minHeight: 44)
-                            }
+                        // Paper: one quiet button brings the rest of the history; the rows are lazy.
+                        let remaining = past.count - shownPast.count
+                        Button { withMotion { visiblePastCount = past.count } } label: {
+                            Text("Show \(remaining) older job\(remaining == 1 ? "" : "s")")
+                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
                         .padding(.top, 4)
@@ -1597,7 +1597,7 @@ struct CustomerDetailView: View {
     }
 
     private func customerJobRow(_ job: Job, open: Bool, record full: JobRecord?) -> some View {
-        return NavigationLink(value: job) {
+        return Button { openedJob = job } label: {
             if open {
                 // Open work, in the jobs row grammar: the street, the problem, when and who.
                 JobRoomRow(job: job, street: street(for: job.locationId),

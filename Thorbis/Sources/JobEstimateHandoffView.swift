@@ -358,8 +358,7 @@ struct JobEstimateHandoffView: View {
                 .accessibilityIdentifier("handoff-details-\(record.id)")
             }
             if model.overviewPriceFailures.contains(record.id) {
-                Button("Retry price") { Task { await model.retryOverviewPrice(record) } }
-                    .font(Theme.customerFont(type.body, weight: .medium))
+                CustomerSecondaryButton(title: "Retry price", type: type) { Task { await model.retryOverviewPrice(record) } }
                     .accessibilityIdentifier("handoff-retry-price-\(record.id)")
             }
             if record.status == "approved" {

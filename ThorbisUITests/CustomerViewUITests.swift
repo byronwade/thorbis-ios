@@ -14,12 +14,12 @@ final class CustomerViewUITests: XCTestCase {
                                "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"]
         app.launch()
 
-        let door = app.buttons["job-onsite-show-customer"]
+        let door = app.buttons["job-customer-view"]
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
         for _ in 0..<10 where !door.exists { app.swipeUp() }
         XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one visible Customer view door")
         app.scrollClearOfFoot(door)
-        XCTAssertTrue(door.label.contains("Customer view"))
+        XCTAssertEqual(door.label, "Show customer")
         door.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         capture(app, "Customer view home")
@@ -101,7 +101,9 @@ final class CustomerViewUITests: XCTestCase {
     func testChangedDetailsStillGoThroughStaffReviewAfterHandBack() {
         let app = launch()
         let door = app.buttons["job-customer-view"]
-        XCTAssertTrue(door.waitForExistence(timeout: 20)); door.tap()
+        XCTAssertTrue(door.waitForExistence(timeout: 20))
+        // The door is a row in the job's details, which can start under the job's bar.
+        app.scrollClearOfFoot(door); door.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         let details = revealCustomerDetails(in: app)
         XCTAssertTrue(details.waitForExistence(timeout: 10))
@@ -130,7 +132,7 @@ final class CustomerViewUITests: XCTestCase {
 
     /// The detail screen's own door, not the job header's one still in the stack beneath it.
     private func detailDoor(_ app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Customer view · Estimates", "job-customer-view")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Show customer", "job-customer-view")).firstMatch
     }
 
     private func ownerExit(_ app: XCUIApplication) {
@@ -160,10 +162,13 @@ final class CustomerViewUITests: XCTestCase {
     /// Large cards can report hittable while their centre is still behind the fixed hand-back footer.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         let list = documentsList(in: app)
-        let bottom = app.buttons["Hand back to the technician"].firstMatch.frame.minY
-        for _ in 0..<8 where !(element.isHittable && (bottom == 0 || element.frame.maxY < bottom)) {
+        let footer = app.buttons["Hand back to the technician"].firstMatch
+        for _ in 0..<12 {
+            let top = app.navigationBars.firstMatch.frame.maxY
+            let bottom = footer.exists ? footer.frame.minY : app.frame.maxY
+            if element.isHittable && element.frame.midY > top && element.frame.midY < bottom { return }
             guard list.exists else { return }
-            list.swipeUp(velocity: .slow)
+            if element.frame.midY <= top { list.swipeDown(velocity: .slow) } else { list.swipeUp(velocity: .slow) }
         }
         XCTFail("Customer view control must be hittable and clear of navigation and hand-back controls")
     }

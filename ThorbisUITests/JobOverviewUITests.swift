@@ -534,6 +534,9 @@ final class JobOverviewUITests: XCTestCase {
         for _ in 0..<5 where !notes.isHittable { content.swipeUp() }
         XCTAssertTrue(notes.isHittable, "Photos must be able to switch back to notes")
         notes.tap()
+        // Leaving Photos puts the job's header back above the feed, and the feed builds its rows as
+        // they scroll in: bring the chips back before reading which one is chosen.
+        for _ in 0..<6 where !notes.exists { content.swipeUp() }
         XCTAssertTrue(waitForChosen(notes))
         // A note's row reads "Note · You"; an empty feed says so.
         let note = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Note")).firstMatch

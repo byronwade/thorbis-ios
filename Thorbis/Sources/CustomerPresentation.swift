@@ -330,9 +330,9 @@ struct CustomerEstimatePresentation: View {
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             if !option.description.isEmpty {
                 optionDescription(option)
-                    .foregroundStyle(Theme.subtle)
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, 12)
+                    .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -459,6 +459,8 @@ struct CustomerEstimatePresentation: View {
                 }
                 .frame(height: type.regular ? 260 : 220)
                 .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                // One element for the pad: the guide inside is hidden, which would hide these too.
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Signature box. Sign with your finger.")
                 .accessibilityIdentifier("customer-estimate-signature-pad")
                 .accessibilityValue(handoff?.signature != nil ? "Signature saved for this estimate" : SignatureInk.hasInk(strokes) ? "Signature entered" : "Signature required")
@@ -1158,6 +1160,9 @@ struct CustomerInvoicePresentation: View {
             }
             .frame(height: type.regular ? 260 : 220)
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            // One element for the pad (the guide inside is hidden); Clear stays its own button above it.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Signature box. Sign with your finger.")
             .overlay(alignment: .topTrailing) {
                 if SignatureInk.hasInk(strokes) {
                     Button("Clear") { strokes = [] }
@@ -1165,7 +1170,6 @@ struct CustomerInvoicePresentation: View {
                         .frame(minWidth: type.target, minHeight: 44)
                 }
             }
-            .accessibilityLabel("Signature box. Sign with your finger.")
             if let error {
                 Text(error).font(Theme.customerFont(type.body)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)

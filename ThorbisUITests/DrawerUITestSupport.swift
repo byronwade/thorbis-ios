@@ -71,8 +71,9 @@ extension XCUIApplication {
         let gear = drawerRow("settings")
         XCTAssertTrue(gear.waitForExistence(timeout: 5), "No gear circle", file: file, line: line)
         gear.tap()
-        let saved = buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Saved on this phone", "drawer-saved-work")).firstMatch
+        // The first match can be the drawer's own row behind the menu; take the front-most one.
+        let saved = thorbisFrontButton(matching: NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Saved on this phone", "drawer-saved-work"))
         XCTAssertTrue(saved.waitForExistence(timeout: 5), "No saved work in the gear menu", file: file, line: line)
-        saved.tap()
+        thorbisTapCentre(saved)
     }
 }
