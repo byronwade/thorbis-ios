@@ -27,7 +27,13 @@ final class ReceiptsModel: ObservableObject {
         error = nil
         guard let organizationID, let userID else { return }
         do {
-            let opened = try ReceiptsStore(organizationID: organizationID, userID: userID, directory: directory)
+            var preview: ReceiptsStore?
+            #if DEBUG
+            if PaperPreview.enabled, directory == nil {
+                preview = try PlacesPreviewData.receipts(organizationID: organizationID, userID: userID)
+            }
+            #endif
+            let opened = try preview ?? ReceiptsStore(organizationID: organizationID, userID: userID, directory: directory)
             store = opened
             receipts = opened.receipts
             bound = true
@@ -61,7 +67,9 @@ enum ReceiptFormat {
 
     /// "Nov 12" this year, "Nov 12, 2025" otherwise.
     static func day(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
-        calendar.isDate(date, equalTo: now, toGranularity: .year)
+        if calendar.isDate(date, inSameDayAs: now) { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) { return "Yesterday" }
+        return calendar.isDate(date, equalTo: now, toGranularity: .year)
             ? date.formatted(.dateTime.month(.abbreviated).day())
             : date.formatted(.dateTime.month(.abbreviated).day().year())
     }
@@ -133,10 +141,17 @@ private struct ReceiptExportFile: Identifiable {
     let folder: URL
 }
 
+/// Paper 46 "Receipts": the place header, the search field holding what narrows the list as chips,
+/// then groups of rows with a 24pt circle that picks a receipt. Paper groups by Pending, Submitted
+/// and Reimbursed and submits what is picked; nothing here is submitted, so the groups are months
+/// and the bar shares what is picked as a CSV.
 struct ReceiptsView: View {
     @EnvironmentObject private var session: SessionController
     @StateObject private var model = ReceiptsModel()
     @State private var query = ""
+    @State private var thisMonthOnly = true
+    @State private var category: ReceiptCategory?
+    @State private var picked: Set<String> = []
     @State private var editor: ReceiptEditorRequest?
     @State private var opened: ReceiptOpen?
     @State private var export: ReceiptExportFile?
@@ -146,130 +161,187 @@ struct ReceiptsView: View {
 
     private var identityKey: String { "\(session.activeOrganization?.id ?? "")|\(session.user?.id ?? "")" }
 
+    /// "This month · $312.40 on this phone"
     private var subtitle: String {
-        guard model.bound, !model.receipts.isEmpty else { return "On this phone \u{00B7} Not shared with the office" }
+        guard model.bound, !model.receipts.isEmpty else { return "Kept on this phone" }
         let total = ReceiptMath.monthTotal(model.receipts, containing: Date())
-        return "This month \u{00B7} \(ReceiptFormat.amount(total)) \u{00B7} On this phone"
+        return "This month \u{00B7} \(ReceiptFormat.amount(total)) on this phone"
     }
 
-    /// The search on the card (46 tall, radius 14); it narrows this list.
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("", text: $query, prompt: .placeholder("Merchant, category or job"))
-                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                .autocorrectionDisabled()
-                .frame(minHeight: 46)
-                .accessibilityLabel("Search receipts")
-                .accessibilityIdentifier("receipts-search")
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
-                        .frame(width: 32, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel("Clear search")
-            }
+    private var chips: [PaperFilterChip] {
+        var all: [PaperFilterChip] = []
+        if thisMonthOnly { all.append(PaperFilterChip(id: "month", title: "This month") { thisMonthOnly = false }) }
+        if let category { all.append(PaperFilterChip(id: "category", title: category.label) { self.category = nil }) }
+        return all
+    }
+
+    private var shown: [ReceiptRecord] {
+        let now = Date()
+        return model.receipts.filter { receipt in
+            (!thisMonthOnly || Calendar.current.isDate(receipt.date, equalTo: now, toGranularity: .month))
+                && (category == nil || receipt.category == category)
+                && ReceiptFormat.matches(receipt, query: query)
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 46)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, PaperCardMetrics.margin)
     }
 
-    /// One month on one card: its receipts, then the month's total. "Share CSV" sits beside the label.
-    private func monthSection(_ month: ReceiptMonth) -> some View {
-        PaperSection(title: ReceiptFormat.month(month.start), count: month.receipts.count) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(month.receipts) { receipt in
-                    if receipt.id != month.receipts.first?.id { WellDivider() }
-                    Button { opened = ReceiptOpen(id: receipt.id) } label: {
-                        PaperListRow(title: receipt.merchant, subtitle: ReceiptFormat.rowSubtitle(receipt),
-                                     amount: ReceiptFormat.amount(receipt.totalCents))
-                            .frame(minHeight: 44)
+    private func filterItems(_ shown: [ReceiptRecord]) -> [ThorbisMenuItem] {
+        var items = [
+            ThorbisMenuItem("This month", icon: thisMonthOnly ? "checkmark" : "calendar") { thisMonthOnly = true },
+            ThorbisMenuItem("All receipts", icon: thisMonthOnly ? "tray.full" : "checkmark") { thisMonthOnly = false },
+        ]
+        for (index, option) in ReceiptCategory.allCases.enumerated() {
+            items.append(ThorbisMenuItem(option.label, icon: category == option ? "checkmark" : "tag", startsGroup: index == 0) {
+                category = category == option ? nil : option
+            })
+        }
+        if !shown.isEmpty {
+            items.append(ThorbisMenuItem("Select all shown", icon: "checkmark.circle", startsGroup: true) {
+                picked = Set(shown.map(\.id))
+            })
+        }
+        return items
+    }
+
+    /// Paper 46's row: the 24pt circle, 12, the merchant over "Parts · Jul 18", the amount.
+    private func row(_ receipt: ReceiptRecord, first: Bool) -> some View {
+        let on = picked.contains(receipt.id)
+        return HStack(spacing: 0) {
+            Button {
+                if on { picked.remove(receipt.id) } else { picked.insert(receipt.id) }
+            } label: {
+                ZStack {
+                    if on {
+                        Circle().fill(Theme.brand)
+                        PaperIcon(.placeCheck, size: 12, color: .white)
+                    } else {
+                        Circle().strokeBorder(Theme.borderStrong, lineWidth: 1.5)
                     }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint("Opens the receipt")
                 }
-                WellDivider()
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(query.isEmpty ? "Month total" : "Total of matches").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    Text(ReceiptFormat.amount(month.totalCents)).font(Theme.amountFont(16)).foregroundStyle(Theme.foreground)
-                }
-                .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 48)
-                .accessibilityElement(children: .combine)
-            }
-        } accessory: {
-            Button { share(month.id) } label: {
-                Text("Share CSV").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
+                .frame(width: 24, height: 24)
+                .padding(.leading, 16).padding(.trailing, 12)
+                .frame(minHeight: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
-            .accessibilityLabel("Share \(ReceiptFormat.month(month.start)) as a CSV file")
-            .accessibilityIdentifier("receipts-share-\(month.id)")
+            .accessibilityLabel("Select \(receipt.merchant)")
+            .accessibilityAddTraits(on ? .isSelected : [])
+            .accessibilityIdentifier("receipts-pick-\(receipt.id)")
+            Button { opened = ReceiptOpen(id: receipt.id) } label: {
+                OnPhoneRow(title: receipt.merchant, subtitle: ReceiptFormat.rowSubtitle(receipt)) {
+                    PlaceAmount(text: ReceiptFormat.amount(receipt.totalCents))
+                }
+                .padding(.leading, -16)
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens the receipt")
         }
+    }
+
+    @ViewBuilder private func groups(_ months: [ReceiptMonth]) -> some View {
+        ForEach(months) { month in
+            PaperCardLabel(title: ReceiptFormat.month(month.start), count: month.receipts.count)
+                .padding(.top, 22)
+            PaperRowsCard {
+                ForEach(month.receipts) { receipt in
+                    if receipt.id != month.receipts.first?.id { WellDivider(leading: 52) }
+                    row(receipt, first: receipt.id == month.receipts.first?.id)
+                }
+            }
+        }
+    }
+
+    /// Paper 46's bar: × lets go of the picks, the count over their total, then the one pill.
+    private func selectionBar(_ chosen: [ReceiptRecord]) -> some View {
+        HStack(spacing: 10) {
+            Button { picked = [] } label: {
+                PaperIcon(.close, size: 14)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.quietFill, in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Clear selection")
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(chosen.count) selected").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                Text(ReceiptFormat.amount(ReceiptMath.total(chosen))).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            Button { share(chosen) } label: {
+                Text("Share CSV").font(Theme.font(14, weight: .semibold)).foregroundStyle(.white)
+                    .lineLimit(1)
+                    .padding(.horizontal, 22)
+                    .frame(minHeight: 44)
+                    .background(Theme.brand, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityIdentifier("receipts-share")
+        }
+        .padding(.horizontal, 8)
+        .frame(minHeight: 60)
+        .background(Theme.card, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 8)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 8)
     }
 
     var body: some View {
-        let shown = ReceiptMath.months(model.receipts.filter { ReceiptFormat.matches($0, query: query) })
+        let shown = shown
+        let chosen = model.receipts.filter { picked.contains($0.id) }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 46: the place header (menu circle, +, 34 Bold title, the month's total).
-                PaperHeader(title: "Receipts", subtitle: subtitle, showsCreate: model.bound)
-                    .environment(\.paperCreate, model.bound
-                                 ? PaperCreateAction(label: "Add receipt", run: { editor = ReceiptEditorRequest() })
-                                 : nil)
-                if model.bound && !model.receipts.isEmpty { searchField.padding(.top, 2) }
-                VStack(alignment: .leading, spacing: 20) {
-                    if let message = actionError ?? model.error {
-                        Text(message).font(Theme.font(15)).foregroundStyle(Theme.destructive)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                    }
-                    if !model.bound {
-                        if model.error == nil { SkeletonRows(count: 3, leading: false, inset: 0) }
-                    } else if model.receipts.isEmpty {
-                        PaperEmptyState(symbol: "doc.text", title: "No receipts yet",
-                                        message: "Photograph a receipt and its merchant, date and total are read for you to check. Or add one by hand.",
-                                        actionTitle: "Add receipt") { editor = ReceiptEditorRequest() }
-                    } else if shown.isEmpty {
-                        PaperEmptyState(symbol: "magnifyingglass", title: "No matches",
-                                        message: "No merchant, category, job or note matches \u{201C}\(query)\u{201D}.",
-                                        actionTitle: "Clear search") { query = "" }
-                    } else {
-                        ForEach(shown) { month in monthSection(month) }
-                    }
-                    if model.bound {
-                        Text("Receipts and their photos are saved on this phone only. The office doesn\u{2019}t see them and nothing is submitted for reimbursement; share a month\u{2019}s CSV to hand them in.")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                PaperHeader(title: "Receipts", subtitle: subtitle)
+                if model.bound && !model.receipts.isEmpty {
+                    PlaceSearchField(query: $query, chips: chips, identifier: "receipts-search") {
+                        ThorbisMenu(items: filterItems(shown), title: "Show", accessibilityLabel: "Filter receipts") {
+                            PaperFilterCircle(active: category != nil)
+                        }
+                        .accessibilityIdentifier("header-filter")
                     }
                 }
-                .paperCardMargin().padding(.top, 14).padding(.bottom, 24)
+                if let message = actionError ?? model.error {
+                    Text(message).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                }
+                if !model.bound {
+                    if model.error == nil { SkeletonRows(count: 3, leading: false, inset: 0).paperCardMargin().padding(.top, 22) }
+                } else if model.receipts.isEmpty {
+                    PaperEmptyState(symbol: "doc.text", title: "No receipts yet",
+                                    message: "Photograph a receipt and its merchant, date and total are read for you to check. Receipts stay on this phone; the office doesn\u{2019}t see them.",
+                                    actionTitle: "Add receipt") { editor = ReceiptEditorRequest(startsWithCamera: true) }
+                        .paperCardMargin().padding(.top, 22)
+                } else if shown.isEmpty {
+                    PaperEmptyState(symbol: "magnifyingglass", title: thisMonthOnly && query.isEmpty && category == nil ? "No receipts this month" : "No matches",
+                                    message: "Nothing matches what the list is narrowed to.",
+                                    actionTitle: "Show all receipts") { query = ""; category = nil; thisMonthOnly = false }
+                        .paperCardMargin().padding(.top, 22)
+                } else {
+                    groups(ReceiptMath.months(shown))
+                }
             }
+            .padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("receipts-root")
+        .placeBarCreate("Add receipt", shows: model.bound) { editor = ReceiptEditorRequest() }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            // Paper 45: photographing is the main way in.
-            if model.bound {
-                PaperActionBar(title: "Photograph receipt", symbol: "camera", identifier: "receipts-photograph") {
-                    editor = ReceiptEditorRequest(startsWithCamera: true)
-                }
-            }
+            if model.bound, !chosen.isEmpty { selectionBar(chosen) }
         }
         .task(id: identityKey) {
             editor = nil
             opened = nil
             actionError = nil
+            picked = []
             model.bind(organizationID: session.activeOrganization?.id, userID: session.user?.id)
+            #if DEBUG
+            if PaperPreview.enabled { picked = Set(model.receipts.prefix(2).map(\.id)) }
+            #endif
         }
         .thorbisDestination(item: $opened) { ReceiptDetailView(id: $0.id, model: model) }
         .sheet(item: $editor) { request in SheetSurface {
@@ -284,15 +356,15 @@ struct ReceiptsView: View {
         }
     }
 
-    /// Writes the whole month (not only the search's matches) to a temporary CSV and hands it to the share sheet.
-    private func share(_ monthID: String) {
-        guard let month = ReceiptMath.months(model.receipts).first(where: { $0.id == monthID }) else { return }
+    /// Writes the picked receipts to a temporary CSV and hands it to the share sheet.
+    private func share(_ receipts: [ReceiptRecord]) {
+        guard !receipts.isEmpty else { return }
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("receipts-export-\(UUID().uuidString)", isDirectory: true)
-        let url = folder.appendingPathComponent("Receipts-\(month.id).csv")
+        let url = folder.appendingPathComponent("Receipts.csv")
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try Data(ReceiptMath.csv(month.receipts).utf8).write(to: url, options: .atomic)
+            try Data(ReceiptMath.csv(receipts).utf8).write(to: url, options: .atomic)
             actionError = nil
             export = ReceiptExportFile(url: url, folder: folder)
         } catch {

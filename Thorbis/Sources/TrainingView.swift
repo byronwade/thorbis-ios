@@ -253,6 +253,14 @@ final class TrainingModel: ObservableObject {
         storage = nil
         key = identity.key
         do {
+            #if DEBUG
+            if PaperPreview.enabled {
+                storage = try PlacesPreviewData.training(actorID: identity.actorID, organizationID: identity.organizationID)
+                error = nil
+                revision += 1
+                return
+            }
+            #endif
             storage = try TrainingRecords(actorID: identity.actorID, organizationID: identity.organizationID)
             error = nil
         } catch {
@@ -368,79 +376,77 @@ struct TrainingView: View {
         let nothingMatches = !needle.isEmpty && (showsLicenses ? credentials.isEmpty : true) && (showsLearning ? courses.isEmpty : true)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Training", subtitle: subtitle(all, today: today), showsCreate: model.isBound)
-                    .environment(\.paperCreate, model.isBound
-                                 ? PaperCreateAction(label: "Add to Training", run: { choosing = true }) : nil)
-                LearnSearchField(query: $query, prompt: "Search licenses and courses",
-                                 label: "Search training", identifier: "training-search")
-                    .paperCardMargin().padding(.top, 14)
-                ThorbisSegmented(options: [(TrainingFilter.all, "All"), (TrainingFilter.licenses, "Licenses"),
-                                           (TrainingFilter.learning, "Learning")], selection: $filter)
-                    .paperCardMargin().padding(.top, 12)
-                VStack(alignment: .leading, spacing: 20) {
+                PaperHeader(title: "Training", subtitle: subtitle(all, today: today))
+                // Paper 28: the search field, then All / Training / Manuals; here the two kinds kept on this phone.
+                PlaceSearchField(query: $query, identifier: "training-search")
+                PaperTabs(options: ["All", "Licenses", "Learning"], selection: Binding(
+                    get: { filter == .all ? "All" : filter == .licenses ? "Licenses" : "Learning" },
+                    set: { filter = $0 == "Licenses" ? .licenses : $0 == "Learning" ? .learning : .all }))
+                    .padding(.top, 16)
+                VStack(alignment: .leading, spacing: 0) {
                     if let error = actionError ?? model.error {
                         Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 4)
+                            .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 14)
                     }
                     if nothingMatches {
                         PaperEmptyState(symbol: "magnifyingglass", title: "No matches",
                                         message: "No license or course matches \u{201C}\(needle)\u{201D}.",
                                         actionTitle: "Clear search") { query = "" }
+                            .padding(.top, 22)
                     } else {
                         if showsLicenses && !attention.isEmpty {
                             // Paper 28 "Pinned": what is due, with its state in a chip.
-                            PaperSection("Needs attention", count: attention.count) {
+                            PaperCardLabel(title: "Needs attention", count: attention.count).padding(.top, 22)
+                            PaperRowsCard {
                                 ForEach(attention) { credential in
-                                    if credential.id != attention.first?.id { WellDivider() }
+                                    if credential.id != attention.first?.id { WellDivider(leading: 48) }
                                     credentialRow(credential, today: today, chip: true)
                                 }
                             }
                         }
                         if showsLicenses {
-                            PaperSection(title: "Licenses and certifications", count: credentials.count) {
+                            PaperCardLabel(title: "Licenses and certifications") {
+                                sectionAdd("Add license", identifier: "training-add-license") {
+                                    credentialEditor = TrainingCredentialEditing(record: nil)
+                                }
+                            }
+                            .padding(.top, 22)
+                            PaperRowsCard {
                                 if credentials.isEmpty {
                                     LearnEmptyRow(title: "No licenses yet",
                                                   message: "Add a license or certification with its number and the day it expires. Add a photo of the card to show on site.")
                                 } else {
                                     ForEach(credentials) { credential in
-                                        if credential.id != credentials.first?.id { WellDivider() }
+                                        if credential.id != credentials.first?.id { WellDivider(leading: 48) }
                                         credentialRow(credential, today: today, chip: false)
                                     }
-                                }
-                            } accessory: {
-                                LearnSectionAction(title: "Add", label: "Add license", identifier: "training-add-license") {
-                                    credentialEditor = TrainingCredentialEditing(record: nil)
                                 }
                             }
                         }
                         if showsLearning {
-                            PaperSection(title: "My learning", count: courses.count) {
+                            PaperCardLabel(title: "My learning") {
+                                sectionAdd("Add course", identifier: "training-add-course") {
+                                    courseEditor = TrainingCourseEditing(record: nil)
+                                }
+                            }
+                            .padding(.top, 22)
+                            PaperRowsCard {
                                 if courses.isEmpty {
                                     LearnEmptyRow(title: "Nothing in progress",
                                                   message: "Add a course you are taking, with its link and a note on how far you are.")
                                 } else {
                                     ForEach(courses) { course in
-                                        if course.id != courses.first?.id { WellDivider() }
+                                        if course.id != courses.first?.id { WellDivider(leading: 48) }
                                         courseRow(course)
                                     }
                                 }
-                            } accessory: {
-                                LearnSectionAction(title: "Add", label: "Add course", identifier: "training-add-course") {
-                                    courseEditor = TrainingCourseEditing(record: nil)
-                                }
                             }
-                            // Paper 28 "Training" and "Manuals and SOPs": the catalogue, empty until there is one.
-                            PaperSection("Company courses and manuals") {
-                                LearnEmptyRow(title: "No company courses yet",
-                                              message: "Thorbis has no course or manual library yet, so there are no lessons or exams to take here. Keep your own under My learning.")
-                            }
-                            .accessibilityIdentifier("training-catalogue-empty")
                         }
                     }
-                    LearnFootnote(text: "Saved on this phone only. The office and your other devices don\u{2019}t see it.")
+                    PlacePhoneLine(text: "Kept on this phone \u{00B7} the office doesn\u{2019}t see it").padding(.top, 16)
                 }
-                .paperCardMargin().padding(.top, 20).padding(.bottom, 24)
+                .padding(.bottom, 24)
                 .id(model.revision)
             }
         }
@@ -449,6 +455,7 @@ struct TrainingView: View {
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("training-root")
+        .placeBarCreate("Add to Training", shows: model.isBound) { choosing = true }
         .task(id: identity?.key ?? "") {
             credentialEditor = nil
             courseEditor = nil
@@ -487,25 +494,45 @@ struct TrainingView: View {
     }
 
     /// Paper 58C's row: the license over its number, where it stands at the trailing edge.
+    /// Paper 28's "View all" beside a group's label (13 Semibold brand); here it adds to the group.
+    private func sectionAdd(_ label: String, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text("Add").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .padding(.vertical, -13)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(identifier)
+    }
+
+    /// Paper 28: a pinned row leads with an 8pt dot and ends on a 26-tall chip; a listed one leads
+    /// with the page mark and ends on a chevron. 64 tall, 14 from the trailing edge.
     private func credentialRow(_ credential: TrainingCredential, today: Date, chip: Bool) -> some View {
         let expiry = CredentialExpiry(expiresOn: credential.expiresOn, today: today)
         let label = CredentialExpiry.label(expiresOn: credential.expiresOn, today: today)
         let line = [credential.issuer ?? "", credential.number.map { "#\($0)" } ?? ""].filter { !$0.isEmpty }
             .joined(separator: " \u{00B7} ")
+        let warm = expiry == .today || isSoon(expiry)
         return Button { opened = credential } label: {
-            PaperListRow(title: credential.name, subtitle: line.isEmpty ? nil : line, subtitleLines: 2) {
-                if chip {
+            if chip {
+                OnPhoneRow(title: credential.name, subtitle: line.isEmpty ? nil : line, leadingWidth: 20, minHeight: 64, trailingInset: 14) {
+                    Circle().fill(warm ? Theme.statusInProgress : Theme.destructive).frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                } trailing: {
                     Text(label).font(Theme.font(13, weight: .semibold))
                         .foregroundStyle(expiryColor(expiry))
-                        .multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(expiry == .today || isSoon(expiry) ? Theme.warningSurface : Theme.destructiveSurface,
-                                    in: Capsule())
-                } else {
-                    Text(label).font(Theme.font(14, weight: .medium)).foregroundStyle(expiryColor(expiry))
-                        .multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .padding(.horizontal, 10).frame(minHeight: 26)
+                        .background(warm ? Theme.warningSurface : Theme.destructiveSurface, in: Capsule())
+                }
+            } else {
+                OnPhoneRow(title: credential.name, subtitle: expiry.needsAttention || line.isEmpty ? label : "\(line) \u{00B7} \(label)",
+                         subtitleColor: expiry.needsAttention ? expiryColor(expiry) : Theme.muted,
+                         leadingWidth: 20, minHeight: 64, trailingInset: 14) {
+                    PaperIcon(.placePage, size: 20, color: Theme.subtle)
+                } trailing: {
+                    PlaceChevron()
                 }
             }
         }
@@ -538,21 +565,24 @@ struct TrainingView: View {
         }
         items.append(ThorbisMenuItem("Edit", icon: "pencil") { courseEditor = TrainingCourseEditing(record: course) })
         items.append(ThorbisMenuItem("Remove", icon: "trash", role: .destructive) { run { try model.removeCourse(course.id) } })
+        let quiet = copiedCourse == course.id ? "Link copied" : [line, host ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
         return HStack(spacing: 0) {
             Button { courseEditor = TrainingCourseEditing(record: course) } label: {
-                PaperListRow(leading: .icon(course.done ? "checkmark.circle" : "play.circle"), title: course.title,
-                             subtitle: line, meta: copiedCourse == course.id ? "Link copied" : host,
-                             subtitleLines: 2, dimmed: course.done) {
-                    if course.done {
-                        Text("Done").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.success).fixedSize()
-                    }
+                OnPhoneRow(title: course.title, subtitle: quiet, subtitleColor: course.done ? Theme.success : Theme.muted,
+                         leadingWidth: 20, minHeight: 64, trailingInset: 0,
+                         titleColor: course.done ? Theme.subtle : Theme.foreground) {
+                    PaperIcon(.placePlay, size: 20, color: Theme.subtle)
+                } trailing: {
+                    EmptyView()
                 }
             }
             .buttonStyle(RowPressStyle())
             .accessibilityElement(children: .combine)
             .accessibilityHint("Opens the course to edit")
+            // Paper ends the row on a chevron; this row's other moves (mark done, copy link,
+            // remove) have no other home, so it ends on the ••• that holds them.
             ThorbisMenu(items: items, accessibilityLabel: "Options for \(course.title)") {
-                Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                PaperIcon(.more, size: 16, color: Theme.muted)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .padding(.trailing, 4)

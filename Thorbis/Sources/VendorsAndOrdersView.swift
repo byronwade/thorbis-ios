@@ -72,12 +72,16 @@ struct PurchaseOrderStart: Identifiable {
 /// Paper 42 and 43 "Vendors": the place header, a search, then Vendors and Purchase orders as two
 /// tabs. Everything here is kept on this phone for the open workspace, and the page says so.
 struct VendorsAndOrdersView: View {
-    enum Tab: Hashable { case vendors, orders }
+    enum Tab: Hashable, CaseIterable {
+        case vendors, orders
+        var title: String { self == .vendors ? "Vendors" : "Purchase orders" }
+    }
 
     @EnvironmentObject private var session: SessionController
     @StateObject private var book = VendorsBook()
     @State private var tab: Tab = .vendors
     @State private var query = ""
+    @State private var openOnly = true
     @State private var route: VendorsRoute?
     @State private var vendorDraft: VendorDraft?
     @State private var orderStart: PurchaseOrderStart?
@@ -101,14 +105,15 @@ struct VendorsAndOrdersView: View {
     }
 
     private var subtitle: String {
-        guard book.isOpen else { return "On this phone \u{00B7} Not synced" }
+        // Paper: "Company operations · 3 vendors". These are kept on this phone, so it says that.
+        guard book.isOpen else { return "Kept on this phone" }
         switch tab {
         case .vendors:
             let count = book.vendors.count
-            return "\(count == 1 ? "1 vendor" : "\(count) vendors") \u{00B7} On this phone, not synced"
+            return "On this phone \u{00B7} \(count == 1 ? "1 vendor" : "\(count) vendors")"
         case .orders:
             let open = book.orders.filter(\.isOpen).count
-            return "\(open == 1 ? "1 open PO" : "\(open) open POs") \u{00B7} On this phone, not synced"
+            return "On this phone \u{00B7} \(open == 1 ? "1 open PO" : "\(open) open POs")"
         }
     }
 
@@ -124,42 +129,53 @@ struct VendorsAndOrdersView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Vendors", subtitle: subtitle, showsCreate: book.isOpen)
-                    .environment(\.paperCreate, book.isOpen
-                                 ? PaperCreateAction(label: tab == .vendors ? "Add vendor" : "New purchase order", run: startCreate)
-                                 : nil)
-                SalesSearchField(query: $query,
-                                 prompt: tab == .vendors ? "Vendor, contact or account" : "PO number, vendor or item",
-                                 label: tab == .vendors ? "Search vendors" : "Search purchase orders")
-                    .accessibilityIdentifier("vendors-search")
-                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14)
-                ThorbisSegmented(options: [(Tab.vendors, "Vendors"), (Tab.orders, "Purchase orders")], selection: $tab)
-                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
-                VStack(alignment: .leading, spacing: 20) {
-                    if let error = actionError ?? book.error { SalesProblemLine(message: error) }
-                    if !book.isOpen && book.error == nil {
-                        if organizationID == nil {
-                            PaperEmptyState(symbol: "building.2", title: "No workspace is open",
-                                            message: "Vendors are kept for each workspace. Open one to see them.")
-                        } else {
-                            SkeletonRows(count: 3, leading: false, inset: 0)
+                PaperHeader(title: "Vendors", subtitle: subtitle)
+                // Paper 42 / 43: the search field (the PO tab holds "Open" as a chip), then the segments.
+                PlaceSearchField(query: $query,
+                                 chips: tab == .orders && openOnly
+                                     ? [PaperFilterChip(id: "open", title: "Open") { openOnly = false }] : [],
+                                 identifier: "vendors-search") {
+                    if tab == .orders {
+                        ThorbisMenu(items: [
+                            ThorbisMenuItem("Open", icon: openOnly ? "checkmark" : "tray") { openOnly = true },
+                            ThorbisMenuItem("All purchase orders", icon: openOnly ? "tray.full" : "checkmark") { openOnly = false },
+                        ], title: "Show", accessibilityLabel: "Filter purchase orders") {
+                            PaperFilterCircle(active: false)
                         }
-                    } else if book.isOpen {
-                        switch tab {
-                        case .vendors: vendorsTab
-                        case .orders: ordersTab
-                        }
-                        SalesPhoneNote(text: "Vendors and purchase orders are saved on this phone only, for this workspace. Your team doesn\u{2019}t see them, and nothing is sent to a vendor until you share it.")
+                        .accessibilityIdentifier("header-filter")
                     }
                 }
-                .paperCardMargin().padding(.top, 14).padding(.bottom, 24)
+                PaperTabs(options: Tab.allCases.map(\.title), selection: Binding(
+                    get: { tab.title }, set: { title in tab = Tab.allCases.first { $0.title == title } ?? .vendors }))
+                    .padding(.top, 16)
+                if let error = actionError ?? book.error {
+                    SalesProblemLine(message: error).paperCardMargin().padding(.top, 14)
+                }
+                if !book.isOpen && book.error == nil {
+                    if organizationID == nil {
+                        PaperEmptyState(symbol: "building.2", title: "No workspace is open",
+                                        message: "Vendors are kept for each workspace. Open one to see them.")
+                            .padding(.top, 22)
+                    } else {
+                        SkeletonRows(count: 3, leading: false, inset: 0).paperCardMargin().padding(.top, 22)
+                    }
+                } else if book.isOpen {
+                    switch tab {
+                    case .vendors: vendorsTab
+                    case .orders: ordersTab
+                    }
+                    PlacePhoneLine(text: "Kept on this phone \u{00B7} your team doesn\u{2019}t see these")
+                        .padding(.top, 16)
+                }
             }
+            .padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("vendors-root")
+        .placeBarCreate(tab == .vendors ? "Add vendor" : "New purchase order", shows: book.isOpen, action: startCreate)
         .task(id: organizationID) {
             route = nil; vendorDraft = nil; orderStart = nil; actionError = nil
             book.bind(organizationID: organizationID)
@@ -191,6 +207,28 @@ struct VendorsAndOrdersView: View {
 
     // MARK: Vendors
 
+    /// Paper 42 / 43: the group's label with its count beside it and a small + at the trailing edge.
+    private func label(_ title: String, count: Int, add: String, identifier: String, action: @escaping () -> Void) -> some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text("\(count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Spacer(minLength: 8)
+            Button(action: action) {
+                PaperIcon(.placeSmallPlus, size: 16, color: Theme.muted)
+                    .frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .padding(.vertical, -13)
+            .accessibilityLabel(add)
+            .accessibilityIdentifier(identifier)
+        }
+        .frame(minHeight: 18)
+        .padding(.horizontal, PaperCardMetrics.margin + 4)
+        .padding(.top, 22).padding(.bottom, 8)
+    }
+
     @ViewBuilder private var vendorsTab: some View {
         let all = book.vendors
         let shown = all.filter(matches)
@@ -199,28 +237,27 @@ struct VendorsAndOrdersView: View {
             PaperEmptyState(symbol: "shippingbox", title: "No vendors yet",
                             message: "Add the suppliers you buy from, then write purchase orders for them.",
                             actionTitle: "Add vendor") { vendorDraft = VendorDraft() }
-                .padding(.horizontal, -PaperCardMetrics.margin)
+                .padding(.top, 22)
         } else if shown.isEmpty {
             PaperEmptyState(symbol: "magnifyingglass", title: "No matches",
                             message: "No vendor matches \u{201C}\(query)\u{201D}.",
                             actionTitle: "Clear search") { query = "" }
-                .padding(.horizontal, -PaperCardMetrics.margin)
+                .padding(.top, 22)
         } else {
-            PaperSection(title: query.isEmpty ? "All vendors" : "Matches", count: shown.count) {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(shown) { vendor in
-                        if vendor.id != shown.first?.id { WellDivider(leading: 64) }
-                        Button { route = .vendor(vendor.id) } label: {
-                            VendorRow(vendor: vendor,
-                                      spend: PurchaseOrderMath.spend(book.orders, vendorID: vendor.id, year: year))
-                        }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityElement(children: .combine)
-                        .accessibilityHint("Opens the vendor")
+            label(query.isEmpty ? "All vendors" : "Matches", count: shown.count, add: "Add vendor", identifier: "vendors-add") {
+                vendorDraft = VendorDraft()
+            }
+            PaperRowsCard {
+                ForEach(shown) { vendor in
+                    if vendor.id != shown.first?.id { WellDivider(leading: 60) }
+                    Button { route = .vendor(vendor.id) } label: {
+                        VendorRow(vendor: vendor,
+                                  spend: PurchaseOrderMath.spend(book.orders, vendorID: vendor.id, year: year))
                     }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint("Opens the vendor")
                 }
-            } accessory: {
-                sectionAdd("Add vendor", identifier: "vendors-add") { vendorDraft = VendorDraft() }
             }
         }
     }
@@ -231,41 +268,45 @@ struct VendorsAndOrdersView: View {
         let all = book.orders
         let shown = all.filter(matches)
         let open = shown.filter(\.isOpen)
-        let received = shown.filter { !$0.isOpen }
+        let received = openOnly ? [] : shown.filter { !$0.isOpen }
         if all.isEmpty {
             if book.vendors.isEmpty {
                 PaperEmptyState(symbol: "doc.text", title: "No purchase orders yet",
                                 message: "A purchase order is written for a vendor. Add your first vendor to start one.",
                                 actionTitle: "Add vendor") { vendorDraft = VendorDraft() }
-                    .padding(.horizontal, -PaperCardMetrics.margin)
+                    .padding(.top, 22)
             } else {
                 PaperEmptyState(symbol: "doc.text", title: "No purchase orders yet",
                                 message: "Write one for a vendor, mark it ordered, then check the items in when they arrive.",
                                 actionTitle: "New purchase order") { orderStart = PurchaseOrderStart() }
-                    .padding(.horizontal, -PaperCardMetrics.margin)
+                    .padding(.top, 22)
             }
         } else if shown.isEmpty {
             PaperEmptyState(symbol: "magnifyingglass", title: "No matches",
                             message: "No purchase order matches \u{201C}\(query)\u{201D}.",
                             actionTitle: "Clear search") { query = "" }
-                .padding(.horizontal, -PaperCardMetrics.margin)
+                .padding(.top, 22)
         } else {
-            if !open.isEmpty || query.isEmpty {
-                PaperSection(title: "Open purchase orders", count: open.count) {
-                    if open.isEmpty {
-                        Text("Nothing open. Every order has been received.")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
+            label("Open purchase orders", count: open.count, add: "New purchase order", identifier: "vendors-new-order") { startOrder() }
+            PaperRowsCard {
+                if open.isEmpty {
+                    Button { openOnly = false } label: {
+                        Text(openOnly ? "Nothing open. Show received orders" : "Nothing open. Every order has been received.")
+                            .font(Theme.font(15)).foregroundStyle(openOnly ? Theme.brandText : Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
-                    } else {
-                        orderRows(open)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .padding(.horizontal, 16).padding(.vertical, 6)
+                            .contentShape(Rectangle())
                     }
-                } accessory: {
-                    sectionAdd("New purchase order", identifier: "vendors-new-order") { startOrder() }
+                    .buttonStyle(RowPressStyle())
+                    .disabled(!openOnly)
+                } else {
+                    orderRows(open)
                 }
             }
             if !received.isEmpty {
-                PaperSection("Received", count: received.count) { orderRows(received) }
+                PaperCardLabel(title: "Received", count: received.count).padding(.top, 22)
+                PaperRowsCard { orderRows(received) }
             }
         }
     }
@@ -274,27 +315,14 @@ struct VendorsAndOrdersView: View {
         if book.vendors.isEmpty { vendorDraft = VendorDraft() } else { orderStart = PurchaseOrderStart() }
     }
 
-    private func orderRows(_ list: [PurchaseOrderRecord]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(list) { order in
-                if order.id != list.first?.id { WellDivider(leading: PaperCardMetrics.inset + 68) }
-                Button { route = .order(order.id) } label: { PurchaseOrderRow(order: order) }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint("Opens the purchase order")
-            }
+    @ViewBuilder private func orderRows(_ list: [PurchaseOrderRecord]) -> some View {
+        ForEach(list) { order in
+            if order.id != list.first?.id { WellDivider(leading: 84) }
+            Button { route = .order(order.id) } label: { PurchaseOrderRow(order: order) }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens the purchase order")
         }
-    }
-
-    /// Paper 42: the small + beside the section label, in a 44 target.
-    private func sectionAdd(_ label: String, identifier: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: "plus").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.muted)
-                .frame(width: 44, height: 44, alignment: .trailing).contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(label)
-        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -310,14 +338,14 @@ enum VendorInitials {
 
 struct VendorMark: View {
     let name: String
-    var size: CGFloat = 36
+    var size: CGFloat = 32
 
     var body: some View {
         Text(VendorInitials.of(name))
-            .font(.system(size: size * 0.33, weight: .semibold))
-            .foregroundStyle(Theme.muted)
+            .font(.custom("Inter-Regular", fixedSize: size * 0.34).weight(.semibold))
+            .foregroundStyle(Theme.subtle)
             .frame(width: size, height: size)
-            .background(Theme.fill, in: Circle())
+            .background(Theme.quietFill, in: Circle())
             .dynamicTypeSize(...DynamicTypeSize.large)
             .accessibilityHidden(true)
     }
@@ -332,25 +360,25 @@ private struct VendorRow: View {
         HStack(alignment: .center, spacing: 12) {
             VendorMark(name: vendor.name)
             VStack(alignment: .leading, spacing: 0) {
-                Text(vendor.name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text(vendor.name).font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                 let line = vendor.accountLine.isEmpty ? (vendor.contact ?? "") : vendor.accountLine
                 if !line.isEmpty {
-                    Text(line).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(line).font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if spend > 0 {
                 VStack(alignment: .trailing, spacing: 0) {
-                    Text(PurchaseOrderMath.money(spend)).font(Theme.font(16, weight: .medium)).monospacedDigit()
+                    Text(PurchaseOrderMath.money(spend)).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(Theme.foreground)
-                    Text("Ordered this year").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    Text("YTD spend").font(Theme.font(14)).foregroundStyle(Theme.muted)
                 }
                 .fixedSize()
             }
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
+        .padding(.horizontal, 16).padding(.vertical, 11)
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
         .contentShape(Rectangle())
     }
@@ -399,20 +427,21 @@ struct PurchaseOrderRow: View {
         let stacked = typeSize.isAccessibilitySize
         HStack(alignment: .top, spacing: 0) {
             if !stacked {
-                Text(order.numberLabel).font(Theme.font(13, weight: .medium)).monospacedDigit()
+                Text(order.numberLabel).font(Theme.font(13, weight: .medium))
                     .foregroundStyle(Theme.subtle)
                     .padding(.top, 13)
                     .frame(width: 68, alignment: .leading)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
             VStack(alignment: .leading, spacing: 2) {
                 if stacked {
-                    Text(order.numberLabel).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.subtle)
+                    Text(order.numberLabel).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Text(order.vendorName).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text(order.vendorName).font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(PurchaseOrderMath.money(order.totalCents)).font(Theme.font(16, weight: .medium)).monospacedDigit()
+                    Text(PurchaseOrderMath.money(order.totalCents)).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(Theme.foreground).fixedSize()
                 }
                 Text(PurchaseOrderTone.line(order)).font(Theme.font(14)).foregroundStyle(Theme.muted)
@@ -422,7 +451,7 @@ struct PurchaseOrderRow: View {
                     .padding(.top, 4)
             }
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
+        .padding(.horizontal, 16).padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
     }
@@ -534,7 +563,7 @@ struct VendorDetailView: View {
                          symbol: "envelope", spoken: "Email \(vendor.name)", identifier: "vendors-email", url: vendor.mailURL)
                 WellDivider()
                 PaperDetailRow(label: "Account number") {
-                    Text(vendor.maskedAccount ?? "Not set").monospacedDigit()
+                    Text(vendor.maskedAccount ?? "Not set")
                 }
                 .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
             }
@@ -575,7 +604,7 @@ struct VendorDetailView: View {
     private func tile(_ label: String, _ value: String, ink: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            Text(value).font(Theme.font(20, weight: .semibold)).monospacedDigit().foregroundStyle(ink)
+            Text(value).font(Theme.font(20, weight: .semibold)).foregroundStyle(ink)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -590,7 +619,7 @@ struct VendorDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(value).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text(value).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -615,13 +644,13 @@ struct VendorDetailView: View {
     private func vendorOrderRow(_ order: PurchaseOrderRecord) -> some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 0) {
-                Text(order.numberLabel).font(Theme.font(16, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
+                Text(order.numberLabel).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                 Text(PurchaseOrderTone.line(order)).font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: .trailing, spacing: 0) {
-                Text(PurchaseOrderMath.money(order.totalCents, alwaysCents: true)).font(Theme.font(16, weight: .semibold)).monospacedDigit()
+                Text(PurchaseOrderMath.money(order.totalCents, alwaysCents: true)).font(Theme.font(16, weight: .semibold))
                     .foregroundStyle(Theme.foreground)
                 Text(PurchaseOrderTone.word(order)).font(Theme.font(13)).foregroundStyle(PurchaseOrderTone.ink(order))
             }

@@ -83,11 +83,8 @@ struct PipelineView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Pipeline",
-                            subtitle: book.isOpen ? PipelineMath.summary(leads) : "On this phone \u{00B7} Not synced",
-                            showsCreate: book.isOpen)
-                    .environment(\.paperCreate, book.isOpen
-                                 ? PaperCreateAction(label: "New lead", run: { draft = LeadDraft() })
-                                 : nil)
+                            subtitle: book.isOpen ? PipelineMath.summary(leads) : "Kept on this phone",
+)
                 if book.isOpen {
                     stagePills(counts).padding(.top, 16)
                 }
@@ -128,7 +125,11 @@ struct PipelineView: View {
                                     .padding(.horizontal, 4)
                             }
                         }
-                        SalesPhoneNote(text: "Leads are saved on this phone only, for this workspace. Your team doesn\u{2019}t see them, and moving a lead doesn\u{2019}t create a customer or a job.")
+                        // Paper 82A's note sits here (13 muted, 4 in); this one says what is true on this phone.
+                        Text("Leads are kept on this phone. Moving a lead doesn\u{2019}t create a customer or a job.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4)
                     }
                 }
                 .paperCardMargin().padding(.top, 16).padding(.bottom, 24)
@@ -138,6 +139,7 @@ struct PipelineView: View {
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("pipeline-root")
+        .placeBarCreate("New lead", shows: book.isOpen) { draft = LeadDraft() }
         .task(id: organizationID) {
             route = nil; draft = nil; actionError = nil
             book.bind(organizationID: organizationID)
@@ -171,7 +173,7 @@ struct PipelineView: View {
                     let isOn = item == stage
                     Button { stage = item } label: {
                         Text("\(item.label) \u{00B7} \(counts[item] ?? 0)")
-                            .font(Theme.font(14, weight: isOn ? .semibold : .medium)).monospacedDigit()
+                            .font(Theme.font(14, weight: isOn ? .semibold : .medium))
                             .foregroundStyle(isOn ? Theme.onInk : Theme.foreground)
                             .padding(.horizontal, 14).frame(minHeight: 36)
                             .background(isOn ? Theme.ink : Theme.card, in: Capsule())
@@ -201,7 +203,7 @@ struct PipelineView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text(PipelineMath.when(lead.updatedAt))
-                            .font(Theme.font(13, weight: today ? .semibold : .regular)).monospacedDigit()
+                            .font(Theme.font(13, weight: today ? .semibold : .regular))
                             .foregroundStyle(today ? Theme.brandText : Theme.subtle)
                             .fixedSize()
                     }
@@ -439,7 +441,7 @@ struct LeadDetailView: View {
     }
 
     private func fact(_ label: String, _ value: String, empty: String = "") -> some View {
-        PaperDetailRow(label: label) { Text(value.isEmpty ? empty : value).monospacedDigit() }
+        PaperDetailRow(label: label) { Text(value.isEmpty ? empty : value) }
             .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
     }
 }

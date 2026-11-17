@@ -144,53 +144,38 @@ struct MarketingView: View {
         let tally = LeadSourceTally.make(model.entries)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Marketing", subtitle: "Reviews, lead sources and campaigns", showsCreate: model.isBound)
-                    .environment(\.paperCreate, model.isBound
-                                 ? PaperCreateAction(label: "Add campaign note", run: { editor = MarketingCampaignEditing(record: nil) }) : nil)
+                PaperHeader(title: "Marketing", subtitle: "Reviews, reminders and campaigns")
                 VStack(alignment: .leading, spacing: 16) {
                     if let error = actionError ?? model.storeError {
                         Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 4)
                     }
                     reviewCard
-                    PaperCard {
+                    // Paper 92A: one card of rows: the review request, each campaign, where leads come from.
+                    PaperRowsCard {
                         reviewRequestsRow
-                        WellDivider()
+                        ForEach(campaigns) { note in
+                            WellDivider(leading: 16)
+                            campaignRow(note)
+                        }
+                        WellDivider(leading: 16)
                         leadSourcesRow(tally)
                     }
-                    VStack(alignment: .leading, spacing: 8) {
-                        PaperSection(title: "Campaign notes", count: campaigns.count) {
-                            if campaigns.isEmpty {
-                                LearnEmptyRow(title: "No campaign notes yet",
-                                              message: "Write down a campaign you ran or plan: what it was, when, and what it cost.")
-                            } else {
-                                ForEach(campaigns) { note in
-                                    if note.id != campaigns.first?.id { WellDivider() }
-                                    campaignRow(note)
-                                }
-                            }
-                        } accessory: {
-                            LearnSectionAction(title: "Add", label: "Add campaign note", identifier: "marketing-add-campaign") {
-                                editor = MarketingCampaignEditing(record: nil)
-                            }
-                        }
-                        .id(model.revision)
-                        if MarketingCampaigns.totalCents(campaigns) > 0 {
-                            Text("Total cost \(money(MarketingCampaigns.totalCents(campaigns), currency: "USD"))")
-                                .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                                .padding(.horizontal, 4)
-                        }
-                    }
-                    .padding(.top, 4)
-                    LearnFootnote(text: "Campaign notes are saved on this phone only. Nothing is sent to customers from here.")
+                    .padding(.horizontal, -PaperCardMetrics.margin)
+                    .id(model.revision)
+                    PlacePhoneLine(text: campaigns.isEmpty
+                                   ? "Add a campaign note with +. Notes are kept on this phone"
+                                   : "Campaign notes are kept on this phone \u{00B7} nothing is sent")
+                        .padding(.horizontal, -PaperCardMetrics.margin)
                 }
-                .paperCardMargin().padding(.top, 16).padding(.bottom, 24)
+                .paperCardMargin().padding(.top, 14).padding(.bottom, 24)
             }
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("marketing-root")
+        .placeBarCreate("Add campaign note", shows: model.isBound) { editor = MarketingCampaignEditing(record: nil) }
         .refreshable { await load() }
         .task(id: organizationID ?? "") {
             editor = nil
@@ -210,10 +195,10 @@ struct MarketingView: View {
         .thorbisDestination(isPresented: $showLeads) { MarketingLeadSourcesView(model: model) }
         .thorbisDestination(isPresented: $showReviewSettings) { ReviewRequestsView() }
         .sheet(item: $editor) { editing in SheetSurface {
-            MarketingCampaignEditor(record: editing.record) { saved in
+            MarketingCampaignEditor(record: editing.record, onSave: { saved in
                 try model.save(saved)
                 actionError = nil
-            }
+            }, onRemove: editing.record.map { note in { try model.removeCampaign(note.id) } })
         } }
     }
 
@@ -268,7 +253,7 @@ struct MarketingView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityIdentifier("marketing-review-card")
     }
 
@@ -333,16 +318,13 @@ struct MarketingView: View {
         let state: String? = model.reviewRequestsOn.map { on in
             model.reviewLink == nil ? "No link" : (on ? "On" : "Off")
         }
-        let row = PaperListRow(title: "Ask for a review after payment",
-                               subtitle: "One text after an invoice is paid in full", subtitleLines: 2) {
+        let row = OnPhoneRow(title: "Ask for a review after payment",
+                           subtitle: "One text after an invoice is paid in full") {
             HStack(spacing: 6) {
                 if let state {
                     Text(state).font(Theme.font(15)).foregroundStyle(Theme.muted).fixedSize()
                 }
-                if canEditCompany {
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                }
+                if canEditCompany { PlaceChevron() }
             }
         }
         if canEditCompany {
@@ -366,10 +348,7 @@ struct MarketingView: View {
         else if tally.recorded == 0 { line = "No customer has a source written down yet" }
         else { line = tally.summary }
         return Button { showLeads = true } label: {
-            PaperListRow(title: "Where leads come from", subtitle: line, subtitleLines: 3) {
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            }
+            OnPhoneRow(title: "Where leads come from", subtitle: line) { PlaceChevron() }
         }
         .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .combine)
@@ -379,39 +358,19 @@ struct MarketingView: View {
 
     // MARK: Campaign notes
 
+    /// Paper 92A: the campaign's name over "Campaign · Sep 1 · …" and a chevron; it opens the note.
     private func campaignRow(_ note: MarketingCampaignNote) -> some View {
-        let line = [note.channel, MarketingCampaigns.dates(note) ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
-        return HStack(spacing: 0) {
-            Button { editor = MarketingCampaignEditing(record: note) } label: {
-                PaperListRow(title: note.name, subtitle: line, meta: note.note, subtitleLines: 2) {
-                    if let cents = note.costCents {
-                        Text(money(cents, currency: "USD")).font(Theme.font(15, weight: .medium)).monospacedDigit()
-                            .foregroundStyle(Theme.foreground).fixedSize()
-                    }
-                }
-            }
-            .buttonStyle(RowPressStyle())
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens the note to edit")
-            ThorbisMenu(items: [
-                ThorbisMenuItem("Edit", icon: "pencil") { editor = MarketingCampaignEditing(record: note) },
-                ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
-                    do { try model.removeCampaign(note.id); actionError = nil }
-                    catch { actionError = error.localizedDescription }
-                },
-            ], accessibilityLabel: "Options for \(note.name)") {
-                Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-            }
-            .padding(.trailing, 4)
+        let line = [note.channel, MarketingCampaigns.dates(note) ?? "", note.costCents.map { money($0, currency: "USD") } ?? ""]
+            .filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        return Button { editor = MarketingCampaignEditing(record: note) } label: {
+            OnPhoneRow(title: note.name, subtitle: line) { PlaceChevron() }
         }
+        .buttonStyle(RowPressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens the note to edit or remove")
     }
 }
 
-// MARK: - 92D Lead sources
-
-/// Paper 92D: the title over what the count covers, the range, one bar split by source, then
-/// each source with its share. Jobs won and revenue per source are not drawn: nothing ties a
 /// job's money back to how the customer found the business.
 struct MarketingLeadSourcesView: View {
     @ObservedObject var model: MarketingModel
@@ -545,6 +504,8 @@ struct MarketingLeadSourcesView: View {
 private struct MarketingCampaignEditor: View {
     let record: MarketingCampaignNote?
     let onSave: (MarketingCampaignNote) throws -> Void
+    /// Removes the note being edited; nil for a new one.
+    var onRemove: (() throws -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var channel: String
@@ -557,7 +518,9 @@ private struct MarketingCampaignEditor: View {
     @State private var badDates = false
     @State private var error: String?
 
-    init(record: MarketingCampaignNote?, onSave: @escaping (MarketingCampaignNote) throws -> Void) {
+    init(record: MarketingCampaignNote?, onSave: @escaping (MarketingCampaignNote) throws -> Void,
+         onRemove: (() throws -> Void)? = nil) {
+        self.onRemove = onRemove
         self.record = record
         self.onSave = onSave
         _name = State(initialValue: record?.name ?? "")
@@ -604,6 +567,19 @@ private struct MarketingCampaignEditor: View {
                                    keyboard: .decimalPad)
                         WellDivider()
                         LearnField(label: "Note", text: $note, prompt: "Who it went to, what it said, how it did", multiline: true)
+                    }
+                    if let onRemove {
+                        Button {
+                            do { try onRemove(); dismiss() }
+                            catch { self.error = error.localizedDescription }
+                        } label: {
+                            Text("Remove campaign note").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                                .background(Theme.card, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("marketing-campaign-remove")
                     }
                     LearnFootnote(text: "Saved on this phone only. Thorbis does not send this campaign or count its results.")
                 }

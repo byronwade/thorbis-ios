@@ -25,7 +25,13 @@ final class TruckStockModel: ObservableObject {
         error = nil
         guard let organizationID, let userID else { return }
         do {
-            let opened = try TruckStockStore(organizationID: organizationID, userID: userID, directory: directory)
+            var preview: TruckStockStore?
+            #if DEBUG
+            if PaperPreview.enabled, directory == nil {
+                preview = try PlacesPreviewData.truckStock(organizationID: organizationID, userID: userID)
+            }
+            #endif
+            let opened = try preview ?? TruckStockStore(organizationID: organizationID, userID: userID, directory: directory)
             store = opened
             items = TruckStockRules.sorted(opened.items)
             bound = true
@@ -72,11 +78,11 @@ enum TruckStockFormat {
     /// Low: "1 left · keep 6" or "Out · keep 6". Otherwise the part number and the minimum.
     static func rowSubtitle(_ item: TruckStockItem) -> String {
         if TruckStockRules.isLow(item) {
-            return "\(item.quantity == 0 ? "Out" : "\(item.quantity) left") \u{00B7} keep \(item.minimum)"
+            return "\(item.quantity == 0 ? "Out" : "\(item.quantity) left") \u{00B7} par \(item.minimum)"
         }
         let part = (item.partNumber ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let unit = item.unit.trimmingCharacters(in: .whitespacesAndNewlines)
-        return [part, item.minimum > 0 ? "keep \(item.minimum)" : "no minimum",
+        return [part, item.minimum > 0 ? "par \(item.minimum)" : "no par",
                 unit.isEmpty || unit.lowercased() == TruckStockRules.defaultUnit ? "" : unit]
             .filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
     }
@@ -102,12 +108,11 @@ private struct TruckStockStepper: View {
     var low = false
     let step: (Int) -> Void
 
-    private func circle(_ symbol: String, label: String, tint: Bool, enabled: Bool, delta: Int) -> some View {
+    private func circle(_ glyph: PaperGlyph, label: String, tint: Bool, enabled: Bool, delta: Int) -> some View {
         Button { step(delta) } label: {
-            Image(systemName: symbol).font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(tint ? Theme.brandText : Theme.foreground)
+            PaperIcon(glyph, size: 12, color: tint ? Theme.brandText : Theme.foreground)
                 .frame(width: 44, height: 44)
-                .background(tint ? Theme.brandSurface : Theme.fill, in: Circle())
+                .background(tint ? Theme.brandTint : Theme.quietFill, in: Circle())
                 .contentShape(Circle())
                 .opacity(enabled ? 1 : 0.4)
         }
@@ -119,26 +124,28 @@ private struct TruckStockStepper: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            circle("minus", label: "One fewer \(name)", tint: false, enabled: quantity > 0, delta: -1)
-            Text("\(quantity)").font(Theme.font(16, weight: .semibold)).monospacedDigit()
+            circle(.placeMinus, label: "One fewer \(name)", tint: false, enabled: quantity > 0, delta: -1)
+            Text("\(quantity)").font(Theme.font(16, weight: .semibold))
                 .foregroundStyle(Theme.foreground)
                 .frame(minWidth: 22)
                 .accessibilityHidden(true)
-            // Paper 84: the + of a low item is the brand surface, the way back over its minimum.
-            circle("plus", label: "One more \(name)", tint: low, enabled: quantity < TruckStockRules.maximumCount, delta: 1)
+            // Paper 84: the + of a low item is brand-tinted, the way back over its minimum.
+            circle(.placeStepPlus, label: "One more \(name)", tint: low, enabled: quantity < TruckStockRules.maximumCount, delta: 1)
         }
         .fixedSize()
     }
 }
 
+/// Paper 84 "Inventory (truck stock)": the title over "42 items · 4 low", the search field, the
+/// segments, "Running low" with − count + on each row, then the rest with their counts, and the +
+/// circle at the foot. Paper's Warehouse segment and "Scan to use" pill need a server and a part
+/// catalogue the phone doesn't have, so they are left out.
 struct TruckStockView: View {
-    private enum Filter: Hashable { case all, low }
-
     @EnvironmentObject private var session: SessionController
     @Environment(\.dynamicTypeSize) private var typeSize
     @StateObject private var model = TruckStockModel()
     @State private var query = ""
-    @State private var filter = Filter.all
+    @State private var tab = "My truck"
     @State private var editor: TruckStockEditorRequest?
     @State private var opened: TruckStockOpen?
     @State private var showRestock = false
@@ -149,32 +156,8 @@ struct TruckStockView: View {
     private var identityKey: String { "\(session.activeOrganization?.id ?? "")|\(session.user?.id ?? "")" }
 
     private var subtitle: String {
-        guard model.bound, !model.items.isEmpty else { return "On this phone \u{00B7} Counted by hand" }
-        return "\(TruckStockFormat.summary(model.items)) \u{00B7} On this phone"
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("", text: $query, prompt: .placeholder("Item or part number"))
-                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .frame(minHeight: 46)
-                .accessibilityLabel("Search truck stock")
-                .accessibilityIdentifier("truckstock-search")
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
-                        .frame(width: 32, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 46)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, PaperCardMetrics.margin)
+        guard model.bound, !model.items.isEmpty else { return "Counted by hand \u{00B7} kept on this phone" }
+        return "\(TruckStockFormat.summary(model.items)) \u{00B7} on this phone"
     }
 
     private func adjust(_ item: TruckStockItem, by delta: Int) {
@@ -186,17 +169,18 @@ struct TruckStockView: View {
         }
     }
 
-    /// Paper 84: the hexagon (amber when low), the name over what is left, then − count +.
+    /// Paper 84: the hexagon in a 34pt slot (amber when low), the name over what is left, then
+    /// − count + on a low row and the plain count on the rest. 64 tall.
     private func row(_ item: TruckStockItem) -> some View {
         let low = TruckStockRules.isLow(item)
         let subtitle = TruckStockFormat.rowSubtitle(item)
+        let stacked = typeSize.isAccessibilitySize
         let words = Button { opened = TruckStockOpen(id: item.id) } label: {
             HStack(alignment: .center, spacing: 0) {
-                Image(systemName: "hexagon").font(.system(size: 18, weight: .regular))
-                    .foregroundStyle(low ? Theme.warning : Theme.muted)
-                    .frame(width: 34, alignment: .leading).accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                PaperIcon(.placeHex, size: 20, color: low ? Theme.warning : Theme.muted)
+                    .frame(width: 34, alignment: .leading)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(item.name).font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                     if !subtitle.isEmpty {
@@ -205,23 +189,30 @@ struct TruckStockView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                Spacer(minLength: 0)
+                Spacer(minLength: 12)
+                if !low {
+                    Text("\(item.quantity)").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .frame(minWidth: 28, alignment: .trailing)
+                        .padding(.trailing, 16)
+                }
             }
-            .padding(.leading, PaperCardMetrics.inset).padding(.vertical, 10)
+            .padding(.leading, 16).padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(item.name), \(TruckStockRules.amount(item.quantity, unit: item.unit)) on the truck\(low ? ", low" : "")\(item.minimum > 0 ? ", keep at least \(item.minimum)" : "")")
+        .accessibilityLabel("\(item.name), \(TruckStockRules.amount(item.quantity, unit: item.unit)) on the truck\(low ? ", low" : "")\(item.minimum > 0 ? ", par \(item.minimum)" : "")")
         .accessibilityHint("Opens the item")
         let stepper = TruckStockStepper(name: item.name, quantity: item.quantity, low: low) { adjust(item, by: $0) }
         return Group {
-            if typeSize.isAccessibilitySize {
+            if !low {
+                words
+            } else if stacked {
                 // Large text: the count sits under the words instead of squeezing them.
                 VStack(alignment: .leading, spacing: 0) {
                     words
-                    stepper.padding(.leading, PaperCardMetrics.inset + 34).padding(.bottom, 8)
+                    stepper.padding(.leading, 50).padding(.bottom, 8)
                 }
             } else {
                 HStack(spacing: 8) {
@@ -233,95 +224,106 @@ struct TruckStockView: View {
         }
     }
 
-    private func rows(_ list: [TruckStockItem]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(list) { item in
-                if item.id != list.first?.id { WellDivider() }
-                row(item)
-            }
+    @ViewBuilder private func rows(_ list: [TruckStockItem]) -> some View {
+        ForEach(list) { item in
+            if item.id != list.first?.id { WellDivider(leading: 50) }
+            row(item)
         }
+    }
+
+    /// Paper 84's foot: the 50pt + circle at the trailing edge (beside where Paper's scan pill sits).
+    private var bar: some View {
+        HStack(spacing: 8) {
+            Spacer(minLength: 0)
+            Button { editor = TruckStockEditorRequest() } label: {
+                PaperIcon(.plusLight, size: 20)
+                    .frame(width: 50, height: 50)
+                    .background(Theme.card, in: Circle())
+                    .background(Theme.quietFill, in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Add stock item")
+            .accessibilityIdentifier("header-create")
+        }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 8)
     }
 
     var body: some View {
         let matching = model.items.filter { TruckStockFormat.matches($0, query: query) }
         let low = matching.filter(TruckStockRules.isLow)
-        let rest = filter == .low ? [] : matching.filter { !TruckStockRules.isLow($0) }
+        let rest = tab == "Low stock" ? [] : matching.filter { !TruckStockRules.isLow($0) }
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // Paper 84: the place header, the search, then the segments.
-                PaperHeader(title: "Truck stock", subtitle: subtitle, showsCreate: model.bound)
-                    .environment(\.paperCreate, model.bound
-                                 ? PaperCreateAction(label: "Add stock item", run: { editor = TruckStockEditorRequest() })
-                                 : nil)
+                // Paper 84: the place header (menu circle only), the search, then the segments.
+                PaperHeader(title: "Truck stock", subtitle: subtitle)
                 if model.bound && !model.items.isEmpty {
-                    searchField.padding(.top, 2)
-                    ThorbisSegmented(options: [(Filter.all, "All items"), (Filter.low, "Low stock")], selection: $filter)
-                        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
+                    PlaceSearchField(query: $query, identifier: "truckstock-search")
+                    PaperTabs(options: ["My truck", "Low stock"], selection: $tab)
+                        .padding(.top, 16)
                         .accessibilityIdentifier("truckstock-filter")
                 }
-                VStack(alignment: .leading, spacing: 20) {
-                    if let message = actionError ?? model.error {
-                        Text(message).font(Theme.font(15)).foregroundStyle(Theme.destructive)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                    }
-                    if !model.bound {
-                        if model.error == nil { SkeletonRows(count: 3, leading: false, inset: 0) }
-                    } else if model.items.isEmpty {
-                        PaperEmptyState(symbol: "shippingbox", title: "No stock yet",
-                                        message: "Add what you carry and the count it shouldn\u{2019}t fall below. Low items collect into a restock list.",
-                                        actionTitle: "Add stock item") { editor = TruckStockEditorRequest() }
-                    } else if matching.isEmpty {
-                        PaperEmptyState(symbol: "magnifyingglass", title: "No matches",
-                                        message: "No item or part number matches \u{201C}\(query)\u{201D}.",
-                                        actionTitle: "Clear search") { query = "" }
-                    } else if filter == .low && low.isEmpty {
-                        PaperEmptyState(symbol: "checkmark.circle", title: "Nothing is low",
-                                        message: "Items at or under their minimum show here.",
-                                        actionTitle: "Show all") { filter = .all }
-                    } else {
-                        if !low.isEmpty {
-                            VStack(alignment: .leading, spacing: 0) {
-                                // Paper 84: a 6pt warning dot, "Running low", and "Restock all" in
-                                // the brand ink; here that opens the list to share.
-                                HStack(alignment: .center, spacing: 6) {
-                                    Circle().fill(Theme.warning).frame(width: 6, height: 6).accessibilityHidden(true)
-                                    Text("Running low").font(Theme.font(13, weight: .semibold))
-                                        .foregroundStyle(Theme.muted)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .accessibilityLabel("Running low, \(low.count)")
-                                        .accessibilityAddTraits(.isHeader)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    Button { showRestock = true } label: {
-                                        Text("Restock list").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                                            .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(PressStyle())
-                                    .accessibilityIdentifier("truckstock-restock")
-                                }
-                                .padding(.horizontal, 4)
-                                PaperCard { rows(low) }
+                if let message = actionError ?? model.error {
+                    Text(message).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                }
+                if !model.bound {
+                    if model.error == nil { SkeletonRows(count: 3, leading: false, inset: 0).paperCardMargin().padding(.top, 22) }
+                } else if model.items.isEmpty {
+                    PaperEmptyState(symbol: "shippingbox", title: "No stock yet",
+                                    message: "Add what you carry and the count it shouldn\u{2019}t fall below. Low items collect into a restock list. Counts stay on this phone.",
+                                    actionTitle: "Add stock item") { editor = TruckStockEditorRequest() }
+                        .paperCardMargin().padding(.top, 22)
+                } else if matching.isEmpty {
+                    PaperEmptyState(symbol: "magnifyingglass", title: "No matches",
+                                    message: "No item or part number matches \u{201C}\(query)\u{201D}.",
+                                    actionTitle: "Clear search") { query = "" }
+                        .paperCardMargin().padding(.top, 22)
+                } else if tab == "Low stock" && low.isEmpty {
+                    PaperEmptyState(symbol: "checkmark.circle", title: "Nothing is low",
+                                    message: "Items at or under their par show here.",
+                                    actionTitle: "Show all") { tab = "My truck" }
+                        .paperCardMargin().padding(.top, 22)
+                } else {
+                    if !low.isEmpty {
+                        // Paper 84: a 6pt warning dot, "Running low", and "Restock all" in the
+                        // brand ink; here that opens the list to share.
+                        HStack(alignment: .center, spacing: 6) {
+                            Circle().fill(Theme.statusInProgress).frame(width: 6, height: 6).accessibilityHidden(true)
+                            Text("Running low").font(Theme.font(13, weight: .semibold))
+                                .foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityLabel("Running low, \(low.count)")
+                                .accessibilityAddTraits(.isHeader)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button { showRestock = true } label: {
+                                Text("Restock all").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
                             }
+                            .buttonStyle(PressStyle())
+                            .padding(.vertical, -13)
+                            .accessibilityHint("Opens the restock list to share")
+                            .accessibilityIdentifier("truckstock-restock")
                         }
-                        if !rest.isEmpty {
-                            PaperSection("On the truck", count: rest.count) { rows(rest) }
-                        }
+                        .padding(.horizontal, PaperCardMetrics.margin + 4)
+                        .padding(.top, 16).padding(.bottom, 8)
+                        PaperRowsCard { rows(low) }
                     }
-                    if model.bound {
-                        Text("Counts are saved on this phone only and change when you change them here. Parts used on a job don\u{2019}t count down on their own.")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                    if !rest.isEmpty {
+                        PaperCardLabel(title: "On the truck", count: rest.count).padding(.top, 22)
+                        PaperRowsCard { rows(rest) }
                     }
                 }
-                .paperCardMargin().padding(.top, 14).padding(.bottom, 24)
             }
+            .padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("truckstock-root")
+        .safeAreaInset(edge: .bottom, spacing: 0) { if model.bound { bar } }
         .sensoryFeedback(.selection, trigger: model.items.reduce(0) { $0 + $1.quantity })
         .task(id: identityKey) {
             editor = nil
