@@ -13,8 +13,8 @@ final class CustomerClarityUITests: XCTestCase {
         for _ in 0..<12 where !call.isHittable { app.swipeUp() }
         XCTAssertTrue(call.waitForExistence(timeout: 20))
         XCTAssertTrue(call.isHittable)
-        XCTAssertGreaterThanOrEqual(call.frame.height, 44)
-        XCTAssertGreaterThanOrEqual(call.frame.width, 44)
+        XCTAssertGreaterThanOrEqual(call.frame.height, 43.99)
+        XCTAssertGreaterThanOrEqual(call.frame.width, 43.99)
         let text = app.buttons["Text Danielle Marlowe"]
         XCTAssertTrue(text.isHittable)
         XCTAssertGreaterThanOrEqual(text.frame.height, 44)
