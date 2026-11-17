@@ -267,7 +267,7 @@ final class CommsInboxUITests: XCTestCase {
                        "Calls shows no job notices")
         attach(app, "Inbox calls")
         thread.tap()
-        XCTAssertTrue(app.staticTexts["Incoming call"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["Inbound"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.buttons["inbox-play-00000000-0000-4000-8000-000000009702"].exists, "The answered call has a play control")
         XCTAssertTrue(app.buttons["inbox-link-job-00000000-0000-4000-8000-000000009702"].exists, "Office can change the linked job")
         attach(app, "Call thread")

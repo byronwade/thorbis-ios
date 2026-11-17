@@ -39,7 +39,7 @@ final class CommsInboxScreenshotUITests: XCTestCase {
             capture("\(prefix)-\(section)", base + ["--paper-preview-inbox-section", section], wait: "inbox-section-menu")
         }
         capture("\(prefix)-drafts", base + ["--paper-preview-inbox-folder", "drafts"], wait: "inbox-section-menu")
-        capture("\(prefix)-call-thread", base + ["--paper-preview-inbox-thread", "calls"], text: "Incoming call")
+        capture("\(prefix)-call-thread", base + ["--paper-preview-inbox-thread", "calls"], text: "Inbound")
         capture("\(prefix)-text-thread", base + ["--paper-preview-inbox-thread", "text"], wait: "inbox-text-field")
         capture("\(prefix)-email-thread", base + ["--paper-preview-inbox-thread", "email"], wait: "inbox-email-reply")
     }
@@ -51,7 +51,7 @@ final class CommsInboxScreenshotUITests: XCTestCase {
         let big = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         capture("xxxl-all", ["-thorbis.appearance", "light"] + big, wait: "inbox-section-menu")
         capture("xxxl-calls", ["-thorbis.appearance", "light", "--paper-preview-inbox-section", "calls"] + big, wait: "inbox-section-menu")
-        capture("xxxl-call-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "calls"] + big, text: "Incoming call")
+        capture("xxxl-call-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "calls"] + big, text: "Inbound")
         capture("xxxl-text-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "text"] + big, wait: "inbox-text-field")
     }
 

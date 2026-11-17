@@ -97,54 +97,58 @@ struct CommsRecordingControl: View {
         let total = active && player.duration > 0 ? player.duration : Double(length ?? 0)
         let position = active ? player.current : 0
         let fraction = total > 0 ? min(1, position / total) : 0
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 14) {
                 Button { Task { await player.toggle(callID, path: path, api: api) } } label: {
                     ZStack {
-                        // Paper 51: the play circle is the brand's, its glyph white.
+                        // Paper 51: the 48pt play circle is the brand's, its glyph white.
                         Circle().fill(Theme.brand)
                         if player.loadingID == callID {
                             ProgressView().tint(Color.white)
+                        } else if active && player.isPlaying {
+                            Image(systemName: "pause.fill").font(.system(size: 16, weight: .medium)).foregroundStyle(Color.white)
                         } else {
-                            Image(systemName: active && player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 16, weight: .medium)).foregroundStyle(Color.white)
+                            PaperIcon(.playSolid, size: 18, color: .white)
                         }
                     }
-                    .frame(width: 44, height: 44)
+                    .frame(width: 48, height: 48)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(active && player.isPlaying ? "Pause recording" : "Play recording")
                 .accessibilityIdentifier("inbox-play-\(callID)")
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Theme.fill).frame(height: 4)
-                        Capsule().fill(Theme.brand).frame(width: max(4, proxy.size.width * fraction), height: 4)
+                VStack(spacing: 6) {
+                    GeometryReader { proxy in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Theme.foreground.opacity(0.14)).frame(height: 4)
+                            Capsule().fill(Theme.brand).frame(width: max(4, proxy.size.width * fraction), height: 4)
+                            Circle().fill(Theme.brand).frame(width: 12, height: 12)
+                                .offset(x: max(0, min(proxy.size.width - 12, proxy.size.width * fraction - 6)))
+                        }
+                        .frame(maxHeight: .infinity)
+                        .contentShape(Rectangle().inset(by: -16))
+                        .gesture(DragGesture(minimumDistance: 0).onEnded { value in
+                            guard proxy.size.width > 0 else { return }
+                            player.seek(callID, to: value.location.x / proxy.size.width)
+                        })
                     }
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 0).onEnded { value in
-                        guard proxy.size.width > 0 else { return }
-                        player.seek(callID, to: value.location.x / proxy.size.width)
-                    })
-                }
-                .frame(height: 44)
-                .accessibilityElement()
-                .accessibilityLabel("Recording position")
-                .accessibilityValue("\(BookingCallRecord.clock(Int(position))) of \(BookingCallRecord.clock(Int(total)))")
-                .accessibilityAdjustableAction { direction in
-                    guard total > 0 else { return }
-                    let step = 10 / total
-                    player.seek(callID, to: fraction + (direction == .increment ? step : -step))
+                    .frame(height: 12)
+                    .accessibilityElement()
+                    .accessibilityLabel("Recording position")
+                    .accessibilityValue("\(BookingCallRecord.clock(Int(position))) of \(BookingCallRecord.clock(Int(total)))")
+                    .accessibilityAdjustableAction { direction in
+                        guard total > 0 else { return }
+                        let step = 10 / total
+                        player.seek(callID, to: fraction + (direction == .increment ? step : -step))
+                    }
+                    HStack {
+                        Text(BookingCallRecord.clock(Int(position))).foregroundStyle(Theme.subtle)
+                        Spacer()
+                        Text(BookingCallRecord.clock(Int(total))).foregroundStyle(Theme.muted)
+                    }
+                    .font(Theme.font(13)).monospacedDigit()
+                    .accessibilityHidden(true)
                 }
             }
-            HStack {
-                Text(BookingCallRecord.clock(Int(position)))
-                Spacer()
-                Text(BookingCallRecord.clock(Int(total)))
-            }
-            .font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-            .padding(.leading, 56)
-            .accessibilityHidden(true)
             if player.failedID == callID {
                 Text("The recording didn\u{2019}t load. Tap play to try again.")
                     .font(Theme.font(13)).foregroundStyle(Theme.warning)
@@ -259,7 +263,7 @@ struct CommsCallThreadView: View {
     var body: some View {
         let thread = model.thread(threadID)
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 28) {
                 if let thread {
                     ForEach(thread.calls, id: \.id) { call in
                         CommsCallCard(call: call, model: model, player: player,
@@ -321,54 +325,44 @@ struct CommsCallCard: View {
 
     var body: some View {
         let kind = call.kind
-        let headingLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                                         : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-        let alarming = kind == .missed || kind == .dropped
+        let card = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+        // Paper 51: the call's chips, the player on its own card, the summary on the next, then
+        // the transcript under its label, and the job it belongs to.
         VStack(alignment: .leading, spacing: 12) {
-            headingLayout {
-                // Paper 49C: the call's glyph in a 32pt circle, green when it was answered.
-                Image(systemName: kind.symbol).font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(alarming ? Theme.destructive : kind == .answered ? Theme.success : Theme.muted)
-                    .frame(width: 32, height: 32)
-                    .background(alarming ? Theme.destructiveSurface : kind == .answered ? Theme.successSurface : Theme.fill, in: Circle())
-                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
-                    .accessibilityHidden(true)
-                Text(kind.heading).font(Theme.font(15, weight: .medium))
-                    .fixedSize(horizontal: false, vertical: true)
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                if let when = call.startedDate {
-                    Text(when.stampLabel(year: false)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+            chips(kind)
+            if let path = call.playablePath {
+                VStack(alignment: .leading, spacing: 10) {
+                    CommsRecordingControl(callID: call.id, path: path, length: call.length, player: player)
+                    if let disclosure = call.disclosure, !disclosure.isEmpty {
+                        Text("Caller heard: \u{201C}\(disclosure)\u{201D}").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-            }
-            .accessibilityElement(children: .combine)
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                StatusLabel(tone: kind.status.tone, word: kind.status.word)
-                if let length = call.length, kind != .missed {
-                    Text(BookingCallRecord.clock(length)).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
-                        .accessibilityLabel("\(length / 60) minutes \(length % 60) seconds")
-                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .padding(.top, 4)
+            } else if let note = call.recordingNote, kind != .missed {
+                Text(note).font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.horizontal, 4)
             }
             if let summary = call.summary?.text, !summary.isEmpty {
-                Text(kind == .voicemail ? "\u{201C}\(summary)\u{201D}" : summary)
-                    .font(Theme.font(15)).lineSpacing(3).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let path = call.playablePath {
-                CommsRecordingControl(callID: call.id, path: path, length: call.length, player: player)
-                if let disclosure = call.disclosure, !disclosure.isEmpty {
-                    Text("Caller heard: \u{201C}\(disclosure)\u{201D}").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        PaperIcon(.sparkle, size: 14, color: Theme.brandText)
+                        Text(kind == .voicemail ? "Voicemail" : "AI summary").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    }
+                    Text(kind == .voicemail ? "\u{201C}\(summary)\u{201D}" : summary)
+                        .font(Theme.font(15)).lineSpacing(3).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            } else if let note = call.recordingNote, kind != .missed {
-                Text(note).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: card)
             }
             if hasTranscript { transcript }
             jobRow
         }
-        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Paper v2: the card's tone does the work; no rim.
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $choosingJob) {
             CommsLinkJobSheet(call: call, jobs: CallLogRules.linkableJobs(store.jobs)) { jobID in
@@ -376,6 +370,52 @@ struct CommsCallCard: View {
                 Task { await link(to: jobID) }
             } onClose: { choosingJob = false }
         }
+    }
+
+    /// Paper 51's chips, 40 tall: which way the call went (brand at 24%; a missed or dropped call
+    /// in the destructive ink), when, and how long.
+    private func chips(_ kind: CommsCallKind) -> some View {
+        let alarming = kind == .missed || kind == .dropped
+        let word: String = switch kind {
+        case .answered: "Inbound"
+        case .missed: "Missed"
+        case .voicemail: "Voicemail"
+        case .ongoing: "On the call"
+        case .dropped: "Dropped"
+        }
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        return layout {
+            HStack(spacing: 6) {
+                PaperIcon(.arrowInbound, size: 14, color: alarming ? Theme.destructive : Theme.brandText)
+                Text(word).font(Theme.font(14, weight: .semibold)).foregroundStyle(alarming ? Theme.destructive : Theme.brandText)
+            }
+            .padding(.horizontal, 12).frame(minHeight: 40)
+            .background(alarming ? Theme.destructiveSurface : Theme.brandTint, in: Capsule())
+            if let when = call.startedDate {
+                HStack(spacing: 6) {
+                    PaperIcon(.clockSmall, size: 14, color: Theme.muted)
+                    Text(Self.stamp(when)).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 12).frame(minHeight: 40)
+                .background(Theme.card, in: Capsule())
+            }
+            if let length = call.length, kind != .missed {
+                Text(length >= 60 ? "\(length / 60)m \(length % 60)s" : "\(length)s")
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                    .padding(.horizontal, 12).frame(minHeight: 40)
+                    .background(Theme.card, in: Capsule())
+                    .accessibilityLabel("\(length / 60) minutes \(length % 60) seconds")
+            }
+        }
+    }
+
+    /// "Today · 8:42 AM", "Yesterday · 4:27 PM", "Nov 14 · 6:33 PM".
+    private static func stamp(_ date: Date, calendar: Calendar = .current) -> String {
+        let day = calendar.isDateInToday(date) ? "Today"
+            : calendar.isDateInYesterday(date) ? "Yesterday" : date.formatted(.dateTime.month(.abbreviated).day())
+        return "\(day) \u{00B7} \(date.tradeTime)"
     }
 
     private var hasTranscript: Bool {
@@ -386,57 +426,69 @@ struct CommsCallCard: View {
     private var transcript: some View {
         let detail = model.details[call.id]
         let segments = detail?.transcript ?? call.transcript
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 0) {
+            // Paper 51: "Transcript" as the group's label, how many turns trailing; it opens the card.
             Button {
                 withMotion(.snappy) { showTranscript.toggle() }
                 if showTranscript && detail == nil { Task { await loadTranscript() } }
             } label: {
-                HStack {
-                    // Paper 49C: "Transcript" is a brand word on the call's card.
+                HStack(spacing: 8) {
                     Text(showTranscript ? "Hide transcript" : "Transcript")
-                        .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(showTranscript ? Theme.muted : Theme.brandText)
                     Spacer()
-                    Image(systemName: "chevron.down").rotationEffect(.degrees(showTranscript ? 180 : 0))
-                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                    if showTranscript && !segments.isEmpty {
+                        Text("\(segments.count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    PaperIcon(.chevronDown, size: 12, color: Theme.muted).rotationEffect(.degrees(showTranscript ? 180 : 0))
                 }
+                .padding(.horizontal, 4)
                 .frame(minHeight: 44).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             if showTranscript {
-                if let transcriptError {
-                    InlineProblem(message: transcriptError)
-                } else if segments.isEmpty && detail == nil {
-                    SkeletonRows(count: 2, leading: false, inset: 0)
-                } else if segments.isEmpty {
-                    Text("No transcript was kept for this call.").font(Theme.font(14)).foregroundStyle(Theme.muted)
-                } else {
-                    ForEach(segments) { segment in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(segment.label).font(Theme.font(13, weight: .medium))
-                                .foregroundStyle(segment.speaker == "caller" ? Theme.foreground : Theme.muted)
-                            Text(segment.text).font(Theme.font(15)).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 14) {
+                    if let transcriptError {
+                        InlineProblem(message: transcriptError)
+                    } else if segments.isEmpty && detail == nil {
+                        SkeletonRows(count: 2, leading: false, inset: 0)
+                    } else if segments.isEmpty {
+                        Text("No transcript was kept for this call.").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    } else {
+                        ForEach(segments) { segment in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(segment.label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                Text(segment.text).font(Theme.font(15)).lineSpacing(3).foregroundStyle(Theme.subtle)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .accessibilityElement(children: .combine)
                         }
-                        .accessibilityElement(children: .combine)
                     }
                 }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             }
         }
     }
 
     @ViewBuilder private var jobRow: some View {
         let linked = call.jobId.flatMap { id in store.jobs.first { $0.id == id } }
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             if let jobID = call.jobId {
                 NavigationLink(value: PaperRoute.job(jobID)) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "briefcase").font(.system(size: 13)).foregroundStyle(Theme.muted)
-                        Text(linked?.title ?? "Open the linked job").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .lineLimit(2)
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(linked?.title ?? "Open the linked job").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .lineLimit(2)
+                            Text("Linked job").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        }
                         Spacer(minLength: 0)
-                        PaperDisclosure()
+                        PaperRowChevron()
                     }
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                    .padding(.horizontal, 16).padding(.vertical, 11)
+                    .frame(minHeight: 60).contentShape(Rectangle())
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityHint("Opens the job this call is linked to")
@@ -448,9 +500,9 @@ struct CommsCallCard: View {
                         Text(call.jobId == nil ? "Link to job" : "Change job").font(Theme.font(15, weight: .medium))
                     }
                     .foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 16)
                     .frame(minHeight: 44)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                    .background(Theme.quietFill, in: Capsule())
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
