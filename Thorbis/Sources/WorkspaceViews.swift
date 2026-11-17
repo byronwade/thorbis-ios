@@ -994,6 +994,7 @@ struct PriceBookItemEditor: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .background(Theme.canvas)
+        .paperPageGround()
         .onChange(of: content.description) { _, _ in nameProblem = nil }
         .onChange(of: priceText) { _, _ in priceProblem = nil }
         .onChange(of: content.unit) { _, _ in unitProblem = nil }
