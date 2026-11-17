@@ -243,24 +243,6 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
-            id: "2026-11-12-estimate-save-and-menu",
-            date: "2026-11-12",
-            highlights: [
-                .init(symbol: "keyboard", title: "Save stays clear of Done",
-                      detail: "When you edit an estimate, Done above the keyboard no longer covers Save."),
-                .init(symbol: "rectangle.landscape", title: "Landscape settings stay on screen",
-                      detail: "Turn the phone sideways and the drawer settings menu still keeps Saved work and Settings in reach."),
-            ]
-        ),
-        ReleaseNote(
-            id: "2026-11-12-customer-keyboard-done",
-            date: "2026-11-12",
-            highlights: [
-                .init(symbol: "keyboard", title: "Done puts the keyboard away",
-                      detail: "When adding a customer, Done above the keyboard puts it away so you can reach Type."),
-            ]
-        ),
-        ReleaseNote(
             id: "2026-11-14-inbox-draft-actions",
             date: "2026-11-14",
             highlights: [
@@ -306,6 +288,24 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "sidebar.left", title: "Find work in the menu",
                       detail: "Jobs and documents are easy to find, and tapping a section opens or closes it."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-12-estimate-save-and-menu",
+            date: "2026-11-12",
+            highlights: [
+                .init(symbol: "keyboard", title: "Save stays clear of Done",
+                      detail: "When you edit an estimate, Done above the keyboard no longer covers Save."),
+                .init(symbol: "iphone.landscape", title: "Landscape settings stay on screen",
+                      detail: "Turn the phone sideways and the drawer settings menu still keeps Saved work and Settings in reach."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-12-customer-keyboard-done",
+            date: "2026-11-12",
+            highlights: [
+                .init(symbol: "keyboard", title: "Done puts the keyboard away",
+                      detail: "When adding a customer, Done above the keyboard puts it away so you can reach Type."),
             ]
         ),
         ReleaseNote(

@@ -52,7 +52,8 @@ enum RunningLateDraft {
 
         var why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         while let last = why.last, ".!,;".contains(last) { why.removeLast() }
-        let arrival = "I'll be there around \(newTime) instead of \(oldTime)."
+        // "12:45 p.m." already ends the sentence; a second full stop would read "p.m..".
+        let arrival = "I'll be there around \(newTime) instead of \(oldTime)\(oldTime.hasSuffix(".") ? "" : ".")"
         if why.isEmpty {
             parts.append("I'm running late, so \(arrival)")
         } else {
