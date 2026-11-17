@@ -839,6 +839,7 @@ struct RootView: View {
         case "payouts": previewPlace(.money, then: .payments)
         case "customize-menu": schedulePath.append(PaperRoute.customizeMenu)
         case "properties", "property-detail": schedulePath.append(PaperRoute.properties)
+        case "notifications": schedulePath.append(PaperRoute.notifications)
         case "signature": previewSignature = true
         case "job-schedule", "equipment-editor", "equipment-sections": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
         case "new-job", "book-job", "book-job-filled": createJob = true
