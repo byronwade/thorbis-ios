@@ -171,6 +171,14 @@ struct JobDetailView: View {
     /// Paper 21B's filter chips, in its order.
     private let activityFilters = ["All", "Notes", "Photos", "Status", "Money"]
     private var showsPhotos: Bool { selectedTab == "Activity" && activityFilter == "Photos" }
+    /// Paper's map: a job out on its visit opens in Field mode (F2 to F8), a screen of its own with
+    /// no sections. "More › Full job details" closes it onto Job details (Paper 21), whose
+    /// "Field mode" card opens it again.
+    @State private var fieldModeOpen = !(PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-full-details"))
+    /// Paper 21O "At this address", pushed from More.
+    @State private var showAtAddress = false
+    /// Paper F5: the tech moved on from Working to Wrap up without an estimate to approve first.
+    @State private var wrapUpStageOpen = false
 
     /// Retire a mounted sheet on material authority or job changes. A routine
     /// authority revision alone does not discard a technician's entered amount.
@@ -226,7 +234,7 @@ struct JobDetailView: View {
                 } else {
                     // At accessibility sizes, the full job header can be taller than the
                     // screen. Keep the section chooser reachable above the scrolling content.
-                    if typeSize.isAccessibilitySize { tabBar(job) }
+                    if typeSize.isAccessibilitySize, !inField(job) { tabBar(job) }
                     ScrollViewReader { proxy in
                     ScrollView {
                     // The tabs pin under the nav bar, so switching Overview, Invoice or Activity
@@ -234,10 +242,10 @@ struct JobDetailView: View {
                     LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                     // Paper 23, 24 and 21B: Money and Activity keep the job's whole header (number,
                     // title, who and where, the chips); only the visit's steps stay on Overview.
-                    fullHeader(job, showsSteps: selectedTab == "Overview")
+                    fullHeader(job, showsSteps: inField(job))
                     // At accessibility sizes a fixed action can cover most of a small screen.
                     // Keep the same action early in the scrollable content instead.
-                    if typeSize.isAccessibilitySize && !(selectedTab == "Money" && moneyBarIsCustomerView) { primaryAction }
+                    if typeSize.isAccessibilitySize { primaryAction }
                     // Where the sections start; it reports when the tabs are pinned (scrolled past).
                     Color.clear.frame(height: 0).id("job-sections")
                         .onGeometryChange(for: Bool.self) { $0.frame(in: .scrollView).minY < -1 } action: { tabsPinned = $0 }
@@ -249,14 +257,15 @@ struct JobDetailView: View {
                             default: overviewContent(job)
                             }
                         }
-                        // Paper v2: cards sit 16 in from the screen's edges, 12 under the sections.
+                        // Paper 21: cards sit 16 in from the screen's edges, 14 under the sections on
+                        // Overview and 16 on Money and Activity (the tab bar keeps 6 of it).
                         .padding(.horizontal, 16)
-                        .padding(.top, 12)
+                        .padding(.top, inField(job) ? 0 : selectedTab == "Overview" ? 8 : 10)
                         .padding(.bottom, 28)
                     } header: {
                         // Pinned, the tabs keep the canvas behind them so rows never show through.
                         // Paper 23: Money is one page with no jump chips, so the header is the tabs alone.
-                        if !typeSize.isAccessibilitySize { tabBar(job).background(Theme.canvas) }
+                        if !typeSize.isAccessibilitySize, !inField(job) { tabBar(job).background(Theme.canvas) }
                     }
                     }
                     }
@@ -318,9 +327,6 @@ struct JobDetailView: View {
             }
             // The Money action is a sibling of the scroll view, so document
             // controls cannot draw or receive taps underneath the payment bar.
-            if job != nil, selectedTab == "Money", !typeSize.isAccessibilitySize {
-                primaryAction
-            }
         }
         .background(Theme.canvas)
         .background(CustomerWindowAnchorView(anchor: customerWindowAnchor))
@@ -423,6 +429,9 @@ struct JobDetailView: View {
             try? await Task.sleep(for: .seconds(1.5))
             if opensAssign { showAssign = true } else { showPause = true }
             #endif
+        }
+        .thorbisDestination(isPresented: $showAtAddress) {
+            if let job { atAddressScreen(job) }
         }
         .thorbisDestination(isPresented: $showFollowUps) {
             JobFollowUpsView(jobID: jobId, initialKind: followUpKind).onDisappear { Task { await loadFollowUps() } }
@@ -591,7 +600,7 @@ struct JobDetailView: View {
             Group {
             // Paper 21B: the composer leads Activity's page, so Activity keeps the job's bar like
             // Overview. Photos have their own capture bar, and the bar steps aside for the keyboard.
-            if !typeSize.isAccessibilitySize, selectedTab != "Money", !showsPhotos, !noteFocused { primaryAction }
+            if !typeSize.isAccessibilitySize, !showsPhotos, !noteFocused { primaryAction }
             }
         }
         .sheet(isPresented: $showPause) { SheetSurface {
@@ -783,19 +792,18 @@ struct JobDetailView: View {
                 }
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             }
-        } else if let job, let context = contextLine(job) {
-            // C-Job: where this job sits in the day, beside Back ("Today · Stop 3 of 6").
-            ThorbisToolbarItem(placement: .principal) {
-                Text(context)
-                    .font(Theme.font(13, weight: .medium)).monospacedDigit()
-                    .foregroundStyle(Theme.muted)
-                    .lineLimit(1)
-                    .accessibilityIdentifier("job-context")
-            }
         }
         if let job {
-            ThorbisToolbarItem(placement: .topBarTrailing) {
-                FavoriteRecordButton(kind: .job, id: job.id, organizationID: job.organizationId)
+            // Paper 21: Share, then More. Field mode (F2) keeps More alone.
+            if !inField(job) {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    Button { shareJob = sharedJobText(job) } label: {
+                        PaperIcon(.share, size: 20).frame(width: 44, height: 44).background(Theme.card, in: Circle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Share job")
+                    .accessibilityIdentifier("job-share")
+                }
             }
             ThorbisToolbarItem(placement: .topBarTrailing) {
                 // One quiet circle (Job.dc.html): Share job sits in the menu with the rest, so it is always there.
@@ -828,7 +836,7 @@ struct JobDetailView: View {
             // The job's bar shows on Overview and Activity; on Money (and over the photos) Wrap up
             // stays in the menu. On site the bar walks the wrap-up rows, so the closeout screen
             // (checks, unpaid follow-up, cancel) stays in the menu.
-            barIsWrapUp: selectedTab != "Money" && !showsPhotos && nextStep == .wrapUp && !onSiteWrapsUp,
+            barIsWrapUp: !showsPhotos && nextStep == .wrapUp && !onSiteWrapsUp,
             canShowToCustomer: session.can("estimate.view", feature: "estimates") || session.can("invoice.view", feature: "invoicing"),
             canEditCustomer: session.can("customer.edit", feature: "core_crm"),
             canAddToCalendar: JobFiltering.date(job.scheduledFor) != nil,
@@ -847,6 +855,11 @@ struct JobDetailView: View {
 
     /// Out on the visit (driving, arrived, working), the job follows Paper's field mode (F2 to F8).
     private func inField(_ job: JobRecord) -> Bool {
+        fieldModeOpen && onVisit(job) && selectedTab == "Overview"
+    }
+
+    /// The visit is under way (driving, arrived or working): the statuses field mode has a step for.
+    private func onVisit(_ job: JobRecord) -> Bool {
         JobFieldSteps.step(for: shownStatus(job)) != nil
     }
 
@@ -924,7 +937,7 @@ struct JobDetailView: View {
     private func fullDetailsLead(_ job: JobRecord) -> ThorbisMenuItem? {
         guard inField(job) else { return nil }
         return ThorbisMenuItem("Full job details", icon: "doc.text", subtitle: "Overview, money and activity") {
-            showOnOverview("job-property-history")
+            withMotion(.snappy) { fieldModeOpen = false; selectedTab = "Overview" }
         }
     }
 
@@ -969,10 +982,9 @@ struct JobDetailView: View {
             }
         }
         actions.append(contentsOf: deviceMenuItems(job))
-        let share = ThorbisMenuItem("Share job", icon: "square.and.arrow.up") {
-            shareJob = SharedText(JobShareText.text(title: job.title, customer: store.customerName(job.customerId),
-                                                    scheduledFor: job.scheduledFor))
-        }
+        let share = ThorbisMenuItem("Share job", icon: "square.and.arrow.up") { shareJob = sharedJobText(job) }
+        // The bar's star moved here (Paper 21's bar is Back, Share and More).
+        if let favorite = favoriteMenuItem(job) { actions.append(favorite) }
         let cancel = cancelMenuItem(job, icon: "xmark.circle")
         var items: [ThorbisMenuItem] = []
         if inField(job) {
@@ -998,6 +1010,23 @@ struct JobDetailView: View {
         return items
     }
 
+    private func sharedJobText(_ job: JobRecord) -> SharedText {
+        SharedText(JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor))
+    }
+
+    /// "Add to favorites" / "Remove from favorites", for whoever may keep this job as a favorite.
+    private func favoriteMenuItem(_ job: JobRecord) -> ThorbisMenuItem? {
+        guard session.can("job.view", feature: "jobs"),
+              let context = ScopedRecordFavorites.currentScope(session: session, api: api),
+              context.organizationID.caseInsensitiveCompare(job.organizationId) == .orderedSame else { return nil }
+        let favorites = ScopedRecordFavorites.shared
+        let selected = favorites.isBound(to: context) && favorites.entries.contains { $0.kind == .job && $0.id == job.id.lowercased() }
+        return ThorbisMenuItem(selected ? "Remove from favorites" : "Add to favorites", icon: selected ? "star.fill" : "star") {
+            favorites.bind(context)
+            favorites.toggle(.job, id: job.id)
+        }
+    }
+
     /// Paper 21K, in its order: "Save customer to contacts", "At this address" and "Measure with
     /// camera", when the loaded customer and the device allow them.
     private func deviceMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
@@ -1010,7 +1039,7 @@ struct JobDetailView: View {
         }
         // On the visit, "Full job details" already opens there.
         if !inField(job) {
-            items.append(ThorbisMenuItem("At this address", icon: "house") { showOnOverview("job-property-history") })
+            items.append(ThorbisMenuItem("At this address", icon: "house") { showAtAddress = true })
         }
         if session.can("job.edit", feature: "jobs"), SiteMeasure.isSupported {
             items.append(ThorbisMenuItem("Measure with camera", icon: "camera") { openCapture(.measure) })
@@ -1130,7 +1159,7 @@ struct JobDetailView: View {
             // Paper F2 to F4: out on the visit, the five steps lead the screen (Overview only;
             // Paper 23, 24 and 21B draw Money and Activity without them).
             if showsSteps, let step = JobFieldSteps.step(for: shownStatus(job)) {
-                JobFieldSteps(current: step)
+                JobFieldSteps(current: step == 2 && fieldWrapsUp ? 3 : step)
                     .padding(.horizontal, 16 - Theme.gutter)
                     .padding(.bottom, barTitle ? 0 : 16)
             }
@@ -1138,7 +1167,7 @@ struct JobDetailView: View {
                 // Paper 21: the job's number (and its place's name) is a 13 Semibold eyebrow over
                 // the 34 Bold title; who it is for and where sit under it at 15.
                 Text(headerLines(eyebrowParts(job).joined(separator: " \u{00B7} ")))
-                    .font(Theme.font(13, weight: .semibold)).monospacedDigit()
+                    .font(Theme.font(13, weight: .semibold))
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel(eyebrowParts(job).joined(separator: ", "))
@@ -1154,7 +1183,7 @@ struct JobDetailView: View {
                     .accessibilityIdentifier("job-title")
                 if !subtitle.isEmpty {
                     Text(headerLines(subtitle.joined(separator: " \u{00B7} ")))
-                        .font(Theme.font(15)).monospacedDigit()
+                        .font(Theme.font(15))
                         .foregroundStyle(Theme.subtle)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
@@ -1162,25 +1191,27 @@ struct JobDetailView: View {
                         .accessibilityIdentifier("job-subtitle")
                 }
             }
+            // Paper F2 to F5: field mode has no chips; the steps say where the visit is, and the
+            // status sheet is on Job details.
+            if !barTitle {
             FlowRow(spacing: 8, lineSpacing: 8) {
                 statusControl(job)
                 whenChip(job)
                 assigneeChip(job)
                 if let estimate = estimateChipText { JobHeaderChip(text: estimate) { EmptyView() } }
-                // The note circle (and, on site, the office's phone) sit with the chips so the bar can
-                // carry Paper's Call, Text and Directions beside the camera.
-                captureCircles
             }
             // Paper: the chips sit 14 under the header's words.
             .padding(.top, 14)
             // Paper: the chips start 16 in, with the cards; the title keeps the 20 gutter.
             .padding(.horizontal, 16 - Theme.gutter)
+            }
             // What to know before touching anything leads Overview's cards (`fieldLead`).
         }
         .padding(.horizontal, Theme.gutter)
         // Paper F2: the steps sit 16 under the bar's title; Paper 21: the eyebrow 14 under the bar.
         .padding(.top, barTitle ? 8 : 14)
-        .padding(.bottom, 18)
+        // Paper 21: the sections sit 16 under the chips. Field mode: the cards 14 under the steps.
+        .padding(.bottom, 14)
     }
 
     /// Paper 21's eyebrow: "JOB-2214 · Marlowe residence" (the job's number, then its place's name
@@ -1200,9 +1231,6 @@ struct JobDetailView: View {
         let customer = store.customerName(job.customerId)
         if customer != "Customer" { parts.append(customer) }
         if let street = street(job), street != job.title { parts.append(street) }
-        if let memberPricing, memberPricing.isMember {
-            parts.append(memberPricing.discountPercent > 0 ? "Member \(memberPricing.discountPercent)% off" : "Member")
-        }
         return parts
     }
 
@@ -1210,15 +1238,12 @@ struct JobDetailView: View {
     @ViewBuilder private func whenChip(_ job: JobRecord) -> some View {
         if let text = whenText(job) {
             JobHeaderChip(text: text) {
-                Image(systemName: "clock").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.subtle)
-                    .accessibilityHidden(true)
+                PaperIcon(.jobClock, size: 14, color: Theme.muted)
             }
         }
     }
 
     private func whenText(_ job: JobRecord) -> String? {
-        let arrived = isOnSite && outbox.pendingStatus(for: job.id) == nil ? JobFiltering.date(job.arrivedAt) : nil
-        if let arrived { return "Arrived \(arrived.tradeTime)" }
         if let scheduled = JobFiltering.date(job.scheduledFor) {
             return Calendar.current.isDateInToday(scheduled) ? "Today \u{00B7} \(scheduled.tradeTime)" : scheduled.visitLabel()
         }
@@ -1233,7 +1258,7 @@ struct JobDetailView: View {
         return JobHeaderChip(text: text, leadingInset: named == nil ? 12 : 6) {
             if let named {
                 Text(initials(named))
-                    .font(Theme.font(11, weight: .semibold))
+                    .font(Theme.font(11, weight: .semibold)).tracking(-0.22)
                     .foregroundStyle(Theme.brandText)
                     .frame(width: 22, height: 22)
                     .background(Theme.brandSurface, in: Circle())
@@ -1514,7 +1539,8 @@ struct JobDetailView: View {
         // Paper 21: the status chip is tinted with its status (the word in the status's text colour)
         // and leads with the status mark; a chevron when it opens the status popover.
         return JobHeaderChip(text: statusWordText(job, queued: queued, now: now), fill: tone.surface,
-                             textColor: tone.text, showsChevron: showsMenu, leadingInset: 10) {
+                             textColor: tone.text, weight: .semibold, showsChevron: showsMenu,
+                             leadingInset: 12, trailingInset: showsMenu ? 10 : 12) {
             StatusGlyph(tone: tone, label: "", pending: queued != nil, size: 14)
                 .accessibilityHidden(true)
         }
@@ -1524,9 +1550,7 @@ struct JobDetailView: View {
         if let queued {
             return ["arrived", "in_progress"].contains(queued) ? "On site · waiting to sync" : "\(queued.statusLabel) · waiting to sync"
         }
-        if ["arrived", "in_progress"].contains(job.status), let arrived = JobFiltering.date(job.arrivedAt) {
-            return JobOnSiteClock.line(arrived: arrived, now: now)
-        }
+        if let step = JobFieldSteps.step(for: job.status) { return JobFieldSteps.titles[step] }
         return job.status.statusLabel
     }
 
@@ -1574,14 +1598,11 @@ struct JobDetailView: View {
     /// The words on each section: "On site" once arrived, what's owed on Money, how much on Activity.
     private func sectionLabel(_ tab: String, job: JobRecord) -> String {
         switch tab {
-        case "Overview": return isOnSite ? "On site" : "Overview"
-        case "Money":
-            guard let balance = invoiceBalanceCents, balance > 0 else { return "Money" }
-            return "Money · \(jobShortMoney(balance, currency: "USD"))"
+        // Paper 21, 23, 21B: the sections are their words alone (amounts and counts are spoken).
+        case "Overview": return "Overview"
+        case "Money": return "Money"
         case "Photos": return "Photos"
-        default:
-            let count = activityCount(job)
-            return count > 0 ? "Activity · \(count)" : "Activity"
+        default: return "Activity"
         }
     }
 
@@ -1646,11 +1667,7 @@ struct JobDetailView: View {
     /// Paper 21, 21B: Overview and Activity share the job's bar (the next step, then the circles);
     /// Money's bar is the money's own next step.
     @ViewBuilder private var primaryAction: some View {
-        if selectedTab == "Money" {
-            moneyAction
-        } else {
-            overviewBar
-        }
+        overviewBar
     }
 
     /// On site with the work started, the bar is the wrap-up: a status step (Start work, Resume)
@@ -1667,20 +1684,18 @@ struct JobDetailView: View {
     @ViewBuilder private var overviewBar: some View {
         if let job {
             let step = nextStep
-            let circles = HStack(spacing: 8) {
-                if session.can("job.edit", feature: "jobs") { cameraCircle }
-                reachCircles(job)
-            }
+            // Paper 21: the commit, then Call, Text and Directions. The camera is Activity's.
+            let circles = reachCircles(job)
             // Paper F2 and F3 (driving, arrived): the bar is the moment's second action over one
             // full-width 60pt commit. Call, Text and Directions are the screen's own rows there
             // ("Call Danielle", "Open in Maps", the job menu), so the circles are left out.
-            let fieldBar = ["en_route", "arrived"].contains(shownStatus(job)) && !typeSize.isAccessibilitySize
+            let fieldBar = inField(job) && ["en_route", "arrived"].contains(shownStatus(job)) && !typeSize.isAccessibilitySize
             // Paper F4 (working): the same bar, no circles. The camera is the Photo tile; Call and
             // Text are in the job menu, Directions on the Address row.
-            let workingBar = shownStatus(job) == "in_progress" && !typeSize.isAccessibilitySize
+            let workingBar = inField(job) && shownStatus(job) == "in_progress" && !typeSize.isAccessibilitySize
             VStack(spacing: 10) {
                 // Paper F2 to F4: the moment's second action sits over the commit.
-                fieldSecondary(job)
+                if inField(job) { fieldSecondary(job) }
                 if workingBar {
                     if let step {
                         if onSiteWrapsUp { workingCommitButton } else { fieldCommitButton(step) }
@@ -1706,7 +1721,9 @@ struct JobDetailView: View {
                 }
             }
             .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 8)
-            .background(Theme.canvas)
+            // Paper: the bar floats on the canvas, which fades in behind it.
+            .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0), .init(color: Theme.background, location: 0.34)],
+                                       startPoint: .top, endPoint: .bottom).padding(.top, -18).ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
         }
     }
 
@@ -1722,14 +1739,33 @@ struct JobDetailView: View {
                 .buttonStyle(PressStyle())
                 .accessibilityHint("Tells the office why the work can't start")
                 .accessibilityIdentifier("job-cant-start")
-        } else if status == "in_progress", workingCommitShowsEstimate, session.can("job.complete", feature: "jobs") {
+        } else if status == "in_progress", fieldWrapsUp, session.can("invoice.view", feature: "invoicing") {
+            // Paper F5 "Send invoice instead": the invoice itself, to review and send.
+            Button {
+                if let bill = WrapUpList.billingInvoice(invoices) { reviewInvoiceID = bill.id } else { run(.createInvoice) }
+            } label: { secondaryPill("Send invoice instead") }
+                .buttonStyle(PressStyle())
+                .disabled(busy || creatingInvoice)
+                .accessibilityHint("Opens the invoice to send instead of collecting now")
+                .accessibilityIdentifier("job-send-invoice")
+        } else if status == "in_progress", !fieldWrapsUp, session.can("job.complete", feature: "jobs") {
             // Paper F4 "Mark done without estimate": straight to Wrap up, which holds the checks
             // and Complete job.
-            Button { showWrapUp = true } label: { secondaryPill("Mark done without estimate") }
+            Button { withMotion(.snappy) { wrapUpStageOpen = true } } label: { secondaryPill("Mark done without estimate") }
                 .buttonStyle(PressStyle())
-                .accessibilityHint("Opens Wrap up without showing the estimate")
+                .accessibilityHint("Moves on to Wrap up without showing the estimate")
                 .accessibilityIdentifier("job-mark-done")
         }
+    }
+
+    /// Paper F5 "Wrap up": working, with the estimate (when there is one) already answered, or the
+    /// tech having chosen to wrap up without one. Until then the step is Working (F4).
+    private var fieldWrapsUp: Bool {
+        guard onSiteWrapsUp else { return false }
+        if wrapUpStageOpen { return true }
+        let rows = wrapUpRows
+        guard let approval = rows.first(where: { $0.step == .approval }) else { return false }
+        return approval.done
     }
 
     /// True while the working commit is the estimate to hand the customer (Paper F4).
@@ -1839,10 +1875,9 @@ struct JobDetailView: View {
     /// One of the bar's card circles (camera, Call, Text, Directions). Paper draws three at 50pt;
     /// with the camera kept in the bar they are 44 so the commit keeps its words.
     private func barCircle(_ symbol: String, enabled: Bool = true) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 17, weight: .medium))
-            .foregroundStyle(Theme.foreground.opacity(enabled ? 1 : 0.4))
-            .frame(width: 44, height: 44)
+        let glyph: PaperGlyph = symbol == "phone" ? .phone : symbol == "message" ? .message : .navigate
+        return PaperIcon(glyph, size: symbol == "location" ? 18 : 20, color: Theme.foreground.opacity(enabled ? 1 : 0.4))
+            .frame(width: 48, height: 48)
             .background(Theme.card, in: Circle())
             .contentShape(Circle())
     }
@@ -1877,10 +1912,10 @@ struct JobDetailView: View {
             } label: {
                 HStack(spacing: 7) {
                     if busy || creatingInvoice { ProgressView().tint(.white) }
-                    else { Image(systemName: canCompleteHere && next == nil ? "checkmark" : "checkmark.seal").font(.subheadline.weight(.medium)).accessibilityHidden(true) }
-                    commitLabel(rows)
+                    else { PaperIcon(.jobShieldCheck, size: 18, color: .white) }
+                    commitLabel(rows).font(Theme.font(16, weight: .semibold))
                 }
-                .inkCommit()
+                .inkCommit(height: 48)
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
@@ -1891,10 +1926,12 @@ struct JobDetailView: View {
             Button { run(step) } label: {
                 HStack(spacing: 7) {
                     if busy || creatingInvoice { ProgressView().tint(.white) }
-                    else { Image(systemName: step.symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
-                    Text(step.title(resuming: job?.status == "paused"))
+                    else if step == .wrapUp { PaperIcon(.jobShieldCheck, size: 18, color: .white) }
+                    else { Image(systemName: step.symbol).font(.system(size: 15, weight: .semibold)).accessibilityHidden(true) }
+                    Text(step.title(resuming: job?.status == "paused")).font(Theme.font(16, weight: .semibold))
+                        .lineLimit(1).minimumScaleFactor(0.8)
                 }
-                .inkCommit()
+                .inkCommit(height: 48)
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
@@ -1940,9 +1977,12 @@ struct JobDetailView: View {
     /// "Wrap up · 3 left" while rows are open; "Complete job" once the server will take it.
     private func commitTitle(_ rows: [WrapUpRow]) -> String {
         let left = WrapUpList.left(rows)
-        if left > 0 { return "Wrap up · \(left) left" }
+        // Paper 21: the bar's commit is "Wrap up job"; what is left shows in field mode's Wrap up.
+        if left > 0 { return inFieldNow ? "Wrap up · \(left) left" : "Wrap up job" }
         return canCompleteHere ? "Complete job" : "Wrap up job"
     }
+
+    private var inFieldNow: Bool { job.map { inField($0) } ?? false }
 
     /// Completing straight from the bar: the server says it's completable, allows the move and
     /// this role may make it. Otherwise the closeout screen explains what's holding it.
@@ -2013,39 +2053,36 @@ struct JobDetailView: View {
     /// then what to know at this address, the job's description and customer, the people on the
     /// account, the line items, the money and the latest activity. Every other section stays below,
     /// so nothing the Overview had is out of reach. Actions that aren't the bar's next step are in •••.
-    private func overviewContent(_ job: JobRecord) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            // Paper F4 "Working": the on-site timer, the four capture tiles and what was found lead.
-            let working = shownStatus(job) == "in_progress"
-            if working { workingLead(job) }
-            fieldLead(job)
-            if let step = overviewDirectPaymentStep(job), case let .collect(invoiceID, _, _) = step {
-                Button { Task { await collectOverviewInvoice(step) } } label: {
-                    Label("Collect payment · \(jobInvoiceReference(invoiceID))", systemImage: "creditcard")
-                        .font(Theme.font(15, weight: .medium))
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(RowPressStyle())
-                .accessibilityLabel("Collect payment for invoice \(jobInvoiceReference(invoiceID))")
-                .accessibilityIdentifier("job-overview-collect")
-                .disabled(overviewPaymentRefreshing)
+    @ViewBuilder private func overviewContent(_ job: JobRecord) -> some View {
+        if inField(job) { fieldModeContent(job) } else { detailsOverview(job) }
+    }
+
+    /// Paper F2 to F5: field mode is the step's own cards and nothing else. Everything on Job
+    /// details is one tap away in More › Full job details.
+    private func fieldModeContent(_ job: JobRecord) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if shownStatus(job) == "in_progress" {
+                if fieldWrapsUp { fieldWrapUp(job) } else { workingLead(job) }
+            } else {
+                fieldLead(job)
             }
-            if isOnSite {
-                toolkit(job, working: working).id("job-toolkit")
-                wrapUpPanel(job).id("job-wrap-up")
+        }
+    }
+
+    /// Paper 21 Job details, Overview: the field-mode card while the visit is under way, how to get
+    /// in and what to watch for, why the office sent the visit, the checklist, then Details,
+    /// Contacts, Line items and Activity. Past visits, equipment and who was notified are "At this
+    /// address" (Paper 21O, in More); follow-ups, the customer view and photos are in More and
+    /// Activity.
+    private func detailsOverview(_ job: JobRecord) -> some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 12) {
+                fieldModeCard(job)
+                accessCard(job)
+                descriptionCard(job)
+                checklistCard(job)
             }
-            JobPropertyHistorySection(job: job, part: .place, locations: customerLocations,
-                                      locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
-                                      visits: visits, visitsLoaded: visitsLoaded,
-                                      showsFacts: !(inField(job) && accessBanner(job) != nil))
-                .id("job-property-history")
-            // Paper 21: the description is its own card, then Details, Contacts, Line items, Activity.
-            descriptionCard(job)
-            // Working, the Checklist tile above carries the same progress ("5 of 8 done").
-            if !working { checklistCard(job) }
-            customerPanel(job)
+            customerPanel(job).id("job-details")
             if session.can("customer.view", feature: "core_crm") {
                 let current = customerContext(job) != nil && customerContext(job) == contactsContext
                 let canAddContact = current && session.can("customer.edit", feature: "core_crm")
@@ -2057,34 +2094,247 @@ struct JobDetailView: View {
                                    customerName: linkedCustomer(job)?.name,
                                    onAdd: addContact) { await loadContacts(job) }
             }
-            if isOnSite { partsPanel }
-            moneyPanel(job)
+            partsPanel
             latestActivity(job).id("job-latest-activity")
-            photosStrip(job)
-            // Driving, the map leads the screen (`fieldLead`), so it isn't drawn again here.
-            if shownStatus(job) != "en_route" { mapStrip(job) }
-            // Left out once the visits answer with none here, so an empty section adds no gap.
-            if !visitsLoaded || !JobPropertyHistory.make(job: job, locations: [], equipment: [], visits: visits, listedJobs: store.jobs,
-                                                         currentUserID: session.user?.id).visits.isEmpty {
-                JobPropertyHistorySection(job: job, part: .visits, locations: customerLocations,
+        }
+    }
+
+    /// Paper F5 "Wrap up": what is still open before the job can close ("Finish checklist · 3
+    /// left"), the visit in three numbers, and where the customer signs. Each open row goes to
+    /// what completes it; the bar collects.
+    @ViewBuilder private func fieldWrapUp(_ job: JobRecord) -> some View {
+        let rows = wrapUpRows
+        let open = rows.filter { !$0.done && $0.step != .signature && $0.step != .payment }
+        let bill = invoices.first(where: { $0.status == "draft" }) ?? WrapUpList.billingInvoice(invoices)
+        let since = JobFiltering.date(job.arrivedAt) ?? JobFiltering.date(job.startedAt)
+        VStack(alignment: .leading, spacing: 16) {
+            if !open.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Finish checklist").accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 8)
+                        Text("\(open.count) left")
+                    }
+                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4)
+                    VStack(spacing: 0) {
+                        ForEach(Array(open.enumerated()), id: \.element.id) { index, row in
+                            Button { openWrapUpRow(row) } label: {
+                                HStack(spacing: 12) {
+                                    Circle().strokeBorder(Theme.borderStrong, lineWidth: 1.6).frame(width: 32, height: 32)
+                                    HStack(spacing: 8) {
+                                        Text(row.title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        if row.step == .afterPhotos || row.step == .beforePhotos {
+                                            Text("Add photo").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                                .padding(.horizontal, 16).frame(minHeight: 48)
+                                                .background(Theme.brandTint, in: Capsule())
+                                        }
+                                    }
+                                    .padding(.trailing, 12).padding(.vertical, 8)
+                                    .frame(minHeight: 64)
+                                    .overlay(alignment: .top) { if index > 0 { Rectangle().fill(Theme.border).frame(height: 1) } }
+                                }
+                                .padding(.leading, 16)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(row.title)
+                            .accessibilityValue("To do")
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityIdentifier("job-wrap-up-\(row.id)")
+                        }
+                    }
+                    .panelBackground(cornerRadius: Theme.cardRadius)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Summary").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+                VStack(spacing: 0) {
+                    if session.can("invoice.view", feature: "invoicing"), let bill, let total = paperLinesTotal(bill.lines) {
+                        fieldSummaryRow("Parts and labor", value: money(total, currency: bill.currency), first: true)
+                    }
+                    if let since {
+                        TimelineView(.everyMinute) { context in
+                            fieldSummaryRow("Time on site", value: JobOnSiteClock.short(arrived: since, now: context.date))
+                        }
+                    }
+                    if liveMediaCountContext != nil, liveMediaCountContext == mediaCountContext, mediaCount != nil {
+                        let waiting = pendingMedia.items.filter { $0.jobID == jobId && $0.kind == "photo" }.count
+                        fieldSummaryRow("Photos", value: "\(mediaPhotos.count + waiting)\(mediaHasMore ? "+" : "")")
+                    }
+                }
+                .panelBackground(cornerRadius: Theme.cardRadius)
+            }
+            if let signature = rows.first(where: { $0.step == .signature }) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Customer sign-off").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+                    Button { openWrapUpRow(signature) } label: {
+                        VStack(spacing: 6) {
+                            PaperIcon(.jobSignature, size: 28, color: signature.done ? Theme.statusDone : Theme.muted)
+                            Text(signature.done ? "Signed" : "\(customerCallName(job)) signs here")
+                                .font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Theme.borderStrong, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
+                        .padding(12)
+                        .panelBackground(cornerRadius: Theme.cardRadius)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel(signature.done ? "Customer signed" : "\(customerCallName(job)) signs here")
+                    .accessibilityHint("Opens the invoice for the customer's signature")
+                    .accessibilityIdentifier("job-wrap-up-signature")
+                }
+            }
+        }
+        // Paper F5: the first label sits 22 under the steps (the header leaves 14).
+        .padding(.top, 8)
+        .id("job-wrap-up")
+    }
+
+    private func fieldSummaryRow(_ label: String, value: String, first: Bool = false) -> some View {
+        HStack(spacing: 12) {
+            Text(label).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(value).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+        }
+        .padding(.trailing, 16).padding(.vertical, 8)
+        .frame(minHeight: 60)
+        .overlay(alignment: .top) { if !first { Rectangle().fill(Theme.border).frame(height: 1) } }
+        .padding(.leading, 16)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Paper 21 "Field mode · Working": where the visit is on field mode's five steps, and the
+    /// way back into it.
+    @ViewBuilder private func fieldModeCard(_ job: JobRecord) -> some View {
+        if onVisit(job), let step = JobFieldSteps.step(for: shownStatus(job)) {
+            let shown = shownStatus(job) == "in_progress" && fieldWrapsUp ? 3 : step
+            Button { withMotion(.snappy) { fieldModeOpen = true; selectedTab = "Overview" } } label: {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Field mode \u{00B7} \(JobFieldSteps.titles[shown])")
+                            .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: 4) {
+                            ForEach(0..<JobFieldSteps.titles.count, id: \.self) { index in
+                                Capsule().fill(index < shown ? Theme.statusDone : index == shown ? Theme.brand : Theme.foreground.opacity(0.12))
+                                    .frame(height: 4)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("Resume")
+                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 44)
+                        .background(Theme.brandTint, in: Capsule())
+                }
+                .padding(.vertical, 12).padding(.leading, 16).padding(.trailing, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground(cornerRadius: Theme.cardRadius)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            // Paper: the next card sits 16 under this one (12 between the others).
+            .padding(.bottom, 4)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Field mode, \(JobFieldSteps.titles[shown]), step \(shown + 1) of \(JobFieldSteps.titles.count)")
+            .accessibilityHint("Resumes field mode")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("job-field-mode-card")
+        }
+    }
+
+    /// Paper 21: how to get in (the codes, under a key) and what to watch for (the site's notes,
+    /// under a warning triangle in the warning tone), each on one 16 Medium line.
+    @ViewBuilder private func accessCard(_ job: JobRecord) -> some View {
+        if let banner = accessBanner(job) {
+            let codes = banner.headline
+            let notes = banner.facts.filter { $0.label == "Site notes" }.map(\.value)
+            if !codes.isEmpty || !notes.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !codes.isEmpty { accessRow(.jobKey, text: codes, color: Theme.foreground) }
+                    ForEach(notes, id: \.self) { note in accessRow(.jobWarning, text: note, color: Theme.warning) }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground(cornerRadius: Theme.cardRadius)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("job-access-card")
+            }
+        }
+    }
+
+    private func accessRow(_ glyph: PaperGlyph, text: String, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            PaperIcon(glyph, size: 20, color: color).frame(width: 24, height: 24)
+                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 6 }
+            Text(text).font(Theme.font(16, weight: .medium)).foregroundStyle(color)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Paper 21O "At this address": past visits, the equipment on file and who was notified, on a
+    /// screen of their own (More › At this address). The job's other records with no place on
+    /// Paper's Overview (service addresses, membership, the booking call, follow-ups and the
+    /// record's own dates) follow them here.
+    private func atAddressScreen(_ job: JobRecord) -> some View {
+        let history = JobPropertyHistory.make(job: job, locations: [], equipment: [], visits: visits, listedJobs: store.jobs,
+                                              currentUserID: session.user?.id)
+        let count = history.visits.count
+        let subtitle = [street(job), visitsLoaded ? "\(count) \(count == 1 ? "visit" : "visits")" : nil].compactMap { $0 }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("At this address").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    if !subtitle.isEmpty {
+                        Text(subtitle.joined(separator: " \u{00B7} ")).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 4)
+                if !visitsLoaded || count > 0 {
+                    JobPropertyHistorySection(job: job, part: .visits, locations: customerLocations,
+                                              locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
+                                              visits: visits, visitsLoaded: visitsLoaded)
+                }
+                JobPropertyHistorySection(job: job, part: .place, locations: customerLocations,
                                           locationsLoaded: customerContext(job) != nil && customerContext(job) == locationsContext,
                                           visits: visits, visitsLoaded: visitsLoaded)
+                JobNoticesSection(jobID: job.id)
+                if let bookingCall { JobBookingCallSection(call: bookingCall) }
+                if session.can("customer.view", feature: "core_crm") {
+                    let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
+                    JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
+                                               loaded: placesCurrent, failed: locationsFailed,
+                                               headerStreet: displayTitle(job),
+                                               factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
+                }
+                CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
+                followUpsPanel
+                detailsGroup(job)
             }
-            followUpsPanel
-            // Web parity: whether the booking and on-the-way notices reached the customer.
-            JobNoticesSection(jobID: job.id)
-            // JS-05: only when the platform recorded the call that booked this job.
-            if let bookingCall { JobBookingCallSection(call: bookingCall) }
-            if session.can("customer.view", feature: "core_crm") {
-                let placesCurrent = customerContext(job) != nil && customerContext(job) == locationsContext
-                JobServiceAddressesSection(customerID: job.customerId, places: customerLocations,
-                                           loaded: placesCurrent, failed: locationsFailed,
-                                           headerStreet: displayTitle(job),
-                                           factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
-            }
-            CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
-            detailsGroup(job).id("job-details")
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 28)
         }
+        .background(Theme.canvas)
+        .foregroundStyle(Theme.foreground)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.canvas, for: .navigationBar)
+        .accessibilityIdentifier("job-at-address")
     }
 
     /// The drive to the job's place while it is still ahead, on a card (it was under the header).
@@ -2133,7 +2383,8 @@ struct JobDetailView: View {
         if status == "arrived" {
             youAreHere(job)
         }
-        if inField(job), let banner = fieldBanner(job, status: status) {
+        // Paper F2 draws no banner while driving (the codes ride in the call card); F3 leads with it.
+        if status == "arrived", let banner = fieldBanner(job, status: status) {
             banner
         }
         if status == "arrived" {
@@ -2358,7 +2609,7 @@ struct JobDetailView: View {
             if let address = detailsAddress(job) {
                 if let url = jobDirectionsURL(job) {
                     Button { openURL(url) } label: {
-                        detailValueRow("Address", value: address, valueColor: Theme.brandText, symbol: "arrow.up.right",
+                        detailValueRow("Address", value: address, valueColor: Theme.brandText, glyph: .jobArrowOut,
                                        symbolColor: Theme.brandText)
                     }
                     .buttonStyle(RowPressStyle())
@@ -2366,36 +2617,18 @@ struct JobDetailView: View {
                     .accessibilityHint("Opens driving directions in Maps")
                     .accessibilityIdentifier("job-details-address")
                 } else {
-                    detailValueRow("Address", value: address, symbol: nil)
+                    detailValueRow("Address", value: address)
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("job-details-address")
                 }
             }
             if let equipmentLine = equipmentLine(job) {
-                detailValueRow("Equipment", value: equipmentLine, symbol: nil)
-                    .accessibilityElement(children: .combine)
+                Button { showAtAddress = true } label: { detailValueRow("Equipment", value: equipmentLine, glyph: .jobUpDown) }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityLabel("Equipment, \(equipmentLine)")
+                    .accessibilityHint("Opens the equipment at this address")
                     .accessibilityIdentifier("job-details-equipment")
             }
-            // Hands the phone to the customer for their estimates, invoices and details.
-            Button { openCustomerView(.home) } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "iphone").font(.system(size: 16, weight: .medium)).frame(width: 36)
-                        .accessibilityHidden(true)
-                    Text("Show customer").font(Theme.font(15, weight: .medium))
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
-                }
-                .foregroundStyle(Theme.foreground.opacity(canOpenCustomerView ? 1 : 0.4))
-                .padding(.horizontal, 16).padding(.vertical, 10)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(RowPressStyle())
-            .disabled(!canOpenCustomerView)
-            .accessibilityLabel("Show customer")
-            .accessibilityHint("Hands the device to the customer for their estimates, invoices and details")
-            .accessibilityIdentifier("job-customer-view")
             if job.pauseReason != nil || job.pauseNextAction != nil {
                 VStack(alignment: .leading, spacing: 3) {
                     JobStatusWord(word: "Paused", color: Theme.warning)
@@ -2443,7 +2676,7 @@ struct JobDetailView: View {
             Button { showChecklist = true } label: {
                 HStack(spacing: 12) {
                     ZStack {
-                        Circle().stroke(Theme.fill, lineWidth: 3)
+                        Circle().stroke(Theme.foreground.opacity(0.12), lineWidth: 3)
                         Circle().trim(from: 0, to: CGFloat(done) / CGFloat(total))
                             .stroke(Theme.brandText, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                             .rotationEffect(.degrees(-90))
@@ -2453,15 +2686,14 @@ struct JobDetailView: View {
                     .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Checklist \u{00B7} \(done) of \(total)")
-                            .font(Theme.font(16, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
+                            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(next.map { "Next: \($0.label)" } ?? "All done")
                             .font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
+                    PaperIcon(.jobChevronRight, size: 16, color: Theme.muted).frame(width: 24, height: 24)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
@@ -2478,7 +2710,7 @@ struct JobDetailView: View {
     /// Paper 21's Details rows: the label on the left in the marker grey, the value right-aligned
     /// at 15 Medium, an optional mark after it. At accessibility sizes the value reads under its label.
     private func detailValueRow(_ label: String, value: String, valueColor: Color = Theme.foreground,
-                                symbol: String?, symbolColor: Color = Theme.muted) -> some View {
+                                glyph: PaperGlyph? = nil, symbolColor: Color = Theme.borderStrong) -> some View {
         let stacked = typeSize.isAccessibilitySize
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
                              : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
@@ -2491,10 +2723,7 @@ struct JobDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: stacked ? .leading : .trailing)
             }
-            if let symbol {
-                Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(symbolColor)
-                    .accessibilityHidden(true)
-            }
+            if let glyph { PaperIcon(glyph, size: 16, color: symbolColor) }
         }
         .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
@@ -2502,7 +2731,7 @@ struct JobDetailView: View {
     }
 
     private func customerRow(_ job: JobRecord, name: String, opens: Bool) -> some View {
-        detailValueRow("Customer", value: name, symbol: opens ? "chevron.right" : nil)
+        detailValueRow("Customer", value: name, glyph: opens ? .jobUpDown : nil)
             // The name leads what is spoken, as it led the row before.
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(name)
@@ -2623,21 +2852,40 @@ struct JobDetailView: View {
                 JobPanelRow(title: "Nothing yet", subtitle: "Notes, status changes and photos show up here.", titleSize: 15)
             }
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, entry in
-                timelineRow(entry, showsDay: true, isFirst: index == 0, isLast: index == shown.count - 1)
+                latestActivityRow(entry)
                 if index == 0, hidden > 0 { showAllActivityRow(hidden) }
             }
         }
+    }
+
+    /// Paper 21's Activity rows: an 8pt dot, then what happened and when on one 15pt line
+    /// ("Ramon marked Driving · 24 min ago"), 56 tall. The row opens Activity.
+    private func latestActivityRow(_ entry: TimelineEntry) -> some View {
+        let when = Calendar.current.isDateInToday(entry.date) && Date().timeIntervalSince(entry.date) < 3600 && Date() >= entry.date
+            ? "\(max(1, Int(Date().timeIntervalSince(entry.date) / 60))) min ago" : timeLabel(entry.date, showsDay: true)
+        return Button { activityFilter = "All"; withMotion(.snappy) { selectedTab = "Activity" } } label: {
+            HStack(spacing: 12) {
+                Circle().fill(Theme.borderStrong).frame(width: 8, height: 8).frame(width: 20)
+                Text("\(entry.title) \u{00B7} \(when)")
+                    .font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityLabel("\(entry.title), \(when)")
+        .accessibilityHint("Opens Activity")
     }
 
     /// Paper 21 "Show 9 activity items": opens Activity with everything showing.
     private func showAllActivityRow(_ hidden: Int) -> some View {
         Button { activityFilter = "All"; withMotion(.snappy) { selectedTab = "Activity" } } label: {
             HStack(spacing: 12) {
-                Image(systemName: "ellipsis").font(.system(size: 14, weight: .medium))
-                    .rotationEffect(.degrees(90))
-                    .foregroundStyle(Theme.muted)
-                    .frame(width: 20)
-                    .accessibilityHidden(true)
+                PaperIcon(.jobDotsVertical, size: 16, color: Theme.muted).frame(width: 20)
                 Text("Show \(hidden) activity \(hidden == 1 ? "item" : "items")")
                     .font(Theme.font(15, weight: .medium))
                     .foregroundStyle(Theme.brandText)
@@ -3082,16 +3330,13 @@ struct JobDetailView: View {
                         .accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 8)
                     Text("\(count) \(count == 1 ? "item" : "items")")
-                        .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
                 .padding(.horizontal, 4)
-                .frame(minHeight: 26)
                 if editable {
                     Button { partsInvoice = bill } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: "plus").font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(Theme.brandText)
-                                .accessibilityHidden(true)
+                            PaperIcon(.plusLight, size: 18, color: Theme.brandText)
                             Text("Add from price book or custom")
                                 .font(Theme.font(16)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -3107,7 +3352,7 @@ struct JobDetailView: View {
                 }
                 JobPanel {
                     ForEach(bill.lines) { line in
-                        lineItemRow(line)
+                        lineItemRow(line, edit: editable ? { partsInvoice = bill } : nil)
                     }
                 }
                 if let total = paperLinesTotal(bill.lines) {
@@ -3115,7 +3360,7 @@ struct JobDetailView: View {
                         Text("Total").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                         Spacer(minLength: 8)
                         Text(money(total, currency: bill.currency))
-                            .font(Theme.font(22, weight: .bold)).monospacedDigit()
+                            .font(Theme.font(22, weight: .bold)).monospacedDigit().tracking(-0.44)
                             .foregroundStyle(Theme.foreground)
                             .lineLimit(1).minimumScaleFactor(0.7)
                     }
@@ -3131,23 +3376,47 @@ struct JobDetailView: View {
 
     /// Paper 21: one line of the job's bill. The line at 16 Medium over "2 × $185.00" at 14, its
     /// amount on the right. One VoiceOver stop per line.
-    private func lineItemRow(_ line: FieldLine) -> some View {
+    private func lineItemRow(_ line: FieldLine, edit: (() -> Void)? = nil) -> some View {
+        // Paper 21: the line at 16 Medium over where it came from and its price each ("Price book ·
+        // $185.00"), then the quantity on a 44pt capsule between Remove and Add. Quantities are
+        // changed in the invoice's line editor, so the capsule opens it.
         let each = money(line.unitPrice.amount, currency: line.unitPrice.currency)
         let amount = JobInvoiceLineRows.amount(line).map { money($0, currency: line.unitPrice.currency) }
+        let source = line.source?.priceBookItemId != nil ? "Price book" : "Custom"
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(line.description).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("\(line.quantity) \u{00D7} \(each)").font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text("\(source) \u{00B7} \(each)").font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(amount ?? "\u{2014}").font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .lineLimit(1)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(line.description), quantity \(line.quantity)\(amount.map { ", \($0)" } ?? "")")
+            if let edit {
+                Button(action: edit) {
+                    HStack(spacing: 0) {
+                        PaperIcon(.jobTrash, size: 16, color: Theme.destructive).frame(width: 44, height: 44)
+                        Text("\(line.quantity)").font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                            .foregroundStyle(Theme.foreground).frame(minWidth: 18)
+                        PaperIcon(.jobStepPlus, size: 14, color: Theme.foreground).frame(width: 44, height: 44)
+                    }
+                    .background(Theme.quietFill, in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Quantity \(line.quantity)")
+                .accessibilityHint("Opens the line editor to change or remove this line")
+            } else {
+                Text("\(line.quantity)").font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(Theme.foreground)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .background(Theme.quietFill, in: Capsule())
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(line.description), quantity \(line.quantity)\(amount.map { ", \($0)" } ?? "")")
     }
 
     /// Each wrap-up row goes where its fact is made; a done row opens it to look again.
@@ -3295,10 +3564,6 @@ struct JobDetailView: View {
                     .disabled(documents.loadingEstimatePage)
                     .accessibilityIdentifier("job-load-more-estimates")
                 }
-                // When the bar is busy with the invoice, the estimates' customer door stays here, quieter.
-                if !jobEstimates.isEmpty, (!moneyBarIsCustomerView || typeSize.isAccessibilitySize), canOpenCustomerView {
-                    showCustomerEstimatesButton
-                }
             }
         }
         .task(id: "\(job.id)|\(job.organizationId)|\(job.customerId)|\(job.estimateId ?? "")") {
@@ -3349,9 +3614,7 @@ struct JobDetailView: View {
     private var addEstimateRow: some View {
         Button(action: buildEstimate) {
             HStack(spacing: 12) {
-                Image(systemName: "plus").font(.system(size: 16, weight: .medium))
-                    .frame(width: 20)
-                    .accessibilityHidden(true)
+                PaperIcon(.jobPlus, size: 18, color: Theme.brandText).frame(width: 20)
                 Text("Add an estimate").font(Theme.font(16, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -3538,7 +3801,9 @@ struct JobDetailView: View {
                         invoiceCard(invoice, job: job)
                     }
                 }
-                // Paper 24 "Payments": what has been paid on the invoice the bar collects for.
+                // Paper 24 "Line items": the one invoice's lines, 22 under its card.
+                if invoices.count == 1 { partsPanel.padding(.top, 7) }
+                // Paper 24 "Payments": what has been paid on the invoice.
                 invoicePaymentsSection.padding(.top, 7)
                 // Paper 24 "Activity": the invoice's own trail (created, sent), when the job has one
                 // invoice and this person may read it. The section stays out when the read is refused.
@@ -3586,11 +3851,13 @@ struct JobDetailView: View {
             if let step {
                 // Paper 24: Collect payment is a brand-surface pill in the invoice's card.
                 Button { run(step) } label: {
-                    Label("Collect payment", systemImage: "creditcard")
-                        .font(Theme.font(16, weight: .semibold))
+                    HStack(spacing: 8) {
+                        PaperIcon(.jobCard, size: 18, color: Theme.brandText)
+                        Text("Collect payment").font(Theme.font(16, weight: .semibold))
+                    }
                         .foregroundStyle(Theme.brandText)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.brandSurface, in: Capsule())
+                        .background(Theme.brandTint, in: Capsule())
                         .padding(.horizontal, 18).padding(.bottom, 18)
                         .contentShape(Rectangle())
                 }
@@ -3598,8 +3865,8 @@ struct JobDetailView: View {
                 .accessibilityLabel("Collect payment for invoice \(reference)")
                 .accessibilityIdentifier("job-invoice-collect-\(invoice.id)")
             }
-            if !invoice.lines.isEmpty, fresh {
-                JobInvoiceItemsDisclosure(invoice: invoice, reference: reference, startsExpanded: invoices.count == 1)
+            if !invoice.lines.isEmpty, fresh, invoices.count > 1 {
+                JobInvoiceItemsDisclosure(invoice: invoice, reference: reference, startsExpanded: false)
             }
         }
     }
@@ -3748,12 +4015,12 @@ struct JobDetailView: View {
                                isFirst: isFirst, isLast: isLast, verticalPadding: 12, disc: true) {
             VStack(alignment: .leading, spacing: 8) {
                 layout {
-                    Text(entry.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text(entry.title).font(Theme.font(15)).foregroundStyle(Theme.subtle)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .layoutPriority(-1)
                     Text(timeLabel(entry.date, showsDay: showsDay))
-                        .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .fixedSize()
                 }
                 .frame(minHeight: 32)
@@ -3818,10 +4085,10 @@ struct JobDetailView: View {
                     .frame(minHeight: 44)
                     .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .accessibilityIdentifier("job-note-field")
-                composerDictateButton
+                if noteFocused || dictation.isListening || !note.isEmpty { composerDictateButton }
                 if !canSaveNote, !busy, session.can("job.edit", feature: "jobs") {
                     Button { openCapture(.camera(stage: nil)) } label: {
-                        Image(systemName: "camera").font(.system(size: 18, weight: .regular)).foregroundStyle(Theme.subtle)
+                        PaperIcon(.jobCamera, size: 22, color: Theme.subtle)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
@@ -3832,7 +4099,7 @@ struct JobDetailView: View {
                 Button { dictation.stop(); Task { await saveNote() } } label: {
                     Group {
                         if busy { ProgressView().tint(.white) }
-                        else { Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)) }
+                        else { PaperIcon(.jobSend, size: 16, color: .white) }
                     }
                     .foregroundStyle(Color.white)
                     .frame(width: 40, height: 40)
@@ -4776,8 +5043,10 @@ private struct JobHeaderChip<Leading: View>: View {
     var fill: Color = Theme.card
     var textColor: Color = Theme.subtle
     /// A chevron after the words, for a chip that opens a menu.
+    var weight: Font.Weight = .medium
     var showsChevron = false
     var leadingInset: CGFloat = 12
+    var trailingInset: CGFloat = 12
     @ViewBuilder var leading: Leading
     @Environment(\.dynamicTypeSize) private var typeSize
 
@@ -4785,20 +5054,16 @@ private struct JobHeaderChip<Leading: View>: View {
         HStack(spacing: 6) {
             leading
             Text(text)
-                .font(Theme.font(14, weight: .medium))
-                .monospacedDigit()
+                .font(Theme.font(14, weight: weight))
                 .foregroundStyle(textColor)
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             if showsChevron {
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(textColor)
-                    .accessibilityHidden(true)
+                PaperIcon(.chevronDown, size: 12, color: textColor)
             }
         }
-        .padding(.leading, leadingInset).padding(.trailing, 12).padding(.vertical, 6)
+        .padding(.leading, leadingInset).padding(.trailing, trailingInset).padding(.vertical, 6)
         .frame(minHeight: 40)
         .background(fill, in: Capsule())
         .contentShape(Capsule())

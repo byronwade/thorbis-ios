@@ -2080,6 +2080,18 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 listed[index]["startedAt"] = formatter.string(from: arrived.addingTimeInterval(3 * 60))
                 listed[index]["allowedTransitions"] = PaperPreview.onSiteDone ? ["paused", "completed"] : ["paused"]
             }
+            // `--paper-preview-field-step driving|arrived|working`: field mode's earlier steps (Paper F2 to F4).
+            if let flag = arguments.firstIndex(of: "--paper-preview-field-step"), arguments.indices.contains(flag + 1) {
+                let now = Date()
+                let formatter = ISO8601DateFormatter()
+                let step = arguments[flag + 1]
+                listed[index]["dispatchedAt"] = formatter.string(from: now.addingTimeInterval(-60 * 60))
+                listed[index]["enRouteAt"] = formatter.string(from: now.addingTimeInterval(-24 * 60))
+                listed[index]["arrivedAt"] = step == "driving" ? nil : formatter.string(from: now.addingTimeInterval(-4 * 60))
+                listed[index]["startedAt"] = step == "working" ? formatter.string(from: now.addingTimeInterval(-2 * 60)) : nil
+                listed[index]["status"] = step == "driving" ? "en_route" : step == "arrived" ? "arrived" : "in_progress"
+                listed[index]["allowedTransitions"] = step == "driving" ? ["arrived", "paused"] : step == "arrived" ? ["in_progress", "paused"] : ["paused"]
+            }
         }
         if PaperPreview.screen == "customer-jobs" { listed += propertyHistoryJobs() }
         if PaperPreview.screen == "dispatch-board" {
