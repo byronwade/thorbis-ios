@@ -121,10 +121,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
     func testLongInvoiceHeadingActionAtLargestText() {
         let app = launch(["--paper-preview-long-catalog-sections", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         let add = app.buttons["invoice-add-item"]
-        for _ in 0..<8 where !add.exists { app.swipeUp() }
-        XCTAssertTrue(add.waitForExistence(timeout: 10))
-        for _ in 0..<8 where !add.isHittable { app.swipeUp() }
-        XCTAssertTrue(add.isHittable)
+        reveal(add, in: app)
         XCTAssertGreaterThanOrEqual(add.frame.height, 44)
         add.tap()
         XCTAssertTrue(app.textFields["invoice-catalog-search"].waitForExistence(timeout: 10))
@@ -171,10 +168,22 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         return String(fields.firstMatch.identifier.dropFirst("invoice-line-description-".count))
     }
 
+    /// Scrolls `element` clear of the pinned Save draft / Issue invoice bar. At accessibility sizes
+    /// that bar covers the lower third of the sheet, and a control under it still reports hittable.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
-        for _ in 0..<8 where !element.isHittable { app.swipeUp() }
-        XCTAssertTrue(element.isHittable, app.debugDescription)
+        let bar = app.buttons["Save draft"]
+        func clear() -> Bool {
+            guard element.isHittable else { return false }
+            return !bar.exists || element.frame.maxY <= bar.frame.minY - 4
+        }
+        for _ in 0..<14 where !clear() {
+            // A held drag has no momentum, so the control cannot be flung past the viewport.
+            let below = !bar.exists || element.frame.maxY > bar.frame.minY - 4
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: below ? 0.55 : 0.35))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: below ? 0.35 : 0.55)))
+        }
+        XCTAssertTrue(clear(), app.debugDescription)
     }
 
     func testCatalogAddsDistinctLinesAndOpensTheLastForEditing() {

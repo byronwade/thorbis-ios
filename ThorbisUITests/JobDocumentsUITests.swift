@@ -705,12 +705,15 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(next.frame.intersection(choose.frame).isEmpty)
         XCTAssertLessThanOrEqual(previous.frame.height, 80, "Paging should reflow instead of wrapping a word into pieces")
         XCTAssertLessThanOrEqual(app.staticTexts["customer-document-position"].frame.height, 75)
-        let description = app.staticTexts.matching(NSPredicate(format: "label == %@", "Compressor diagnostic")).firstMatch
+        // The staff job screen stays in the tree under Customer view and lists the same line, so
+        // the words are read from the customer's own pages.
+        let pages = app.collectionViews["customer-document-pages"]
+        let description = pages.staticTexts.matching(NSPredicate(format: "label == %@", "Compressor diagnostic")).firstMatch
         XCTAssertTrue(description.exists)
         capture(app, "Accessible customer invoice lines")
         // Either the description has the readable column's width, or it has a line of its own with
         // the price under it (the iPad's 720pt column: the words are shorter than the room).
-        let price = app.staticTexts.matching(NSPredicate(format: "label == %@", "$120.00")).firstMatch
+        let price = pages.staticTexts.matching(NSPredicate(format: "label == %@", "$120.00")).firstMatch
         let stacked = price.exists && price.frame.minY >= description.frame.maxY - 1
         XCTAssertTrue(stacked || description.frame.width >= min(app.frame.width, 760) * 0.6,
                       "Large descriptions need a readable column instead of squeezing beside a fixed price: \(description.frame), price \(price.frame)")

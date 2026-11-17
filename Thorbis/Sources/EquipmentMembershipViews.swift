@@ -253,7 +253,7 @@ struct EquipmentEditor: View {
                 .padding(.horizontal, 100)
             HStack {
                 Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text("Cancel").font(Theme.font(16, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 16).frame(minHeight: 44)
                         .background(Theme.card, in: Capsule())
                         .contentShape(Capsule())
@@ -272,7 +272,7 @@ struct EquipmentEditor: View {
                 } label: {
                     HStack(spacing: 6) {
                         if busy { ProgressView().tint(.white) }
-                        Text("Save").font(Theme.font(16, weight: .semibold))
+                        Text("Save").font(Theme.font(16, weight: .semibold)).lineLimit(1).fixedSize()
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18).frame(minHeight: 44)
@@ -286,6 +286,9 @@ struct EquipmentEditor: View {
             }
         }
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        // A title row is a bar: it stops growing at xLarge so the pills never break mid-word and
+        // the title keeps its room. The form under it follows the reader's text size in full.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 
     /// One Paper card: the card tone, radius 20, rows separated by an inset hairline.

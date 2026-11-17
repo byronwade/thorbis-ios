@@ -376,7 +376,9 @@ final class CustomerDocumentBookUITests: XCTestCase {
         // The staff job screen stays in the tree under Customer view and lists the estimate as "Sent"
         // in its Money section, so the status is read from the customer's own page.
         let pages = app.collectionViews["customer-document-pages"]
-        XCTAssertTrue(pages.staticTexts["Status needs refresh"].waitForExistence(timeout: 15))
+        // An approval with no verified receipt hides the estimate's name and status altogether.
+        XCTAssertTrue(pages.staticTexts["This copy needs a refresh before you can decide."].waitForExistence(timeout: 15))
+        XCTAssertFalse(pages.staticTexts["Approved"].exists)
         XCTAssertFalse(pages.staticTexts["Sent"].exists)
         XCTAssertFalse(app.buttons["customer-book-review-sign"].exists)
     }

@@ -1029,7 +1029,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertNotNil(back); back?.tap()
         XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
         ownerExit(app).tap()
-        waitHittable(thorbisShowCustomerDoor(app))
+        // At this size the door scrolls with the page, and both estimates sit above it again.
+        let door = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !door.isHittable { app.swipeUp() }
+        XCTAssertTrue(door.isHittable)
     }
     func testSelectedReviewShowsCanonicalDiscountBreakdown() {
         let app = open(["--paper-preview-handoff-discount", "--paper-preview-handoff-hide-controls"])
@@ -1117,7 +1121,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         // At accessibility sizes the section row is one pinned chooser (a40f825), not tabs.
         let tabs = app.buttons["job-section-chooser"]
         XCTAssertTrue(tabs.exists)
-        XCTAssertTrue(tabs.label.contains("Estimates"))
+        XCTAssertTrue(tabs.label.contains("Money"))
         // At accessibility sizes Present scrolls with the content (a40f825) instead of pinning
         // above the bottom edge, so the card must fit between the pinned chooser and the screen's
         // bottom; while Present is still pinned below the card, it must clear that too.

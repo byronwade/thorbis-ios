@@ -28,8 +28,10 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
-        XCTAssertTrue(invoice.label.contains("$150.00"))
-        XCTAssertTrue(invoice.label.contains("due"), invoice.label)
+        // The row settles once the invoice's payments arrive; read it after that.
+        let settled = expectation(for: NSPredicate(format: "label CONTAINS %@", "due"), evaluatedWith: invoice)
+        wait(for: [settled], timeout: 10)
+        XCTAssertTrue(invoice.label.contains("$150.00"), invoice.label)
         XCTAssertFalse(invoice.label.contains("Unpaid"), invoice.label)
         invoice.tap()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))

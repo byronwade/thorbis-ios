@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-17-sheet-titles",
+            date: "2026-11-17",
+            highlights: [
+                .init(symbol: "textformat.size", title: "Sheet titles at large text",
+                      detail: "On New customer, Add equipment and Add property, Cancel and Save stay on one line at the largest text sizes."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-17-customer-pages-open",
             date: "2026-11-17",
             highlights: [

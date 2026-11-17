@@ -33,13 +33,20 @@ final class SavedWorkReviewUITests: XCTestCase {
         let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); screen.name = "Full screen " + name
         screen.lifetime = .keepAlways; add(screen)
     }
+    /// Brings `element` above the pinned Send now / Keep working bar (Paper 73B). A row under that
+    /// bar still reports hittable, and a tap on it lands on Send now.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        let scroll = app.scrollViews["saved-work-review"]
-        for _ in 0..<6 {
-            if element.exists && element.isHittable { return }
-            scroll.swipeUp()
+        let bar = app.buttons["saved-work-sync"]
+        func clear() -> Bool {
+            guard element.exists, element.isHittable else { return false }
+            return !bar.exists || element.frame.maxY <= bar.frame.minY - 4 || element.frame.minY >= bar.frame.maxY
         }
-        XCTAssertTrue(element.isHittable)
+        for _ in 0..<10 where !clear() {
+            // A held drag has no momentum, so the row cannot be flung past the viewport.
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        }
+        XCTAssertTrue(clear(), app.debugDescription)
     }
     func testDrawerOpensScopedSavedWorkWithCommandsAndMedia() {
         continueAfterFailure = false
@@ -168,11 +175,15 @@ final class SavedWorkReviewUITests: XCTestCase {
     func testWorkspaceChangeRetiresOpenDiscardConfirmation() {
         let app = open(["--paper-preview-saved-work-controls"])
         app.buttons["Sample controls"].tap()
-        app.buttons["Switch sample workspace shortly"].tap()
+        // The sample switch fires five seconds after its tap, so the row is found first and the
+        // question is opened straight after.
         let dismiss = app.buttons["saved-work-dismiss-00000000-0000-4000-8000-000000009711"]
-        reveal(dismiss, in: app); dismiss.tap()
+        reveal(dismiss, in: app)
+        app.buttons["Switch sample workspace shortly"].tap()
+        dismiss.tap()
+        // The question is up when the switch lands about a second later; asking whether Discard can
+        // be tapped in that second races the sheet leaving.
         XCTAssertTrue(app.discardQuestion.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Discard"].isHittable)
         XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 15))
         XCTAssertFalse(app.buttons["Discard"].exists)
         XCTAssertFalse(app.buttons["saved-work-summary"].exists)

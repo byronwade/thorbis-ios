@@ -88,7 +88,11 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.thorbisTapCentre(workspace)
         let settings = app.buttons.matching(NSPredicate(format: "label == %@", "Settings")).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        app.thorbisTapCentre(settings)
+        // At this size the rows outgrow the menu, so Settings starts below its fold.
+        let menu = app.popovers.firstMatch
+        for _ in 0..<6 where !settings.isHittable && menu.exists { menu.swipeUp() }
+        XCTAssertTrue(settings.isHittable, "Settings must be reachable by scrolling the menu")
+        settings.tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10)
                       || app.buttons["Sign out"].waitForExistence(timeout: 5),
                       "Settings must open from the workspace menu")

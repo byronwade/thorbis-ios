@@ -103,7 +103,7 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         let menus = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Options for "))
         func lowerMenu() -> XCUIElement? {
             let floor = newJob.exists ? newJob.frame.minY - 8 : window.maxY - 60
-            return menus.allElementsBoundByIndex.first { $0.isHittable && $0.frame.midY > window.midY && $0.frame.maxY < floor }
+            return menus.allElementsBoundByIndex.first { $0.frame.midY > window.midY && $0.frame.maxY < floor && $0.isHittable }
         }
         for _ in 0..<20 where lowerMenu() == nil {
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))

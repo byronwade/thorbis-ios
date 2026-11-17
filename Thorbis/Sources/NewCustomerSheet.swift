@@ -166,7 +166,7 @@ struct NewCustomerSheet: View {
         // Paper's row is justify-between: a long "Save customer" pill leaves the title less room.
         HStack(spacing: 8) {
                 Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text("Cancel").font(Theme.font(16, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 16).frame(minHeight: 44)
                         .background(Theme.card, in: Capsule())
                         .contentShape(Capsule())
@@ -180,7 +180,7 @@ struct NewCustomerSheet: View {
                 Button { Task { await commit() } } label: {
                     HStack(spacing: 6) {
                         if busy { ProgressView().tint(.white) }
-                        Text("Save customer").font(Theme.font(16, weight: .semibold))
+                        Text("Save customer").font(Theme.font(16, weight: .semibold)).lineLimit(1).fixedSize()
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18).frame(minHeight: 44)
@@ -195,6 +195,9 @@ struct NewCustomerSheet: View {
                 .accessibilityIdentifier("sheet-commit")
         }
         .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        // A title row is a bar: it stops growing at xLarge so the pills never break mid-word and
+        // the title keeps its room. The form under it follows the reader's text size in full.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 
     /// "How they found us" with the answer trailing in the muted ink and a quiet chevron, 56 tall.
