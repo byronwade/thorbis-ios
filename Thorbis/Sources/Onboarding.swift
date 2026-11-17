@@ -1254,21 +1254,36 @@ struct BusinessSetupView: View {
         if step == .team { inviting = true } else { opened = step }
     }
 
-    /// Paper 61 / 61N: Company, Payments, Operations, Team and access. Every row is a place the
-    /// app has; a setup step that is not finished says "To do" beside its chevron.
+    /// Paper 61N: Company (profile, what customers see), Payments, Operations (price book, hours,
+    /// checklists, notification rules, workflows), Team and access. Every row is a place the app
+    /// has; a setup step that is not finished says "To do" beside its chevron.
     @ViewBuilder
     private func settingsGroups(_ steps: [BusinessSetupModel.Step], current: Bool) -> some View {
         let hasHours = OperatingFacts.offered(profile.profile)
         let hasNotices = MenuItem.notices.permitted(session)
+        // Each row is gated on what its page reads: company settings, or the jobs closeout policy.
+        let editsSettings = session.can("organization.settings.edit")
+        let hasChecklists = session.can("job.view", feature: "jobs")
+        let divider = WellDivider(leading: PaperCardMetrics.inset + 38)
         VStack(alignment: .leading, spacing: 20) {
-            if steps.contains(.details) {
+            if steps.contains(.details) || editsSettings {
                 PaperSection("Company") {
-                    Button { open(.details) } label: {
-                        settingsRow(symbol: "building.2", title: "Company profile",
-                                    subtitle: session.activeOrganization?.name,
-                                    todo: needsDoing(.details, current: current))
+                    if steps.contains(.details) {
+                        Button { open(.details) } label: {
+                            settingsRow(symbol: "building.2", title: "Company profile",
+                                        subtitle: session.activeOrganization?.name,
+                                        todo: needsDoing(.details, current: current))
+                        }
+                        .buttonStyle(RowPressStyle())
                     }
-                    .buttonStyle(RowPressStyle())
+                    if editsSettings {
+                        if steps.contains(.details) { divider }
+                        NavigationLink { CustomerDisplaySettingsView().thorbisBackButton() } label: {
+                            settingsRow(symbol: "drop", title: "What customers see", subtitle: nil, todo: false)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-customer-display")
+                    }
                 }
             }
             if steps.contains(.payments) {
@@ -1281,7 +1296,7 @@ struct BusinessSetupView: View {
                     .buttonStyle(RowPressStyle())
                 }
             }
-            if steps.contains(.services) || hasHours || hasNotices {
+            if steps.contains(.services) || hasHours || hasChecklists || hasNotices || editsSettings {
                 PaperSection("Operations") {
                     if steps.contains(.services) {
                         Button { open(.services) } label: {
@@ -1292,19 +1307,36 @@ struct BusinessSetupView: View {
                         .buttonStyle(RowPressStyle())
                     }
                     if hasHours {
-                        if steps.contains(.services) { WellDivider(leading: PaperCardMetrics.inset + 38) }
+                        if steps.contains(.services) { divider }
                         NavigationLink { OperatingDetailsView().thorbisBackButton() } label: {
                             settingsRow(symbol: "percent", title: "Hours, tax and terms", subtitle: nil, todo: false)
                         }
                         .buttonStyle(RowPressStyle())
                     }
+                    if hasChecklists {
+                        if steps.contains(.services) || hasHours { divider }
+                        NavigationLink { ChecklistTemplatesView().thorbisBackButton() } label: {
+                            settingsRow(symbol: "checklist", title: "Checklists",
+                                        subtitle: "What techs confirm before finishing a job", todo: false)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-checklists")
+                    }
                     if hasNotices {
-                        if steps.contains(.services) || hasHours { WellDivider(leading: PaperCardMetrics.inset + 38) }
+                        if steps.contains(.services) || hasHours || hasChecklists { divider }
                         NavigationLink(value: PaperRoute.notices) {
                             settingsRow(symbol: "bell", title: "Notification rules",
                                         subtitle: "Who hears about booked and changed jobs", todo: false)
                         }
                         .buttonStyle(RowPressStyle())
+                    }
+                    if editsSettings {
+                        if steps.contains(.services) || hasHours || hasChecklists || hasNotices { divider }
+                        NavigationLink { WorkflowsView().thorbisBackButton() } label: {
+                            settingsRow(symbol: "square.grid.2x2", title: "Workflows", subtitle: nil, todo: false)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("settings-workflows")
                     }
                 }
             }
