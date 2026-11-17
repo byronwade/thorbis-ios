@@ -41,7 +41,7 @@ enum PaperPreview {
     static var screen: String {
         let args = ProcessInfo.processInfo.arguments
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
-              ["time-clock", "receipts", "truck-stock", "training", "pipeline", "vendors", "vendors-orders", "marketing", "business-settings", "help", "schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "builder-options", "builder-picker", "builder-line", "invoice-editor-line", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "search-empty", "search-phone", "search-actions", "search-street", "search-offline", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "book-job", "book-job-filled", "dispatch-board", "owner-home", "glance-widgets", "glance-lock", "glance-island", "present-estimate-financing", "present-invoice-pay", "properties", "property-detail", "notice-log", "scorecard", "payments"].contains(args[index + 1]) else { return "schedule" }
+              ["time-clock", "receipts", "truck-stock", "training", "pipeline", "vendors", "vendors-orders", "marketing", "business-settings", "help", "schedule", "app-menu", "app-menu-edit", "bar-live", "bar-syncing", "search-typed", "ipad-sidebar", "settings", "whats-new", "schedule-week", "new-job", "create-menu", "schedule-unscheduled", "schedule-map", "customize-menu", "signature", "attention", "estimate-detail", "builder-options", "builder-picker", "builder-line", "invoice-editor-line", "jobs", "my-day", "customers", "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-assign", "job-followups", "offline", "offline-job", "offline-job-money", "offline-followups", "offline-estimate", "offline-invoice", "offline-customer", "offline-customers", "customer", "customer-activity", "customer-records", "estimates", "invoices", "team", "reports", "billing", "billing-detail", "notices", "new-customer", "job-invoice-empty", "new-estimate", "price-book", "revenue", "menu", "more", "search", "inbox", "invoice-editor", "invoice-detail", "invoice-payment", "invoice-payment-refund", "invoice-payment-refund-form", "invoice-payment-refund-confirmation", "invoice-payment-refund-pending", "invoice-payment-refund-reconciliation", "estimate-revision", "estimate-draft", "estimate-draft-detail", "public-estimate", "present-estimate", "present-estimate-review", "present-invoice", "schedule", "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details", "next-stop", "next-stop-active", "job-history", "job-history-empty", "search-customers", "search-empty", "search-phone", "search-actions", "search-street", "search-offline", "tool-scan", "tool-checklist", "tool-checklist-pick", "present-estimate-detail", "job-onsite", "customer-jobs", "customer-money", "drafts", "local-fleet", "local-equipment", "local-agreements", "job-schedule", "equipment-editor", "jobs-filters", "equipment-sections", "book-job", "book-job-filled", "dispatch-board", "owner-home", "glance-widgets", "glance-lock", "glance-island", "present-estimate-financing", "present-invoice-pay", "properties", "property-detail", "notice-log", "scorecard", "payments", "payments-list", "team-goals", "payouts", "role-editor", "member-access"].contains(args[index + 1]) else { return "schedule" }
         return args[index + 1]
     }
     /// Owner registration screens: --paper-preview-screen onboard-signup | onboard-company | onboard-details | onboard-setup | onboard-trade | onboard-wizard.
@@ -1252,6 +1252,31 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["items": [["userId": actor, "displayName": "Ramon Marlowe"], ["userId": "00000000-0000-4000-8000-000000008801", "displayName": "Jorge Alvarez"],
                               ["userId": "00000000-0000-4000-8000-000000008802", "displayName": "Sam Osei"]]]
         }
+        // Paper 63's role editor: one custom role and a short catalog grouped as Paper groups it.
+        if PaperPreview.screen == "role-editor" {
+            let roleID = "00000000-0000-4000-8000-000000009301"
+            if path == "/v1/organization/roles" {
+                return ["items": [["role": ["id": roleID, "currentRevision": 3], "revision": ["name": "Office", "description": "Books and bills"]]]]
+            }
+            if path == "/v1/organization/roles/\(roleID)" {
+                return ["role": ["id": roleID, "currentRevision": 3],
+                        "revision": ["name": "Office", "description": "Books and bills",
+                                     "grants": ["financials.view", "pricebook.edit", "job.assign", "location.view", "customer.message", "report.export"]
+                                        .map { ["capability": $0, "scope": "organization"] }]] as [String: Any]
+            }
+            if path == "/v1/organization/role-presets" {
+                let rows: [(String, String, String)] = [
+                    ("financials.view", "Can view all financials", "financials"), ("payroll.approve", "Can approve payroll", "financials"),
+                    ("pricebook.edit", "Can edit price book", "financials"), ("invoice.void", "Can void invoices", "financials"),
+                    ("invoice.refund", "Can issue refunds", "financials"), ("estimate.approve", "Can approve estimates over $5,000", "financials"),
+                    ("organization.members.manage", "Can manage team and roles", "team_and_company"),
+                    ("organization.settings.edit", "Can edit company and billing settings", "team_and_company"),
+                    ("job.assign", "Can dispatch and reassign jobs", "operations"), ("location.view", "Can view technician GPS and location", "operations"),
+                    ("customer.message", "Can message customers", "operations"), ("report.export", "Can export reports and data", "operations")]
+                return ["capabilities": rows.map { ["id": $0.0, "label": $0.1, "description": $0.1, "resource": $0.2, "offlineLabel": NSNull(),
+                                                    "allowedScopes": [["id": "organization", "label": "Everything"]], "supportedConditions": [Any]()] as [String: Any] }]
+            }
+        }
         if path == "/v1/organization/role-members" {
             let people: [(String, String, Bool, String)] = [("Byron Wade", "byron@acmehvac.com", true, "owner"), ("Maria Chen", "maria@acmehvac.com", false, "Office"),
                 ("Jorge Alvarez", "jorge@acmehvac.com", false, "Technician"), ("Dana Whitfield", "dana@acmehvac.com", false, "Office"), ("Sam Osei", "sam@acmehvac.com", false, "Technician")]
@@ -1533,25 +1558,25 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if ["job-invoice-empty", "billing-detail"].contains(PaperPreview.screen) { capabilities.append("invoice.create") }
             if PaperPreview.isJobDocumentsPreview, ProcessInfo.processInfo.arguments.contains("--paper-preview-create-invoice") { capabilities.append("invoice.create") }
             if PaperPreview.screen == "notices" { capabilities.append("organization.settings.edit") }
-            if PaperPreview.screen == "owner-home" { capabilities.append("organization.settings.edit") }
+            if PaperPreview.screen == "owner-home", PaperPreview.role == nil { capabilities.append("organization.settings.edit") }
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-admin") { capabilities.append("organization.settings.edit") }
             if PaperPreview.onboardingScreen != nil { capabilities += ["organization.settings.edit", "organization.members.manage", "pricebook.edit"] }
             switch PaperPreview.role {
             case "tech": capabilities.removeAll { $0 == "job.assign" }
-            case "owner": capabilities += ["organization.settings.edit", "organization.members.manage"]
+            case "owner": capabilities += ["organization.settings.edit", "organization.members.manage", "organization.permissions.manage"]
             default: break
             }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-sidebar-job-view-only") {
                 capabilities = ["job.view"]
             }
             return ["authority": ["actorId": actor, "organizationId": org, "policyVersion": 1, "generation": "paper-preview", "authorityExpiresAt": expiry],
-                    "capabilities": capabilities,
+                    "capabilities": capabilities.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } },
                     "resources": [], "views": []] as [String: Any]
         case "/v1/features":
             let decision = ["enabled": true, "released": true, "entitled": true]
             var enabledFeatures = ["jobs", "core_crm", "estimates", "estimate_option_signing", "invoicing", "price_book"]
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-group-feature") { enabledFeatures.append("estimate_line_groups") }
-            if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || PaperPreview.screen == "revenue" || PaperPreview.screen == "owner-home" { enabledFeatures.append("payments") }
+            if PaperPreview.isPaymentRefundPreview || PaperPreview.isPaymentCollectionPreview || ["revenue", "owner-home", "payments-list"].contains(PaperPreview.screen) { enabledFeatures.append("payments") }
             if PaperPreview.screen.hasPrefix("billing") { enabledFeatures.append("progress_billing") }
             if ["notices", "inbox"].contains(PaperPreview.screen) { enabledFeatures.append("job_booking_notices") }
             if PaperPreview.screen == "inbox", !ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-no-calls") { enabledFeatures.append("call_recording") }

@@ -835,7 +835,8 @@ struct RootView: View {
         case "local-fleet": openLocal(.fleet)
         case "local-equipment": openLocal(.equipment)
         case "local-agreements": openLocal(.agreements)
-        case "team": previewPlace(.team)
+        case "team", "role-editor", "member-access": previewPlace(.team)
+        case "payouts": previewPlace(.money, then: .payments)
         case "customize-menu": schedulePath.append(PaperRoute.customizeMenu)
         case "properties", "property-detail": schedulePath.append(PaperRoute.properties)
         case "signature": previewSignature = true
@@ -876,7 +877,7 @@ struct RootView: View {
         case "payments": schedulePath.append(PaperRoute.payments)
         case "billing-detail": previewPlace(.billing, then: .billingSchedule("00000000-0000-4000-8000-000000009501"))
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
-        case "revenue": previewPlace(.money)
+        case "revenue", "payments-list": previewPlace(.money)
         case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
              "job-history", "job-history-empty", "job-onsite",
              "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
@@ -1262,15 +1263,15 @@ struct PaperRouteView: View {
         case .invoices: InvoicesView()
         case .priceBook:
             WorkspacePriceBookView(api: api, canList: true, canViewDetail: session.can("organization.settings.edit", feature: "price_book")).id(session.generation)
-        // Money and Reports are one place: Revenue first, then the reports.
-        case .revenue: ReportsView(includesRevenue: true).id(session.generation)
+        // Paper 59 / 54: Money is its own page; the reports are one row away (Paper 60).
+        case .revenue: MoneyHomeView().id(session.generation)
         case .drafts:
             if let actor = session.user?.id, let org = session.activeOrganization?.id {
                 InboxLocalDraftView(actorID: actor, organizationID: org)
             }
         case .closeout(let jobID): JobCloseoutView(jobID: jobID)
         case .team: TeamView()
-        case .reports: ReportsView(includesRevenue: MenuItem.money.permitted(session), initialTab: "Operations")
+        case .reports: ReportsSummaryView().id(session.generation)
         case .scorecard: ScorecardView()
         case .teamGoals: TeamGoalsView()
         case .filteredInvoices(let filter): InvoicesView(filter: filter)

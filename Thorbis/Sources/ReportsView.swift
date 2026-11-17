@@ -110,7 +110,7 @@ struct ReportsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 59/60: the 34 Bold title over the company and the day. A place root keeps the
                 // drawer's circle; pushed, the back button leads.
-                PaperHeader(title: includesRevenue ? "Money" : "Reports", subtitle: headerSubtitle)
+                PaperHeader(title: includesRevenue ? "Full report" : "Reports", subtitle: headerSubtitle)
                     .environment(\.paperMenuButton, false)
                 // Paper's segmented control; wrapping keeps every report reachable on a narrow phone.
                 if tabs.count > 1 { PaperTabs(options: tabs, selection: $tab, wrapOverflow: true).padding(.top, 4) }
