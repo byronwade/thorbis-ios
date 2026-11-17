@@ -115,63 +115,66 @@ struct OperatingFactsFields: View {
     @ObservedObject var model: CompanyDetailsModel
     @Binding var week: SetupWeek
 
+    /// Paper 61A: three grouped cards, Hours, Tax and Terms, each row 56 tall with its value trailing.
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            choice("Time zone", key: "timezone",
-                   options: SetupTimeZones.choices(current: model.drafts["timezone"] ?? ""),
-                   label: SetupTimeZones.label)
-            hours
-            taxRate
-            choice("Payment terms", key: "default_payment_terms", options: PaymentTermsChoice.all,
-                   label: PaymentTermsChoice.label)
+            VStack(alignment: .leading, spacing: 8) {
+                PaperSection("Hours") {
+                    choiceRow("Time zone", key: "timezone",
+                              options: SetupTimeZones.choices(current: model.drafts["timezone"] ?? ""),
+                              label: SetupTimeZones.label)
+                    ForEach(SetupWeek.days, id: \.self) { day in
+                        WellDivider()
+                        dayRow(day)
+                    }
+                }
+                if let error = model.fieldErrors["timezone"] { InlineProblem(message: error).padding(.horizontal, 4) }
+                if let error = model.fieldErrors["business_hours"] ?? week.problem {
+                    InlineProblem(message: error).padding(.horizontal, 4)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                PaperSection("Tax") { taxRow }
+                if let error = model.fieldErrors["sales_tax_rate"] {
+                    InlineProblem(message: error).padding(.horizontal, 4)
+                } else {
+                    Text("Leave it empty if you don't charge sales tax.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                PaperSection("Terms") {
+                    choiceRow("Payment terms", key: "default_payment_terms", options: PaymentTermsChoice.all,
+                              label: PaymentTermsChoice.label)
+                }
+                if let error = model.fieldErrors["default_payment_terms"] { InlineProblem(message: error).padding(.horizontal, 4) }
+            }
         }
     }
 
-    private func title(_ text: String) -> some View {
-        Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-    }
-
-    private func choice(_ name: String, key: String, options: [String], label: @escaping (String) -> String) -> some View {
+    /// A row that opens a menu of choices: the name, the chosen value trailing in muted type.
+    private func choiceRow(_ name: String, key: String, options: [String], label: @escaping (String) -> String) -> some View {
         let current = model.drafts[key] ?? ""
-        return VStack(alignment: .leading, spacing: 6) {
-            title(name)
-            ThorbisMenu(items: options.map { option in
-                ThorbisMenuItem(label(option), isSelected: option == current) {
-                    model.drafts[key] = option
-                    model.fieldErrors[key] = nil
-                }
-            }, title: name, accessibilityLabel: name) {
-                HStack {
-                    Text(current.isEmpty ? "Choose" : label(current)).font(Theme.font(16))
-                        .foregroundStyle(current.isEmpty ? Theme.muted : Theme.foreground)
-                    Spacer()
-                    Image(systemName: "chevron.up.chevron.down").font(.system(size: 13)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, 14)
-                .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+        return ThorbisMenu(items: options.map { option in
+            ThorbisMenuItem(label(option), isSelected: option == current) {
+                model.drafts[key] = option
+                model.fieldErrors[key] = nil
             }
-            if let error = model.fieldErrors[key] { InlineProblem(message: error).font(Theme.font(13)) }
+        }, title: name, accessibilityLabel: name) {
+            HStack(spacing: 8) {
+                Text(name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                Spacer(minLength: 8)
+                Text(current.isEmpty ? "Choose" : label(current)).font(Theme.font(15))
+                    .foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, PaperCardMetrics.inset)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
         }
-    }
-
-    private var hours: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            title("Business hours")
-            VStack(spacing: 0) {
-                ForEach(SetupWeek.days, id: \.self) { day in
-                    dayRow(day)
-                    if day != SetupWeek.days.last { Divider().overlay(Theme.border) }
-                }
-            }
-            .padding(.horizontal, 14)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-            if let error = model.fieldErrors["business_hours"] ?? week.problem {
-                InlineProblem(message: error).font(Theme.font(13))
-            }
-        }
+        .accessibilityValue(current.isEmpty ? "Not set" : label(current))
     }
 
     private func dayRow(_ day: String) -> some View {
@@ -179,7 +182,7 @@ struct OperatingFactsFields: View {
         let open = Binding(get: { week.days[day]?.open ?? false },
                            set: { week.days[day]?.open = $0; model.fieldErrors["business_hours"] = nil })
         return HStack(spacing: 8) {
-            Text(name).font(Theme.font(15, weight: .medium)).frame(width: 40, alignment: .leading)
+            Text(name).font(Theme.font(16, weight: .medium)).frame(width: 44, alignment: .leading)
             if open.wrappedValue {
                 time(day, \.from, label: "\(name) opens")
                 Text("–").foregroundStyle(Theme.muted).accessibilityHidden(true)
@@ -188,9 +191,10 @@ struct OperatingFactsFields: View {
                 Text("Closed").font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 4)
-            Toggle("\(name) open", isOn: open).labelsHidden().tint(Theme.success)
+            Toggle("\(name) open", isOn: open).labelsHidden().tint(Theme.brand)
         }
-        .frame(minHeight: 48)
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .frame(minHeight: 56)
     }
 
     private func time(_ day: String, _ part: WritableKeyPath<SetupWeek.Day, Int>, label: String) -> some View {
@@ -209,28 +213,25 @@ struct OperatingFactsFields: View {
             .accessibilityLabel(label)
     }
 
-    private var taxRate: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            title("Sales tax rate")
-            HStack(spacing: 6) {
-                TextField("8.25", text: Binding(get: { model.drafts["sales_tax_rate"] ?? "" },
-                                                set: { model.drafts["sales_tax_rate"] = $0; model.fieldErrors["sales_tax_rate"] = nil }))
-                    .keyboardType(.decimalPad)
-                    .font(Theme.font(16))
-                    .accessibilityLabel("Sales tax rate, percent")
-                Text("%").font(Theme.font(16)).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 12)
-            .frame(minHeight: 46)
-            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius)
-                .stroke(model.fieldErrors["sales_tax_rate"] == nil ? Theme.border : Theme.destructive, lineWidth: 1))
-            if let error = model.fieldErrors["sales_tax_rate"] {
-                InlineProblem(message: error).font(Theme.font(13))
-            } else {
-                Text("Leave it empty if you don't charge sales tax.").font(Theme.font(13)).foregroundStyle(Theme.muted)
-            }
+    /// "Default rate" with the percent typed in place, trailing like the other rows' values.
+    private var taxRow: some View {
+        HStack(spacing: 6) {
+            Text("Default rate").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                .accessibilityHidden(true)
+            Spacer(minLength: 8)
+            TextField("8.25", text: Binding(get: { model.drafts["sales_tax_rate"] ?? "" },
+                                            set: { model.drafts["sales_tax_rate"] = $0; model.fieldErrors["sales_tax_rate"] = nil }),
+                      prompt: .placeholder("0"))
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .font(Theme.font(15)).monospacedDigit()
+                .foregroundStyle(model.fieldErrors["sales_tax_rate"] == nil ? Theme.foreground : Theme.destructive)
+                .frame(maxWidth: 96)
+                .accessibilityLabel("Sales tax rate, percent")
+            Text("%").font(Theme.font(15)).foregroundStyle(Theme.muted).accessibilityHidden(true)
         }
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
     }
 }
 
@@ -249,29 +250,36 @@ struct OperatingDetailsView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                if model.profile != nil {
-                    OperatingFactsFields(model: model, week: $week).disabled(!canEdit)
-                    if !model.queued.isEmpty {
-                        Label("Saved on this phone. It syncs when you're back online.", systemImage: "icloud.and.arrow.up")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 0) {
+                // Paper 61A: the 34 Bold title and one muted line, then the three cards.
+                PaperHeader(title: "Hours, tax and terms", subtitle: "Used on estimates, invoices and booking")
+                    .environment(\.paperMenuButton, false)
+                    .environment(\.paperDrawer, nil)
+                VStack(alignment: .leading, spacing: 16) {
+                    if model.profile != nil {
+                        OperatingFactsFields(model: model, week: $week).disabled(!canEdit)
+                        if !model.queued.isEmpty {
+                            Label("Saved on this phone. It syncs when you're back online.", systemImage: "icloud.and.arrow.up")
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 4)
+                        }
+                        if let error { InlineProblem(message: error).padding(.horizontal, 4) }
+                    } else if let loadError = model.loadError {
+                        InlineProblem(message: loadError).padding(.horizontal, 4)
+                        Button("Try again") { Task { await load() } }
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText).frame(minHeight: 44)
+                            .padding(.horizontal, 4)
+                    } else {
+                        SkeletonSection(rows: 5)
                     }
-                    if let error { InlineProblem(message: error) }
-                } else if let loadError = model.loadError {
-                    InlineProblem(message: loadError)
-                    Button("Try again") { Task { await load() } }
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText).frame(minHeight: 44)
-                } else {
-                    SkeletonRows(count: 5, leading: false, inset: 0)
                 }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 44)
             }
-            .padding(Theme.gutter)
             .frame(maxWidth: 600, alignment: .leading)
             .frame(maxWidth: .infinity)
         }
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
-        .navigationTitle("Hours, tax and terms")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if canEdit, model.profile != nil {

@@ -11,7 +11,7 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         let app = launchPriceBookEditor()
         let commit = app.buttons["price-book-item-commit"]
         XCTAssertTrue(commit.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertTrue(commit.isEnabled, "Add to price book is never pre-disabled")
+        XCTAssertTrue(commit.isEnabled, "Add is never pre-disabled")
         commit.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Add the name customers see")).firstMatch
             .waitForExistence(timeout: 5), app.debugDescription)
@@ -35,18 +35,24 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
 
     // MARK: Popover direction
 
-    /// Kind and Tax sit in the lower half of the price book editor: their menus open upward and
-    /// every row stays on screen.
+    /// Kind in the price book editor (Paper v2 34A moved it up the page; Taxable is a switch now):
+    /// a select in the lower half opens its menu upward; wherever it sits, every row stays on screen.
     func testLowerHalfSelectsOpenUpward() {
         continueAfterFailure = false
         let app = launchPriceBookEditor()
-        for (label, option) in [("Kind,", "Material"), ("Tax,", "Not taxable")] {
+        XCTAssertTrue(app.switches["price-book-item-taxable"].waitForExistence(timeout: 30), app.debugDescription)
+        for (label, option) in [("Kind,", "Material")] {
             let select = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", label)).firstMatch
             XCTAssertTrue(select.waitForExistence(timeout: 30), app.debugDescription)
-            XCTAssertGreaterThan(select.frame.midY, app.windows.firstMatch.frame.midY, "\(label) sits in the lower half")
+            let lowerHalf = select.frame.midY > app.windows.firstMatch.frame.midY
             select.tap()
             let row = app.buttons[option]
-            assertMenuRow(row, opensAbove: select, in: app)
+            if lowerHalf {
+                assertMenuRow(row, opensAbove: select, in: app)
+            } else {
+                XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
+                XCTAssertTrue(app.windows.firstMatch.frame.contains(row.frame), "\(option) must be fully on screen")
+            }
             attach(app, "\(label.dropLast()) menu open")
             row.tap()
             XCTAssertTrue(row.waitForNonExistence(timeout: 5))
@@ -84,6 +90,13 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-many-locations"]
         app.launch()
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
+        // Paper v2 (48N): service locations live on the customer's Property page.
+        let property = app.buttons["customer-hub-property"]
+        XCTAssertTrue(property.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !property.isHittable { app.swipeUp() }
+        property.tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Options for ")).firstMatch
+            .waitForExistence(timeout: 30), app.debugDescription)
         let window = app.windows.firstMatch.frame
         let newJob = app.buttons["customer-new-job-action"]
         let menus = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Options for "))

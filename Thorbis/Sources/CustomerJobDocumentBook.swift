@@ -241,10 +241,13 @@ private struct CustomerEstimateBookPage: View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.heading, weight: .medium))
+                    // Paper 38B / 38C: the document's name in the largest Bold, its status under it.
+                    Text(issued?.title ?? estimate.title).font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                        .accessibilityAddTraits(.isHeader)
                         .fixedSize(horizontal: false, vertical: true)
-                    if fresh { CustomerStatusWord(status: estimate.status, type: type) }
-                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
+                        .padding(.horizontal, 4)
+                    if fresh { CustomerStatusWord(status: estimate.status, type: type).padding(.horizontal, 4) }
+                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).padding(.horizontal, 4) }
                     if !fresh {
                         Text("This copy needs a refresh before you can decide.").font(Theme.customerFont(type.body))
                     } else if loading { CustomerSkeleton(caption: "Opening the current estimate…", heading: false) }
@@ -258,7 +261,8 @@ private struct CustomerEstimateBookPage: View {
                                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                             }
                             ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
-                                Text(option.title).font(Theme.customerFont(type.heading, weight: .medium))
+                                Text(option.title).font(Theme.customerFont(type.body, weight: .semibold))
+                                    .fixedSize(horizontal: false, vertical: true)
                                 if !option.description.isEmpty { ReadOnlyDocumentDescription(text: option.description, fontSize: type.body, access: readingAccess, customerFacing: true,
                                                                                               accessibilityContext: "EST-\(estimate.id.suffix(4).uppercased()), package \(index + 1)") }
                                 estimateLines(option.lines, currency: option.currency,
@@ -267,14 +271,16 @@ private struct CustomerEstimateBookPage: View {
                         }
                     }
                 }
-                .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+                // Paper: cards sit 16 from the screen edge; the title adds 4 to line up at 20.
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+                .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
             if fresh, estimate.status == "sent", issued != nil, !loading, moneyVerified {
                 CustomerPresentationCommit(title: "Review and sign", enabled: true, busy: false, type: type, action: review)
                     .accessibilityIdentifier("customer-book-review-sign")
-                    .padding(Theme.gutter)
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
             } else if !fresh {
-                CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
+                CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
             }
         }
         .task(id: CustomerEstimateBookLoadID(estimate: estimate, fresh: fresh)) { await load() }
@@ -341,9 +347,12 @@ private struct CustomerInvoiceBookPage: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(invoice.origin == "estimate_deposit" ? "Deposit invoice" : "Invoice")
-                        .font(Theme.customerFont(type.heading, weight: .medium)).accessibilityIdentifier("customer-invoice-summary")
-                    if fresh { CustomerStatusWord(status: invoice.status, type: type) }
-                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted) }
+                        .font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("customer-invoice-summary")
+                        .padding(.horizontal, 4)
+                    if fresh { CustomerStatusWord(status: invoice.status, type: type).padding(.horizontal, 4) }
+                    else { Text("Status needs refresh").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).padding(.horizontal, 4) }
                     if signed, let authorization = invoice.customerAuthorization {
                         Label("Signed by \(authorization.signerName)", systemImage: "signature")
                             .font(Theme.customerFont(type.body))
@@ -355,7 +364,8 @@ private struct CustomerInvoiceBookPage: View {
                             .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                         if let headlineAmount = balance.amount {
                             Text(money(headlineAmount, currency: invoice.currency))
-                                .font(Theme.customerFont(type.total, weight: .medium)).monospacedDigit()
+                                .font(Theme.customerFont(type.total, weight: .bold)).monospacedDigit().tracking(-1)
+                                .minimumScaleFactor(0.6).lineLimit(1)
                         }
                         CustomerIncludedLabel(type: type)
                     CustomerIncludedLines(lines: invoice.lines, type: type, rows: customerAmountRows(amounts, currency: invoice.currency, invoice: invoice.status != "void"), readingAccess: readingAccess,
@@ -388,18 +398,20 @@ private struct CustomerInvoiceBookPage: View {
                         }
                     }
                 }
-                .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+                // Paper: cards sit 16 from the screen edge; the title adds 4 to line up at 20.
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+                .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
             if fresh, model.invoice != nil, amounts != nil, ["issued", "paid"].contains(invoice.status) {
                 if !signed && canSign {
                     CustomerPresentationCommit(title: "Sign for the work", enabled: !model.isLoading, busy: false, type: type, action: sign)
-                        .padding(Theme.gutter)
+                        .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
                 } else if invoice.status == "issued", canPay, model.canRecordPayment, let amounts, amounts.due > 0 {
                     CustomerPresentationCommit(title: "Pay \(money(amounts.due, currency: invoice.currency))", enabled: true, busy: false, type: type, action: pay)
-                        .padding(Theme.gutter)
+                        .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
                 }
             } else if !fresh {
-                CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(Theme.gutter)
+                CustomerSecondaryButton(title: "Refresh documents", type: type) { Task { await refresh() } }.padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
             }
         }
         .task(id: original) { await model.load() }
@@ -438,9 +450,12 @@ private struct CustomerInvoiceBookPage: View {
                 Spacer(minLength: 8)
                 Text("\(model.payments.count)").foregroundStyle(Theme.muted)
             }
-            .font(Theme.customerFont(type.body, weight: .medium)).frame(minHeight: 56)
+            .font(Theme.customerFont(type.body, weight: .semibold)).frame(minHeight: 56)
         }
-        .tint(Theme.foreground).accessibilityIdentifier("customer-payment-history")
+        .tint(Theme.foreground)
+        .padding(.horizontal, 16)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .accessibilityIdentifier("customer-payment-history")
     }
 }
 

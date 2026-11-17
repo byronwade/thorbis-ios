@@ -120,6 +120,24 @@ struct EstimateRevisionEditorState: Equatable {
         }
     }
 
+    /// Paper 35E "Restore this version": the form opens on an older sent version's title, lines and
+    /// options (line sources, groups and the materials switch included) over the current estimate.
+    /// Nothing else changes: saving sends them through the same revise request, against the
+    /// estimate's current revision number, so the server makes a new version and keeps the old ones.
+    init(estimate: EstimateRecord, restoring revision: EstimateRevisionRecord) {
+        self.estimate = estimate
+        title = revision.title
+        lines = revision.lines.map(Self.draftLine)
+        options = (revision.options ?? []).map { option in
+            EstimateRevisionOptionDraft(
+                id: option.id,
+                title: option.title,
+                description: option.description,
+                lines: option.lines.map(Self.draftLine)
+            )
+        }
+    }
+
     var canRevise: Bool {
         estimate.status == "draft" || estimate.status == "sent" || estimate.status == "declined"
     }

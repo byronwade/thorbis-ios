@@ -25,10 +25,9 @@ final class AdaptiveControlsUITests: XCTestCase {
         )
         XCTAssertTrue(app.dismissSoftwareKeyboard(from: form), "Dismiss the keyboard before navigating the form.")
         XCTAssertFalse(app.keyboardShowing, "Dismiss the keyboard before navigating the form.")
-        // The pinned Save bar is disabled in the read-only preview, and a disabled bar does not
-        // block XCUI's hit test: a choice behind it reports hittable while a tap lands on the bar.
-        let save = app.buttons["Save customer"]
-        func revealed() -> Bool { commercial.isHittable && (!save.exists || commercial.frame.maxY <= save.frame.minY) }
+        // Paper v2 (47A): Save customer sits in the sheet's header, so nothing pinned at the bottom
+        // can cover the choice; it only has to be on screen.
+        func revealed() -> Bool { commercial.isHittable && app.windows.firstMatch.frame.contains(commercial.frame) }
         for _ in 0..<10 where !revealed() { form.swipeUp() }
         XCTAssertTrue(revealed(), app.debugDescription)
         XCTAssertGreaterThanOrEqual(commercial.frame.width, 44)

@@ -40,6 +40,9 @@ struct PaperHeader: View {
     /// A screen-specific identifier for the title (e.g. `schedule-title`), so tests find this place
     /// whatever its title reads ("Today", "This week", "Board").
     var titleIdentifier: String? = nil
+    /// Paper's 28 Bold title where a page is a column, not a place root (iPad T12E "Money").
+    /// Phone pages, pushed ones included (61A), keep the 34.
+    var compact = false
     @Environment(\.paperCreate) private var create
     @EnvironmentObject private var session: SessionController
     @Environment(\.paperShowMenu) private var openAccount
@@ -68,8 +71,9 @@ struct PaperHeader: View {
             }
             HStack(alignment: .center, spacing: 8) {
                 Text(title)
-                    .font(Theme.font(34, weight: .medium)).tracking(-0.8)
-                    .lineLimit(1).minimumScaleFactor(0.7)
+                    .font(compact ? Theme.heading() : Theme.font(34, weight: .bold)).tracking(compact ? -0.56 : -0.85)
+                    // At accessibility sizes a long title wraps rather than shrinking.
+                    .lineLimit(typeSize.isAccessibilitySize ? 3 : 1).minimumScaleFactor(0.7)
                     .accessibilityAddTraits(.isHeader)
                     .modifier(OptionalIdentifier(identifier: titleIdentifier))
                 Spacer(minLength: 0)
@@ -91,6 +95,7 @@ struct PaperHeader: View {
             .frame(minHeight: 20, alignment: .leading)
         }
         .foregroundStyle(Theme.foreground)
+        // Paper v2: circles 16 from the edges, the title 20 in and 14 under them.
         .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 12)
     }
 
@@ -191,7 +196,8 @@ struct PaperTabs: View {
     /// tighter ones on a 402pt phone; a cut-off "Acti" reads as a bug. The tightest is only for
     /// callers that would otherwise wrap; each tab keeps its 44-point minimum and full label.
     private var candidates: [(padding: CGFloat, inset: CGFloat)] {
-        var all: [(padding: CGFloat, inset: CGFloat)] = [(12, Theme.gutter), (8, Theme.gutter), (6, Theme.gutter - 6)]
+        // Paper v2: the segment track sits 16 from the screen edges, like the cards.
+        var all: [(padding: CGFloat, inset: CGFloat)] = [(12, PaperCardMetrics.margin), (8, PaperCardMetrics.margin), (6, Theme.gutter - 6)]
         if wrapOverflow { all.append((3, Theme.gutter - 6)) }
         return all
     }
@@ -236,8 +242,8 @@ struct PaperTabs: View {
                 // track, the chosen segment raised as a white pill, every segment the same width.
                 // Segments are 44 tall (golden rule 13); the white pill is inset 3 inside them.
                 row(padding: fit.padding, tracked: true)
-                    .padding(.horizontal, 3)
-                    .background(Theme.fill, in: Capsule())
+                    .padding(.horizontal, 2)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     .padding(.horizontal, fit.inset)
             } else if wrapOverflow {
                 FlowRow(spacing: 2, lineSpacing: 0) {
@@ -317,7 +323,7 @@ struct PaperTabs: View {
     private var labelMeasurement: some View {
         HStack(spacing: 0) {
             ForEach(options, id: \.self) { option in
-                Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
+                Text(option).font(Theme.font(14, weight: .semibold)).lineLimit(1).fixedSize()
                     .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { labelWidths[option] = $0 }
             }
         }
@@ -343,18 +349,22 @@ struct PaperTabs: View {
                 // Fixed width so a long word ("All customers") may use its neighbours' padding rather
                 // than truncate; accessibility sizes, where a row of these widened the whole screen,
                 // never get here (they use `accessibleChooser`).
-                Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
-                    .foregroundStyle(on ? Theme.foreground : Theme.muted)
+                // Paper v2 segment: 14 Semibold in ink when chosen, 14 Medium in the body grey
+                // otherwise; the chosen one on a raised pill (radius 9) inside the card track.
+                Text(option).font(Theme.font(14, weight: on ? .semibold : .medium)).lineLimit(1).fixedSize()
+                    .foregroundStyle(on ? Theme.foreground : Theme.subtle)
                     .padding(.horizontal, padding)
+                    // 44 to tap (HIG-004); the raised pill draws Paper's 36 inside it.
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background {
                         if on {
-                            Capsule().fill(Theme.selectedSegment).shadow(color: .black.opacity(0.08), radius: 1.5, y: 1)
-                                .padding(.vertical, 3)
+                            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedSegment)
+                                .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+                                .padding(.vertical, 4)
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }
-                    .contentShape(Capsule())
+                    .contentShape(Rectangle())
             } else {
                 Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
                     .foregroundStyle(on ? Theme.foreground : Theme.muted)
@@ -548,7 +558,7 @@ struct PaperActionBar<Secondary: View>: View {
             HStack(spacing: 8) {
                 Button(action: action) {
                     HStack(spacing: 7) {
-                        if busy { ProgressView().tint(Theme.onInk) } else if let symbol { Image(systemName: symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
+                        if busy { ProgressView().tint(.white) } else if let symbol { Image(systemName: symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
                         Text(title)
                     }
                     .inkCommit(enabled: !disabled)
@@ -565,7 +575,7 @@ struct PaperActionBar<Secondary: View>: View {
                     .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 8)
         .background(ground)
     }
 }
@@ -621,8 +631,9 @@ enum PaperChrome {
         }
         let appearance = UINavigationBarAppearance()
         appearance.configureWithTransparentBackground()
-        appearance.titleTextAttributes = [.font: inter(17, .medium)]
-        appearance.largeTitleTextAttributes = [.font: inter(30, .medium)]
+        // Paper v2: 17 Semibold inline titles, 34 Bold large titles.
+        appearance.titleTextAttributes = [.font: inter(17, .semibold)]
+        appearance.largeTitleTextAttributes = [.font: inter(34, .bold), .kern: -0.85]
         let scrolled = UINavigationBarAppearance()
         scrolled.configureWithDefaultBackground()
         scrolled.titleTextAttributes = appearance.titleTextAttributes
@@ -721,53 +732,75 @@ struct OfflineBanner: View {
                     if let returnToReview { returnToReview() }
                     else { reviewScope = scope }
                 } label: {
-                    banner(symbol: state.attentionCount > 0 || state.hasListingWarning ? "exclamationmark.triangle" : (session.isOffline ? "wifi.slash" : "arrow.triangle.2.circlepath"),
-                           tint: state.attentionCount > 0 || state.hasListingWarning ? Theme.warning : Theme.muted,
-                           text: summary(state), trailing: state.totalCount == 0 ? String(localized: "Review") : (state.totalCount == 1 ? String(localized: "1 item") : String(localized: "\(state.totalCount) items")))
+                    banner(symbol: needsAttention(state) ? "exclamationmark.triangle" : (session.isOffline ? "icloud.slash" : "icloud"),
+                           tone: tone(state), text: summary(state), trailing: trailing(state))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Review saved work")
                 .accessibilityValue(summary(state) + ", " + String(localized: "\(state.totalCount) items listed"))
                 .accessibilityIdentifier("saved-work-summary")
             } else if session.isOffline {
-                banner(symbol: "wifi.slash", tint: Theme.warning,
-                       text: "Offline · showing \(store.cachedAt.map { "work saved " + $0.formatted(.relative(presentation: .named)) } ?? "your last copy")", trailing: nil)
+                banner(symbol: "icloud.slash", tone: .warning,
+                       text: "Offline — showing \(store.cachedAt.map { "work saved " + $0.formatted(.relative(presentation: .named)) } ?? "your last copy")", trailing: nil)
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.bottom, 10)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 10)
         .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
         .onChange(of: reviewIsCurrent) { _, valid in if !valid { reviewScope = nil } }
         #if DEBUG
         .task { await PaperPreview.activateSavedWorkScenario(session: session) }
         #endif
     }
+    private enum Tone { case warning, success, quiet }
+    private func needsAttention(_ state: SavedWorkSnapshot) -> Bool { state.attentionCount > 0 || state.hasListingWarning }
+    /// Paper 73 draws offline and needs-review in the warning tone, 74 (sending) in the success tone.
+    private func tone(_ state: SavedWorkSnapshot) -> Tone {
+        if needsAttention(state) || session.isOffline { return .warning }
+        return state.isSending ? .success : .quiet
+    }
     private func summary(_ state: SavedWorkSnapshot) -> String {
         if state.hasListingWarning { return String(localized: "Saved work needs checking") }
         if state.attentionCount > 0 { return String(localized: "Saved work needs attention") }
-        if session.isOffline { return String(localized: "Offline · saved on this phone") }
-        return state.isSending ? String(localized: "Syncing saved work") : String(localized: "Saved on this phone")
+        if session.isOffline { return String(localized: "Offline — changes save on this phone") }
+        return state.isSending ? String(localized: "Back online — syncing changes…") : String(localized: "Saved on this phone")
     }
-    /// The calm strip (phase 4): the glyph in a small tinted circle, the state in semibold words and
-    /// the count as a quiet capsule, on the same rounded ground as `ErrorBanner`.
-    private func banner(symbol: String, tint: Color, text: String, trailing: String?) -> some View {
-        HStack(spacing: 10) {
-            BannerGlyph(symbol: symbol, tint: tint)
-            // At accessibility sizes the count reads under the words, which then keep the width.
-            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                                      : AnyLayout(HStackLayout(spacing: 10))
+    /// Paper 73 "3 queued", 74 "2 left"; a state that needs the person says how many items.
+    private func trailing(_ state: SavedWorkSnapshot) -> String {
+        if state.totalCount == 0 { return String(localized: "Review") }
+        if !needsAttention(state) {
+            if session.isOffline { return String(localized: "\(state.totalCount) queued") }
+            if state.isSending { return String(localized: "\(state.totalCount) left") }
+        }
+        return state.totalCount == 1 ? String(localized: "1 item") : String(localized: "\(state.totalCount) items")
+    }
+    /// Paper 73 / 74 strip: a tinted 14pt-radius ground, the cloud and the words in the tone's text
+    /// colour (14 Semibold), and the count in a 24pt pill of the same tone.
+    private func banner(symbol: String, tone: Tone, text: String, trailing: String?) -> some View {
+        let ink: Color = tone == .warning ? Theme.warning : (tone == .success ? Theme.success : Theme.foreground)
+        let ground: Color = tone == .warning ? Theme.warningSurface : (tone == .success ? Theme.successSurface : Theme.fill)
+        // At accessibility sizes the count reads under the words, which then keep the width.
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                                  : AnyLayout(HStackLayout(spacing: 8))
+        return HStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(ink)
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
             layout {
-                Text(text).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).fixedSize(horizontal: false, vertical: true)
+                Text(text).font(Theme.font(14, weight: .semibold)).foregroundStyle(ink).fixedSize(horizontal: false, vertical: true)
                 if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 if let trailing {
-                    Text(trailing).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(trailing).font(Theme.font(13, weight: .semibold)).monospacedDigit().foregroundStyle(ink)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Theme.selectedSegment, in: Capsule())
+                        .padding(.horizontal, 9).frame(minHeight: 24)
+                        .background(ink.opacity(0.18), in: Capsule())
                 }
             }
         }
-        .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 9).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .padding(.leading, 14).padding(.trailing, 10).padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(ground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }
@@ -1039,8 +1072,8 @@ extension PaperEmptyState {
 enum PaperCardMetrics {
     /// design.thorbis.com sheet radius.
     static let radius: CGFloat = Theme.cardRadius
-    /// Rows inside a card pad by this, so their text lines up with the card's edge.
-    static let inset: CGFloat = 14
+    /// Rows inside a card pad by this, so their text lines up with the card's edge (Paper v2: 16).
+    static let inset: CGFloat = 16
     /// The card's distance from the screen edge; group headers add 4 so they align with the gutter.
     static let margin: CGFloat = 16
     /// Breathing room above the first and below the last row, instead of a rule between rows.
@@ -1544,45 +1577,83 @@ extension PaperListRow where Trailing == Text {
 
 /// One section: a 13/500 label (with " · count") above one white panel of rows.
 struct PaperSection<Content: View, Accessory: View>: View {
-    /// "By month  6": the label in 13 Medium and its count in 13 Regular, as one text that wraps whole.
+    /// "In progress  2": the label in 13 Semibold and its count in 13 Regular (Paper v2).
     static func label(_ title: String, count: Int?) -> Text {
-        let word = Text(title).font(Theme.font(13, weight: .medium))
+        let word = Text(title).font(Theme.font(13, weight: .semibold))
         guard let count, count > 0 else { return word }
         return word + Text("  \(count)").font(Theme.font(13)).monospacedDigit()
     }
 
     let title: String?
     var count: Int? = nil
+    /// Paper 52/54/58: a small chevron before the label ("⌄ Needs attention", "⌄ Money"). Pass the
+    /// screen's own flag and the label folds its card away and back; nil draws no chevron.
+    var collapsed: Binding<Bool>? = nil
     @ViewBuilder var content: Content
     @ViewBuilder var accessory: Accessory
 
     @Environment(\.paperGroupedWells) private var wells
 
+    private var isCollapsed: Bool { collapsed?.wrappedValue ?? false }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let title, wells {
-                SectionHeader(title: title, count: count) { accessory }.padding(.bottom, 2)
-            } else if let title {
-                // The list grammar's count ("By month  6"): the number beside the word, not after a dot.
-                // One text, so at large sizes the count wraps with the words instead of floating mid-label.
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Self.label(title, count: count)
-                        .foregroundStyle(Theme.muted)
-                        .accessibilityAddTraits(.isHeader)
+            if let title, let collapsed {
+                // The chevron and the label are one button; the count and the accessory stay their own.
+                HStack(alignment: .center, spacing: 8) {
+                    Button { withMotion { collapsed.wrappedValue.toggle() } } label: {
+                        HStack(alignment: .center, spacing: 6) {
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                                .rotationEffect(.degrees(collapsed.wrappedValue ? -90 : 0))
+                                .frame(width: 12, height: 12)
+                                .accessibilityHidden(true)
+                            Text(title).font(Theme.font(13, weight: .semibold))
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        // 44pt to the finger, the label's own height to the eye.
+                        .padding(.vertical, 13).contentShape(Rectangle()).padding(.vertical, -13)
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityValue(collapsed.wrappedValue ? "Collapsed" : "Expanded")
+                    .accessibilityHint(collapsed.wrappedValue ? "Shows this section" : "Hides this section")
+                    if let count, count > 0 {
+                        Text("\(count)").font(Theme.font(13)).monospacedDigit()
+                    }
                     accessory
                 }
-                .frame(minHeight: 28)
-                .padding(.horizontal, 4).padding(.bottom, 4)
+                .foregroundStyle(Theme.muted)
+                .frame(minHeight: wells ? 32 : 26)
+                .padding(.horizontal, 4).padding(.bottom, wells ? 2 : 8)
+            } else if let title, wells {
+                SectionHeader(title: title, count: count) { accessory }.padding(.bottom, 2)
+            } else if let title {
+                // Paper v2: the label on the left, its count at the trailing edge, 8 above the card.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title).font(Theme.font(13, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let count, count > 0 {
+                        Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                    accessory
+                }
+                // Not combined: the accessory (Add contact, Add equipment) stays its own button.
+                .frame(minHeight: 26)
+                .padding(.horizontal, 4).padding(.bottom, 8)
             }
-            PaperCard { content }
+            if !isCollapsed { PaperCard { content } }
         }
     }
 }
 
 extension PaperSection where Accessory == EmptyView {
-    init(_ title: String?, count: Int? = nil, @ViewBuilder content: () -> Content) {
-        self.init(title: title, count: count, content: content) { EmptyView() }
+    init(_ title: String?, count: Int? = nil, collapsed: Binding<Bool>? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title: title, count: count, collapsed: collapsed, content: content) { EmptyView() }
     }
 }
 
@@ -1616,20 +1687,15 @@ struct PaperLabeledCircle: View {
 
 // MARK: - Forms (design 2026-10-30): one column, the label above, the answer in a field well
 
-/// Sink (design.thorbis.com Depth): the field is a well one step darker than the panel, inset,
-/// with a 1px rim that follows the radius. Never a drop shadow. 48 tall, radius 10.
+/// Paper v2 field: a filled box, radius 14, 50 tall, no rim and no inset shade. On a screen it is
+/// the card on the canvas; inside a sheet (already the card) it is the field fill.
 struct FieldWell: ViewModifier {
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         content
-            .padding(.horizontal, 12).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .background(Theme.field, in: shape)
-            // Inset: a faint shade along the top edge, inside the rim.
-            .overlay(shape.strokeBorder(LinearGradient(colors: [Color.black.opacity(0.10), .clear],
-                                                       startPoint: .top, endPoint: .center), lineWidth: 1.5)
-                .blendMode(.multiply).allowsHitTesting(false))
-            .overlay(shape.strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false))
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .background(ThorbisPanelStyle(), in: shape)
     }
 }
 
@@ -1656,9 +1722,10 @@ struct PaperFormField<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                if let note { Text("· \(note)").font(Theme.font(13)).foregroundStyle(Theme.muted.opacity(0.8)) }
+                Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                if let note { Text("· \(note)").font(Theme.font(13)).foregroundStyle(Theme.muted) }
             }
+            .padding(.horizontal, 4)
             .accessibilityHidden(true)
             content
             if let error { FieldProblem(message: error) }

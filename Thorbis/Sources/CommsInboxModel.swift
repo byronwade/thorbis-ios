@@ -14,7 +14,7 @@ enum CommsInboxSection: String, CaseIterable, Identifiable {
     /// The word in the title menu and on the screen's title.
     var title: String {
         switch self {
-        case .all: "Inbox"
+        case .all: "Messages"
         case .calls: "Calls"
         case .voicemail: "Voicemail"
         case .texts: "Texts"

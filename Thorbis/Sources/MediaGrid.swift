@@ -1,15 +1,15 @@
 import SwiftUI
 import UIKit
 
-// The job's Photos screen pieces (2026-10-31 media redesign): square thumbnails three across
-// (four when the column is wide), a small stage word on each, and an upload state that comes
-// straight from PendingMediaStore: Waiting, Sending or Failed.
+// The job's Photos screen pieces (Paper 21A): thumbnails two across (more when the column is
+// wide), the stage on a dark pill bottom-left, and an upload state that comes straight from
+// PendingMediaStore: Waiting, Sending or Failed.
 
-/// What the Photos selector shows. "Untagged" lives in the filter circle, not the selector.
+/// What the Photos chips show. "Untagged" is the warning chip at the end of the row.
 enum MediaFilter: String, CaseIterable, Hashable {
     case all = "All", before = "Before", after = "After", documents = "Documents", untagged = "Untagged"
 
-    /// The selector's four choices; Untagged reads as All there, with the filter circle lit.
+    /// The choices offered in the one menu shown at accessibility text sizes.
     static let selector: [MediaFilter] = [.all, .before, .after, .documents]
 }
 
@@ -57,71 +57,88 @@ enum MediaUploadState: Equatable {
 /// The stage word a photo is filed under, if any.
 func mediaStageWord(_ tags: [String]) -> String? { ["Before", "After"].first(where: tags.contains) }
 
-/// How many columns the grid uses for a content width: 3 on a phone, 4 from about 380pt
-/// (Pro Max / Plus), more on iPad, 2 at accessibility text sizes.
+/// How many columns the grid uses for a content width: 2 on a phone (Paper 21A: 175 by 132
+/// tiles, 8 apart), more on iPad.
 enum MediaGridMetrics {
-    static let spacing: CGFloat = 6
+    static let spacing: CGFloat = 8
+    /// Paper 21A: a thumbnail's corner.
+    static let tileRadius: CGFloat = 16
+    /// Paper's tile is 175 wide and 132 tall.
+    static let aspect: CGFloat = 175.0 / 132.0
+    /// The pills over a photo keep one tone in light and dark: they sit on the picture, not the page.
+    static let scrim = Color.black.opacity(0.72)
+    static let afterPill = Color(hex: 0x0E9A3F).opacity(0.92)
     static func columns(width: CGFloat, accessibility: Bool) -> Int {
-        if accessibility { return 2 }
-        if width >= 600 { return max(5, Int(width / 140)) }
-        return width >= 380 ? 4 : 3
+        if accessibility || width < 600 { return 2 }
+        return max(3, Int(width / 190))
     }
 }
 
-/// One square in the grid. The image fills the square; the stage word sits bottom-left and the
-/// upload state top-right, both on a small ground pill so they read over any photo.
+/// One tile in the grid. The image fills it; the stage sits bottom-left (After on green with a
+/// tick), the upload state top-right, and while choosing photos a 24pt circle top-right.
 struct MediaTile<Thumb: View>: View {
     let stage: String?
     let state: MediaUploadState
     var selecting = false
     var selected = false
     @ViewBuilder var image: Thumb
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: MediaGridMetrics.tileRadius, style: .continuous)
         Color.clear
-            .aspectRatio(1, contentMode: .fit)
+            .aspectRatio(typeSize.isAccessibilitySize ? 1 : MediaGridMetrics.aspect, contentMode: .fit)
             .overlay { image }
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            // A filled thumbnail overflows its square; taps must stay on this tile.
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .clipShape(shape)
+            // A filled thumbnail overflows its tile; taps must stay on this tile.
+            .contentShape(shape)
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(selected ? Theme.brand : Theme.border.opacity(0.5), lineWidth: selected ? 3 : 1)
+                // Paper: no rim until the photo is chosen, then 2pt of brand.
+                shape.strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2)
             }
             .overlay(alignment: .bottomLeading) {
                 if let stage {
-                    Text(stage).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 7).frame(minHeight: 22)
-                        .background(Theme.background.opacity(0.92), in: Capsule())
-                        .padding(5)
+                    HStack(spacing: 4) {
+                        if stage == "After" {
+                            Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
+                                .accessibilityHidden(true)
+                        }
+                        Text(stage).font(Theme.font(13, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10).frame(minHeight: 24)
+                    .background(stage == "After" ? MediaGridMetrics.afterPill : MediaGridMetrics.scrim, in: Capsule())
+                    .padding(8)
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if let word = state.word {
                     HStack(spacing: 5) {
                         if state == .sending {
-                            ProgressView().controlSize(.mini).tint(Theme.foreground)
+                            ProgressView().controlSize(.mini).tint(.white)
                         } else if let tint = state.tint {
                             Circle().fill(tint).frame(width: 7, height: 7)
                         }
-                        Text(word).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.foreground)
+                        Text(word).font(Theme.font(13, weight: .semibold)).foregroundStyle(.white)
                     }
-                    .padding(.horizontal, 7).frame(minHeight: 22)
-                    .background(Theme.background.opacity(0.92), in: Capsule())
-                    .padding(5)
+                    .padding(.horizontal, 9).frame(minHeight: 24)
+                    .background(MediaGridMetrics.scrim, in: Capsule())
+                    .padding(8)
+                } else if selecting {
+                    ZStack {
+                        Circle().fill(selected ? Theme.brand : Color.black.opacity(0.25))
+                        if selected {
+                            Image(systemName: "checkmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                        } else {
+                            Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: 1.5)
+                        }
+                    }
+                    .frame(width: 24, height: 24)
+                    .padding(8)
+                    .accessibilityHidden(true)
                 }
             }
-            .overlay(alignment: .topLeading) {
-                if selecting {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 24, weight: .medium))
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(selected ? Theme.onInk : Theme.foreground, selected ? Theme.brand : Theme.background.opacity(0.85))
-                        .padding(6)
-                        .accessibilityHidden(true)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(shape)
     }
 }
 
@@ -155,33 +172,49 @@ struct PendingMediaThumbnail: View {
     }
 }
 
-/// A row for the Documents list: title, one supporting line, status as a word on the right.
+/// A row for the Documents list (Paper 21A): a 44pt file tile, the title over one supporting
+/// line, then the upload state as a word, or the download glyph on a stored file.
 struct MediaDocumentRow: View {
     let title: String
     let detail: String
     let state: MediaUploadState
+    var symbol = "doc"
+    /// A stored file opens when tapped; the glyph says so.
+    var showsDownload = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-        layout {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+        let large = typeSize.isAccessibilitySize
+        HStack(alignment: .center, spacing: 12) {
+            if !large {
+                Image(systemName: symbol).font(.system(size: 17, weight: .regular)).foregroundStyle(Theme.subtle)
+                    .frame(width: 44, height: 44)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .accessibilityHidden(true)
             }
-            if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
-            if let word = state.word { StatusWord(text: word, tint: state.tint) }
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(large ? nil : 1)
+                Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .lineLimit(large ? nil : 2)
+                if large, let word = state.word { StatusWord(text: word, tint: state.tint).padding(.top, 4) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !large, let word = state.word {
+                StatusWord(text: word, tint: state.tint)
+            } else if showsDownload && state == .stored {
+                Image(systemName: "arrow.down.to.line").font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(Theme.subtle)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
         .contentShape(Rectangle())
     }
 }
 
-/// A quiet 56pt word button (field fill) for the selection bar and the quick tag step.
+/// A quiet 56pt word pill (field fill) for the selection bar and the quick tag step.
 struct MediaQuietButton: View {
     let title: String
     var symbol: String? = nil
@@ -194,18 +227,18 @@ struct MediaQuietButton: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if let symbol { Image(systemName: symbol).font(.system(size: 16, weight: .medium)) }
-                Text(title).font(Theme.font(17, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
+                Text(title).font(Theme.font(16, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
             }
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: height)
-            .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            // Paper v2: a secondary action is a pill on the field fill, 16 Semibold.
+            .background(selected ? Theme.brandSurface : Theme.fill, in: Capsule())
             .overlay {
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                    .strokeBorder(selected ? Theme.brand : .clear, lineWidth: 2)
+                Capsule().strokeBorder(selected ? Theme.brand : Color.clear, lineWidth: 2)
             }
             .opacity(isEnabled ? 1 : 0.4)
-            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])

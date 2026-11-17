@@ -114,7 +114,7 @@ struct WhatsNewSheet: View {
                 Text(content.buildLine)
                     .font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
                 Text("What's new")
-                    .font(Theme.font(24, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .font(Theme.font(34, weight: .bold)).tracking(-0.85).foregroundStyle(Theme.foreground)
                     .padding(.top, 4)
                     .accessibilityAddTraits(.isHeader)
                 PaperCard {
@@ -178,15 +178,33 @@ struct WhatsNewHighlightRow: View {
 /// the notes (MA-19). Each day is one section, like the sheet.
 struct WhatsNewHistoryView: View {
     var notes: [ReleaseNote] = ReleaseNotes.all
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// Paper 65F: two cards a row; one at accessibility sizes so the words never squeeze.
+    private var columns: [GridItem] {
+        typeSize.isAccessibilitySize
+            ? [GridItem(.flexible(), alignment: .top)]
+            : [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)]
+    }
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 20) {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                // Paper 65F: the title in 28 Bold, one muted line under it.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("What's new").font(Theme.heading()).tracking(-0.56)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("What you can do now, newest first").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 16)
                 ForEach(notes) { note in
-                    VStack(alignment: .leading, spacing: 6) {
-                        PaperSection(note.dayLabel) {
-                            ForEach(Array(note.highlights.enumerated()), id: \.offset) { _, item in
-                                WhatsNewHighlightRow(item: item)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(note.dayLabel).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                            .padding(.horizontal, 4)
+                        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                            ForEach(Array(note.highlights.enumerated()), id: \.offset) { index, item in
+                                WhatsNewHistoryCard(item: item, index: index)
                             }
                         }
                         if note.fixes > 0 {
@@ -195,13 +213,59 @@ struct WhatsNewHistoryView: View {
                                 .padding(.horizontal, 4)
                         }
                     }
+                    .padding(.bottom, 20)
                 }
             }
             .paperCardMargin()
-            .padding(.top, 8).padding(.bottom, 24)
+            .padding(.bottom, 24)
         }
         .background(Theme.canvas)
-        .navigationTitle("What's new")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// One highlight as a Paper 65F card: its symbol on a tinted tile, the title (16 Semibold) and the
+/// sentence under it. The tile's hue rotates so a row of cards scans; the words carry the meaning.
+private struct WhatsNewHistoryCard: View {
+    let item: ReleaseNote.Highlight
+    let index: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Image(systemName: item.symbol)
+                .font(.system(size: 34, weight: .regular))
+                .foregroundStyle(ink)
+                .frame(maxWidth: .infinity, minHeight: 88)
+                .background(surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                Text(item.detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4).padding(.bottom, 4)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .panelBackground()
+        .accessibilityElement(children: .combine)
+    }
+
+    private var ink: Color {
+        switch index % 4 {
+        case 0: return Theme.brandText
+        case 1: return Theme.success
+        case 2: return Theme.ai
+        default: return Theme.warning
+        }
+    }
+
+    private var surface: Color {
+        switch index % 4 {
+        case 0: return Theme.brandSurface
+        case 1: return Theme.successSurface
+        case 2: return Theme.aiSurface
+        default: return Theme.warningSurface
+        }
     }
 }

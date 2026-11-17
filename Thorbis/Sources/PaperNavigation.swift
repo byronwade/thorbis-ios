@@ -421,7 +421,7 @@ struct RootView: View {
         DrawerSections.make(pins: pinnedPlaces,
                             explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
                             roleDefaults: layout.roleDefaultTabs, hidden: layout.hidden, order: layout.menuOrder,
-                            local: localSections) { item in
+                            local: localSections, role: WorkRole(session)) { item in
             switch item {
             case .schedule: primaryAccess.canOpen(.schedule)
             case .jobs: primaryAccess.canOpen(.jobs)
@@ -440,7 +440,7 @@ struct RootView: View {
         case .schedule:
             let mine = ScheduleScope.initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
             let left = TodayNumbers.left(TodayNumbers.visits(store.jobs, assignee: mine.assignee(session.user?.id, range: .today)))
-            return left > 0 ? PlaceCount(text: "\(left) left", spoken: "\(left) stop\(left == 1 ? "" : "s") left today") : nil
+            return PlaceCount.number(left, spoken: "\(left) stop\(left == 1 ? "" : "s") left today")
         case .jobs:
             let open = TodayNumbers.open(store.jobs)
             return PlaceCount.number(open, spoken: "\(open) open")
@@ -663,7 +663,7 @@ struct RootView: View {
         .environment(\.paperCreate, headerCreate)
         .sheet(isPresented: $showSettings) { SheetSurface { SettingsView() } }
         .sheet(isPresented: $search) { SheetSurface { PaperGlobalSearch() } }
-        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
+        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet(offersBooking: true) } }
         .sheet(isPresented: $newEstimate) { SheetSurface { NewEstimateView() } }
         .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
         .onChange(of: reviewScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
@@ -1131,11 +1131,11 @@ struct PreviewSheets: ViewModifier {
                                            : PaperPreview.screen.hasPrefix("builder-") ? PaperPreview.optionsEstimate : PaperPreview.estimate) { _ in }
                     .environmentObject(api).environmentObject(session).environmentObject(store)
             } }
-            .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
+            .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet(offersBooking: true) } }
             .modifier(PreviewFormSheet(screen: $formSheet))
             .sheet(isPresented: $signature) { SheetSurface {
                 SignatureCaptureSheet(title: "Approve $970.00", summary: "By signing, Danielle Marlowe approves \"AC repair and compressor replacement\" as shown.",
-                                      jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe") { _ in nil }
+                                      jobID: PaperPreview.jobID, suggestedName: "Danielle Marlowe", heading: "Sign estimate") { _ in nil }
             } }
             .sheet(isPresented: $newEstimate, onDismiss: {
                 guard EstimateRecoveryPreview.enabled, let id = createdEstimateID else { return }

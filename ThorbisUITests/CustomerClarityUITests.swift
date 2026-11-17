@@ -48,6 +48,7 @@ final class CustomerClarityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-label", "--paper-preview-scroll", "center", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
+        openPropertyPage(app)
         let name = "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
         let label = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 30))
@@ -69,6 +70,7 @@ final class CustomerClarityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-long-location-label", "--paper-preview-scroll", "center", "-thorbis.appearance", "dark"]
         app.launch()
+        openPropertyPage(app)
         let name = "Birch Community Hall North Building Utility Room and Accessible Service Entrance Near the West Courtyard"
         let label = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", name)).firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 30))
@@ -131,29 +133,23 @@ final class CustomerClarityUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["Danielle Marlowe"].waitForExistence(timeout: 30))
         capture("Customer overview")
-        // v2: the account's details sit on Overview itself (no "Customer details" disclosure).
-        XCTAssertTrue(app.staticTexts["Billing terms"].waitForExistence(timeout: 10))
-        // The tabs are Overview, "Jobs · N" and Money.
+        // Paper v2 (48N): the account's details stay on the main page.
+        let billing = app.staticTexts["Billing terms"]
+        for _ in 0..<8 where !billing.exists { app.swipeUp() }
+        XCTAssertTrue(billing.waitForExistence(timeout: 10))
+        // "Everything for Danielle": Jobs opens its own page with the history.
         let jobs = jobsTab(app)
         for _ in 0..<8 where !jobs.isHittable { app.swipeDown() }
         XCTAssertTrue(jobs.waitForExistence(timeout: 10))
         jobs.tap()
-        let history = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "Open", "Past")).firstMatch
+        let history = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "Open", "Past")).firstMatch
         XCTAssertTrue(history.waitForExistence(timeout: 10))
         capture("Customer jobs")
         XCTAssertFalse(app.staticTexts["Next visit"].exists)
-        // The jobs' photos, notes and documents follow the history on the Jobs tab.
-        let photos = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Photos")).firstMatch
-        for _ in 0..<10 where !photos.exists { app.swipeUp() }
-        XCTAssertTrue(photos.waitForExistence(timeout: 15), app.debugDescription)
-        for _ in 0..<10 where !app.buttons["Overview"].isHittable { app.swipeDown() }
-        app.buttons["Overview"].tap()
+        app.navigationBars.buttons.element(boundBy: 0).tap()
         let addContact = app.buttons["Add contact"]
         for _ in 0..<8 where !addContact.exists { app.swipeUp() }
         XCTAssertTrue(addContact.waitForExistence(timeout: 10))
-        let addLocation = app.buttons["Add location"]
-        for _ in 0..<8 where !addLocation.exists { app.swipeUp() }
-        XCTAssertTrue(addLocation.exists)
     }
 
     func testNoJobsShowsAnHonestEmptyHistory() {
@@ -169,8 +165,16 @@ final class CustomerClarityUITests: XCTestCase {
     }
 
     /// The Jobs tab, labelled "Jobs · N" while jobs are visible.
+    /// Paper v2 (48N): service locations live on the customer's Property page.
+    private func openPropertyPage(_ app: XCUIApplication) {
+        let property = app.buttons["customer-hub-property"]
+        XCTAssertTrue(property.waitForExistence(timeout: 30))
+        for _ in 0..<8 where !property.isHittable { app.swipeUp() }
+        property.tap()
+    }
+
     private func jobsTab(_ app: XCUIApplication) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@", "Jobs", "Jobs ·")).firstMatch
+        app.buttons.matching(NSPredicate(format: "label == %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@", "Jobs", "Jobs ·", "Jobs,")).firstMatch
     }
 
     func testLongJobTitleWrapsAtLargestText() {

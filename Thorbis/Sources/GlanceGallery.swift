@@ -33,7 +33,7 @@ struct GlanceGallery: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 18) {
                 switch screen {
                 case "glance-lock": lock
                 case "glance-island": island
@@ -43,19 +43,26 @@ struct GlanceGallery: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(screen == "glance-widgets" ? Color(white: 0.55) : Color(white: 0.18))
+        // Paper 94D draws the widgets on the screen canvas; the Lock Screen and island stay dark.
+        .background(screen == "glance-widgets" ? Theme.background : Color(white: 0.18))
     }
 
     // MARK: Home Screen
 
+    /// Paper 94D's order: Today's jobs (medium), then Next stop beside the small Today's jobs, then
+    /// the caption. The large widget and the working and all-done states follow for coverage.
     @ViewBuilder private var widgets: some View {
-        HStack(spacing: 22) {
-            widget(TodayJobsView(entry: Self.entry, previewFamily: .systemSmall), width: 170, height: 170)
+        widget(TodayJobsView(entry: Self.entry, previewFamily: .systemMedium), width: 358, height: 160)
+        HStack(spacing: 18) {
             widget(NextStopView(entry: Self.entry), width: 170, height: 170)
+            widget(TodayJobsView(entry: Self.entry, previewFamily: .systemSmall), width: 170, height: 170)
         }
-        widget(TodayJobsView(entry: Self.entry, previewFamily: .systemMedium), width: 364, height: 170)
-        widget(TodayJobsView(entry: Self.working, previewFamily: .systemLarge), width: 364, height: 382)
-        HStack(spacing: 22) {
+        Text("Widgets, Control Center and the Action button can start On my way.")
+            .font(Theme.font(14))
+            .foregroundStyle(Theme.muted)
+            .padding(.horizontal, 4)
+        widget(TodayJobsView(entry: Self.working, previewFamily: .systemLarge), width: 358, height: 376)
+        HStack(spacing: 18) {
             widget(NextStopView(entry: Self.working), width: 170, height: 170)
             widget(TodayJobsView(entry: TodayEntry(date: .now, items: [], signedOut: false, progress: .allDone(6)),
                                  previewFamily: .systemSmall), width: 170, height: 170)
@@ -67,8 +74,8 @@ struct GlanceGallery: View {
         content
             .padding(16)
             .frame(width: width, height: height)
-            .background(WidgetInk.ground)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(WidgetInk.panel)
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     // MARK: Lock Screen
@@ -95,9 +102,9 @@ struct GlanceGallery: View {
 
     private func activity(_ state: JobActivityAttributes.ContentState) -> some View {
         JobLockScreenView(attributes: Self.attributes, state: state)
-            .frame(width: 370)
-            .background(WidgetInk.ground)
-            .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .frame(width: 358)
+            .background(WidgetInk.panel.opacity(0.88))
+            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }
 
     // MARK: Dynamic Island
@@ -107,11 +114,11 @@ struct GlanceGallery: View {
         let onSite = Self.state("arrived", minutes: 4)
         Text("Compact").font(WidgetInk.font(13, weight: .medium)).foregroundStyle(.white.opacity(0.7))
         HStack {
-            GlanceStatusWord(text: driving.shortLabel, tint: WidgetInk.tint(driving.status, island: true), size: 13,
-                             textColor: WidgetInk.Island.text)
-                .fixedSize()
+            Circle().fill(WidgetInk.tint(driving.status, island: true)).frame(width: 8, height: 8)
+                .accessibilityLabel(driving.shortLabel)
             Spacer(minLength: 126)
-            ElapsedText(since: driving.since).font(WidgetInk.number(13)).foregroundStyle(.white).frame(maxWidth: 52)
+            ElapsedText(since: driving.since).font(WidgetInk.number(14, weight: .semibold)).foregroundStyle(.white)
+                .frame(maxWidth: 52)
         }
         .padding(.horizontal, 14).frame(width: 290, height: 37).background(Capsule().fill(.black))
         Text("Minimal").font(WidgetInk.font(13, weight: .medium)).foregroundStyle(.white.opacity(0.7))

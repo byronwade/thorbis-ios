@@ -40,6 +40,21 @@ extension APIClient {
     }
 }
 
+/// Paper 53A's radio: a 22pt ring that fills brand when chosen.
+private struct AssigneeRadio: View {
+    let selected: Bool
+
+    var body: some View {
+        ZStack {
+            Circle().strokeBorder(selected ? Theme.brand : Theme.foreground.opacity(0.4), lineWidth: selected ? 2 : 1.5)
+                .frame(width: 22, height: 22)
+            if selected { Circle().fill(Theme.brand).frame(width: 11, height: 11) }
+        }
+        .frame(width: 24, height: 24)
+        .accessibilityHidden(true)
+    }
+}
+
 /// Live assignment is kept separate from the device's demonstration dispatch board.
 struct JobAssignmentView: View {
     let jobID: String
@@ -56,6 +71,8 @@ struct JobAssignmentView: View {
     @State private var loadID = UUID()
     @State private var saving = false
     @State private var error: String?
+    /// The job's street, for the line under the title; nil until read (or with no address on file).
+    @State private var street: String?
 
     private var isCurrent: Bool {
         loadedGeneration == session.generation && session.can("job.assign", feature: "jobs")
@@ -68,9 +85,11 @@ struct JobAssignmentView: View {
     /// A modal (design.thorbis.com Places: "Assign a tech" is one task): who has it now, then the
     /// roster on the panel; one tap picks a tech, the ink commit saves it.
     var body: some View {
-        ThorbisModalSheet(title: "Assign tech", closeLabel: "Close", onClose: { dismiss() },
+        // Paper 53A: the job under the title, the roster on one card, the commit, then Cancel as a pill.
+        ThorbisModalSheet(title: "Assign a technician", subtitle: isCurrent ? jobLine : nil,
+                          closeLabel: "Cancel", onClose: { dismiss() },
                           detents: [.medium, .large],
-                          commitTitle: isCurrent && job != nil ? "Save assignment" : nil,
+                          commitTitle: isCurrent && job != nil ? commitTitle : nil,
                           busy: saving, commitIdentifier: "assign-save",
                           commit: { attemptSave() }) {
             if !session.can("job.assign", feature: "jobs") {
@@ -79,42 +98,63 @@ struct JobAssignmentView: View {
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
                 if loading { SkeletonRows(count: 4, inset: 0) }
                 if isCurrent, let job {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Assigned now").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        Text(job.assignedToUserId.map { current in
-                            assignees.first(where: { $0.userId == current })?.displayName ?? "Someone outside your roster"
-                        } ?? "Unassigned").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                    // Who has it now is said on that tech's row. Only a tech outside this roster, who
+                    // has no row, is named here.
+                    if let current = job.assignedToUserId, !assignees.contains(where: { $0.userId == current }) {
+                        Text("Assigned now: someone outside your roster").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .accessibilityElement(children: .combine)
-                    VStack(alignment: .leading, spacing: 6) {
-                        SectionHeader(title: "Assign to", count: assignees.count, horizontalPadding: 0)
+                    VStack(alignment: .leading, spacing: 8) {
                         if assignees.isEmpty {
                             Text("No one can be assigned right now. Ask your office to add a tech.").font(Theme.font(15)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         } else {
-                            let sorted = assignees.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
+                            // Paper 53A: the suggested tech leads the roster with a brand chip. The
+                            // pick is the least-booked tech on the visit's day, as New job offers it.
+                            let load = dayLoad(job)
+                            let suggestion = Self.suggestion(for: job, among: assignees, load: load)
+                            let sorted = assignees.sorted { lhs, rhs in
+                                if lhs == suggestion { return true }
+                                if rhs == suggestion { return false }
+                                return lhs.displayName.localizedStandardCompare(rhs.displayName) == .orderedAscending
+                            }
                             VStack(spacing: 0) {
                                 ForEach(sorted) { person in
                                     let chosen = selectedUserID == person.userId
+                                    let detail = rowDetail(person, job: job, load: load)
+                                    if person.userId != sorted.first?.userId { WellDivider(leading: PaperCardMetrics.inset + 36) }
                                     Button { selectedUserID = person.userId; missing = nil } label: {
                                         HStack(spacing: 12) {
-                                            InitialsAvatar(name: person.displayName, size: 28)
-                                                .accessibilityHidden(true)
-                                            Text(person.displayName).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                                            AssigneeRadio(selected: chosen)
+                                            VStack(alignment: .leading, spacing: 0) {
+                                                Text(person.displayName).font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                                                    .foregroundStyle(Theme.foreground)
+                                                if let detail {
+                                                    Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                                                }
+                                            }
                                             Spacer(minLength: 8)
-                                            if chosen {
-                                                Image(systemName: "checkmark").font(.system(size: 14, weight: .medium))
-                                                    .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                                            if person == suggestion {
+                                                Text("Suggested").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                                    .padding(.horizontal, 10).frame(height: 26)
+                                                    .background(Theme.brandSurface, in: Capsule())
                                             }
                                         }
-                                        .padding(.horizontal, 10)
-                                        .frame(minHeight: 48).contentShape(Rectangle())
+                                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
+                                        .frame(minHeight: 56)
+                                        // Paper 53A: the chosen row sits on brand at 12%.
+                                        .background(chosen ? Theme.brand.opacity(0.12) : Color.clear)
+                                        .contentShape(Rectangle())
                                     }
                                     .buttonStyle(RowPressStyle())
+                                    .accessibilityLabel([person.displayName, detail,
+                                                         person == suggestion ? "Suggested, fewest jobs that day" : nil]
+                                        .compactMap { $0 }.joined(separator: ", "))
                                     .accessibilityAddTraits(chosen ? .isSelected : [])
                                 }
                             }
-                            .padding(.horizontal, -10)
+                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                         }
                         if let missing { FieldProblem(message: missing) }
                     }
@@ -123,6 +163,43 @@ struct JobAssignmentView: View {
         }
         .task(id: session.generation) { await load() }
         .refreshable { await load() }
+    }
+
+    /// Paper 53A: "Drain backup · 214 Maple St · Today, 1:00 p.m." under the title; the street once
+    /// it is read, the time once the job has one.
+    private var jobLine: String? {
+        guard let job else { return nil }
+        return [job.title, street, JobFiltering.date(job.scheduledFor).map { $0.visitLabel() }]
+            .compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// Jobs booked per tech on this visit's day, not counting this job; empty until it has a day.
+    private func dayLoad(_ job: JobRecord) -> [String: Int] {
+        guard let day = JobFiltering.date(job.scheduledFor) else { return [:] }
+        return BookJobSearch.load(store.jobs.filter { $0.id != job.id }, on: day)
+    }
+
+    /// The least-booked tech that day; nil until the job has a day.
+    private static func suggestion(for job: JobRecord, among people: [FieldAssignee], load: [String: Int]) -> FieldAssignee? {
+        guard JobFiltering.date(job.scheduledFor) != nil else { return nil }
+        return BookJobSearch.suggested(people, load: load)
+    }
+
+    /// "Has this job now · 3 jobs that day": who holds it, and how full their day is.
+    private func rowDetail(_ person: FieldAssignee, job: JobRecord, load: [String: Int]) -> String? {
+        var parts: [String] = []
+        if person.userId == job.assignedToUserId { parts.append("Has this job now") }
+        if JobFiltering.date(job.scheduledFor) != nil {
+            let count = load[person.userId] ?? 0
+            parts.append("\(count) other job\(count == 1 ? "" : "s") that day")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// Paper 53A: "Assign Dana Reyes" once someone is picked.
+    private var commitTitle: String {
+        guard let selectedUserID, let person = assignees.first(where: { $0.userId == selectedUserID }) else { return "Save assignment" }
+        return "Assign \(person.displayName)"
     }
 
     /// Press first, then say what is missing under the list.
@@ -149,6 +226,7 @@ struct JobAssignmentView: View {
         assignees = []
         selectedUserID = nil
         loadedGeneration = nil
+        street = nil
         guard session.can("job.assign", feature: "jobs"),
               let organizationID = session.activeOrganization?.id else { return }
         loading = true
@@ -168,9 +246,22 @@ struct JobAssignmentView: View {
                   session.activeOrganization?.id == organizationID else { return }
             job = freshJob
             assignees = roster
+            // Paper 53A: an unassigned job opens on the suggested tech; a reassignment on who has it.
             selectedUserID = freshJob.assignedToUserId
+                ?? Self.suggestion(for: freshJob, among: roster, load: dayLoad(freshJob))?.userId
             loadedGeneration = generation
             if !keepError { error = nil }
+            // The street for the line under the title; the sheet is already usable without it.
+            if session.can("customer.view", feature: "core_crm"),
+               let places = try? await api.fieldLocations(freshJob.customerId) {
+                guard operation == loadID, generation == session.generation else { return }
+                let mine = places.filter { $0.customerId == freshJob.customerId && $0.organizationId == organizationID }
+                let place = mine.first(where: { $0.id == freshJob.locationId }) ?? (mine.count == 1 ? mine.first : nil)
+                street = place.flatMap {
+                    NextStopPlace(jobID: freshJob.id, organizationID: organizationID, customerID: freshJob.customerId,
+                                  address: $0.address).firstLine
+                }
+            }
         } catch is CancellationError {
         } catch {
             guard operation == loadID, generation == session.generation else { return }

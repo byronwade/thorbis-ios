@@ -69,6 +69,12 @@ private struct ErrorStatesGallery: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
+                // Paper 73C Couldn't load and 73D No access, as a screen's own state.
+                PaperEmptyState(symbol: "exclamationmark.circle", title: "Couldn’t load this job",
+                                message: "Something went wrong on our side. Your work on this phone is safe.",
+                                actionTitle: "Try again", tint: Theme.warning, prominent: true) {}
+                PaperEmptyState(symbol: "lock", title: "You don’t have access to Reports",
+                                message: "Your role is Technician. An owner or manager can give you access.")
                 label("No signal")
                 ErrorBanner(error: Problem(title: "Network error", status: nil, detail: "No connection. Check your signal and try again."),
                             retry: {})
@@ -182,8 +188,8 @@ enum StatesPreviewFixtures {
     static let statusPickerTitle = "Status"
     /// The same rows `PaperJobDetailView.statusControl` builds for a dispatched job.
     static var statusPickerItems: [ThorbisMenuItem] {
-        [ThorbisMenuItem("Dispatched", status: .dispatched, isSelected: true) {}] + [("On my way", "en_route"), ("Arrive", "arrived"), ("Start work", "in_progress"),
-         ("Pause job…", "paused"), ("Move back to scheduled", "scheduled")].map { title, target in
+        [ThorbisMenuItem("Dispatched", status: .dispatched, isSelected: true) {}] + [("On my way", "en_route"), ("I've arrived", "arrived"), ("Start work", "in_progress"),
+         ("Pause job", "paused"), ("Move back to scheduled", "scheduled")].map { title, target in
             ThorbisMenuItem(title, status: StatusTone(jobStatus: target)) {}
         }
     }

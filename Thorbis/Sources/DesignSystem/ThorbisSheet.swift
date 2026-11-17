@@ -3,27 +3,126 @@ import UIKit
 
 // MARK: - Scaffold
 
-/// The title row every Thorbis sheet shares (v2): 17pt Medium title on the left, a close circle
-/// on the right, 20pt from the edges. The grabber above stays the system's.
+/// Where a sheet draws its way out (Paper v2).
+enum ThorbisSheetCloseStyle {
+    /// Paper's default. A `ThorbisModalSheet` whose close is "Cancel" and that has a bottom commit
+    /// draws Cancel as a pill under the commit (Pause this job, Assign a technician); every other
+    /// sheet draws the 44pt close circle beside the title (Schedule).
+    case automatic
+    /// The 44pt circle with a cross: on the right of a leading title, on the left of a centred one.
+    case circle
+    /// The close word as a pill on the left of the title row; the title is centred.
+    case headerPill
+    /// `ThorbisModalSheet` only: the close word as a full-width pill at the bottom, under the commit.
+    /// The header draws no close.
+    case bottomPill
+}
+
+/// A commit drawn in the title row (Paper Edit photo: a 44pt brand pill, "Done"), in place of a
+/// bottom commit. Its identifier defaults to `sheet-commit`.
+struct ThorbisSheetHeaderAction {
+    var title: String
+    var busy = false
+    var enabled = true
+    var identifier: String? = nil
+    var action: () -> Void
+}
+
+/// The title row every Thorbis sheet shares (Paper v2), 20pt from the edges under the system
+/// grabber. By default a 22 Bold title on the left with an optional 15pt muted line under it, and a
+/// 44pt close circle on the right. With `closeStyle: .headerPill` or a `trailing` commit the close
+/// moves to the left, the title is centred at 17 Semibold and the commit pill sits on the right.
 struct ThorbisSheetHeader: View {
     let title: String?
+    /// One muted line under the title that names the thing ("AC not cooling · JOB-2214").
+    var subtitle: String? = nil
     var closeLabel = "Close"
     var onClose: (() -> Void)? = nil
+    var closeStyle: ThorbisSheetCloseStyle = .automatic
+    var trailing: ThorbisSheetHeaderAction? = nil
+
+    private var closeOnLeft: Bool { closeStyle == .headerPill || trailing != nil }
+    private var drawsClose: Bool { onClose != nil && closeStyle != .bottomPill }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if let title {
-                Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            Spacer(minLength: 0)
-            if let onClose {
-                PaperCircleButton(symbol: "xmark", label: closeLabel, size: 30, fill: Theme.fill, action: onClose)
-            }
+        Group {
+            if closeOnLeft { barRow } else { titleRow }
         }
         .padding(.horizontal, Theme.gutter)
-        .padding(.top, 14).padding(.bottom, 4)
+        .padding(.top, 14).padding(.bottom, 6)
+    }
+
+    /// Leading title and subtitle, the close circle on the right.
+    private var titleRow: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                if let title {
+                    Text(title).font(Theme.font(22, weight: .bold)).tracking(-0.44).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                if let subtitle {
+                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            if drawsClose, let onClose {
+                PaperCircleButton(symbol: "xmark", label: closeLabel, size: 44, fill: Theme.fill, action: onClose)
+            }
+        }
+    }
+
+    /// Close on the left, the title centred, the commit pill on the right.
+    private var barRow: some View {
+        ZStack {
+            VStack(spacing: 1) {
+                if let title {
+                    Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                if let subtitle {
+                    Text(subtitle).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
+            }
+            .padding(.horizontal, 92)
+            HStack(spacing: 12) {
+                if drawsClose, let onClose {
+                    if closeStyle == .headerPill {
+                        Button(action: onClose) {
+                            Text(closeLabel).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                .lineLimit(1).fixedSize()
+                                .padding(.horizontal, 16).frame(minHeight: 44)
+                                .background(Theme.fill, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                    } else {
+                        PaperCircleButton(symbol: "xmark", label: closeLabel, size: 44, fill: Theme.fill, action: onClose)
+                    }
+                }
+                Spacer(minLength: 0)
+                if let trailing {
+                    Button(action: trailing.action) {
+                        HStack(spacing: 6) {
+                            if trailing.busy { ProgressView().tint(.white) }
+                            Text(trailing.title)
+                        }
+                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(Color.white)
+                        .lineLimit(1).fixedSize()
+                        .padding(.horizontal, 18).frame(minHeight: 44)
+                        .background(Theme.brand.opacity(trailing.enabled ? 1 : 0.45), in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(trailing.busy || !trailing.enabled)
+                    .accessibilityIdentifier(trailing.identifier ?? "sheet-commit")
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
     }
 }
 
@@ -45,12 +144,15 @@ struct ThorbisSheetScaffold<Content: View>: View {
     var title: String? = nil
     var onClose: (() -> Void)? = nil
     var detents: Set<PresentationDetent> = [.medium, .large]
+    /// A commit in the title row (Paper 40D "Add"): the brand pill on the right, the close circle
+    /// on the left and the title centred, as `ThorbisSheetHeader` draws any `trailing` action.
+    var headerAction: ThorbisSheetHeaderAction? = nil
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         VStack(spacing: 0) {
-            if title != nil || onClose != nil {
-                ThorbisSheetHeader(title: title, onClose: onClose)
+            if title != nil || onClose != nil || headerAction != nil {
+                ThorbisSheetHeader(title: title, onClose: onClose, trailing: headerAction)
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
@@ -72,10 +174,18 @@ struct ThorbisSheetScaffold<Content: View>: View {
 /// inside the sheet's padding at the bottom. The commit is never pre-disabled: let them press it,
 /// then show what is missing under the field. When it truly must be off, `commitDisabledReason`
 /// says why under the commit.
+///
+/// Paper v2 chrome: a "Cancel" close with a bottom commit is a fill pill under the commit (side by
+/// side with it while the keyboard is up, so both stay in reach); a "Close" is the 44pt circle
+/// beside the title. `subtitle` names the thing under the title. `commitInHeader` moves the commit
+/// into the title row as a brand pill (Paper Edit photo) with the close on the left.
 struct ThorbisModalSheet<Content: View>: View {
     let title: String
+    /// One muted line under the title that names the thing ("AC not cooling · JOB-2214").
+    var subtitle: String? = nil
     var closeLabel = "Close"
     var onClose: (() -> Void)? = nil
+    var closeStyle: ThorbisSheetCloseStyle = .automatic
     var detents: Set<PresentationDetent> = [.medium, .large]
     var commitTitle: String? = nil
     var commitSymbol: String? = nil
@@ -85,6 +195,8 @@ struct ThorbisModalSheet<Content: View>: View {
     var destructive = false
     var commitIdentifier: String? = nil
     var commit: () -> Void = {}
+    /// Draws the commit as a pill in the title row instead of at the bottom.
+    var commitInHeader = false
     /// Number pads and accessibility sizes have no Return; Done under the commit puts the keyboard
     /// away (MA-16). A form drag would pull an empty New customer sheet (#460).
     var onKeyboardDone: (() -> Void)? = nil
@@ -92,9 +204,66 @@ struct ThorbisModalSheet<Content: View>: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var keyboardShown = false
 
+    /// The bottom commit's title; nil when there is no commit or it sits in the title row.
+    private var bottomCommitTitle: String? { commitInHeader ? nil : commitTitle }
+
+    /// True when the close is the pill under the commit.
+    private var cancelAtBottom: Bool {
+        guard onClose != nil else { return false }
+        switch closeStyle {
+        case .bottomPill: return true
+        case .automatic: return closeLabel == "Cancel" && bottomCommitTitle != nil
+        case .circle, .headerPill: return false
+        }
+    }
+
+    private var headerCloseStyle: ThorbisSheetCloseStyle {
+        if cancelAtBottom { return .bottomPill }
+        if closeStyle == .automatic { return commitInHeader && closeLabel != "Close" ? .headerPill : .circle }
+        return closeStyle
+    }
+
+    private var headerCommit: ThorbisSheetHeaderAction? {
+        guard commitInHeader, let commitTitle else { return nil }
+        return ThorbisSheetHeaderAction(title: commitTitle, busy: busy, enabled: commitDisabledReason == nil,
+                                        identifier: commitIdentifier, action: commit)
+    }
+
+    /// With the keyboard up Cancel and the commit share one row, so neither is pushed off a short sheet.
+    private var sideBySide: Bool {
+        cancelAtBottom && bottomCommitTitle != nil && keyboardShown && !typeSize.isAccessibilitySize
+    }
+
+    private func commitButton(_ commitTitle: String) -> some View {
+        Button(action: commit) {
+            HStack(spacing: 7) {
+                if busy { ProgressView().tint(.white) }
+                else if let commitSymbol { Image(systemName: commitSymbol).accessibilityHidden(true) }
+                Text(commitTitle)
+            }
+            .modifier(CommitLook(destructive: destructive, enabled: commitDisabledReason == nil))
+        }
+        .buttonStyle(PressStyle())
+        .disabled(busy || commitDisabledReason != nil)
+        .accessibilityHint(commitDisabledReason ?? "")
+        .accessibilityIdentifier(commitIdentifier ?? "sheet-commit")
+    }
+
+    /// Paper: the close word on a 50pt fill pill, 8 under the commit.
+    private var cancelPill: some View {
+        Button { onClose?() } label: {
+            Text(closeLabel).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                .frame(maxWidth: .infinity).frame(minHeight: Theme.commitHeight)
+                .background(Theme.fill, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            ThorbisSheetHeader(title: title, closeLabel: closeLabel, onClose: onClose)
+            ThorbisSheetHeader(title: title, subtitle: subtitle, closeLabel: closeLabel, onClose: onClose,
+                               closeStyle: headerCloseStyle, trailing: headerCommit)
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     content()
@@ -110,26 +279,24 @@ struct ThorbisModalSheet<Content: View>: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                if let commitTitle {
+                if bottomCommitTitle != nil || cancelAtBottom {
                     VStack(alignment: .leading, spacing: 8) {
-                        Button(action: commit) {
-                            HStack(spacing: 7) {
-                                if busy { ProgressView().tint(destructive ? .white : Theme.onInk) }
-                                else if let commitSymbol { Image(systemName: commitSymbol).accessibilityHidden(true) }
-                                Text(commitTitle)
+                        if sideBySide, let bottomCommitTitle {
+                            HStack(spacing: 10) {
+                                cancelPill
+                                commitButton(bottomCommitTitle)
                             }
-                            .modifier(CommitLook(destructive: destructive, enabled: commitDisabledReason == nil))
+                        } else {
+                            if let bottomCommitTitle { commitButton(bottomCommitTitle) }
+                            if cancelAtBottom { cancelPill }
                         }
-                        .buttonStyle(PressStyle())
-                        .disabled(busy || commitDisabledReason != nil)
-                        .accessibilityHint(commitDisabledReason ?? "")
-                        .accessibilityIdentifier(commitIdentifier ?? "sheet-commit")
-                        if let commitDisabledReason {
+                        if bottomCommitTitle != nil, let commitDisabledReason {
                             Text(commitDisabledReason).font(Theme.font(13)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityHidden(true)
                         }
                     }
+                    // Paper v2: the commit and Cancel sit 20 from the sheet's edges.
                     .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, keyboardShown && onKeyboardDone != nil ? 4 : 12)
                 }
                 if onKeyboardDone != nil, keyboardShown {
@@ -142,7 +309,7 @@ struct ThorbisModalSheet<Content: View>: View {
                         .buttonStyle(ThorbisBarButtonStyle(prominent: true))
                         .accessibilityIdentifier("keyboard-done")
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.top, commitTitle == nil ? 8 : 0).padding(.bottom, 8)
+                    .padding(.horizontal, Theme.gutter).padding(.top, bottomCommitTitle == nil && !cancelAtBottom ? 8 : 0).padding(.bottom, 8)
                 }
             }
             .background(Theme.surface)
@@ -175,7 +342,8 @@ struct ThorbisSheetField<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+            Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4)
             content()
             if let error {
                 FieldProblem(message: error)

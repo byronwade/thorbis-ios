@@ -170,19 +170,20 @@ struct JobMediaView: View {
                 SiteMeasure.isSupported, VideoCapture.isAvailable)
     }
 
-    /// Photos screen (2026-10-31 redesign): one selector, a square-thumbnail grid with each photo's
-    /// stage and upload state, documents as rows, and one ink "Take photo" with quiet circles beside.
+    /// Photos screen (Paper 21A): "Add photo or video" and the scan circle, the count chips, a
+    /// two-across grid with each photo's stage and upload state, then documents as rows.
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            // Paper 21A: 16 between the add row, each day's grid and Documents; 12 above the chips.
+            VStack(alignment: .leading, spacing: 16) {
                 notices
-                selectorRow
+                VStack(alignment: .leading, spacing: 12) {
+                    addRow
+                    selectorRow
+                }
                 if loading || (previewIsCurrent && preview.loading) { SkeletonRows(count: 2, inset: 0) }
                 selectedFileRow
                 waitingSummary
-                if canAdd && dynamicTypeSize.isAccessibilitySize && !selecting {
-                    captureControls.padding(.top, 4)
-                }
                 justCapturedRow
                 emptyStates
                 if showsPhotos { photoSections }
@@ -192,19 +193,14 @@ struct JobMediaView: View {
                     Text(videoNotice ?? "Photos, PDFs and video clips up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
-            .onGeometryChange(for: CGFloat.self) { $0.size.width - Theme.gutter * 2 } action: { contentWidth = $0 }
+            // Paper v2: cards and tiles sit 16 in from the screen's edges.
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width - 16 * 2 } action: { contentWidth = $0 }
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .safeAreaInset(edge: .bottom) {
-            if selecting {
-                selectionBar
-            } else if canAdd && !dynamicTypeSize.isAccessibilitySize {
-                captureControls
-                    .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-                    .background(Theme.canvas)
-            }
+            if selecting { selectionBar }
         }
         .sheet(isPresented: $showLegacyRecovery) { SheetSurface {
             LegacyMediaRecoveryView(jobID: jobID, workspaceName: session.activeOrganization?.name ?? "Current workspace")
@@ -241,6 +237,7 @@ struct JobMediaView: View {
                              load: { try await download($0) },
                              retag: { await retag($0, $1) },
                              archive: { await archive([$0]) },
+                             recaption: { await recaption($0, $1) },
                              fileMarkup: { image, tags in try enqueueDerived(image, tags: tags, caption: "Marked up", prefix: "markup") },
                              onClose: { viewer = nil })
         }
@@ -337,7 +334,7 @@ struct JobMediaView: View {
     @ViewBuilder private var notices: some View {
         if let error = error ?? (previewIsCurrent ? preview.error : nil) {
             ErrorBanner(message: error, retry: selectedData == nil ? nil : { enqueueSelection() })
-                .padding(.horizontal, -Theme.gutter)
+                .padding(.horizontal, -16)
         }
         if let pageError, let scope = readScope, pageErrorScope == scope {
             ErrorBanner(message: pageError) {
@@ -357,7 +354,7 @@ struct JobMediaView: View {
         }
     }
 
-    /// The screen's one selector, with Untagged and Select in the filter circle beside it.
+    /// The count chips (Paper 21A); at accessibility text sizes, one "Show" menu instead.
     @ViewBuilder private var selectorRow: some View {
         if readScope != nil && !(allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && !hasMore) {
             HStack(spacing: 8) {
@@ -371,40 +368,149 @@ struct JobMediaView: View {
                     }
                     .accessibilityIdentifier("photo-filter-menu")
                 } else {
-                    // Text tabs, as every list and the job's own sections use; wrapping keeps each word whole.
-                    PaperTabs(options: MediaFilter.selector.map(\.rawValue),
-                              selection: Binding(get: { (filter == .untagged ? .all : filter).rawValue },
-                                                 set: { raw in
-                                                     guard let next = MediaFilter(rawValue: raw) else { return }
-                                                     filter = next
-                                                     if next == .documents { endSelecting() }
-                                                 }),
-                              wrapOverflow: true, textTabs: true)
-                        .padding(.horizontal, -(Theme.gutter - 8))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("job-media-selector")
-                    ThorbisMenu(items: filterMenuItems, title: "Photos", accessibilityLabel: "More photo options") {
-                        PaperCircleLabel(symbol: "line.3.horizontal.decrease", size: 44,
-                                         fill: filter == .untagged ? Theme.brandSurface : Theme.fill)
+                    // Paper 21A: count chips. Every chip carries `job-media-selector` and is named
+                    // by its stage alone ("After"); its count is the value.
+                    let counts = photoCounts
+                    let documentCount = documents.count + waitingDocuments.count
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            filterChip(.all, count: counts.all)
+                            filterChip(.before, count: counts.before)
+                            filterChip(.after, count: counts.after)
+                            if documentCount > 0 || filter == .documents {
+                                filterChip(.documents, count: documentCount)
+                            }
+                            if counts.untagged > 0 || filter == .untagged {
+                                untaggedChip(counts.untagged)
+                            }
+                        }
+                        .padding(.horizontal, 16)
                     }
-                    .accessibilityValue(filter == .untagged ? "Showing untagged photos" : "")
-                    .accessibilityIdentifier("photo-filter-menu")
+                    .padding(.horizontal, -16)
                 }
             }
         }
     }
 
-    private var filterMenuItems: [ThorbisMenuItem] {
-        var items = [
-            ThorbisMenuItem("All photos", icon: "square.grid.3x3", isSelected: filter == .all) { filter = .all },
-            ThorbisMenuItem("Untagged photos", icon: "tag.slash", subtitle: "\(allPhotos.filter { mediaStageWord($0.tags) == nil }.count) loaded",
-                            isSelected: filter == .untagged) { filter = .untagged },
-        ]
-        if canAdd && !storedPhotos.isEmpty {
-            items.append(ThorbisMenuItem("Select photos", icon: "checkmark.circle") { startSelecting() })
+    /// Loaded photos by stage, the ones still on this phone included.
+    private var photoCounts: (all: Int, before: Int, after: Int, untagged: Int) {
+        let tags = allPhotos.map(\.tags) + waiting.filter { $0.kind == "photo" }.map(\.tags)
+        let before = tags.filter { $0.contains("Before") }.count
+        let after = tags.filter { $0.contains("After") }.count
+        let untagged = tags.filter { !$0.contains("Before") && !$0.contains("After") }.count
+        return (tags.count, before, after, untagged)
+    }
+
+    /// "All · 6": 40 tall on the card; the chosen one sits on the brand tint in the brand text tone.
+    private func filterChip(_ option: MediaFilter, count: Int) -> some View {
+        let chosen = filter == option
+        return Button {
+            filter = option
+            if option == .documents { endSelecting() }
+        } label: {
+            Text("\(option.rawValue) · \(count)")
+                .font(Theme.font(14, weight: chosen ? .semibold : .medium)).monospacedDigit()
+                .foregroundStyle(chosen ? Theme.brandText : Theme.subtle)
+                .lineLimit(1)
+                .padding(.horizontal, 11)
+                .frame(minHeight: 40)
+                .background(chosen ? Theme.brandSurface : Theme.card, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
         }
-        if !befores.isEmpty && !afters.isEmpty {
-            items.append(ThorbisMenuItem("Compare before and after", icon: "rectangle.split.2x1") { showCompare = true })
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(option.rawValue)
+        .accessibilityValue("\(count)")
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityIdentifier("job-media-selector")
+    }
+
+    /// "1 untagged": the warning chip; tapping it shows only the photos with no stage.
+    private func untaggedChip(_ count: Int) -> some View {
+        let chosen = filter == .untagged
+        return Button {
+            filter = chosen ? .all : .untagged
+        } label: {
+            HStack(spacing: 6) {
+                Circle().fill(Theme.warning).frame(width: 6, height: 6).accessibilityHidden(true)
+                Text("\(count) untagged")
+                    .font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(Theme.warning)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 11)
+            .frame(minHeight: 40)
+            .background(Theme.warningSurface, in: Capsule())
+            .overlay { Capsule().strokeBorder(chosen ? Theme.warning : Color.clear, lineWidth: 1.5) }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Untagged")
+        .accessibilityValue("\(count)")
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityIdentifier("job-media-selector")
+    }
+
+    // MARK: Add
+
+    /// Paper 21A: "Add photo or video" on a card pill with the scan circle beside it. The pill
+    /// opens the ways to add (camera, several shots, video, a photo or PDF from this phone, measure).
+    @ViewBuilder private var addRow: some View {
+        if canAdd && !selecting {
+            let available = tools
+            VStack(alignment: .leading, spacing: 8) {
+                if cameraDenied {
+                    PermissionNotice(permission: .camera, purpose: "add photos to jobs", outer: 0)
+                }
+                HStack(spacing: 8) {
+                    ThorbisMenu(items: addMenuItems(camera: available.camera, video: available.video, measure: available.measure),
+                                title: "Add photo or video", accessibilityLabel: "Add photo or video", presentation: .sheet) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "camera").font(.system(size: 17, weight: .medium)).accessibilityHidden(true)
+                            Text("Add photo or video").font(Theme.font(16, weight: .semibold))
+                                .multilineTextAlignment(.center)
+                        }
+                        .foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 16).padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Theme.card, in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .accessibilityIdentifier("job-media-take-photo")
+                    Button {
+                        if available.scan { showScanner = true } else { importDocument = true }
+                    } label: {
+                        Image(systemName: "doc.viewfinder").font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(width: 48, height: 48)
+                            .background(Theme.card, in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Scan")
+                    .accessibilityHint(available.scan ? "Scan a paper document into a PDF." : "Choose a PDF to add.")
+                    .accessibilityIdentifier("job-media-scan")
+                }
+            }
+        }
+    }
+
+    private func addMenuItems(camera: Bool, video: Bool, measure: Bool) -> [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if camera {
+            items.append(ThorbisMenuItem("Take photo", icon: "camera") { openCamera(.single) })
+            items.append(ThorbisMenuItem("Take several photos", icon: "square.stack.3d.down.right",
+                                         subtitle: "The camera stays open. Tag them later.") { openCamera(.burst) })
+        }
+        if video {
+            items.append(ThorbisMenuItem("Record video", icon: "video", subtitle: "Up to 60 seconds") { showVideo = true })
+        }
+        items.append(ThorbisMenuItem("Choose a photo", icon: "photo.on.rectangle", startsGroup: !items.isEmpty) { showLibrary = true })
+        items.append(ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true })
+        if measure {
+            items.append(ThorbisMenuItem("Measure", icon: "ruler",
+                                         subtitle: "Measure with the camera and add it as a photo") { showMeasure = true })
         }
         return items
     }
@@ -514,7 +620,7 @@ struct JobMediaView: View {
 
     @ViewBuilder private var photoSections: some View {
         if !waitingPhotos.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 JobPanelLabel(title: "On this phone", count: "\(waitingPhotos.count)")
                 LazyVGrid(columns: gridColumns, spacing: MediaGridMetrics.spacing) {
                     ForEach(waitingPhotos) { media in pendingTile(media) }
@@ -524,7 +630,7 @@ struct JobMediaView: View {
         if !photos.isEmpty {
             let groups = JobPhotoDateGroups.group(photos, calendar: calendar)
             ForEach(Array(groups.enumerated()), id: \.element.day) { index, group in
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     photoGroupLabel(group, first: index == 0)
                     LazyVGrid(columns: gridColumns, spacing: MediaGridMetrics.spacing) {
                         ForEach(group.photos) { record in recordTile(record) }
@@ -535,26 +641,41 @@ struct JobMediaView: View {
     }
 
     private func photoGroupLabel(_ group: JobPhotoDateGroups.Group, first: Bool) -> some View {
-        let day = group.day.map(photoDayLabel) ?? "Date unavailable"
-        let title = "\(day) · \(group.photos.count)"
+        let day = group.day.map { calendar.isDateInToday($0) ? "Today" : photoDayLabel($0) } ?? "Date unavailable"
         return HStack(spacing: 8) {
-            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).monospacedDigit()
+            // Paper 21A: "Today  4", the day in the section label's 13 Semibold and its count in
+            // 13 Regular; Select and Done are brand words.
+            (Text(day).font(Theme.font(13, weight: .semibold))
+                + Text("  \(group.photos.count)").font(Theme.font(13)).monospacedDigit())
+                .foregroundStyle(Theme.muted)
+                .accessibilityLabel("\(day) · \(group.photos.count)")
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
+            if first && selecting && !storedPhotos.isEmpty {
+                let everything = pickedRecords.count == storedPhotos.count
+                Button(everything ? "Clear" : "Choose all") {
+                    picked = everything ? [] : Set(storedPhotos.map(\.id))
+                }
+                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("job-media-choose-all")
+            }
             if first && canAdd && !storedPhotos.isEmpty {
                 Button(selecting ? "Done" : "Select") { if selecting { endSelecting() } else { startSelecting() } }
-                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 14).frame(minHeight: 44)
-                    .background(selecting ? Theme.brandSurface : Theme.fill, in: Capsule())
+                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
                     .buttonStyle(PressStyle())
                     .accessibilityIdentifier("job-media-select")
             }
             if first && !selecting && !befores.isEmpty && !afters.isEmpty {
                 Button { showCompare = true } label: {
                     Label("Compare", systemImage: "rectangle.split.2x1")
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 14).frame(minHeight: 44)
-                        .background(Theme.fill, in: Capsule())
+                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("job-media-compare")
@@ -583,6 +704,33 @@ struct JobMediaView: View {
         .accessibilityLabel("Photo, \(record.caption ?? record.originalFilename)")
         .accessibilityValue([mediaStageWord(record.tags), MediaUploadState.of(record).word, selecting ? (isPicked ? "Selected" : "Not selected") : nil].compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier("job-media-photo-\(record.id)")
+        .overlay(alignment: .bottom) {
+            // Paper 21A: a photo with no stage offers Before and After right on the tile.
+            if canAdd && stored && !selecting && mediaStageWord(record.tags) == nil && !dynamicTypeSize.isAccessibilitySize {
+                HStack(spacing: 6) {
+                    quickTag("Before", .before, record)
+                    quickTag("After", .after, record)
+                }
+                .padding(.horizontal, 8).padding(.bottom, 6)
+                .disabled(busy)
+            }
+        }
+    }
+
+    private func quickTag(_ title: String, _ stage: MediaStage, _ record: MediaAssetRecord) -> some View {
+        Button {
+            Task { await retag(record, stage) }
+        } label: {
+            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(.white)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: 40)
+                .background(MediaGridMetrics.scrim, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Tag \(title)")
+        .accessibilityHint("Files \(record.caption ?? record.originalFilename) under \(title)")
     }
 
     @ViewBuilder private func pendingTile(_ media: PendingMedia) -> some View {
@@ -605,8 +753,11 @@ struct JobMediaView: View {
 
     @ViewBuilder private var documentSection: some View {
         if !documents.isEmpty || !waitingDocuments.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                JobPanelLabel(title: hasMore ? "Documents loaded" : "Documents", count: "\(documents.count + waitingDocuments.count)")
+            VStack(alignment: .leading, spacing: 8) {
+                // Paper 21A: "Documents · 2" with a brand plus that adds a PDF.
+                JobPanelLabel(title: hasMore ? "Documents loaded" : "Documents", count: "\(documents.count + waitingDocuments.count)",
+                              actionTitle: canAdd ? "Add a PDF" : nil, actionSymbol: "plus",
+                              actionIdentifier: "job-media-add-document", action: { importDocument = true })
                 JobPanel {
                     ForEach(waitingDocuments) { media in
                         let state = MediaUploadState.of(media, in: pendingMedia)
@@ -626,7 +777,8 @@ struct JobMediaView: View {
                     }
                     ForEach(documents) { record in
                         Button { open(record) } label: {
-                            MediaDocumentRow(title: record.originalFilename, detail: documentDetail(record), state: .of(record))
+                            MediaDocumentRow(title: record.originalFilename, detail: documentDetail(record), state: .of(record),
+                                             symbol: record.kind == "video" ? "video" : "doc", showsDownload: true)
                         }
                         .buttonStyle(RowPressStyle())
                         .disabled(busy || preview.loading || record.uploadState != "stored")
@@ -665,103 +817,62 @@ struct JobMediaView: View {
 
     // MARK: Bars
 
-    /// One ink "Take photo", with Burst, Scan, Measure, Video and Import as quiet circles above it.
-    private var captureControls: some View {
-        let tools = tools
-        return VStack(spacing: 10) {
-            if cameraDenied {
-                PermissionNotice(permission: .camera, purpose: "add photos to jobs", outer: 0)
-            }
-            HStack(spacing: 0) {
-                if tools.camera {
-                    toolCircle("Burst", symbol: "square.stack.3d.down.right", identifier: "job-media-burst",
-                               hint: "Keeps the camera open for many shots. Tag them later.") { openCamera(.burst) }
-                }
-                toolCircle("Scan", symbol: "doc.viewfinder", identifier: "job-media-scan",
-                           hint: tools.scan ? "Scan a paper document into a PDF." : "Choose a PDF to add.") {
-                    if tools.scan { showScanner = true } else { importDocument = true }
-                }
-                if tools.measure {
-                    toolCircle("Measure", symbol: "ruler", identifier: "job-media-measure",
-                               hint: "Measure a distance with the camera and add it to this job as a photo.") { showMeasure = true }
-                }
-                if tools.video {
-                    toolCircle("Video", symbol: "video", identifier: "job-media-video", hint: "Record a clip of up to 60 seconds.") { showVideo = true }
-                }
-                VStack(spacing: 3) {
-                    ThorbisMenu(items: [
-                        ThorbisMenuItem("Choose a photo", icon: "photo.on.rectangle") { showLibrary = true },
-                        ThorbisMenuItem("Choose a PDF", icon: "doc") { importDocument = true },
-                    ] + (tools.scan ? [ThorbisMenuItem("Scan a document", icon: "doc.viewfinder") { showScanner = true }] : []),
-                                title: "Add from this phone", accessibilityLabel: "Import a photo or PDF") {
-                        PaperCircleLabel(symbol: "square.and.arrow.down", size: 48)
-                    }
-                    .accessibilityIdentifier("job-media-import")
-                    Text("Import").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                }
-                .frame(maxWidth: .infinity)
-            }
-            Button { openCamera(.single) } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "camera")
-                    Text("Take photo")
-                }
-                .inkCommit(height: 56)
-            }
-            .buttonStyle(PressStyle())
-            .disabled(!tools.camera)
-            .accessibilityIdentifier("job-media-take-photo")
-            // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
-            if !tools.camera {
-                Text("This device has no camera. Import a photo instead.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private func toolCircle(_ title: String, symbol: String, identifier: String, hint: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                PaperCircleLabel(symbol: symbol, size: 48)
-                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(title)
-        .accessibilityHint(hint)
-        .accessibilityIdentifier(identifier)
-    }
-
-    /// Bulk actions on picked photos: stage them, share them, or remove them.
+    /// Paper 21A's selection bar: a floating card pill, "3 selected", Tag on the fill and Delete
+    /// in the danger tone. Tag opens the stages; the share glyph sends the picked photos.
     private var selectionBar: some View {
         let count = pickedRecords.count
-        return VStack(spacing: 10) {
-            HStack {
-                Text(count == 0 ? "Tap photos to choose them" : "\(count) chosen")
-                    .font(Theme.font(15, weight: .medium)).monospacedDigit()
-                Spacer()
-                Button(count == storedPhotos.count ? "Clear" : "Choose all") {
-                    picked = count == storedPhotos.count ? [] : Set(storedPhotos.map(\.id))
+        let compact = dynamicTypeSize.isAccessibilitySize
+        return HStack(spacing: 4) {
+            Text(count == 0 ? "Tap photos" : "\(count) selected")
+                .font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Spacer(minLength: 8)
+            if busy { ProgressView().padding(.trailing, 4) }
+            HStack(spacing: 4) {
+                ThorbisMenu(items: [
+                    ThorbisMenuItem("Before", icon: "tag") { Task { await retagPicked(.before) } },
+                    ThorbisMenuItem("After", icon: "tag") { Task { await retagPicked(.after) } },
+                    ThorbisMenuItem("No stage", icon: "tag.slash") { Task { await retagPicked(.other) } },
+                ], title: "Tag", accessibilityLabel: "Tag") {
+                    HStack(spacing: 6) {
+                        Image(systemName: "tag").font(.system(size: 14, weight: .semibold)).accessibilityHidden(true)
+                        if !compact { Text("Tag").font(Theme.font(15, weight: .semibold)).lineLimit(1) }
+                    }
+                    .foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 44)
+                    .background(Theme.fill, in: Capsule())
+                    .contentShape(Capsule())
                 }
-                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground).frame(minHeight: 44)
-                .accessibilityIdentifier("job-media-choose-all")
-            }
-            HStack(spacing: 8) {
-                MediaQuietButton(title: "Before") { Task { await retagPicked(.before) } }
-                MediaQuietButton(title: "After") { Task { await retagPicked(.after) } }
-                MenuOrCircle(symbol: "tag.slash", label: "No stage") { Task { await retagPicked(.other) } }
-                MenuOrCircle(symbol: "square.and.arrow.up", label: "Share") { Task { await sharePicked() } }
-                MenuOrCircle(symbol: "trash", label: "Remove") { confirmBulkArchive = true }
-                    .accessibilityIdentifier("job-media-remove-picked")
+                .accessibilityIdentifier("job-media-tag-picked")
+                Button { Task { await sharePicked() } } label: {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.foreground)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Share")
+                Button { confirmBulkArchive = true } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash").font(.system(size: 14, weight: .semibold)).accessibilityHidden(true)
+                        if !compact { Text("Delete").font(Theme.font(15, weight: .semibold)).lineLimit(1) }
+                    }
+                    .foregroundStyle(Theme.destructive)
+                    .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Delete")
+                .accessibilityIdentifier("job-media-remove-picked")
             }
             .disabled(count == 0 || busy)
-            if busy { ProgressView().frame(height: 20) }
+            .opacity(count == 0 ? 0.45 : 1)
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.canvas)
+        .padding(.leading, 20).padding(.trailing, 8)
+        .frame(minHeight: 52)
+        .background(Theme.card, in: Capsule())
+        .shadow(color: .black.opacity(0.35), radius: 14, y: 10)
+        .padding(.horizontal, 16).padding(.bottom, 8)
     }
 
     // MARK: Actions
@@ -834,6 +945,21 @@ struct JobMediaView: View {
         } catch {
             guard readScope == scope, sourceScope == scope else { return }
             self.error = error.localizedDescription
+        }
+    }
+
+    /// Saves a photo's caption (the viewer's "Add caption"); true when the server kept it.
+    private func recaption(_ record: MediaAssetRecord, _ caption: String) async -> Bool {
+        guard canAdd, let scope = readScope, sourceScope == scope else { return false }
+        do {
+            let updated = try await api.tagFieldMedia(record.id, tags: record.tags, caption: caption)
+            guard readScope == scope, sourceScope == scope, updated.id == record.id, records.contains(where: { $0.id == record.id }),
+                  updated.jobId == jobID, updated.organizationId == scope.organization else { return false }
+            if let index = records.firstIndex(where: { $0.id == updated.id }) { records[index] = updated }
+            error = nil
+            return true
+        } catch {
+            return false
         }
     }
 
@@ -1020,7 +1146,7 @@ struct JobMediaView: View {
     private func markupCover(_ target: PhotoMarkupTarget, cancel: @escaping () -> Void, saved close: @escaping () -> Void) -> some View {
         Group {
             if let image = UIImage(data: target.data) {
-                PhotoMarkupView(image: image, onSave: { flattened in
+                PhotoMarkupView(image: image, stage: mediaStageWord(target.tags), onSave: { flattened in
                     try enqueueDerived(flattened, tags: target.tags, caption: "Marked up", prefix: "markup")
                     close()
                 }, onCancel: cancel)
@@ -1152,18 +1278,6 @@ struct JobMediaView: View {
         }
     }
     #endif
-}
-
-/// Picks one of the selection bar's quiet circles (a 56pt field circle with a spoken name).
-private struct MenuOrCircle: View {
-    let symbol: String
-    let label: String
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) { PaperCircleLabel(symbol: symbol, size: 56) }
-            .buttonStyle(PressStyle())
-            .accessibilityLabel(label)
-    }
 }
 
 struct PhotoMarkupTarget: Identifiable {

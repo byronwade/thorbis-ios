@@ -357,16 +357,18 @@ struct Well<Content: View>: View {
     }
 }
 
-/// Where rows of a panel meet. v2 (design.thorbis.com: "never a line between two jobs"): it draws
-/// nothing and keeps the rows' own padding as the pause. `leading` is kept so call sites compile.
+/// Where rows of one grouped card meet. Paper v2 (2026-11-16): a hairline inset to the rows' text,
+/// only inside a card, never between cards or under a heading.
 struct WellDivider: View {
     var leading: CGFloat = PaperCardMetrics.inset
+    @Environment(\.displayScale) private var displayScale
     var body: some View {
-        Color.clear.frame(height: 0).accessibilityHidden(true)
+        Rectangle().fill(Theme.hairline).frame(height: 1 / max(displayScale, 1))
+            .padding(.leading, leading).accessibilityHidden(true)
     }
 }
 
-/// A collection on one panel; space, not lines, between rows.
+/// A collection on one panel, a hairline between rows.
 struct WellList<Data: RandomAccessCollection, Row: View>: View where Data.Element: Identifiable {
     let data: Data
     var dividerInset: CGFloat = PaperCardMetrics.inset

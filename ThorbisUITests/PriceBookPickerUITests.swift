@@ -3,7 +3,9 @@ import XCTest
 /// The price book picker (since #183 a cart sheet, `PriceBookCartPicker`, behind "Add item" in the
 /// invoice editor and the estimate builder): search with the keyboard up, add an item as many times
 /// as needed without the sheet closing, page past the first fifty, filter by category from the
-/// Category circle, then "Done" returns to the document.
+/// Category circle, then "Done" returns to the document. Since Paper 33 the picker is Add
+/// materials' "Price book" segment: a Scan · Paste · Price book row sits between the title and the
+/// search field, so the list starts lower; the tests reach rows by identifier and scroll to them.
 @MainActor
 final class PriceBookPickerUITests: XCTestCase {
     private let sentinelID = "00000000-0000-4000-8000-000000009999"
@@ -178,6 +180,18 @@ final class PriceBookPickerUITests: XCTestCase {
         let search = app.textFields["invoice-catalog-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         XCTAssertEqual(search.label, "Search price book", "The spoken instruction must not promise custom lines in this field")
+    }
+
+    /// Paper 33: the invoice picker is one of Add materials' three ways in, and search stays with them.
+    func testInvoicePickerShowsAddMaterialsSegments() {
+        let app = openPriceBook()
+        let search = app.textFields["invoice-catalog-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        for name in ["Scan", "Paste", "Price book"] {
+            let segment = app.buttons[name].firstMatch
+            XCTAssertTrue(segment.waitForExistence(timeout: 5), "\(name) is one of the picker's segments")
+        }
+        XCTAssertTrue(app.buttons["price-book-done"].exists, "Showing the segments leaves the picker open")
     }
 
     func testInvoicePickerCanAddAnItemBeyondTheFirstFifty() {

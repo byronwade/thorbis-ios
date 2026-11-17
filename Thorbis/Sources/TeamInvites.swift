@@ -82,27 +82,54 @@ struct InviteMemberSheet: View {
         return trimmed.contains("@") && trimmed.contains(".") && trimmed.count <= 254
     }
 
-    /// v2 modal: one task, the email in a sunk well with help under it and the error in its place,
-    /// the role as a select well, and one ink commit that is never pre-disabled.
+    private var roleLabel: String { roles.first { $0.id == role }?.label ?? role.statusLabel }
+    private var companyName: String { session.activeOrganization?.name ?? "your company" }
+
+    /// Paper 62C: one card holding the address and the role (each label small above its answer),
+    /// then a quiet note on what happens next. The commit is never pre-disabled.
     var body: some View {
-        ThorbisModalSheet(title: "Invite to team", onClose: busy ? nil : { dismiss() },
+        ThorbisModalSheet(title: "Invite member", onClose: busy ? nil : { dismiss() },
                           commitTitle: "Send invite", commitSymbol: "paperplane", busy: busy,
                           commitIdentifier: "team-invite-send", commit: { Task { await press() } }) {
-            FormField(label: "Email", help: "They get an email to join and choose a password. Invites expire after 7 days.",
-                      error: emailProblem) {
-                TextField("", text: $email, prompt: .placeholder("mike@reyesplumbing.com"))
-                    .font(Theme.font(16))
-                    .keyboardType(.emailAddress).textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .focused($emailFocused)
-                    .submitLabel(.send)
-                    .onSubmit { Task { await press() } }
-                    .onChange(of: email) { _, _ in emailProblem = nil }
-                    .accessibilityLabel("Email")
-                    .fieldWell()
-            }
-            FormField(label: "Role", help: "What they can see and do. You can change it later in Team.") {
-                ThorbisSelect(options: roles.map { ($0.id, $0.label) }, selection: $role, menuTitle: "Role")
+            VStack(alignment: .leading, spacing: 8) {
+                ThorbisSheetGroup {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Email").font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        TextField("", text: $email, prompt: .placeholder("mike@reyesplumbing.com"))
+                            .font(Theme.font(17, weight: .semibold))
+                            .keyboardType(.emailAddress).textContentType(.emailAddress)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .focused($emailFocused)
+                            .submitLabel(.send)
+                            .onSubmit { Task { await press() } }
+                            .onChange(of: email) { _, _ in emailProblem = nil }
+                            .accessibilityLabel("Email")
+                    }
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    ThorbisSheetDivider()
+                    ThorbisMenu(items: roles.map { option in
+                        ThorbisMenuItem(option.label, isSelected: option.id == role) { role = option.id }
+                    }, title: "Role", accessibilityLabel: "Role, \(roleLabel)") {
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Role").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                                Text(roleLabel).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                }
+                if let emailProblem { FieldProblem(message: emailProblem).padding(.horizontal, 4) }
+                Text("They get an email to join \(companyName) and choose a password. It works for 7 days. You can change the role any time.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
             }
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
         }

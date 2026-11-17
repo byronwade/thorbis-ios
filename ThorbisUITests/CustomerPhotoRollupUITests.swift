@@ -14,14 +14,19 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "scroll settles")], timeout: 1)
     }
 
+    /// Paper v2: the section label and its count read as one heading ("Photos, 35").
+    private func photosHeading(count: Int, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Photos", "\(count)")).firstMatch
+    }
+
     func testCustomerPhotosShowBothJobsAndOpenTheCorrectJobPhoto() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records",
                                "--paper-preview-customer-photo-rollup"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Photos"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["35"].waitForExistence(timeout: 10))
+        XCTAssertTrue(photosHeading(count: 35, in: app).waitForExistence(timeout: 20))
         XCTAssertTrue(app.staticTexts["AC not cooling"].exists)
         let first = app.buttons["customer-photo-00000000-0000-4000-8000-000000031000"]
         XCTAssertTrue(first.waitForExistence(timeout: 10))
@@ -50,8 +55,7 @@ final class CustomerPhotoRollupUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-records",
                                "--paper-preview-mixed-photo-rollup"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Photos"].waitForExistence(timeout: 20))
-        XCTAssertTrue(app.staticTexts["35"].waitForExistence(timeout: 10))
+        XCTAssertTrue(photosHeading(count: 35, in: app).waitForExistence(timeout: 20))
         let historical = app.buttons["customer-legacy-photo-00000000-0000-4000-8000-000000033001"]
         bringClearOfNewJob(historical, in: app)
         XCTAssertTrue(historical.isHittable, "The second job's historical photo is reachable")

@@ -7,7 +7,7 @@ enum LocalWorkspaceSection: String, CaseIterable, Hashable {
         switch self {
         case .fleet: "Fleet"
         case .equipment: "Equipment"
-        case .agreements: "Agreements"
+        case .agreements: "Maintenance plans"
         case .team: "Team additions"
         }
     }
@@ -34,36 +34,98 @@ enum LocalWorkspaceSection: String, CaseIterable, Hashable {
         case .fleet:
             [
                 ("name", "Name", true), ("model", "Make and model", false),
-                ("plate", "Plate", false), ("year", "Year", false), ("vin", "VIN", false),
-                ("assignedTo", "Assigned driver (name or local ID)", false),
-                ("mileage", "Mileage as noted", false), ("purchasePrice", "Purchase price as noted", false),
-                ("marketValue", "Owner-estimated market value", false),
-                ("purchaseDate", "Purchase date (YYYY-MM-DD)", false),
-                ("registrationDue", "Registration due (YYYY-MM-DD)", false),
-                ("lastOilChange", "Last oil change (YYYY-MM-DD)", false),
-                ("nextOilChange", "Next oil change (YYYY-MM-DD)", false),
-                ("lastTireRotation", "Last tire rotation (YYYY-MM-DD)", false),
-                ("lastNewTires", "Last new tires (YYYY-MM-DD)", false),
+                ("plate", "License plate", false), ("year", "Year", false), ("vin", "VIN", false),
+                ("assignedTo", "Assigned tech", false),
+                ("mileage", "Mileage", false), ("purchasePrice", "Purchase price", false),
+                ("marketValue", "Market value (your estimate)", false),
+                ("purchaseDate", "Purchase date", false),
+                ("registrationDue", "Registration due", false),
+                ("lastOilChange", "Last oil change", false),
+                // Paper 88B: "Next service" ("Oil change at 45,000 mi"), written as entered.
+                ("nextOilChange", "Next service", false),
+                ("lastTireRotation", "Last tire rotation", false),
+                ("lastNewTires", "Last new tires", false),
                 ("lastRepair", "Last repair", false), ("notes", "Notes", false),
             ]
         case .equipment:
-            [("name", "Unit name", true), ("site", "Site as written", true),
-             ("brand", "Brand", false), ("serial", "Serial", false),
-             ("installedYear", "Installed year", false), ("notes", "Notes", false)]
+            [("name", "Name", true), ("site", "Property", true),
+             ("brand", "Brand", false), ("serial", "Serial number", false),
+             ("installedYear", "Install year", false), ("notes", "Notes", false)]
         case .agreements:
-            [("name", "Agreement name", true), ("customer", "Customer name as written", true),
-             ("cadence", "Visit cadence", true), ("renewsOn", "Renews on (YYYY-MM-DD)", false),
+            [("name", "Plan name", true), ("customer", "Customer", true),
+             ("cadence", "Visit cadence", true), ("renewsOn", "Renews on", false),
              ("notes", "Notes", false)]
         case .team:
             [("name", "Name", true), ("role", "Role", true), ("phone", "Phone", false)]
         }
     }
+
+    /// Paper 88B / 86C: the editor's cards. Stacked cards put the label over a 17 Medium answer;
+    /// inline cards put the label on the left and the answer, muted, on the right.
+    var editorCards: [(keys: [String], inline: Bool)] {
+        switch self {
+        case .fleet:
+            [(["name", "model", "plate", "vin"], false),
+             (["assignedTo", "mileage", "nextOilChange", "registrationDue"], true),
+             (["year", "purchaseDate", "purchasePrice", "marketValue"], true),
+             (["lastOilChange", "lastTireRotation", "lastNewTires", "lastRepair"], true),
+             (["notes"], false)]
+        case .equipment:
+            [(["name", "brand", "serial"], false), (["installedYear", "site"], true), (["notes"], false)]
+        case .agreements:
+            [(["name", "customer"], false), (["cadence", "renewsOn"], true), (["notes"], false)]
+        case .team:
+            [(["name", "role", "phone"], false)]
+        }
+    }
+
+    /// The example shown in an empty answer.
+    func prompt(_ key: String) -> String {
+        switch key {
+        case "purchaseDate", "registrationDue", "lastOilChange", "lastTireRotation",
+             "lastNewTires", "renewsOn": "YYYY-MM-DD"
+        case "nextOilChange": "Oil change at 45,000 mi"
+        case "notes": "Anything the next person should know"
+        default: fields.first { $0.key == key }?.label ?? ""
+        }
+    }
+
+    /// The header + and the editor's title for a new record.
+    var addTitle: String {
+        switch self {
+        case .fleet: "Add vehicle"
+        case .equipment: "Add equipment"
+        case .agreements: "Add maintenance plan"
+        case .team: "Add team member"
+        }
+    }
+
+    var editTitle: String {
+        switch self {
+        case .fleet: "Edit vehicle"
+        case .equipment: "Edit equipment"
+        case .agreements: "Edit maintenance plan"
+        case .team: "Edit team member"
+        }
+    }
+
+    /// The subtitle's noun for a count ("6 vehicles").
+    func countLabel(_ count: Int) -> String {
+        switch self {
+        case .fleet: count == 1 ? "1 truck" : "\(count) trucks"
+        case .equipment: count == 1 ? "1 unit" : "\(count) units"
+        case .agreements: count == 1 ? "1 plan" : "\(count) plans"
+        case .team: count == 1 ? "1 person" : "\(count) people"
+        }
+    }
 }
 
-struct LocalWorkspaceRow: Identifiable {
+struct LocalWorkspaceRow: Identifiable, Hashable {
     let id: String
     let title: String
     let subtitle: String
+    /// A quiet trailing word (Paper 88: "Unassigned" on a truck with no driver).
+    var status: String? = nil
 }
 
 struct LocalWorkspaceDraft: Identifiable {
@@ -121,8 +183,21 @@ final class LocalWorkspaceViewModel: ObservableObject {
     func rows(_ section: LocalWorkspaceSection) -> [LocalWorkspaceRow] {
         guard let storage else { return [] }
         switch section {
-        case .fleet: return storage.vehicles.map { .init(id: $0.id, title: $0.name, subtitle: [$0.model, $0.plate].compactMap { $0 }.joined(separator: " · ")) }
-        case .equipment: return storage.equipment.map { .init(id: $0.id, title: $0.name, subtitle: $0.site) }
+        // Paper 88: "Van 3 · Ford Transit" over "Ramon Mendez · plate 8XYZ412".
+        case .fleet: return storage.vehicles.map { vehicle in
+            let plate: String? = vehicle.plate.map { "plate \($0)" }
+            // Paper 88: a truck nobody drives reads "No driver" with "Unassigned" trailing.
+            let driver = (vehicle.assignedTo ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return LocalWorkspaceRow(id: vehicle.id, title: [vehicle.name, vehicle.model ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
+                                     subtitle: [driver.isEmpty ? "No driver" : driver, plate ?? ""].filter { !$0.isEmpty }.joined(separator: " · "),
+                                     status: driver.isEmpty ? "Unassigned" : nil)
+        }
+        // Paper 86: the unit over where it is and when it went in.
+        case .equipment: return storage.equipment.map { unit in
+            let installed: String? = unit.installedYear.map { "installed \($0)" }
+            return LocalWorkspaceRow(id: unit.id, title: unit.name,
+                                     subtitle: [unit.brand ?? "", unit.site, installed ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
+        }
         case .agreements: return storage.agreements.map { .init(id: $0.id, title: $0.name, subtitle: "\($0.customer) · \($0.kind.rawValue.capitalized)") }
         case .team: return storage.crew.map { .init(id: $0.id, title: $0.name, subtitle: $0.role) }
         }
@@ -218,6 +293,11 @@ struct LocalWorkspaceView: View {
     /// Equipment: whether the company's server book has units, so the phone's own notes read as a second list.
     @State private var hasServerEquipment = false
     @State private var hasServerAgreements = false
+    /// The shared books' sizes, for the subtitle ("6 units", "236 members").
+    @State private var serverEquipmentCount = 0
+    @State private var serverAgreementCount = 0
+    /// Paper 88A: the truck whose page is pushed.
+    @State private var openedVehicle: LocalWorkspaceRow?
     /// Equipment and Agreements: the company's server book is showing, so this phone's notes are second.
     private var sharedEquipment: Bool {
         (section == .equipment && hasServerEquipment) || (section == .agreements && hasServerAgreements)
@@ -230,93 +310,129 @@ struct LocalWorkspaceView: View {
         editor = draft
     }
 
+    /// "6 vehicles · On this phone": the count, then where these live.
+    private func subtitle(rows: [LocalWorkspaceRow], bound: Bool) -> String {
+        if sharedEquipment {
+            // Paper 86 / 85C: the count leads ("6 units", "236 members").
+            if section == .equipment && serverEquipmentCount > 0 {
+                return serverEquipmentCount == 1 ? "1 unit" : "\(serverEquipmentCount) units"
+            }
+            if section == .agreements && serverAgreementCount > 0 {
+                return serverAgreementCount == 1 ? "1 member" : "\(serverAgreementCount) members"
+            }
+            return "Shared with your team"
+        }
+        guard bound else { return "On this phone \u{00B7} Not synced" }
+        return "\(section.countLabel(rows.count)) \u{00B7} On this phone, not synced"
+    }
+
+    /// One record: the row opens it; its ••• edits or removes it.
+    private func rowView(_ row: LocalWorkspaceRow) -> some View {
+        HStack(spacing: 0) {
+            Button {
+                // Paper 88A: a truck opens its own page; the other books open their editor.
+                if section == .fleet {
+                    openedVehicle = row
+                } else if let draft = model.draft(section, id: row.id) {
+                    present(draft)
+                }
+            } label: {
+                PaperListRow(title: row.title, subtitle: row.subtitle.isEmpty ? nil : row.subtitle, subtitleLines: 2) {
+                    if let status = row.status {
+                        Text(status).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.muted).fixedSize()
+                    }
+                }
+            }
+            .buttonStyle(RowPressStyle())
+            ThorbisMenu(items: [
+                ThorbisMenuItem("Edit", icon: "pencil") { if let draft = model.draft(section, id: row.id) { present(draft) } },
+                ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
+                    do { try model.remove(row.id, section: section); actionError = nil }
+                    catch { actionError = error.localizedDescription }
+                },
+            ], accessibilityLabel: "Options for \(row.title)") {
+                Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .padding(.trailing, 4)
+        }
+    }
+
     var body: some View {
         // design 2026-10-30: the list system — header, rows on one panel, edits in each row's •••
         // (swipe-to-delete moved there), the one ink commit at the bottom.
         let bound = model.actorID == actorID && model.organizationID == organizationID
+        let rows = bound ? model.rows(section) : []
+        // Paper 85C / 86 / 88: the place header (menu circle, brand +, 34 Bold title, muted count),
+        // then grouped cards 16 from the edges with 20 between sections.
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(section.title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(sharedEquipment ? "Shared with your team" : "On this device · Not synced")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                if let error = actionError ?? model.error {
-                    Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                }
-                if section == .equipment {
-                    CompanyEquipmentBook { hasServerEquipment = $0 }
-                }
-                if section == .agreements {
-                    CompanyAgreementsBook { hasServerAgreements = $0 }
-                }
-                if bound {
-                    let rows = model.rows(section)
-                    // Empty: the shared empty state, not a label repeating the title over a one-line card.
-                    if rows.isEmpty && sharedEquipment {
-                        EmptyView()
-                    } else if rows.isEmpty {
-                        ListRoomEmpty(title: "Nothing here yet.",
-                                      message: "Add to \(section.title.lowercased()) with the button below.")
-                            .padding(.horizontal, -PaperCardMetrics.margin)
-                    } else {
-                    PaperSection(sharedEquipment ? "Notes on this phone" : section.title, count: rows.count) {
-                        Group {
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(rows) { row in
-                                    HStack(spacing: 0) {
-                                        Button { if let draft = model.draft(section, id: row.id) { present(draft) } } label: {
-                                            PaperListRow(title: row.title, subtitle: row.subtitle.isEmpty ? nil : row.subtitle, subtitleLines: 2)
-                                        }
-                                        .buttonStyle(RowPressStyle())
-                                        ThorbisMenu(items: [
-                                            ThorbisMenuItem("Edit", icon: "pencil") { if let draft = model.draft(section, id: row.id) { present(draft) } },
-                                            ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
-                                                do { try model.remove(row.id, section: section); actionError = nil }
-                                                catch { actionError = error.localizedDescription }
-                                            },
-                                        ], accessibilityLabel: "Options for \(row.title)") {
-                                            Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                                                .frame(width: 44, height: 44).contentShape(Rectangle())
-                                        }
-                                        .padding(.trailing, 4)
+            VStack(alignment: .leading, spacing: 0) {
+                PaperHeader(title: section.title, subtitle: subtitle(rows: rows, bound: bound),
+                            showsCreate: !sharedEquipment && bound)
+                    .environment(\.paperCreate, !sharedEquipment && bound
+                                 ? PaperCreateAction(label: section.addTitle, run: { present(LocalWorkspaceDraft()) })
+                                 : nil)
+                VStack(alignment: .leading, spacing: 20) {
+                    if let error = actionError ?? model.error {
+                        Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                    }
+                    if section == .equipment {
+                        CompanyEquipmentBook(onLoaded: { hasServerEquipment = $0 }, onCount: { serverEquipmentCount = $0 })
+                    }
+                    if section == .agreements {
+                        CompanyAgreementsBook(onLoaded: { hasServerAgreements = $0 }, onCount: { serverAgreementCount = $0 })
+                    }
+                    if bound {
+                        // Empty: the shared empty state, not a label repeating the title over a one-line card.
+                        if rows.isEmpty && sharedEquipment {
+                            EmptyView()
+                        } else if rows.isEmpty {
+                            ListRoomEmpty(title: "Nothing here yet.",
+                                          message: "\(section.addTitle) with the + above.")
+                                .padding(.horizontal, -PaperCardMetrics.margin)
+                        } else {
+                            PaperSection(sharedEquipment ? "Notes on this phone" : "On this phone", count: rows.count) {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(rows) { row in
+                                        if row.id != rows.first?.id { WellDivider() }
+                                        rowView(row)
                                     }
                                 }
                             }
-                            .padding(.vertical, PaperCardMetrics.edge)
+                            .id(model.revision)
                         }
+                    } else if model.error == nil {
+                        SkeletonRows(count: 3, leading: false, inset: 0)
                     }
-                    .id(model.revision)
-                    }
-                } else if model.error == nil {
-                    SkeletonRows(count: 3, leading: false, inset: 0)
+                    // With the shared book showing, units are added where they belong: on the customer.
+                    Text(sharedEquipment ? (section == .equipment ? "Add or edit a unit on its customer\u{2019}s page; it shows here for the whole team."
+                                                                  : "Add or cancel a plan on its customer\u{2019}s page; it shows here for the whole team.")
+                                         : "These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 }
-                // With the shared book showing, units are added where they belong: on the customer.
-                Text(sharedEquipment ? (section == .equipment ? "Add or edit a unit on its customer\u{2019}s page; it shows here for the whole team."
-                                                              : "Add or cancel an agreement on its customer\u{2019}s page; it shows here for the whole team.")
-                                     : "These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
             }
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
         }
-        .background(Theme.canvas)
+        .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .bottom) {
-            if !sharedEquipment {
-                PaperActionBar(title: "Add to \(section.title.lowercased())", symbol: "plus", disabled: !bound) {
-                    present(LocalWorkspaceDraft())
-                }
-            }
-        }
         .task(id: identityKey) {
             editor = nil
             editorOwner = nil
+            openedVehicle = nil
             actionError = nil
             model.bind(actorID: actorID, organizationID: organizationID)
+        }
+        .thorbisDestination(item: $openedVehicle) { row in
+            LocalVehicleDetail(id: row.id, model: model) { saved in
+                guard model.actorID == actorID && model.organizationID == organizationID else {
+                    throw Problem(title: "Session changed", status: nil, detail: nil)
+                }
+                try model.save(saved, section: .fleet)
+                actionError = nil
+            }
         }
         .sheet(item: $editor) { draft in SheetSurface {
             if editorOwner == identityKey && model.actorID == actorID && model.organizationID == organizationID {
@@ -334,6 +450,164 @@ struct LocalWorkspaceView: View {
     }
 }
 
+
+/// One labelled fact on a truck's page.
+private struct LocalVehicleFact: Identifiable {
+    let label: String
+    let value: String
+    var id: String { label }
+}
+
+/// Paper 88A "Vehicle detail": the truck's name over its make and plate, Details with Edit beside
+/// the label, then its service notes. Kept on this phone, and it says so. Truck stock is not tied
+/// to a truck in the app, so that card is not drawn.
+private struct LocalVehicleDetail: View {
+    let id: String
+    @ObservedObject var model: LocalWorkspaceViewModel
+    let save: (LocalWorkspaceDraft) throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var editor: LocalWorkspaceDraft?
+    @State private var actionError: String?
+
+    private static let mainKeys: [(key: String, label: String)] = [
+        ("assignedTo", "Driver"), ("mileage", "Odometer"),
+        ("nextOilChange", "Next service due"), ("registrationDue", "Registration expires"),
+    ]
+    private static let moreKeys: [(key: String, label: String)] = [
+        ("year", "Year"), ("vin", "VIN"), ("purchaseDate", "Purchase date"),
+        ("purchasePrice", "Purchase price"), ("marketValue", "Market value (your estimate)"),
+        ("lastOilChange", "Last oil change"), ("lastTireRotation", "Last tire rotation"),
+        ("lastNewTires", "Last new tires"), ("lastRepair", "Last repair"),
+    ]
+
+    private func facts(_ draft: LocalWorkspaceDraft, _ keys: [(key: String, label: String)]) -> [LocalVehicleFact] {
+        var rows: [LocalVehicleFact] = []
+        for item in keys {
+            if let value = draft.optional(item.key) { rows.append(LocalVehicleFact(label: item.label, value: value)) }
+        }
+        return rows
+    }
+
+    private func subtitle(_ draft: LocalWorkspaceDraft) -> String {
+        let plate: String = draft.optional("plate").map { "plate \($0)" } ?? ""
+        return [draft.optional("model") ?? "", plate].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+    }
+
+    private func factCard(_ rows: [LocalVehicleFact]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { fact in
+                if fact.id != rows.first?.id { WellDivider() }
+                PaperDetailRow(label: fact.label) { Text(fact.value) }
+                    .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
+            }
+        }
+    }
+
+    private func page(_ draft: LocalWorkspaceDraft) -> some View {
+        let line = subtitle(draft)
+        let main = facts(draft, Self.mainKeys)
+        let more = facts(draft, Self.moreKeys)
+        let notes = draft.optional("notes") ?? ""
+        return VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(draft.required("name")).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                if !line.isEmpty {
+                    Text(line).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            if let actionError {
+                Text(actionError).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            }
+            PaperSection(title: "Details") {
+                if main.isEmpty {
+                    Text("No driver, odometer or service dates yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                } else {
+                    factCard(main)
+                }
+            } accessory: {
+                // Paper 88A: "Edit" in the brand ink beside the section label.
+                Button { editor = draft } label: {
+                    Text("Edit").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Edit vehicle")
+                .accessibilityIdentifier("vehicle-edit")
+            }
+            if !more.isEmpty {
+                PaperSection("Value and upkeep") { factCard(more) }
+            }
+            if !notes.isEmpty {
+                PaperSection("Service notes") {
+                    Text(notes).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                }
+            }
+            Text("Saved on this phone only. The office and dispatch don\u{2019}t see it.")
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+        }
+    }
+
+    var body: some View {
+        let draft = model.draft(.fleet, id: id)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                if let draft {
+                    page(draft)
+                } else {
+                    Text("This vehicle is no longer on this phone.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if draft != nil {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    ThorbisMenu(items: menuItems, accessibilityLabel: "Vehicle actions") {
+                        PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                    }
+                }
+            }
+        }
+        .sheet(item: $editor) { editing in SheetSurface {
+            LocalWorkspaceEditor(section: .fleet, draft: editing) { saved in
+                try save(saved)
+                actionError = nil
+            }
+        } }
+    }
+
+    private var menuItems: [ThorbisMenuItem] {
+        [ThorbisMenuItem("Edit", icon: "pencil") { editor = model.draft(.fleet, id: id) },
+         ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
+             do {
+                 try model.remove(id, section: .fleet)
+                 dismiss()
+             } catch {
+                 actionError = error.localizedDescription
+             }
+         }]
+    }
+}
+
+/// Paper 88B (Add vehicle) and 86C (Add equipment): Cancel and Save in the title row, then the
+/// fields as grouped cards. Saved on this phone only, and it says so under the cards.
 private struct LocalWorkspaceEditor: View {
     let section: LocalWorkspaceSection
     @State var draft: LocalWorkspaceDraft
@@ -343,60 +617,173 @@ private struct LocalWorkspaceEditor: View {
     /// Required fields left empty when Save was pressed, said under each; one clears as it is typed in.
     @State private var missing: Set<String> = []
     @FocusState private var focus: String?
+    /// New records open empty; a saved one always has its required name.
+    @State private var isNew: Bool
+
+    init(section: LocalWorkspaceSection, draft: LocalWorkspaceDraft,
+         onSave: @escaping (LocalWorkspaceDraft) throws -> Void) {
+        self.section = section
+        _draft = State(initialValue: draft)
+        self.onSave = onSave
+        _isNew = State(initialValue: draft.required("name").isEmpty)
+    }
 
     var body: some View {
-        NavigationStack {
-            // design 2026-10-30: one column, labels above, field wells; Save is the ink commit.
+        VStack(spacing: 0) {
+            header
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    Text("On this device · Not synced").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                VStack(alignment: .leading, spacing: 16) {
+                    if let error {
+                        Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4)
+                    }
                     if section == .agreements {
-                        PaperFormField("Kind") {
-                            ThorbisSelect(options: [(LocalAgreementRecord.Kind.maintenance, "Maintenance"),
-                                                    (LocalAgreementRecord.Kind.membership, "Membership")],
-                                          selection: $draft.kind, label: "Kind").fieldWell()
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Kind").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            ThorbisSegmented(options: [(LocalAgreementRecord.Kind.maintenance, "Maintenance"),
+                                                       (LocalAgreementRecord.Kind.membership, "Membership")],
+                                             selection: $draft.kind)
                         }
+                        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     }
-                    ForEach(section.fields.indices, id: \.self) { index in
-                        let field = section.fields[index]
-                        PaperFormField(field.label, note: field.required ? nil : "Optional",
-                                       error: missing.contains(field.key) ? "Add the \(field.label.lowercased()) to save." : nil) {
-                            TextField(field.label, text: Binding(
-                                get: { draft.value(field.key) },
-                                set: { draft.values[field.key] = $0; missing.remove(field.key) }
-                            ), prompt: .placeholder(field.label), axis: field.key == "notes" ? .vertical : .horizontal)
-                            .font(Theme.font(16)).fieldWell()
-                            .focused($focus, equals: field.key)
-                        }
+                    ForEach(section.editorCards.indices, id: \.self) { cardIndex in
+                        LocalEditorCard(section: section, keys: section.editorCards[cardIndex].keys,
+                                        inline: section.editorCards[cardIndex].inline,
+                                        draft: $draft, missing: $missing, focus: $focus)
                     }
-                    if section == .fleet {
-                        Text("Values and maintenance dates are written as entered. Market value is your estimate; no live valuation is connected.")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    }
-                    if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
+                    Text(footnote).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+                .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 32)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.canvas)
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .bottom) {
-                // Never pre-disabled: pressed with a required field empty, it says which under it.
-                PaperActionBar(title: "Save") {
-                    let empty = section.fields.filter { $0.required && draft.required($0.key).isEmpty }
-                    guard empty.isEmpty else {
-                        missing = Set(empty.map(\.key))
-                        focus = empty.first?.key
-                        return
-                    }
-                    do { try onSave(draft); dismiss() }
-                    catch { self.error = error.localizedDescription }
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background.ignoresSafeArea())
+    }
+
+    private var footnote: String {
+        let local = "Saved on this phone only. The office and dispatch don\u{2019}t see it."
+        if section == .fleet {
+            return "Values and maintenance dates are written as entered. Market value is your estimate; no live valuation is connected. " + local
+        }
+        return local
+    }
+
+    private var header: some View {
+        ZStack {
+            Text(isNew ? section.addTitle : section.editTitle).font(Theme.font(17, weight: .semibold))
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 100)
+            HStack {
+                Button { dismiss() } label: {
+                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 16).frame(minHeight: 44)
+                        .background(Theme.card, in: Capsule())
+                        .contentShape(Capsule())
                 }
+                .buttonStyle(PressStyle())
+                Spacer(minLength: 8)
+                // Never pre-disabled: pressed with a required field empty, it says which under it.
+                Button { save() } label: {
+                    Text("Save").font(Theme.font(16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18).frame(minHeight: 44)
+                        .background(Theme.brand, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
             }
-            .navigationTitle(draft.values.isEmpty ? "New \(section.title)" : "Edit \(section.title)")
-            .toolbar {
-                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+    }
+
+    private func save() {
+        var empty: [String] = []
+        for field in section.fields where field.required && draft.required(field.key).isEmpty {
+            empty.append(field.key)
+        }
+        guard empty.isEmpty else {
+            missing = Set(empty)
+            focus = empty.first
+            return
+        }
+        do { try onSave(draft); dismiss() }
+        catch { self.error = error.localizedDescription }
+    }
+}
+
+/// One card of the local editor: stacked (13 muted label over a 17 Medium answer) or inline
+/// (16 label on the left, the answer muted on the right, 56 tall), an inset hairline between rows.
+private struct LocalEditorCard: View {
+    let section: LocalWorkspaceSection
+    let keys: [String]
+    let inline: Bool
+    @Binding var draft: LocalWorkspaceDraft
+    @Binding var missing: Set<String>
+    var focus: FocusState<String?>.Binding
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(keys, id: \.self) { key in
+                if key != keys.first { WellDivider(leading: 16) }
+                row(key)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    private func label(_ key: String) -> String {
+        section.fields.first { $0.key == key }?.label ?? key
+    }
+
+    private func binding(_ key: String) -> Binding<String> {
+        Binding(get: { draft.value(key) },
+                set: { draft.values[key] = $0; missing.remove(key) })
+    }
+
+    private func problem(_ key: String) -> String? {
+        missing.contains(key) ? "Add the \(label(key).lowercased()) to save." : nil
+    }
+
+    @ViewBuilder private func row(_ key: String) -> some View {
+        if inline {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(label(key)).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityHidden(true)
+                    Spacer(minLength: 8)
+                    TextField("", text: binding(key), prompt: .placeholder(section.prompt(key)))
+                        .font(Theme.font(16)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.trailing)
+                        .focused(focus, equals: key)
+                        .accessibilityLabel(label(key))
+                }
+                if let message = problem(key) { FieldProblem(message: message) }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label(key)).font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                TextField("", text: binding(key), prompt: .placeholder(section.prompt(key)),
+                          axis: key == "notes" ? .vertical : .horizontal)
+                    .font(key == "notes" ? Theme.font(15) : Theme.font(17, weight: .medium))
+                    .focused(focus, equals: key)
+                    .accessibilityLabel(label(key))
+                if let message = problem(key) { FieldProblem(message: message) }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

@@ -6,7 +6,7 @@ final class JobMediaQueueUITests: XCTestCase {
     // counts on each date heading ("Oct 27, 2026 · 1"), Import holds library photos and PDFs, and a
     // photo's stage is changed in the viewer. Since #221 stamps read "Nov 14, 2023, 5:13 p.m.".
 
-    /// One of the selector's four choices (every segment carries `job-media-selector`).
+    /// One of the count chips (every chip carries `job-media-selector`; its label is the stage alone).
     private func selector(_ title: String, in app: XCUIApplication) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "job-media-selector", title)).firstMatch
     }
@@ -204,13 +204,13 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(after.waitForNonExistence(timeout: 5))
         XCTAssertTrue(filter.label.contains("After"), filter.label)
         let photo = app.buttons["Photo, Finished unit"]
-        // Capture comes before the photos at this size (Import holds the library and PDFs).
-        let library = app.buttons["job-media-import"]
+        // "Add photo or video" comes before the photos (its menu holds the camera, the library and PDFs).
+        let library = app.buttons["job-media-take-photo"]
         XCTAssertTrue(library.exists)
         let date = dayHeading("Oct 26, 2026", in: app)
         XCTAssertTrue(date.exists)
         XCTAssertLessThan(library.frame.minY, date.frame.minY, "Capture is available before a long photo collection")
-        // Take photo stays on the screen; without a camera it says why (the stage is chosen after each shot since #184).
+        // The add pill stays on the screen without a camera: its menu still offers a photo or PDF from this phone.
         XCTAssertTrue(app.buttons["job-media-take-photo"].exists)
         for _ in 0..<8 where !photo.isHittable { app.swipeUp() }
         XCTAssertTrue(photo.isHittable)
@@ -258,7 +258,7 @@ final class JobMediaQueueUITests: XCTestCase {
         addTeardownBlock { @MainActor in app.terminate(); app.launchArguments = base; app.launch(); app.terminate() }
         let firstPending = app.descendants(matching: .any).matching(identifier: "pending-media-00000000-0000-4000-8000-000000009800").firstMatch
         XCTAssertTrue(firstPending.waitForExistence(timeout: 20))
-        let library = app.buttons["job-media-import"]
+        let library = app.buttons["job-media-take-photo"]
         XCTAssertTrue(library.exists)
         XCTAssertLessThan(library.frame.minY, firstPending.frame.minY, "Capture should precede the pending queue")
         // Since #184 the queue is one summary ("N saved on this phone") with Send now, and each row says its state.
@@ -281,7 +281,7 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["No photos yet"].exists)
         let showAll = app.buttons["Show all photos"]
         XCTAssertTrue(showAll.isHittable)
-        XCTAssertLessThan(showAll.frame.maxY, app.buttons["job-media-take-photo"].frame.minY, "The way back sits above the capture bar")
+        XCTAssertGreaterThan(showAll.frame.minY, app.buttons["job-media-take-photo"].frame.maxY, "The way back sits under the add row and the chips")
         let recovery = XCTAttachment(screenshot: app.screenshot())
         recovery.name = "Empty photo filter recovery above capture"
         recovery.lifetime = .keepAlways
@@ -314,13 +314,16 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         XCTAssertTrue(scan.label.contains("Field scan.pdf"))
         XCTAssertFalse(app.staticTexts["No photos yet"].exists)
-        // #184: Scan and Import are quiet circles beside Take photo.
+        // Paper 21A: the scan circle sits beside "Add photo or video".
         XCTAssertTrue(app.buttons["job-media-scan"].exists)
-        XCTAssertTrue(app.buttons["Import a photo or PDF"].exists)
+        XCTAssertTrue(app.buttons["job-media-take-photo"].exists)
         thorbisSection(app, "Overview").tap()
-        // Photos is its own job section now (Activity reopens on "Showing all"), so leaving for
-        // Overview and coming back through Photos must still show this job's saved scan.
-        thorbisSection(app, "Photos").tap()
+        // Paper 21A: Photos is Activity's Photos chip (Activity reopens on "All"), so leaving for
+        // Overview and coming back through Activity's Photos must still show this job's saved scan.
+        thorbisSection(app, "Activity").tap()
+        let photosChip = app.buttons["activity-filter-photos"]
+        XCTAssertTrue(photosChip.waitForExistence(timeout: 10))
+        photosChip.tap()
         XCTAssertTrue(scan.waitForExistence(timeout: 10))
         XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         app.terminate()

@@ -299,68 +299,79 @@ struct TeamGoalsView: View {
     private var org: String? { session.activeOrganization?.id }
 
     var body: some View {
-        Form {
-            if let error = model.loadError {
-                Section { InlineProblem(message: error) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Paper 91: the title in 34 Bold with one muted line under it.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Team goals").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Weekly sold goals for each role and person").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 16)
+
+                if let error = model.loadError {
+                    InlineProblem(message: error).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
+                }
+                if let screen = model.screen {
+                    PaperSection("Leaderboard", count: nil) {
+                        Toggle(isOn: Binding(get: { screen.leaderboardEnabled }, set: { on in
+                            Task { await model.edit(.leaderboard(on), api: api, actorID: actor, organizationID: org) }
+                        })) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Show leaderboard to the team").font(Theme.font(16, weight: .medium))
+                                status(for: TeamGoalEdit.leaderboard(true).key,
+                                       fallback: screen.leaderboardEnabled ? "Ranked by percent of goal. Nobody sees anyone's dollars." : "Off")
+                            }
+                        }
+                        .tint(Theme.brand)
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                        .frame(minHeight: 52)
+                    }
+                    .paperCardMargin()
+
+                    PaperSection("Roles", count: screen.roles.count) {
+                        ForEach(screen.roles) { role in
+                            if role.id != screen.roles.first?.id { WellDivider() }
+                            Button { target = GoalTarget(kind: .role(role)) } label: {
+                                goalRow(title: role.name, detail: "\(role.people) \(role.people == 1 ? "person" : "people")",
+                                        value: TeamGoalsCopy.amount(role.weeklySold), key: TeamGoalEdit.role(key: role.roleKey, weeklySold: nil).key)
+                            }
+                            .buttonStyle(RowPressStyle())
+                        }
+                    }
+                    .paperCardMargin().padding(.top, 20)
+                    footnote("Weekly sold goal. A month's goal is the weekly goal times the weeks in it.")
+
+                    PaperSection("People", count: screen.people.count) {
+                        ForEach(screen.people) { person in
+                            if person.id != screen.people.first?.id { WellDivider() }
+                            Button { target = GoalTarget(kind: .person(person)) } label: {
+                                goalRow(title: person.displayName, detail: person.roleName,
+                                        value: TeamGoalsCopy.person(person), key: TeamGoalEdit.person(userId: person.userId, weeklySold: nil).key)
+                            }
+                            .buttonStyle(RowPressStyle())
+                        }
+                    }
+                    .paperCardMargin().padding(.top, 20)
+                    if screen.truncated {
+                        footnote("Showing the first \(screen.people.count) people. Set a role goal to cover everyone else.")
+                    }
+                    if let asOf = model.asOf {
+                        footnote("As of \(asOf.formatted(date: .omitted, time: .shortened)). Changes send when you're back online.")
+                    }
+                } else if model.loadError == nil {
+                    SkeletonRows(count: 4, leading: false)
+                }
             }
-            if let screen = model.screen {
-                Section {
-                    Toggle(isOn: Binding(get: { screen.leaderboardEnabled }, set: { on in
-                        Task { await model.edit(.leaderboard(on), api: api, actorID: actor, organizationID: org) }
-                    })) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Show leaderboard to the team").font(Theme.font(15))
-                            status(for: TeamGoalEdit.leaderboard(true).key,
-                                   fallback: screen.leaderboardEnabled ? "Ranked by percent of goal. Nobody sees anyone's dollars." : "Off")
-                        }
-                    }
-                    .tint(Theme.markAccent)
-                }
-                Section {
-                    ForEach(screen.roles) { role in
-                        Button { target = GoalTarget(kind: .role(role)) } label: {
-                            goalRow(title: role.name, detail: "\(role.people) \(role.people == 1 ? "person" : "people")",
-                                    value: TeamGoalsCopy.amount(role.weeklySold), key: TeamGoalEdit.role(key: role.roleKey, weeklySold: nil).key)
-                        }
-                    }
-                } header: { Text("Roles") } footer: {
-                    Text("Weekly sold goal. A month's goal is the weekly goal times the weeks in it.")
-                }
-                Section("People") {
-                    ForEach(screen.people) { person in
-                        Button { target = GoalTarget(kind: .person(person)) } label: {
-                            goalRow(title: person.displayName, detail: person.roleName,
-                                    value: TeamGoalsCopy.person(person), key: TeamGoalEdit.person(userId: person.userId, weeklySold: nil).key)
-                        }
-                    }
-                }
-                if screen.truncated {
-                    Section {
-                        Label("Showing the first \(screen.people.count) people. Set a role goal to cover everyone else.",
-                              systemImage: "person.3")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    }
-                }
-                if let asOf = model.asOf {
-                    Section {
-                        Label("As of \(asOf.formatted(date: .omitted, time: .shortened)). Changes send when you're back online.",
-                              systemImage: "icloud.and.arrow.up")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    }
-                }
-            } else if model.loadError == nil {
-                Section { SkeletonRows(count: 4, leading: false, inset: 0) }
-            }
+            .padding(.bottom, 32)
         }
-        .scrollContentBackground(.hidden)
-        .background(Theme.background)
-        .navigationTitle("Team goals")
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $target) { target in
             GoalSheet(target: target) { edit in
                 Task { await model.edit(edit, api: api, actorID: actor, organizationID: org) }
             }
-            .presentationDetents([.medium])
         }
         .task(id: session.isOffline) {
             await model.load(api: api, actorID: actor, organizationID: org)
@@ -377,16 +388,26 @@ struct TeamGoalsView: View {
         }
     }
 
+    private func footnote(_ text: String) -> some View {
+        Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Theme.gutter).padding(.top, 10)
+    }
+
+    /// Paper 91 card row: the name in 16 Medium, its line under it, the goal at the trailing edge.
     private func goalRow(title: String, detail: String, value: String, key: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                 status(for: key, fallback: detail)
             }
-            Spacer()
-            Text(value).font(Theme.font(15)).monospacedDigit().foregroundStyle(value == "No goal" ? Theme.muted : Theme.foreground)
+            Spacer(minLength: 8)
+            Text(value).font(Theme.font(16, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(value == "No goal" ? Theme.muted : Theme.foreground)
+                .multilineTextAlignment(.trailing)
         }
-        .frame(minHeight: 44)
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
         .contentShape(Rectangle())
     }
 }
@@ -415,39 +436,39 @@ private struct GoalSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Text("$").foregroundStyle(Theme.muted)
-                        TextField("0", text: $text)
-                            .keyboardType(.decimalPad)
-                            .font(Theme.monoFont(28, weight: .medium))
-                            .focused($focused)
-                            .accessibilityLabel("Weekly sold goal")
-                    }
-                    if let problem { InlineProblem(message: problem).font(Theme.font(13)) }
-                } header: { Text("Weekly sold goal") } footer: {
-                    Text("A week, Monday to Sunday. Leave it empty for no goal.")
-                }
-                Section {
-                    if case .person(let person) = target.kind, person.override != nil {
-                        Button("Use role goal") { finish(nil) }
-                    } else if current != nil {
-                        Button("Remove goal", role: .destructive) { finish(nil) }
-                    }
+        // Paper's sheet: the 22 Bold title, one filled money field under its label, the blue pill
+        // commit with Cancel under it. No stock form, bar or grouped list.
+        ThorbisModalSheet(title: title, closeLabel: "Cancel", onClose: { dismiss() },
+                          commitTitle: "Save", commitIdentifier: "team-goal-save", commit: { submit() },
+                          onKeyboardDone: { focused = false }) {
+            FormField(label: "Weekly sold goal", help: "A week, Monday to Sunday. Leave it empty for no goal.",
+                      error: problem) {
+                MoneyFieldWell {
+                    TextField("", text: $text, prompt: .placeholder("0"))
+                        .font(Theme.monoFont(16))
+                        .keyboardType(.decimalPad)
+                        .focused($focused)
+                        .onChange(of: text) { _, _ in problem = nil }
+                        .accessibilityLabel("Weekly sold goal")
                 }
             }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Save") { submit() } }
+            if case .person(let person) = target.kind, person.override != nil {
+                Button { finish(nil) } label: {
+                    RimmedButtonLabel(title: "Use role goal", symbol: "arrow.uturn.backward")
+                }
+                .buttonStyle(PressStyle())
+            } else if current != nil {
+                Button { finish(nil) } label: {
+                    Text("Remove goal").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
             }
-            .onAppear {
-                if let current { text = NSDecimalNumber(decimal: Decimal(current) / 100).stringValue }
-                focused = true
-            }
+        }
+        .onAppear {
+            if let current { text = NSDecimalNumber(decimal: Decimal(current) / 100).stringValue }
+            focused = true
         }
     }
 

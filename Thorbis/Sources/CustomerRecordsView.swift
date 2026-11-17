@@ -24,7 +24,7 @@ struct CustomerRecordsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 20) {
             if compilation.identityIncomplete {
                 ErrorBanner(message: "Some customer records could not be verified. Please try again.") { await retryMedia() }
             }
@@ -69,7 +69,8 @@ struct CustomerRecordsView: View {
         let incomplete = !compilation.mediaIncompleteJobIDs.isEmpty || compilation.identityIncomplete
         let columns = dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.flexible())]
-            : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+            // Paper 48F: three tiles across, 8 apart.
+            : [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
         return VStack(alignment: .leading, spacing: 8) {
             heading("Photos", count: compilation.photoCount, symbol: "photo", incomplete: incomplete)
             if incomplete {
@@ -81,7 +82,7 @@ struct CustomerRecordsView: View {
                 noneYet
             }
             ForEach(compilation.photos, id: \.jobID) { group in
-                jobHeading(group.title, jobID: group.jobID, count: group.count, incomplete: compilation.mediaIncompleteJobIDs.contains(group.jobID) || compilation.identityIncomplete)
+                jobHeading(group.title, jobID: group.jobID, count: group.count, incomplete: compilation.mediaIncompleteJobIDs.contains(group.jobID) || compilation.identityIncomplete, photos: true)
                 LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
                     ForEach(group.items) { source in
                         photoCard(source, jobID: group.jobID)
@@ -125,19 +126,20 @@ struct CustomerRecordsView: View {
         VStack(alignment: .leading, spacing: 0) {
             // `clipped()` only clips drawing: a filled photo still answers taps beyond its 120pt
             // frame, so a tile's overflow would open the photo under it. Hit-test the frame only.
-            image().frame(maxWidth: .infinity).frame(height: 120).clipped().contentShape(Rectangle())
-            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+            // Paper 48F: a 114pt tile, radius 16, its caption in 12 muted under the picture.
+            image().frame(maxWidth: .infinity).frame(height: 96).clipped().contentShape(Rectangle())
+            Text(title).font(Theme.font(12)).foregroundStyle(Theme.muted)
                 .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 10).padding(.vertical, 8)
+                .padding(.horizontal, 8).padding(.vertical, 6)
             if let status {
                 Text(status).font(Theme.font(12)).foregroundStyle(Theme.warning)
-                    .padding(.horizontal, 10).padding(.bottom, 8)
+                    .padding(.horizontal, 8).padding(.bottom, 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .panelBackground(cornerRadius: Theme.cardRadius)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
+        .panelBackground(cornerRadius: 16)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func mediaSection(_ title: String, total: Int, groups: [CustomerJobGroup<MediaAssetRecord>], symbol: String, incomplete: Bool = false) -> some View {
@@ -251,10 +253,16 @@ struct CustomerRecordsView: View {
                 if incomplete { Text("Partial").font(Theme.font(15)) }
             }
         } else {
-            Text(incomplete ? "\(title) · partial" : "\(title) · \(count)")
-                .font(Theme.font(13, weight: .medium)).monospacedDigit()
-                .foregroundStyle(Theme.muted).padding(.horizontal, 4)
-                .accessibilityAddTraits(.isHeader)
+            // Paper v2: the 13 Semibold label on the left, its count (or "Partial") at the trailing edge.
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit()
+                    .foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -272,16 +280,27 @@ struct CustomerRecordsView: View {
         }
     }
 
-    private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false) -> some View {
+    private func jobHeading(_ title: String, jobID: String, count: Int, incomplete: Bool = false, photos: Bool = false) -> some View {
         NavigationLink(value: PaperRoute.job(jobID)) {
-            // A quiet link to the job that groups the records under it, so it never reads as one of them.
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
-                Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                Spacer(minLength: 0)
-            }.frame(minHeight: 44)
+            if photos {
+                // Paper 48F: the job in 15 Semibold over its tiles, "6 photos" in 13 muted trailing.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(incomplete ? "Partial" : (count == 1 ? "1 photo" : "\(count) photos"))
+                        .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, 4).frame(minHeight: 44)
+            } else {
+                // A quiet link to the job that groups the records under it, so it never reads as one of them.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    Text(incomplete ? "Partial" : "\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    Spacer(minLength: 0)
+                }.frame(minHeight: 44)
+            }
         }.buttonStyle(RowPressStyle())
         .accessibilityLabel("Job: \(title), \(incomplete ? "partial" : "\(count)")")
         .accessibilityHint("Opens the job")

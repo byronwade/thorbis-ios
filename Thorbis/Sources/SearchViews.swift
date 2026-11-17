@@ -648,14 +648,21 @@ private struct SearchScreen: View {
                     .foregroundStyle(Theme.foreground)
                     .background(Theme.canvas)
                     .safeAreaInset(edge: .top, spacing: 0) { sheetField }
-                    .navigationTitle("Search")
+                    // The 34 Bold "Search" sits over the field (Paper 76), so the bar stays quiet.
+                    .navigationTitle("")
                     .navigationBarTitleDisplayMode(.inline)
                     .task {
                         if model.query.isEmpty, !initialQuery.isEmpty { model.query = initialQuery }
                     }
                     .toolbar {
                         if !embedded {
-                            ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { dismiss() } }
+                            // Paper 76: the 44pt card circle with a cross, top left. It still
+                            // answers to "Done" for VoiceOver and the tests.
+                            ThorbisToolbarItem(placement: .topBarLeading) {
+                                Button { dismiss() } label: { CreamCircleLabel(symbol: "xmark") }
+                                    .buttonStyle(PressStyle())
+                                    .accessibilityLabel("Done")
+                            }
                         }
                     }
                     .paperDestinations()
@@ -665,25 +672,37 @@ private struct SearchScreen: View {
 
     /// The sheet's field (iPad ⌘F). A Thorbis field rather than the system bar so the arrow keys
     /// can move through the results while the cursor stays in it.
+    /// Paper 76: the 34 Bold title, then the field on a 46-tall card (radius 14), its rim in brand
+    /// while words are in it.
     private var sheetField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.muted)
-                .accessibilityHidden(true)
-            SearchKeyField(text: $model.query, placeholder: "Jobs, customers, phone, invoice number",
-                           focusOnAppear: !embedded, onSubmit: openSelected, onMove: move)
-                .frame(height: 44)
-            if !model.query.isEmpty {
-                Button { model.query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 17)).foregroundStyle(Theme.muted)
-                        .frame(width: 32, height: 44).contentShape(Rectangle())
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return VStack(alignment: .leading, spacing: 14) {
+            Text("Search").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                .foregroundStyle(Theme.foreground)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 4)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(model.query.isEmpty ? Theme.muted : Theme.foreground)
+                    .accessibilityHidden(true)
+                SearchKeyField(text: $model.query, placeholder: "Jobs, customers, phone, invoice number",
+                               focusOnAppear: !embedded, onSubmit: openSelected, onMove: move)
+                    .frame(height: 44)
+                if !model.query.isEmpty {
+                    Button { model.query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                            .frame(width: 40, height: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Clear search")
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Clear search")
             }
+            .padding(.leading, 12).padding(.trailing, 6)
+            .frame(minHeight: 46)
+            .background(Theme.card, in: shape)
+            .overlay { if !model.query.isEmpty { shape.strokeBorder(Theme.brand, lineWidth: 1.5) } }
         }
-        .padding(.vertical, -10)
-        .fieldWell()
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
+        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 4)
         .background(Theme.canvas)
     }
 
@@ -772,25 +791,27 @@ private struct SearchScreen: View {
             savedNote
         }
         if let top = built.top {
-            ListGroupLabel(title: "Top hit", first: true)
-            row(top)
+            card("Top hit") { row(top) }
         }
-        ForEach(Array(built.groups.enumerated()), id: \.element.id) { index, group in
+        ForEach(built.groups) { group in
             let shown = visible(group)
-            ListGroupLabel(title: group.title, count: group.hits.count, first: built.top == nil && index == 0)
-            ForEach(shown) { hit in row(hit) }
-            if shown.count < group.hits.count {
-                Button { expanded.insert(group.id) } label: {
-                    Text("Show all \(group.hits.count)").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.horizontal, ListRoom.gutter).contentShape(Rectangle())
+            card(group.title, count: group.hits.count) {
+                hitRows(shown)
+                if shown.count < group.hits.count {
+                    WellDivider(leading: 16)
+                    Button { expanded.insert(group.id) } label: {
+                        Text("Show all \(group.hits.count)").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .padding(.horizontal, 16).contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
                 }
-                .buttonStyle(RowPressStyle())
             }
         }
         if waiting || model.searching {
             VStack(alignment: .leading, spacing: 0) {
-                ListGroupLabel(title: "Searching…", first: built.isEmpty)
+                Text("Searching\u{2026}").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 20).padding(.top, 20)
                 ListRoomSkeleton(count: built.isEmpty ? 3 : 2, threeLines: false, label: false)
             }
             .accessibilityElement(children: .ignore)
@@ -799,6 +820,54 @@ private struct SearchScreen: View {
             // design.thorbis.com States: say what found nothing and the next move.
             ListRoomEmpty(title: "No matches for \u{201C}\(terms.text)\u{201D}.", message: "Try a street or a phone number.")
         }
+    }
+
+    /// Paper 76: a 13 Semibold label (its count at the trailing edge) 8 above one card of rows,
+    /// 16 from the screen's edges and 20 below the section before it.
+    private func card<Rows: View>(_ title: String, count: Int? = nil, @ViewBuilder rows: () -> Rows) -> some View {
+        card(title, count: count, rows: rows) { EmptyView() }
+    }
+
+    private func card<Rows: View, Trailing: View>(_ title: String, count: Int? = nil, @ViewBuilder rows: () -> Rows,
+                                                  @ViewBuilder trailing: () -> Trailing) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let count, count > 0 {
+                    Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+                trailing()
+            }
+            .frame(minHeight: 18)
+            .padding(.horizontal, 4).padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 0) { rows() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: shape)
+                .clipShape(shape)
+        }
+        .padding(.horizontal, 16).padding(.top, 20)
+    }
+
+    /// A card's rows, a hairline between them that starts at the words (Paper 76), past a
+    /// customer's circle or a row's small symbol.
+    @ViewBuilder private func hitRows(_ hits: [SearchHit], removable: Bool = false) -> some View {
+        ForEach(Array(hits.enumerated()), id: \.element.id) { index, hit in
+            if index > 0 { WellDivider(leading: dividerInset(hit)) }
+            // A recent search's title is its words, which is what the × removes.
+            row(hit, removeSearch: removable ? hit.title : nil)
+        }
+    }
+
+    /// 16 to the row's edge, then its leading mark (40 or 22) and the 12 after it.
+    private func dividerInset(_ hit: SearchHit) -> CGFloat {
+        if typeSize.isAccessibilitySize { return 16 }
+        if case .customer = hit.glyph { return 68 }
+        if case .icon = hit.glyph { return 50 }
+        if case .icon = hit.leading { return 50 }
+        return 16
     }
 
     private func visible(_ group: SearchGroup) -> [SearchHit] {
@@ -829,22 +898,21 @@ private struct SearchScreen: View {
     /// marked), what and who follow; the status word, or an amount over a document's word, trails.
     /// Records carry no leading glyph (the group's label names the kind); recent searches and
     /// actions keep their small symbol.
-    private func row(_ hit: SearchHit) -> some View {
+    /// `removeSearch` (a recent search's words) adds Paper 76's × at the row's end: a 44pt target
+    /// beside the row's own button, 6 from the card's edge.
+    private func row(_ hit: SearchHit, removeSearch: String? = nil) -> some View {
         let selected = isSelected(hit)
         let stacked = typeSize.isAccessibilitySize
+        // Paper 76: records are 64 tall, recent searches and actions 56.
+        let record: Bool = { if case .open = hit.target { return true } else { return false } }()
+        let opensCustomer: Bool = { if case .open(.customer(_)) = hit.target { return true } else { return false } }()
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         let label = layout {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if case .icon(let symbol) = hit.glyph {
-                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(width: 20).accessibilityHidden(true)
-                } else if case .icon(let symbol) = hit.leading {
-                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(width: 20).accessibilityHidden(true)
-                }
+            HStack(alignment: .center, spacing: 12) {
+                if !stacked { leadingMark(hit) }
                 VStack(alignment: .leading, spacing: 2) {
-                    PaperHighlight.text(hit.title, words: terms.marks).font(Theme.font(15, weight: .medium))
+                    PaperHighlight.text(hit.title, words: terms.marks).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(hit.dimmed ? Theme.muted : Theme.foreground)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -867,25 +935,58 @@ private struct SearchScreen: View {
                 }
                 .fixedSize(horizontal: !stacked, vertical: true)
             }
+            if opensCustomer && !stacked { PaperDisclosure() }
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(.leading, 16).padding(.trailing, removeSearch == nil ? 16 : 2).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: record ? 64 : 56, alignment: .leading)
         .contentShape(Rectangle())
-        .background {
-            if selected {
-                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface).padding(.horizontal, 8).padding(.vertical, 2)
+        return HStack(spacing: 0) {
+            Group {
+                if case .none = hit.target {
+                    label.opacity(0.6)
+                } else {
+                    Button { open(hit) } label: { label }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            if let words = removeSearch {
+                Button { recents.removeSearch(words) } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .padding(.trailing, 6)
+                .accessibilityLabel("Remove \(words) from recent searches")
             }
         }
-        return Group {
-            if case .none = hit.target {
-                label.opacity(0.6)
-            } else {
-                Button { open(hit) } label: { label }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
+        // The card shows through; the arrow keys' row sits on the brand tint.
+        .background(selected ? Theme.brandSurface : Color.clear)
         .id(hit.id)
+    }
+
+    /// Paper 76's leading lane: a customer's initials on a 40pt circle; a recent search or an
+    /// action keeps its small symbol in a 22pt column. Records otherwise lead with their words.
+    @ViewBuilder private func leadingMark(_ hit: SearchHit) -> some View {
+        if case .customer(let name) = hit.glyph {
+            Text(Self.initials(name)).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .dynamicTypeSize(...DynamicTypeSize.large)
+                .frame(width: 40, height: 40)
+                .background(Theme.fill, in: Circle())
+                .accessibilityHidden(true)
+        } else if case .icon(let symbol) = hit.glyph {
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                .frame(width: 22).accessibilityHidden(true)
+        } else if case .icon(let symbol) = hit.leading {
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                .frame(width: 22).accessibilityHidden(true)
+        }
+    }
+
+    private static func initials(_ name: String) -> String {
+        let letters = name.split(separator: " ").prefix(2).compactMap(\.first).filter { $0.isLetter || $0.isNumber }
+        return letters.isEmpty ? "?" : String(letters).uppercased()
     }
 
     // MARK: Before anything is typed
@@ -933,7 +1034,7 @@ private struct SearchScreen: View {
         let open = (canViewJobs ? store.jobs : []).filter { !["completed", "canceled"].contains($0.status) }
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }.prefix(6)
         let searches = recents.searches.map { words in
-            SearchHit(id: "search:\(words)", leading: .icon("clock.arrow.circlepath"), title: words,
+            SearchHit(id: "search:\(words)", leading: .icon("clock"), title: words,
                       target: .run(SearchAction(id: "search:\(words)", title: words, symbol: "clock", keywords: [], run: { model.query = words })))
         }
         if !searches.isEmpty { groups.append(SearchGroup(id: "searches", title: "Recent searches", hits: searches)) }
@@ -963,24 +1064,27 @@ private struct SearchScreen: View {
             ListRoomEmpty(title: "Nothing viewed yet.",
                           message: "Search for a job by street, a customer by name or phone, or an invoice by number.")
         }
-        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-            ListGroupLabel(title: group.title, first: index == 0) {
+        ForEach(groups) { group in
+            card(group.title) {
+                hitRows(group.hits, removable: group.id == "searches")
+            } trailing: {
                 if group.id == "searches" {
                     clearButton("Clear recent searches") { recents.clearSearches() }
                 } else if group.id == "opened" {
                     clearButton("Clear recently viewed") { recents.clearOpened() }
                 }
             }
-            ForEach(group.hits) { hit in row(hit) }
         }
     }
 
     private func clearButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text("Clear").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+            Text("Clear").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
                 .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
+        // The 44pt target reaches past the label's line without pushing the card down.
+        .padding(.vertical, -13)
         .accessibilityLabel(label)
     }
 }

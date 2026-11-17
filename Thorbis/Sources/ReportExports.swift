@@ -49,12 +49,14 @@ private struct ReportExportMenu: ViewModifier {
                     ThorbisToolbarItem(placement: .topBarTrailing) {
                         ThorbisMenu(items: exports.map { export in
                             ThorbisMenuItem(export.label, icon: "tablecells") { open(export) }
-                        }, title: "Download as Excel", accessibilityLabel: "Download as Excel") {
+                        }, title: "Export report", accessibilityLabel: "Export report") {
+                            // Paper 60: the share circle at the top right, 44 on the card tone.
                             if preview.loading {
                                 ProgressView()
+                                    .frame(width: 44, height: 44)
+                                    .background(Theme.card, in: Circle())
                             } else {
-                                Image(systemName: "square.and.arrow.down")
-                                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                                CreamCircleLabel(symbol: "square.and.arrow.up")
                             }
                         }
                     }

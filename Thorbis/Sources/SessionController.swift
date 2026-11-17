@@ -148,6 +148,12 @@ final class SessionController: ObservableObject {
         can(capability, feature: feature)
     }
 
+    /// Paper 65B: after the server saved a new name, show it everywhere without a full restore.
+    func applySavedName(_ name: String) {
+        guard let current = user else { return }
+        user = SessionUser(id: current.id, name: name, email: current.email)
+    }
+
     func restore() async {
         guard !signingOut else { return }
         let requestGeneration = invalidate(next: .restoring)

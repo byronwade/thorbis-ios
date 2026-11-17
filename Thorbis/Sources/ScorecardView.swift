@@ -16,25 +16,42 @@ struct ScorecardView: View {
 
     private var selected: ScorecardPeriod { ScorecardPeriod(rawValue: period) ?? .week }
 
+    /// "Today", "This week", "This month": the card's section label.
+    private var sectionTitle: String {
+        switch selected {
+        case .today: return "Today"
+        case .week: return "This week"
+        case .month: return "This month"
+        }
+    }
+
+    /// Paper 91A: "Ramon Mendez · this week".
+    private var subtitle: String {
+        let when = sectionTitle.lowercased()
+        guard let name = session.user?.name, !name.isEmpty else { return "Your own work \(when)" }
+        return "\(name) · \(when)"
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("My scorecard").font(Theme.font(30, weight: .medium)).tracking(-0.6).accessibilityAddTraits(.isHeader)
-                    Text("Your own work, credited by who the job was assigned to").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                // Paper 91A: the title in 34 Bold, then whose card it is and for when.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("My scorecard").font(Theme.font(34, weight: .bold)).tracking(-0.85).accessibilityAddTraits(.isHeader)
+                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
-                PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period, wrapOverflow: true, textTabs: true)
-                if let error, card == nil { ErrorBanner(message: error) { await load() } }
+                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 14)
+                PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period, wrapOverflow: true)
+                if let error, card == nil { ErrorBanner(message: error) { await load() }.padding(.top, 12) }
                 Group {
                     if let card, loadedPeriod == selected { content(card) } else if error == nil { SkeletonRows(count: 5, leading: false, inset: 0) }
                 }
-                .padding(.horizontal, Theme.gutter)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, 32)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.background)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task(id: period) { await load() }
@@ -44,12 +61,14 @@ struct ScorecardView: View {
         let me = card.me
         let sources = card.sources
         let hero = VStack(alignment: .leading, spacing: 4) {
-            Text("Sold").font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text("Sold").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let sold = me.sold {
-                    Text(money(sold, currency: card.currency)).moneyStyle(.hero)
+                    // Paper 91A: the hero figure in 44 Bold tabular, on one line (it shrinks before it clips).
+                    Text(money(sold, currency: card.currency)).font(Theme.display()).tracking(Theme.displayTracking())
+                        .minimumScaleFactor(0.5).moneyStyle(.hero)
                 } else {
-                    Text("—").moneyStyle(.hero).accessibilityLabel("Not available for your role")
+                    Text("—").font(Theme.display()).moneyStyle(.hero).accessibilityLabel("Not available for your role")
                 }
                 // TG-08: hitting the goal is one quiet check, nothing more.
                 if let fraction = ScorecardGoal.fraction(sold: me.sold, goal: me.goal), fraction >= 1 {
@@ -71,7 +90,10 @@ struct ScorecardView: View {
             Text(asOf.map { cachedLabel(card, savedAt: $0) } ?? selected.label(now: Date()))
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
         }
-        .padding(.top, 12).padding(.bottom, 16)
+        // Paper 91A: the hero figure on its own card.
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground()
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         // TG-19: Sold opens exactly the invoices it counts.
@@ -85,57 +107,95 @@ struct ScorecardView: View {
 
         if card.truncated {
             Text("Some older work wasn't counted, so these numbers may be low.")
-                .font(Theme.font(13)).foregroundStyle(Theme.warning).padding(.bottom, 8)
+                .font(Theme.font(13)).foregroundStyle(Theme.warning).padding(.top, 10).padding(.horizontal, 4)
         }
 
         // TG-13: a number this role can't see shows a dash, never a zero and never a missing row.
         let period = selected.filterLabel
         let invoicesRoute = sources.map { PaperRoute.filteredInvoices(RecordFilter(ids: $0.invoiceIds, title: "Your invoices · \(period)")) } ?? .invoices
-        if let collected = me.collected {
-            row("Collected", money(collected, currency: card.currency), route: invoicesRoute)
-        } else {
-            row("Collected", "—", route: nil)
+        // Paper 91A: the rest on one card under the period's name, hairlines between rows.
+        PaperSection(sectionTitle, count: nil) {
+            if let collected = me.collected {
+                row("Collected", money(collected, currency: card.currency), route: invoicesRoute)
+            } else {
+                row("Collected", "—", route: nil)
+            }
+            WellDivider()
+            row("Jobs done", "\(me.jobsDone)",
+                route: sources.map { PaperRoute.filteredJobs(RecordFilter(ids: $0.jobIds, title: "Your jobs done · \(period)")) })
+            WellDivider()
+            if let average = me.averageTicket, let invoices = me.invoices {
+                row("Average ticket", invoices == 0 ? "—" : money(average, currency: card.currency), route: invoicesRoute)
+            } else {
+                row("Average ticket", "—", route: nil)
+            }
+            WellDivider()
+            if let rate = me.closeRateBps, let presented = me.estimatesPresented, let approved = me.estimatesApproved {
+                row("Close rate", presented == 0 ? "—" : "\(rate / 100)%", detail: presented == 0 ? nil : "\(approved) of \(presented) estimates",
+                    route: sources.map { PaperRoute.filteredEstimates(RecordFilter(ids: $0.estimateIds, title: "Your estimates · \(period)")) } ?? .estimates)
+            } else {
+                row("Close rate", "—", route: nil)
+            }
         }
-        row("Jobs done", "\(me.jobsDone)",
-            route: sources.map { PaperRoute.filteredJobs(RecordFilter(ids: $0.jobIds, title: "Your jobs done · \(period)")) })
-        if let average = me.averageTicket, let invoices = me.invoices {
-            row("Average ticket", invoices == 0 ? "—" : money(average, currency: card.currency), route: invoicesRoute)
-        } else {
-            row("Average ticket", "—", route: nil)
-        }
-        if let rate = me.closeRateBps, let presented = me.estimatesPresented, let approved = me.estimatesApproved {
-            row("Close rate", presented == 0 ? "—" : "\(rate / 100)%", detail: presented == 0 ? nil : "\(approved) of \(presented) estimates",
-                route: sources.map { PaperRoute.filteredEstimates(RecordFilter(ids: $0.estimateIds, title: "Your estimates · \(period)")) } ?? .estimates)
-        } else {
-            row("Close rate", "—", route: nil)
-        }
+        .padding(.top, 20)
         // TG-13: review requests appear once they are measured (BYR-1566).
 
         // TG-18: the leaderboard follows the numbers on Week and Month when the owner turns it on.
         if selected != .today, let board = card.leaderboard, !board.isEmpty {
-            PaperGroupHeader(title: "Leaderboard").padding(.top, 20)
+            PaperSection("Leaderboard", count: nil) {
             ForEach(board) { entry in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("\(entry.rank)").font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
-                            .frame(minWidth: 20, alignment: .leading)
-                        Text(entry.me ? "You" : entry.displayName).font(Theme.font(15, weight: entry.me ? .medium : .regular))
-                        Spacer()
-                        Text(ScorecardGoal.percent(entry.percentOfGoalBps)).moneyStyle(.row)
-                    }
-                    GoalBar(fraction: Double(entry.percentOfGoalBps) / 10_000)
-                }
-                .padding(.vertical, 8)
-                .frame(minHeight: 48)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Rank \(entry.rank), \(entry.me ? "you" : entry.displayName), \(ScorecardGoal.percent(entry.percentOfGoalBps)) of goal")
+                if entry.id != board.first?.id { WellDivider(leading: 92) }
+                leaderRow(entry)
             }
+            }
+            .padding(.top, 20)
             Text("Ranked by percent of each person's own goal.")
-                .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
+                .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 10).padding(.horizontal, 4)
         }
 
-        Text("Sold counts invoices issued on your jobs. Collected counts payments recorded on them.")
-            .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 16)
+        Text("Sold counts invoices issued on your jobs. Collected counts payments recorded on them. Work is credited to whoever the job was assigned to.")
+            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 16).padding(.horizontal, 4)
+    }
+
+    /// Paper 91's leaderboard row: the rank, the person's initials in a 36 circle, the name in 16
+    /// Medium, the figure in 16 Semibold. Your own row sits on a brand tint with "· You" after the
+    /// name. The figure is percent of goal (never dollars, TG-09), with its bar under the name.
+    private func leaderRow(_ entry: Scorecard.LeaderboardRow) -> some View {
+        let percent = ScorecardGoal.percent(entry.percentOfGoalBps)
+        let name = entry.displayName.isEmpty ? "You" : entry.displayName
+        let showsYou = entry.me && !entry.displayName.isEmpty
+        return HStack(alignment: .center, spacing: 12) {
+            Text("\(entry.rank)").font(Theme.monoFont(15, weight: .semibold))
+                .foregroundStyle(entry.me ? Theme.brandText : Theme.muted)
+                .frame(minWidth: 16)
+            Text(initials(name)).font(Theme.font(13, weight: .semibold))
+                .foregroundStyle(entry.me ? Theme.brandText : Theme.foreground)
+                .lineLimit(1)
+                .frame(width: 36, height: 36)
+                .background(entry.me ? Theme.brandSurface : Theme.fill, in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(name).font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                        .foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if showsYou {
+                        Text("\u{00B7} You").font(Theme.font(16)).foregroundStyle(Theme.muted)
+                            .fixedSize()
+                    }
+                }
+                GoalBar(fraction: Double(entry.percentOfGoalBps) / 10_000)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(percent).font(Theme.monoFont(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
+        .frame(minHeight: 58)
+        .background(entry.me ? Theme.brand.opacity(0.12) : Color.clear)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Rank \(entry.rank), \(entry.me ? "you" : entry.displayName), \(percent) of goal")
     }
 
     /// TG-14: a cached card names its own dates and when it was saved, so yesterday's
@@ -159,7 +219,8 @@ struct ScorecardView: View {
 
     @ViewBuilder private func row(_ label: String, _ value: String, detail: String? = nil, route: PaperRoute?) -> some View {
         let figure = VStack(alignment: typeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
-            Text(value).moneyStyle(.row)
+            // Paper 91A: the figure in 16 Semibold tabular beside its 16 Medium label.
+            Text(value).font(Theme.monoFont(16, weight: .semibold)).moneyStyle(.row)
             if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted) }
         }
         let chevron = Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
@@ -169,7 +230,7 @@ struct ScorecardView: View {
             if typeSize.isAccessibilitySize {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(label).font(Theme.font(15, weight: .medium))
+                        Text(label).font(Theme.font(16, weight: .medium))
                         figure
                     }
                     Spacer(minLength: 8)
@@ -178,14 +239,15 @@ struct ScorecardView: View {
                 .padding(.vertical, 6)
             } else {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(label).font(Theme.font(15, weight: .medium))
+                    Text(label).font(Theme.font(16, weight: .medium))
                     Spacer()
                     figure
                     if route != nil { chevron }
                 }
             }
         }
-        .frame(minHeight: 48)
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .frame(minHeight: 52)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         if let route {
@@ -241,8 +303,8 @@ struct GoalBar: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.border)
-                Capsule().fill(Theme.foreground)
+                Capsule().fill(Theme.fill)
+                Capsule().fill(Theme.brand)
                     .frame(width: proxy.size.width * min(max(fraction, 0), 1))
             }
         }

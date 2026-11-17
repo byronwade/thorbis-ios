@@ -96,26 +96,68 @@ struct RoleEditorView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                TextField("Role name", text: $name, prompt: .placeholder("Role name"))
-                    .focused($nameFocused)
-                    .onChange(of: name) { _, _ in nameProblem = nil }
-                if let nameProblem { FieldProblem(message: nameProblem) }
-                TextField("What this role is for", text: $summary, prompt: .placeholder("What this role is for"), axis: .vertical).lineLimit(1...3)
-            }
-            ForEach(groups, id: \.0) { resource, capabilities in
-                Section(resource.replacingOccurrences(of: "_", with: " ").capitalized) {
-                    ForEach(capabilities) { capability in capabilityRow(capability) }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Paper 63: "Role" small above the role's name in 34 Bold.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Role").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text(name.isEmpty ? "Role" : name)
+                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .lineLimit(2).minimumScaleFactor(0.6)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 16)
+
+                PaperSection("Name", count: nil) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("Role name", text: $name, prompt: .placeholder("Role name"))
+                            .font(Theme.font(16, weight: .medium))
+                            .focused($nameFocused)
+                            .onChange(of: name) { _, _ in nameProblem = nil }
+                        if let nameProblem { FieldProblem(message: nameProblem) }
+                    }
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    WellDivider()
+                    TextField("What this role is for", text: $summary, prompt: .placeholder("What this role is for"), axis: .vertical)
+                        .lineLimit(1...3)
+                        .font(Theme.font(16))
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                }
+                .paperCardMargin()
+
+                if catalog == nil && error == nil {
+                    SkeletonRows(count: 6, leading: false).padding(.top, 20)
+                }
+                // One card per thing a permission touches, a switch on each row.
+                ForEach(groups, id: \.0) { resource, capabilities in
+                    PaperSection(resource.replacingOccurrences(of: "_", with: " ").capitalized, count: nil) {
+                        ForEach(capabilities) { capability in
+                            if capability.id != capabilities.first?.id { WellDivider() }
+                            capabilityRow(capability)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
+                                .frame(minHeight: 52)
+                        }
+                    }
+                    .paperCardMargin().padding(.top, 20)
+                }
+                if let error { ErrorBanner(message: error).padding(.top, 12) }
+                // Paper 63: the one rule no role changes, centred under the last card.
+                if catalog != nil {
+                    Text("Owner always has full access and cannot be restricted")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Theme.gutter).padding(.top, 16)
                 }
             }
-            if let error { Section { ListErrorRow(message: error) } }
+            .padding(.bottom, 32)
         }
+        .foregroundStyle(Theme.foreground)
         .searchable(text: $search, prompt: "Find a permission")
-        .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.canvas) } }
-        .navigationTitle(name.isEmpty ? "Role" : name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
@@ -144,10 +186,11 @@ struct RoleEditorView: View {
                 else { grants[capability.id] = nil }
             })) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(capability.label).font(Theme.font(15, weight: .medium))
-                    Text(capability.description).font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    Text(capability.label).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text(capability.description).font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
             }
+            .tint(Theme.brand)
             if enabled, capability.allowedScopes.count > 1 {
                 ThorbisSelect(options: capability.allowedScopes.map { ($0.id, $0.label) },
                               selection: Binding(get: { grants[capability.id]?.scope ?? "" },

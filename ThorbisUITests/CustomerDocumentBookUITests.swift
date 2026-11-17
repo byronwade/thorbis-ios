@@ -304,7 +304,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
         app.buttons["Job actions"].tap(); thorbisCustomerViewMenuItem(app).tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         return app
     }
 

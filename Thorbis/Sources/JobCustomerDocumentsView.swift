@@ -29,6 +29,7 @@ struct JobCustomerDocumentsView: View {
 
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @Environment(\.dynamicTypeSize) private var typeSize
     private var estimates: JobDocumentRead<EstimateRecord>? { documents.estimates }
     private var invoices: JobDocumentRead<InvoiceRecord>? { documents.invoices }
     @State private var paper: CustomerJobPaper?
@@ -50,14 +51,22 @@ struct JobCustomerDocumentsView: View {
         Group {
             if currentWorkspace {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Your job documents").font(Theme.customerFont(28, weight: .medium))
+                    // Paper "Customer view": the greeting, then Estimates, Invoices and Your details as
+                    // grouped cards 16 from the edge, 22 apart, with the commit after the last card.
+                    VStack(alignment: .leading, spacing: 22) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(eyebrow).font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(greeting).font(Theme.font(34)).tracking(-0.85)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 6)
                                 .accessibilityAddTraits(.isHeader)
-                            Text(jobTitle).font(Theme.customerFont(20)).fixedSize(horizontal: false, vertical: true)
-                            Text("JOB-\(scope.jobID.suffix(4).uppercased()) · \(customerName)")
+                                .accessibilityIdentifier("customer-view-title")
+                            Text("Here is everything for your visit today")
                                 .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        .padding(.horizontal, 4)
                         if let error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await refresh() } }
                         else if estimates?.isComplete == false || invoices?.isComplete == false {
                             CustomerProblemBanner(message: "Some documents couldn't be refreshed. Try again to see everything.",
@@ -66,8 +75,9 @@ struct JobCustomerDocumentsView: View {
                         if canViewEstimates { estimateRows }
                         if canViewInvoices { invoiceRows }
                         if canEditDetails { detailsRow }
+                        if canViewEstimates { approveEstimates }
                     }
-                    .padding(.horizontal, Theme.gutter).padding(.vertical, 16)
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 16)
                     .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("customer-job-documents-list")
@@ -78,8 +88,18 @@ struct JobCustomerDocumentsView: View {
         }
         .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
-            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: openingID != nil, action: handBack)
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
+            VStack(spacing: 8) {
+                CustomerHandBackPill(busy: openingID != nil, action: handBack)
+                // At accessibility sizes the pinned foot is the pill alone, so the list keeps its room.
+                if !typeSize.isAccessibilitySize {
+                    Text("Your technician's screens stay locked.")
+                        .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12).background(Theme.canvas)
         }
         .thorbisDestination(item: $book) { initial in
             if currentWorkspace {
@@ -136,7 +156,7 @@ struct JobCustomerDocumentsView: View {
         .thorbisDestination(isPresented: $editingDetails) {
             if currentWorkspace, canEditDetails, let details {
                 CustomerSelfEditForm(model: details) { editingDetails = false }
-                    .navigationTitle("Your details")
+                    .navigationTitle("My details")
                     .toolbar { ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) { CustomerModeOwnerUnlockButton() } }
             } else {
                 customerHandBackState(withAction: true)
@@ -174,60 +194,86 @@ struct JobCustomerDocumentsView: View {
         }
     }
 
+    /// Paper: "Wade's Plumbing · Customer view" above the greeting.
+    private var eyebrow: String {
+        guard let workspace = session.activeOrganization?.name, !workspace.isEmpty else { return "Customer view" }
+        return "\(workspace) \u{00B7} Customer view"
+    }
+
+    /// Paper: "Hi Danielle", the customer's first name.
+    private var greeting: String {
+        guard let first = customerName.split(separator: " ").first else { return "Hi" }
+        return "Hi \(first)"
+    }
+
     private var estimateRows: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            customerSectionLabel("Estimates", count: (estimates?.records.count ?? 0) + (estimates?.unavailableIDs.count ?? 0))
-            approveEstimates
-            if let estimates {
-                if estimates.records.isEmpty && estimates.isComplete { empty("No estimates for this job yet.") }
-                ForEach(estimates.records) { estimate in
-                    Button { Task { await openEstimate(estimate.id) } } label: {
-                        JobDocumentRow(estimate: estimate, fresh: estimates.freshIDs.contains(estimate.id), customerFacing: true)
+        VStack(alignment: .leading, spacing: 8) {
+            customerSectionLabel("Estimates")
+            VStack(spacing: 0) {
+                if let estimates {
+                    if estimates.records.isEmpty && estimates.unavailableIDs.isEmpty && estimates.isComplete {
+                        empty("No estimates for this job yet.")
                     }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("customer-estimate-\(estimate.id)")
-                    .disabled(openingID != nil || !estimates.freshIDs.contains(estimate.id))
-                }
-                ForEach(estimates.unavailableIDs, id: \.self) { id in
-                    JobDocumentRow(reference: "EST-\(id.suffix(4).uppercased())", title: "Estimate unavailable",
-                                   status: "unavailable", amount: nil, fresh: false, customerFacing: true)
-                        .accessibilityIdentifier("customer-estimate-unavailable-\(id)")
-                }
-            } else { SkeletonRows(count: 2, leading: false, inset: 0) }
+                    ForEach(Array(estimates.records.enumerated()), id: \.element.id) { index, estimate in
+                        if index > 0 { WellDivider() }
+                        Button { Task { await openEstimate(estimate.id) } } label: {
+                            estimateRow(estimate, fresh: estimates.freshIDs.contains(estimate.id))
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("customer-estimate-\(estimate.id)")
+                        .disabled(openingID != nil || !estimates.freshIDs.contains(estimate.id))
+                    }
+                    ForEach(Array(estimates.unavailableIDs.enumerated()), id: \.element) { index, id in
+                        if index > 0 || !estimates.records.isEmpty { WellDivider() }
+                        CustomerHomeDocumentRow(title: "Estimate unavailable", reference: "EST-\(id.suffix(4).uppercased())",
+                                                word: "Needs refresh", chevron: false)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("customer-estimate-unavailable-\(id)")
+                    }
+                } else { SkeletonRows(count: 2, leading: false, inset: PaperCardMetrics.inset) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
         }
+    }
+
+    /// Paper's estimate row: the name over "EST-1042 · Waiting for you", the amount, a chevron.
+    private func estimateRow(_ estimate: EstimateRecord, fresh: Bool) -> CustomerHomeDocumentRow {
+        let facts = JobDocumentRow(estimate: estimate, fresh: fresh, customerFacing: true)
+        let word = estimate.status == "sent" ? "Waiting for you" : estimate.status.statusLabel
+        return CustomerHomeDocumentRow(title: facts.title, reference: facts.reference,
+                                       word: fresh ? word : "Needs refresh",
+                                       tint: fresh ? StatusWord.documentTint(estimate.status) : nil,
+                                       detail: facts.detail, amount: facts.amount)
+    }
+
+    /// Paper's invoice row: the job's name over "INV-2209 · $340.00 due", the total, a chevron.
+    private func invoiceRow(_ invoice: InvoiceRecord, fresh: Bool) -> CustomerHomeDocumentRow {
+        let facts = JobDocumentRow(invoice: invoice, fresh: fresh, customerFacing: true)
+        let word = invoice.status == "issued" ? (facts.detail ?? "Unpaid") : invoice.status.statusLabel
+        return CustomerHomeDocumentRow(title: invoice.origin == "estimate_deposit" || jobTitle.isEmpty ? facts.title : jobTitle,
+                                       reference: facts.reference,
+                                       word: fresh ? word : "Needs refresh",
+                                       tint: fresh ? StatusWord.documentTint(invoice.status) : nil,
+                                       amount: facts.amount)
     }
 
     /// Approving goes through the job's one multi-estimate review: select one or several, review,
     /// then sign each. Already approved estimates stay listed without approving again.
+    /// Paper: the brand commit "Review estimates" under the last card.
     @ViewBuilder private var approveEstimates: some View {
         if handoff != nil, let estimates, estimates.records.contains(where: { $0.status == "sent" }) {
-            CustomerSecondaryButton(title: "Choose estimates to approve", type: CustomerType(nil)) { approving = true }
+            CustomerPresentationCommit(title: "Review estimates", enabled: openingID == nil, busy: false,
+                                       type: CustomerType(nil)) { approving = true }
                 .accessibilityIdentifier("customer-view-approve-estimates")
-                .disabled(openingID != nil)
         }
     }
 
     private var detailsRow: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 8) {
             customerSectionLabel("Your details")
             Button { editingDetails = true } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "person.crop.circle").font(.system(size: 22)).foregroundStyle(Theme.brandText)
-                        .frame(width: 30).accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Check your details").font(Theme.customerFont(18, weight: .medium))
-                        Text("Name, phone, email, addresses and how to reach you")
-                            .font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
-                .panelBackground(cornerRadius: 14)
-                .contentShape(Rectangle())
+                if let details { CustomerHomeDetailsCard(model: details) }
             }
             .buttonStyle(PressStyle())
             .accessibilityLabel("Your details")
@@ -238,19 +284,24 @@ struct JobCustomerDocumentsView: View {
     }
 
     private var invoiceRows: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            customerSectionLabel("Invoices", count: invoices?.records.count ?? 0)
-            if let invoices {
-                if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
-                ForEach(invoices.records) { invoice in
-                    Button { Task { await openInvoice(invoice.id) } } label: {
-                        JobDocumentRow(invoice: invoice, fresh: invoices.freshIDs.contains(invoice.id), customerFacing: true)
+        VStack(alignment: .leading, spacing: 8) {
+            customerSectionLabel("Invoices")
+            VStack(spacing: 0) {
+                if let invoices {
+                    if invoices.records.isEmpty && invoices.isComplete { empty("No invoices for this job yet.") }
+                    ForEach(Array(invoices.records.enumerated()), id: \.element.id) { index, invoice in
+                        if index > 0 { WellDivider() }
+                        Button { Task { await openInvoice(invoice.id) } } label: {
+                            invoiceRow(invoice, fresh: invoices.freshIDs.contains(invoice.id))
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("customer-invoice-\(invoice.id)")
+                        .disabled(openingID != nil || !invoices.freshIDs.contains(invoice.id))
                     }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("customer-invoice-\(invoice.id)")
-                    .disabled(openingID != nil || !invoices.freshIDs.contains(invoice.id))
-                }
-            } else { SkeletonRows(count: 2, leading: false, inset: 0) }
+                } else { SkeletonRows(count: 2, leading: false, inset: PaperCardMetrics.inset) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
         }
     }
 
@@ -318,7 +369,10 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func empty(_ text: String) -> some View {
-        Text(text).font(Theme.customerFont(18)).foregroundStyle(Theme.muted).padding(.vertical, 8)
+        Text(text).font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
     }
 
     private func refresh() async {
@@ -456,10 +510,11 @@ private struct CustomerJobReadOnlyPaper: View {
                         lines(invoice.lines, currency: invoice.currency, type: type)
                     }
                 }
-                .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+                .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
-            CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", busy: false, action: handBack)
-                .padding(Theme.gutter)
+            CustomerCommitButton(title: "Hand back to the technician", icon: "lock", busy: false, action: handBack)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
         }
     }
 
@@ -483,10 +538,152 @@ private struct CustomerJobReadOnlyPaper: View {
     }
 }
 
-/// A section label at customer size (17pt): the customer reads this screen, not the tech.
-private func customerSectionLabel(_ title: String, count: Int? = nil) -> some View {
-    Text(count.flatMap { $0 > 0 ? "\(title) · \($0)" : nil } ?? title)
-        .font(Theme.customerFont(17, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+/// Paper's section label (Semibold, muted, 4 in from the card's edge) at customer size (17pt):
+/// the customer reads this screen, not the tech.
+private func customerSectionLabel(_ title: String) -> some View {
+    Text(title)
+        .font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.muted)
         .accessibilityAddTraits(.isHeader)
-        .frame(minHeight: 32, alignment: .leading)
+        .padding(.horizontal, 4)
+}
+
+/// One document on Customer view's home (Paper "Customer view"): the name over
+/// "EST-1042 · Waiting for you", the amount at the trailing edge, then a chevron. The card it sits
+/// on draws the surface and the hairlines. At accessibility sizes the amount drops under the name.
+private struct CustomerHomeDocumentRow: View {
+    let title: String
+    let reference: String
+    /// The document's state as a word; `tint` colours it (Paper draws "Waiting for you" in the warning word colour).
+    let word: String
+    var tint: Color? = nil
+    var detail: String? = nil
+    var amount: String? = nil
+    var chevron = true
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(Theme.customerFont(20, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                subtitle.fixedSize(horizontal: false, vertical: true)
+                if stacked, let amount { amountText(amount) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !stacked, let amount { amountText(amount).fixedSize() }
+            if chevron {
+                Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            }
+        }
+        .multilineTextAlignment(.leading)
+        .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private var subtitle: Text {
+        let quiet = Theme.customerFont(17)
+        var line = Text("\(reference) \u{00B7} ").font(quiet).foregroundStyle(Theme.muted)
+            + Text(word).font(Theme.customerFont(17, weight: tint == nil ? .regular : .medium))
+                .foregroundStyle(tint ?? Theme.muted)
+        if let detail, !detail.isEmpty {
+            line = line + Text(" \u{00B7} \(detail)").font(quiet).foregroundStyle(Theme.muted)
+        }
+        return line.monospacedDigit()
+    }
+
+    private func amountText(_ amount: String) -> some View {
+        Text(amount).font(Theme.customerFont(20, weight: .medium)).monospacedDigit()
+            .foregroundStyle(Theme.foreground).lineLimit(1).minimumScaleFactor(0.7)
+    }
+}
+
+/// "Your details" on Customer view's home (Paper): Phone, Email and Address, each with Edit.
+/// Until the customer's record has loaded it is one row; either way the whole card opens the form.
+private struct CustomerHomeDetailsCard: View {
+    @ObservedObject var model: CustomerSelfEditModel
+    @EnvironmentObject private var api: APIClient
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let draft = model.draft {
+                fact("Phone", draft.phone)
+                WellDivider()
+                fact("Email", draft.email)
+                WellDivider()
+                fact("Address", draft.address)
+            } else {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Check your details").font(Theme.customerFont(20, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Text("Name, phone, email, addresses and how to reach you")
+                            .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
+                .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
+            }
+        }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground()
+        .contentShape(Rectangle())
+        // The same read the form makes; it keeps the draft, so opening the form does not load twice.
+        .task { await model.load(api: api) }
+    }
+
+    private func fact(_ label: String, _ value: String) -> some View {
+        let stacked = typeSize.isAccessibilitySize
+        let shown = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
+            Text(label).font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                .frame(width: stacked ? nil : 76, alignment: .leading)
+            Text(shown.isEmpty ? "Not added" : shown).font(Theme.customerFont(17, weight: .medium))
+                .foregroundStyle(shown.isEmpty ? Theme.muted : Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(shown.isEmpty ? "Add" : "Edit").font(Theme.customerFont(17, weight: .semibold))
+                .foregroundStyle(Theme.brandText)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
+    }
+}
+
+/// Paper "Customer view": handing back is the quiet pill (a lock and the words) under the commit.
+/// The words wrap at large text so the pill grows instead of clipping.
+private struct CustomerHandBackPill: View {
+    let busy: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if busy { ProgressView() }
+                else { Image(systemName: "lock").font(.system(size: 17, weight: .medium)).accessibilityHidden(true) }
+                // The same full sentence the other customer screens use; it is also the button's
+                // spoken name, so the words stay their own element for VoiceOver and the UI tests.
+                Text("Hand back to the technician").font(Theme.customerFont(17, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.commitHeight)
+            .background(Theme.fill, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(busy)
+    }
 }

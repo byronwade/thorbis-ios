@@ -46,9 +46,14 @@ struct RecordActivitySection: View {
                     Text("Nothing recorded yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 4)
                 } else {
+                    // Paper 24 "Activity": one card (radius 20), a 56pt row per event with a
+                    // hairline starting at the words.
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(items) { row($0) }
+                        ForEach(items) { item in
+                            row(item, divided: item.id != items.first?.id)
+                        }
                     }
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 }
                 if nextCursor != nil {
                     Button { Task { await loadMore() } } label: {
@@ -64,27 +69,39 @@ struct RecordActivitySection: View {
         .task(id: "\(recordType)|\(recordID)|\(session.generation)") { await load() }
     }
 
-    private func row(_ item: RecordActivityItem) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: Self.symbol(item.action)).font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.muted)
-                .frame(width: 24, height: 24).background(Theme.fill, in: Circle())
+    /// Paper 24: a small dot in a 20pt column, the event at 15 in the body grey, its time at 14
+    /// muted on the trailing edge; why it happened (and "done offline") on a second line at 13.
+    private func row(_ item: RecordActivityItem, divided: Bool) -> some View {
+        let meta = [item.reason,
+                    item.clientOccurredAt != nil ? "done offline, synced later" : nil,
+                    item.actorType.flatMap { $0 == "user" ? nil : $0.capitalized }]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+        return HStack(alignment: .center, spacing: 12) {
+            Circle().fill(Theme.muted.opacity(0.6)).frame(width: 8, height: 8)
+                .frame(width: 20)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.description).font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                let meta = [Self.when(item.occurredAt), item.reason,
-                            item.clientOccurredAt != nil ? "done offline, synced later" : nil,
-                            item.actorType.flatMap { $0 == "user" ? nil : $0.capitalized }]
-                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
-                if !meta.isEmpty {
-                    Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.description).font(Theme.font(15)).foregroundStyle(Theme.subtle)
                         .fixedSize(horizontal: false, vertical: true)
+                    if !meta.isEmpty {
+                        Text(meta).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let when = Self.when(item.occurredAt) {
+                    Text(when).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .lineLimit(1).fixedSize()
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, 16).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .overlay(alignment: .top) {
+                if divided { Rectangle().fill(Theme.hairline).frame(height: 1).accessibilityHidden(true) }
+            }
         }
-        .padding(.horizontal, 4).padding(.vertical, 8)
+        .padding(.leading, 16)
         .accessibilityElement(children: .combine)
     }
 

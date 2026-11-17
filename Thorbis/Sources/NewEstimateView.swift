@@ -15,6 +15,12 @@ struct NewEstimateView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var picker: EstimateBuilderTarget?
+    /// Paper 30/32/33: Add materials (Scan, Paste) and the price book are one set of segments. Two
+    /// sheets can't overlap, so the one being left names the next and it opens after the close.
+    @State private var showMaterials = false
+    @State private var materialsMode = AddMaterialsMode.scan
+    @State private var reopenMaterials = false
+    @State private var reopenPicker = false
     @State private var expandedLine: UUID?
     @State private var revealProblem = 0
     @State private var keyboardUp = false
@@ -90,7 +96,8 @@ struct NewEstimateView: View {
             VStack(spacing: 0) {
                 // The shared sheet header (Add equipment, New customer): the title and its close, with
                 // the same discard check the toolbar Cancel had.
-                ThorbisSheetHeader(title: created == nil ? "New estimate" : "Estimate saved",
+                // Paper 35: the screen's title is the 34 Bold heading in the builder; the header keeps Cancel.
+                ThorbisSheetHeader(title: nil,
                                    closeLabel: created == nil ? "Cancel" : "Close",
                                    onClose: busy ? nil : { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } })
                 ScrollViewReader { proxy in
@@ -114,6 +121,7 @@ struct NewEstimateView: View {
             }
             .keyboardDoneButton()
             .trackKeyboard($keyboardUp)
+            .environment(\.builderDocumentLabel, created.map { "EST-\($0.id.suffix(4).uppercased())" } ?? "New estimate")
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
@@ -143,7 +151,9 @@ struct NewEstimateView: View {
             // The header above closes the sheet; the bar stays only for the debug recovery sample.
             .toolbar(Self.showsPreviewBar ? .visible : .hidden, for: .navigationBar)
             .discardChangesGuard(hasChanges: !lines.isEmpty && created == nil, busy: busy, isPresented: $confirmDiscard) { dismiss() }
-            .sheet(item: $picker) { target in SheetSurface {
+            .sheet(item: $picker, onDismiss: {
+                if reopenMaterials { reopenMaterials = false; showMaterials = true }
+            }) { target in SheetSurface {
                 PriceBookCartPicker(
                     destination: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "this estimate" : title,
                     canUsePriceBook: canUsePriceBook,
@@ -151,8 +161,22 @@ struct NewEstimateView: View {
                     secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
                     addItem: { add($0, group: target.group) },
                     addCustomLine: { addCustom($0, group: target.group) },
-                    refresh: { await refreshCatalog(force: $0) }
+                    refresh: { await refreshCatalog(force: $0) },
+                    materialModes: canUsePriceBook ? AddMaterialsMode.allCases.map { $0.title } : [],
+                    switchMode: { name in
+                        materialsMode = AddMaterialsMode.allCases.first(where: { $0.title == name }) ?? .scan
+                        reopenMaterials = true
+                    }
                 )
+                .environmentObject(session).environmentObject(api)
+            } }
+            .sheet(isPresented: $showMaterials, onDismiss: {
+                if reopenPicker { reopenPicker = false; picker = EstimateBuilderTarget() }
+            }) { SheetSurface {
+                AddMaterialsSheet(initialMode: materialsMode, canUsePriceBook: canUsePriceBook,
+                                  addItem: { add($0, group: nil) },
+                                  refresh: { await refreshCatalog(force: $0) },
+                                  openPriceBook: { reopenPicker = true })
                 .environmentObject(session).environmentObject(api)
             } }
             .thorbisConfirm("Continue without item groups?",
@@ -196,7 +220,6 @@ struct NewEstimateView: View {
             if let removed {
                 LineRemovedToast(removed: removed, undo: undoRemove, expire: { withAnimation { self.removed = nil } })
             }
-            if !keyboardUp { EstimateBuilderTotal(total: total, detail: memberLine) }
             if let descriptionProblem {
                 FieldProblem(message: descriptionProblem)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -229,51 +252,142 @@ struct NewEstimateView: View {
         return "Save estimate · \(money(total, currency: "USD"))"
     }
 
+    /// Paper 35: "New estimate" at 34 Bold with the job under it, the title field, the Draft and
+    /// customer pills, then (16 from the edges) Add item, the line items card, the tip and the totals.
     private var builder: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(created == nil ? "New estimate" : "Estimate saved")
+                    .font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                // The subtitle names the job it's for.
+                if let jobID {
+                    Text("JOB-\(jobID.suffix(4).uppercased())").font(Theme.font(15)).monospacedDigit()
+                        .foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.horizontal, Theme.gutter)
             VStack(alignment: .leading, spacing: 6) {
-                // The header says "New estimate"; the eyebrow names the job it's for.
-                if let jobID { PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())") }
                 // The label stays above the field; the placeholder is only an example.
-                Text("Title").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .padding(.top, 6).accessibilityHidden(true)
+                Text("Title").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4).accessibilityHidden(true)
                 TextField("", text: $title, prompt: .placeholder("Furnace replacement"), axis: .vertical)
-                    .font(Theme.font(24, weight: .medium)).tracking(-0.3)
+                    .font(Theme.font(17, weight: .medium))
                     .accessibilityLabel("Estimate title")
                     .disabled(!recovery.canEdit)
                     .onChange(of: title) { _, _ in titleProblem = nil }
+                    .padding(.horizontal, 12).padding(.vertical, 12)
+                    .frame(minHeight: 48)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 if let titleProblem { FieldProblem(message: titleProblem) }
-                HStack(spacing: 10) {
-                    StatusLabel(tone: .unscheduled, word: "Draft", emphasis: .quiet)
+            }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "circle.lefthalf.filled").font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        Text("Draft").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                    }
+                    .padding(.leading, 10).padding(.trailing, 12).frame(minHeight: 40)
+                    .background(Theme.card, in: Capsule())
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Status, Draft")
                     ThorbisMenu(items: store.customers.filter { $0.archived != true }.map { customer in
                         ThorbisMenuItem(customer.name, isSelected: customer.id == customerID) { customerID = customer.id }
                     }, title: "Customer") {
-                        Chip(text: customerID.isEmpty ? "Choose customer" : store.customerName(customerID), icon: "person",
-                             tint: customerID.isEmpty ? Theme.brandText : Theme.muted)
-                            .padding(.vertical, 10).contentShape(Rectangle())
+                        customerPill
                     }
                     .disabled(!recovery.canEdit || (jobID != nil && !customerID.isEmpty))
                 }
                 if let customerProblem { FieldProblem(message: customerProblem) }
             }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
 
-            EstimateBuilderSection(
-                label: lines.isEmpty ? "Items" : "Items · \(lines.count)",
-                lines: editableLines, disabled: !recovery.canEdit, focus: $focus, expandedLine: $expandedLine,
-                showTotal: false, materialsSwitch: storesLineGroups, lineActionsLeading: keyboardUp,
-                addItem: { picker = EstimateBuilderTarget() },
-                removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
-            )
-            if let linesProblem {
-                FieldProblem(message: linesProblem)
-            } else if lines.isEmpty {
-                Text(canUsePriceBook ? "No items yet. Add one from the price book, or type a custom item."
-                                     : "No items yet. Add a custom item: your role can't use the price book.")
-                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+            VStack(alignment: .leading, spacing: 10) {
+                EstimateBuilderSection(
+                    label: "Line items",
+                    lines: editableLines, disabled: !recovery.canEdit, focus: $focus, expandedLine: $expandedLine,
+                    showTotal: false, materialsSwitch: storesLineGroups, lineActionsLeading: keyboardUp,
+                    addItem: { picker = EstimateBuilderTarget() },
+                    removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } },
+                    addItemAbove: true, addItemNote: canUsePriceBook ? "Price book or custom" : "Custom item",
+                    addMaterials: canUsePriceBook ? { materialsMode = .scan; showMaterials = true } : nil
+                )
+                if let linesProblem {
+                    FieldProblem(message: linesProblem)
+                } else if lines.isEmpty {
+                    Text(canUsePriceBook ? "No items yet. Add one from the price book, or type a custom item."
+                                         : "No items yet. Add a custom item: your role can't use the price book.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                } else {
+                    Text("Tap an item to edit its name or price. At quantity 1, minus becomes remove.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.top, 8)
+                }
+                if !lines.isEmpty { totalsCard }
+                if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
             }
-            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 22)
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 28)
+        .padding(.top, 4).padding(.bottom, 28)
+    }
+
+    /// The customer as Paper 35's pill: their initials on the brand surface and the name; before
+    /// one is chosen, "Choose customer" in the brand's words.
+    private var customerPill: some View {
+        HStack(spacing: 6) {
+            if customerID.isEmpty {
+                Image(systemName: "person").font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                    .padding(.leading, 4)
+                Text("Choose customer").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.brandText)
+            } else {
+                Text(initials(store.customerName(customerID))).font(Theme.font(11, weight: .semibold))
+                    .foregroundStyle(Theme.brandText)
+                    .frame(width: 22, height: 22)
+                    .background(Theme.brandSurface, in: Circle())
+                    .dynamicTypeSize(...DynamicTypeSize.large)
+                    .accessibilityHidden(true)
+                Text(store.customerName(customerID)).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 6).padding(.trailing, 12).frame(minHeight: 40)
+        .background(Theme.card, in: Capsule())
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    /// Paper 35's totals card: the subtotal, then the total at 34 Bold, and a member's price under it.
+    private var totalsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Subtotal").font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                Spacer(minLength: 8)
+                Text(total.map { money($0, currency: "USD") } ?? "\u{2014}").font(Theme.monoFont(15)).foregroundStyle(Theme.subtle)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Total").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                Spacer(minLength: 8)
+                Text(total.map { money($0, currency: "USD") } ?? "\u{2014}")
+                    .font(Theme.font(34, weight: .bold)).monospacedDigit().tracking(-0.6)
+                    .foregroundStyle(Theme.foreground)
+                    .contentTransition(.numericText())
+                    .lineLimit(1).minimumScaleFactor(0.6)
+            }
+            .padding(.top, 4)
+            if let memberLine {
+                Text(memberLine).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 18)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: Actions

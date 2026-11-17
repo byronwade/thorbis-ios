@@ -2,9 +2,10 @@ import SwiftUI
 import UIKit
 
 // Photo viewer and Before/After compare (2026-10-31 media redesign).
-// The viewer is a full-screen pager over the photos the grid is showing: swipe between them,
-// pinch or double-tap to zoom, with the stage, caption, time and who took it underneath and the
-// actions as quiet circles. Compare puts one Before beside one After for the customer.
+// The viewer (Paper 21S) is a full-screen pager on black over the photos the grid is showing:
+// swipe between them, pinch or double-tap to zoom. A close circle, "2 of 6" and the stage menu
+// sit above; the stage pill rides the photo; the caption, who and when, page dots and three
+// tiles (Markup, Share, Delete) sit below. Compare puts one Before beside one After for the customer.
 
 /// Downloads one stored record's file for viewing, checked against the screen's current scope by
 /// the caller. The viewer owns the returned temporary file and deletes it when it closes.
@@ -61,6 +62,8 @@ struct MediaPhotoViewer: View {
     let retag: (MediaAssetRecord, MediaStage) async -> Void
     /// Archives the photo on the server; true when it is gone from the job.
     let archive: (MediaAssetRecord) async -> Bool
+    /// Saves a new caption on the server; true when it was kept.
+    let recaption: (MediaAssetRecord, String) async -> Bool
     let fileMarkup: (UIImage, [String]) throws -> Void
     let onClose: () -> Void
 
@@ -71,13 +74,16 @@ struct MediaPhotoViewer: View {
     @State private var confirmArchive: MediaAssetRecord?
     @State private var share: MediaShareFiles?
     @State private var markup: MediaMarkupTarget?
+    @State private var captioning: MediaAssetRecord?
     @State private var working = false
 
     init(records: [MediaAssetRecord], start: String, canEdit: Bool, currentUserID: String?, load: @escaping MediaFileLoader,
          retag: @escaping (MediaAssetRecord, MediaStage) async -> Void, archive: @escaping (MediaAssetRecord) async -> Bool,
+         recaption: @escaping (MediaAssetRecord, String) async -> Bool,
          fileMarkup: @escaping (UIImage, [String]) throws -> Void, onClose: @escaping () -> Void) {
         self.records = records; self.start = start; self.canEdit = canEdit; self.currentUserID = currentUserID
-        self.load = load; self.retag = retag; self.archive = archive; self.fileMarkup = fileMarkup; self.onClose = onClose
+        self.load = load; self.retag = retag; self.archive = archive; self.recaption = recaption
+        self.fileMarkup = fileMarkup; self.onClose = onClose
         _loader = StateObject(wrappedValue: MediaImageLoader(load: load))
         _current = State(initialValue: start)
     }
@@ -97,7 +103,7 @@ struct MediaPhotoViewer: View {
             .background(Color.black)
             if let record { info(record) }
         }
-        .background(Theme.canvas)
+        .background(Color.black.ignoresSafeArea())
         .foregroundStyle(Theme.foreground)
         .environment(\.colorScheme, .dark)
         .task(id: current) { await prefetch() }
@@ -112,33 +118,73 @@ struct MediaPhotoViewer: View {
                             Task { working = true; _ = await archive(record); working = false }
                         }] })
         .sheet(item: $share) { files in MediaShareSheet(urls: files.urls) { share = nil } }
+        .sheet(item: $captioning) { editing in SheetSurface {
+            MediaCaptionSheet(caption: editing.caption ?? "", save: { text in await recaption(editing, text) }, onClose: { captioning = nil })
+        } }
         .fullScreenCover(item: $markup) { target in
-            PhotoMarkupView(image: target.image, onSave: { flattened in
+            PhotoMarkupView(image: target.image, stage: mediaStageWord(target.tags), onSave: { flattened in
                 try fileMarkup(flattened, target.tags)
                 markup = nil
             }, onCancel: { markup = nil })
         }
     }
 
+    /// Paper 21S: the close circle, "2 of 6" over the day it was taken, and the stage menu.
     private var topBar: some View {
         HStack(spacing: 12) {
-            Button("Done", action: onClose)
-                .buttonStyle(ThorbisBarButtonStyle())
+            Button(action: onClose) { MediaViewerCircle(symbol: "xmark") }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Done")
                 .accessibilityIdentifier("media-viewer-done")
             Spacer(minLength: 0)
-            if let index {
-                Text("\(index + 1) of \(records.count)").font(Theme.monoFont(15, weight: .medium)).foregroundStyle(Theme.muted)
+            VStack(spacing: 0) {
+                if let index {
+                    Text("\(index + 1) of \(records.count)")
+                        .font(Theme.font(16, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
+                }
+                if let record, let day = dayWord(record) {
+                    Text(day).font(Theme.font(13)).foregroundStyle(.white.opacity(0.65))
+                }
             }
+            .accessibilityElement(children: .combine)
             Spacer(minLength: 0)
-            Color.clear.frame(width: 64, height: 44)
+            if canEdit, let record {
+                ThorbisMenu(items: [
+                    ThorbisMenuItem("Before", isSelected: record.tags.contains("Before")) { Task { await retag(record, .before) } },
+                    ThorbisMenuItem("After", isSelected: record.tags.contains("After")) { Task { await retag(record, .after) } },
+                    ThorbisMenuItem("No stage", isSelected: mediaStageWord(record.tags) == nil) { Task { await retag(record, .other) } },
+                ], title: "Photo stage", accessibilityLabel: "Change stage, currently \(mediaStageWord(record.tags) ?? "none")") {
+                    MediaViewerCircle(symbol: "ellipsis")
+                }
+                .disabled(working)
+            } else {
+                Color.clear.frame(width: 44, height: 44)
+            }
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 6)
+        .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 6)
+    }
+
+    /// "Today", or "Jul 20" for an earlier day; nil when the capture time was not recorded.
+    private func dayWord(_ record: MediaAssetRecord) -> String? {
+        guard let taken = record.capturedAt.flatMap({ JobFiltering.isoFractional.date(from: $0) ?? JobFiltering.isoPlain.date(from: $0) }) else { return nil }
+        if Calendar.current.isDateInToday(taken) { return "Today" }
+        return taken.formatted(.dateTime.month(.abbreviated).day())
     }
 
     @ViewBuilder private func page(_ record: MediaAssetRecord) -> some View {
         if let image = loader.images[record.id] {
             ZoomableMediaImage(image: image)
                 .accessibilityLabel(record.caption ?? "Photo")
+                .overlay(alignment: .topLeading) {
+                    // Paper 21S: the stage on a dark pill at the photo's top-left.
+                    if let stage = mediaStageWord(record.tags) {
+                        Text(stage).font(Theme.font(14, weight: .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 12).frame(minHeight: 30)
+                            .background(Color.black.opacity(0.7), in: Capsule())
+                            .padding(16)
+                            .accessibilityHidden(true)
+                    }
+                }
         } else if let failure = loader.failures[record.id] {
             VStack(spacing: 12) {
                 Text(failure).font(Theme.font(15)).foregroundStyle(.white).multilineTextAlignment(.center)
@@ -153,57 +199,70 @@ struct MediaPhotoViewer: View {
 
     private func info(_ record: MediaAssetRecord) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    StatusWord(text: mediaStageWord(record.tags) ?? "No stage")
-                    Spacer(minLength: 0)
-                }
+            VStack(alignment: .leading, spacing: 0) {
                 Text(record.caption ?? record.originalFilename)
-                    .font(Theme.font(17, weight: .medium))
+                    .font(Theme.font(17, weight: .semibold)).foregroundStyle(.white)
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                Text(detail(record)).font(Theme.font(14)).foregroundStyle(Theme.muted)
-            }
-            .accessibilityElement(children: .combine)
-            HStack(spacing: 0) {
+                    .accessibilityAddTraits(.isHeader)
+                Text(detail(record)).font(Theme.font(14)).foregroundStyle(.white.opacity(0.65))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
                 if canEdit {
-                    action("Markup", symbol: "pencil.tip.crop.circle") {
+                    // Paper prints "Add caption" at the end of the line; here it keeps a 44pt target.
+                    Button(record.caption == nil ? "Add caption" : "Edit caption") { captioning = record }
+                        .font(Theme.font(14, weight: .medium)).foregroundStyle(.white.opacity(0.65))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("media-viewer-caption")
+                }
+            }
+            .padding(.horizontal, 4)
+            if let index, records.count > 1, records.count <= 12 {
+                HStack(spacing: 6) {
+                    ForEach(0..<records.count, id: \.self) { position in
+                        Capsule().fill(Color.white.opacity(position == index ? 1 : 0.35))
+                            .frame(width: position == index ? 18 : 6, height: 6)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .accessibilityHidden(true)
+            }
+            HStack(spacing: 8) {
+                if canEdit {
+                    tile("Markup", symbol: "pencil") {
                         guard let image = loader.images[record.id] else { return }
                         markup = MediaMarkupTarget(image: image, tags: record.tags.filter { $0 == "Before" || $0 == "After" })
                     }
                     .disabled(loader.images[record.id] == nil)
-                    VStack(spacing: 4) {
-                        ThorbisMenu(items: [
-                            ThorbisMenuItem("Before", isSelected: record.tags.contains("Before")) { Task { await retag(record, .before) } },
-                            ThorbisMenuItem("After", isSelected: record.tags.contains("After")) { Task { await retag(record, .after) } },
-                            ThorbisMenuItem("No stage", isSelected: mediaStageWord(record.tags) == nil) { Task { await retag(record, .other) } },
-                        ], title: "Photo stage", accessibilityLabel: "Change stage, currently \(mediaStageWord(record.tags) ?? "none")") {
-                            PaperCircleLabel(symbol: "tag", size: 52)
-                        }
-                        Text("Stage").font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
-                    }
-                    .frame(maxWidth: .infinity)
                 }
-                action("Share", symbol: "square.and.arrow.up") {
+                tile("Share", symbol: "square.and.arrow.up") {
                     if let url = loader.files[record.id] { share = MediaShareFiles(urls: [url]) }
                 }
                 .disabled(loader.files[record.id] == nil)
                 if canEdit {
-                    action("Remove", symbol: "trash") { confirmArchive = record }
+                    tile("Delete", symbol: "trash", danger: true) { confirmArchive = record }
                         .accessibilityIdentifier("media-viewer-remove")
                 }
             }
             .disabled(working)
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 8)
+        .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 8)
     }
 
-    private func action(_ title: String, symbol: String, run: @escaping () -> Void) -> some View {
+    /// Paper 21S: an action tile on white 10%, radius 18: the glyph over a 14 Medium word.
+    private func tile(_ title: String, symbol: String, danger: Bool = false, run: @escaping () -> Void) -> some View {
         Button(action: run) {
             VStack(spacing: 4) {
-                PaperCircleLabel(symbol: symbol, size: 52)
-                Text(title).font(Theme.font(12, weight: .medium)).foregroundStyle(Theme.muted)
+                Image(systemName: symbol).font(.system(size: 19, weight: .medium)).frame(height: 22)
+                    .accessibilityHidden(true)
+                Text(title).font(Theme.font(14, weight: .medium)).lineLimit(1).minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity)
+            .foregroundStyle(danger ? Theme.destructive : Color.white)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(title)
@@ -212,9 +271,10 @@ struct MediaPhotoViewer: View {
     private func detail(_ record: MediaAssetRecord) -> String {
         // Capture time only; the upload time is not when the photo was taken.
         let when = record.capturedAt.flatMap { JobFiltering.isoFractional.date(from: $0) ?? JobFiltering.isoPlain.date(from: $0) }
-            .map { "Taken \($0.visitLabel())" } ?? "Time not recorded"
-        let who = currentUserID == record.uploaderUserId ? "by you" : "by a teammate"
-        return "\(when) · \(who)"
+            .map { $0.visitLabel() } ?? "Time not recorded"
+        // Paper: who, then when ("Ramon M. · Today 9:24 AM"). The record names no one, only whose it is.
+        let who = currentUserID == record.uploaderUserId ? "You" : "A teammate"
+        return "\(who) · \(when)"
     }
 
     private func prefetch() async {
@@ -230,6 +290,69 @@ struct MediaMarkupTarget: Identifiable {
     let id = UUID()
     let image: UIImage
     let tags: [String]
+}
+
+/// The viewer's 44pt circle on black: a white glyph on white 14% (Paper 21S).
+private struct MediaViewerCircle: View {
+    let symbol: String
+
+    var body: some View {
+        Image(systemName: symbol).font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 44, height: 44)
+            .background(Color.white.opacity(0.14), in: Circle())
+            .contentShape(Circle())
+    }
+}
+
+/// "Add caption" from the viewer: a few words about the photo, saved on the photo's record.
+private struct MediaCaptionSheet: View {
+    let save: (String) async -> Bool
+    let onClose: () -> Void
+    private let editing: Bool
+    @State private var text: String
+    @State private var busy = false
+    @State private var problem: String?
+    @FocusState private var focused: Bool
+
+    init(caption: String, save: @escaping (String) async -> Bool, onClose: @escaping () -> Void) {
+        self.save = save
+        self.onClose = onClose
+        self.editing = !caption.isEmpty
+        _text = State(initialValue: caption)
+    }
+
+    var body: some View {
+        ThorbisModalSheet(title: editing ? "Edit caption" : "Add caption", closeLabel: "Cancel",
+                          onClose: busy ? nil : onClose, detents: [.medium], commitTitle: "Save caption", busy: busy,
+                          commitIdentifier: "media-caption-save", commit: { commit() }) {
+            ThorbisSheetField(label: "Caption", error: problem) {
+                TextField("Caption", text: $text, prompt: .placeholder("What this photo shows"), axis: .vertical)
+                    .font(Theme.font(16)).lineLimit(1...4)
+                    .fieldWell()
+                    .focused($focused)
+                    .onChange(of: text) { _, _ in problem = nil }
+                    .accessibilityLabel("Caption")
+                    .accessibilityIdentifier("media-caption-field")
+            }
+        }
+        .interactiveDismissDisabled(busy)
+        .onAppear { focused = true }
+    }
+
+    private func commit() {
+        let trimmed = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(280))
+        guard !trimmed.isEmpty else {
+            problem = "Type a few words about the photo."
+            return
+        }
+        busy = true
+        Task {
+            let kept = await save(trimmed)
+            busy = false
+            if kept { onClose() } else { problem = "The caption wasn\u{2019}t saved. Check your connection and try again." }
+        }
+    }
 }
 
 /// A photo that pinches and double-taps to zoom and pans once zoomed. Paging stays with the pager
@@ -290,6 +413,8 @@ struct MediaCompareView: View {
     @State private var afterID: String
     @State private var mode = "slider"
     @State private var split: CGFloat = 0.5
+    /// The side-by-side picture handed to the share sheet (Paper 21P "Share with customer").
+    @State private var shared: MediaShareFiles?
     @Environment(\.dynamicTypeSize) private var typeSize
 
     init(befores: [MediaAssetRecord], afters: [MediaAssetRecord], load: @escaping MediaFileLoader, onClose: @escaping () -> Void) {
@@ -303,15 +428,18 @@ struct MediaCompareView: View {
     private var after: MediaAssetRecord? { afters.first { $0.id == afterID } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Text("Before and after").font(Theme.font(24, weight: .medium))
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 8)
-                Button("Done", action: onClose)
-                    .buttonStyle(ThorbisBarButtonStyle(customerFacing: true))
-                    .accessibilityIdentifier("media-compare-done")
-            }
+        // Paper 21P: a 44pt card circle to leave, the 34 Bold title, the photos on a radius-20
+        // frame, then the pickers and a quiet hint.
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: onClose) { CreamCircleLabel(symbol: "chevron.left") }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Done")
+                .accessibilityIdentifier("media-compare-done")
+                .padding(.leading, -4)
+            Text("Before and after").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 4).padding(.top, 2)
             ThorbisSegmented(options: [("slider", "Slider"), ("side", "Side by side")], selection: $mode)
             GeometryReader { proxy in
                 Group {
@@ -322,15 +450,67 @@ struct MediaCompareView: View {
             .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             if befores.count > 1 { chooser("Before", records: befores, selection: $beforeID) }
             if afters.count > 1 { chooser("After", records: afters, selection: $afterID) }
+            Text(mode == "slider" ? "Drag the handle to compare" : "Before on the left, after on the right")
+                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4)
+            // Paper 21P: the commit shares the pair. It is one picture, before on the left.
+            Button { shareComparison() } label: {
+                Text("Share with customer").inkCommit(enabled: canShare)
+            }
+            .buttonStyle(PressStyle())
+            .disabled(!canShare)
+            .accessibilityIdentifier("media-compare-share")
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
+        .sheet(item: $shared) { files in
+            MediaShareSheet(urls: files.urls) {
+                for url in files.urls { try? FileManager.default.removeItem(at: url) }
+                shared = nil
+            }
+        }
         .task(id: "\(beforeID)|\(afterID)") {
             if let before { await loader.fetch(before, pixels: 2000) }
             if let after { await loader.fetch(after, pixels: 2000) }
         }
         .onDisappear { loader.clear() }
+    }
+
+    /// Both photos have loaded, so there is a pair to share.
+    private var canShare: Bool {
+        guard let before, let after else { return false }
+        return loader.images[before.id] != nil && loader.images[after.id] != nil
+    }
+
+    /// Draws the pair side by side at the same height (before on the left) and opens the share sheet.
+    private func shareComparison() {
+        guard let before, let after,
+              let left = loader.images[before.id], let right = loader.images[after.id],
+              left.size.height > 0, right.size.height > 0 else { return }
+        let height: CGFloat = 1200
+        let gap: CGFloat = 8
+        let leftWidth = (left.size.width / left.size.height * height).rounded()
+        let rightWidth = (right.size.width / right.size.height * height).rounded()
+        let size = CGSize(width: leftWidth + gap + rightWidth, height: height)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let picture = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            left.draw(in: CGRect(x: 0, y: 0, width: leftWidth, height: height))
+            right.draw(in: CGRect(x: leftWidth + gap, y: 0, width: rightWidth, height: height))
+        }
+        guard let data = picture.jpegData(compressionQuality: 0.85) else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("before-and-after-\(UUID().uuidString.prefix(8)).jpg")
+        do {
+            try data.write(to: url, options: .atomic)
+            shared = MediaShareFiles(urls: [url])
+        } catch {
+            shared = nil
+        }
     }
 
     @ViewBuilder private func photo(_ record: MediaAssetRecord?) -> some View {
@@ -348,10 +528,11 @@ struct MediaCompareView: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
-            .padding(.horizontal, 12).frame(minHeight: 34)
-            .background(Theme.background.opacity(0.92), in: Capsule())
-            .padding(10)
+        // Paper 21P: a 28pt pill on the canvas tone, 13 Semibold.
+        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 12).frame(minHeight: 28)
+            .background(Theme.background, in: Capsule())
+            .padding(12)
     }
 
     private func slider(size: CGSize) -> some View {
@@ -360,10 +541,12 @@ struct MediaCompareView: View {
             photo(after).frame(width: size.width, height: size.height)
             photo(before).frame(width: size.width, height: size.height)
                 .mask(alignment: .leading) { Rectangle().frame(width: max(0, x)) }
-            Rectangle().fill(.white).frame(width: 3).offset(x: x - 1.5).shadow(radius: 2)
-            Image(systemName: "arrow.left.and.right")
-                .font(.system(size: 18, weight: .medium)).foregroundStyle(.black)
-                .frame(width: 56, height: 56).background(.white, in: Circle()).shadow(radius: 3)
+            // Paper 21P: a 2pt rule and a 40pt handle in the foreground tone; 56pt to grab.
+            Rectangle().fill(Theme.foreground).frame(width: 2).offset(x: x - 1)
+            Image(systemName: "chevron.left.chevron.right")
+                .font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.background)
+                .frame(width: 40, height: 40).background(Theme.foreground, in: Circle())
+                .frame(width: 56, height: 56).contentShape(Circle())
                 .offset(x: x - 28)
         }
         .overlay(alignment: .topLeading) { label("Before") }
@@ -394,16 +577,18 @@ struct MediaCompareView: View {
 
     private func chooser(_ title: String, records: [MediaAssetRecord], selection: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Choose \(title.lowercased())").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+            Text("Choose \(title.lowercased())").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(records) { record in
                         Button { selection.wrappedValue = record.id } label: {
+                            // Paper 21P: 72pt tiles, radius 14, the chosen one ringed in brand.
                             MediaThumbnail(record: record)
-                                .frame(width: 64, height: 64)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .strokeBorder(selection.wrappedValue == record.id ? Theme.brand : Theme.border, lineWidth: selection.wrappedValue == record.id ? 3 : 1))
+                                .frame(width: 72, height: 72)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(selection.wrappedValue == record.id ? Theme.brand : Color.clear, lineWidth: 2))
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityLabel("\(title) photo \((records.firstIndex(of: record) ?? 0) + 1)")

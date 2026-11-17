@@ -108,35 +108,40 @@ struct PaperEmptyState: View {
     }
 
     var body: some View {
+        // Paper 73C / 73D: a screen's own state (`prominent`) is a 64pt tinted circle, a 22 Bold
+        // title, a 16 muted sentence and the brand pill. Inside a record it stays one size down.
         VStack(spacing: 0) {
-            EmptyGlyph(symbol: symbol, tint: tint, size: mark)
-                .padding(.bottom, 14)
+            EmptyGlyph(symbol: symbol, tint: tint, size: prominent ? mark * 4 / 3 : mark)
+                .padding(.bottom, prominent ? 12 : 14)
             Text(title)
-                .font(Theme.font(17, weight: .medium))
+                .font(prominent ? Theme.font(22, weight: .bold) : Theme.font(17, weight: .semibold))
                 .foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if let message, !message.isEmpty {
                 Text(message)
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(prominent ? 16 : 15)).foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 300)
+                    .frame(maxWidth: 310)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
+                    .padding(.top, prominent ? 12 : 4)
             }
             if let actionTitle, let action {
                 Button(action: action) {
-                    Text(actionTitle)
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(prominent ? Theme.onInk : Theme.foreground)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 18).padding(.vertical, 8).frame(minHeight: 40)
-                        .background(prominent ? Theme.ink : Theme.fill, in: Capsule())
-                        .frame(minHeight: 44)
-                        .contentShape(Capsule())
+                    if prominent {
+                        Text(actionTitle).inkCommit()
+                    } else {
+                        Text(actionTitle)
+                            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 18).padding(.vertical, 8).frame(minHeight: 44)
+                            .background(Theme.fill, in: Capsule())
+                            .contentShape(Capsule())
+                    }
                 }
                 .buttonStyle(PressStyle())
-                .padding(.top, 16)
+                .padding(.top, prominent ? 24 : 16)
                 .accessibilityIdentifier("empty-state-action")
             }
         }
@@ -146,8 +151,9 @@ struct PaperEmptyState: View {
     }
 }
 
-/// The soft glyph of an empty or calm state: the symbol in its hue on a pale rounded square of the
-/// same hue. Decorative; the words carry the meaning.
+/// The glyph of an empty, failed or locked state (Paper 73C / 73D): the symbol on a soft circle.
+/// With a hue the circle is that hue's pale surface; without one it is a neutral circle with a
+/// secondary-ink symbol. Decorative; the words carry the meaning.
 struct EmptyGlyph: View {
     let symbol: String
     var tint: Color? = nil
@@ -155,31 +161,26 @@ struct EmptyGlyph: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.42, weight: .medium))
-            .foregroundStyle(tint ?? Theme.muted)
+            .font(.system(size: size * 0.44, weight: .medium))
+            .foregroundStyle(tint ?? Theme.subtle)
             .frame(width: size, height: size)
-            .background((tint ?? Theme.muted).opacity(tint == nil ? 0.12 : 0.13),
-                        in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous)
-                .strokeBorder((tint ?? Theme.muted).opacity(0.12)))
+            .background((tint ?? Theme.muted).opacity(0.16), in: Circle())
             .accessibilityHidden(true)
     }
 }
 
-/// The calm strip behind a banner (offline, waiting to sync, a failed read): a rounded `fill`
-/// ground, the glyph in a small tinted circle, then the words. Shared by `ErrorBanner` and the
-/// saved-work `OfflineBanner` so every in-between state reads the same.
+/// The mark that leads a banner (Paper 73 / 74: offline, waiting to sync, a failed read): an 18pt
+/// glyph in the state's tone, no ground of its own; the strip behind it carries the tone.
 struct BannerGlyph: View {
     let symbol: String
     var tint: Color = Theme.muted
-    @ScaledMetric(relativeTo: .subheadline) private var size: CGFloat = 26
+    @ScaledMetric(relativeTo: .subheadline) private var size: CGFloat = 18
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.5, weight: .medium))
+            .font(.system(size: size * 0.86, weight: .medium))
             .foregroundStyle(tint)
             .frame(width: size, height: size)
-            .background(tint.opacity(0.14), in: Circle())
             .accessibilityHidden(true)
     }
 }
@@ -231,11 +232,11 @@ struct ErrorBanner: View {
         // A long message keeps the full width and puts its action underneath.
         let stacked = typeSize.isAccessibilitySize || (action != nil && message.count > 64)
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
+                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         layout {
-            HStack(alignment: .center, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
                 BannerGlyph(symbol: symbol, tint: tint)
-                Text(message).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text(message).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -243,21 +244,20 @@ struct ErrorBanner: View {
                 Button {
                     Task { running = true; await action.run(); running = false }
                 } label: {
-                    Text(action.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text(action.title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 12).frame(minHeight: 32)
-                        .background(Theme.selectedSegment, in: Capsule())
-                        .overlay(Capsule().strokeBorder(Theme.border))
+                        .background(Theme.foreground.opacity(0.09), in: Capsule())
                         .frame(minHeight: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .disabled(running)
                 .fixedSize()
-                .padding(.leading, stacked ? 36 : 0)
+                .padding(.leading, stacked ? 26 : 0)
             }
         }
-        .padding(.leading, 10).padding(.trailing, 12).padding(.vertical, action == nil || stacked ? 9 : 2)
+        .padding(.leading, 14).padding(.trailing, 10).padding(.vertical, action == nil || stacked ? 10 : 2)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(.horizontal, outer).padding(.top, 8)
         .accessibilityElement(children: .contain)
     }
@@ -331,28 +331,25 @@ struct SkeletonRows: View {
     var inset: CGFloat = Theme.gutter
     /// Inset hairlines between rows, as on a well.
     var dividers = false
-    @ScaledMetric(relativeTo: .body) private var glyph: CGFloat = 16
 
     var body: some View {
+        // Paper 73E: each row is a 14pt title bar over one or two 12pt bars, 8 apart, 18 above and
+        // below, in the quiet accent tone. No leading mark.
         SkeletonPulse {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(0..<count, id: \.self) { index in
-                    HStack(alignment: .top, spacing: 12) {
-                        Circle().fill(Theme.fill).frame(width: glyph, height: glyph).padding(.top, 1)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Capsule().fill(Theme.fill).frame(width: Self.titleWidth(index), height: 12)
-                            Capsule().fill(Theme.fill.opacity(0.75)).frame(width: Self.lineWidth(index), height: 10)
-                            if leading {
-                                Capsule().fill(Theme.fill.opacity(0.6)).frame(width: 72, height: 9)
-                            }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Capsule().fill(Theme.sidebarAccent).frame(width: Self.titleWidth(index), height: 14)
+                        Capsule().fill(Theme.sidebarAccent).frame(width: Self.lineWidth(index), height: 12)
+                        if leading {
+                            Capsule().fill(Theme.sidebarAccent).frame(width: Self.tailWidth(index), height: 12)
                         }
-                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, inset)
-                    .padding(.vertical, 13)
-                    .frame(minHeight: leading ? 70 : 56, alignment: .top)
+                    .padding(.vertical, 18)
                     .overlay(alignment: .bottom) {
-                        if dividers && index < count - 1 { WellDivider(leading: inset + glyph + 12) }
+                        if dividers && index < count - 1 { WellDivider(leading: inset) }
                     }
                 }
             }
@@ -361,8 +358,9 @@ struct SkeletonRows: View {
         .accessibilityLabel("Loading")
     }
 
-    private static func titleWidth(_ index: Int) -> CGFloat { [170, 136, 188, 150, 120, 164][index % 6] }
-    private static func lineWidth(_ index: Int) -> CGFloat { [120, 150, 104, 132, 158, 112][index % 6] }
+    private static func titleWidth(_ index: Int) -> CGFloat { [180, 150, 200, 160, 130, 170][index % 6] }
+    private static func lineWidth(_ index: Int) -> CGFloat { [250, 270, 230, 240, 260, 220][index % 6] }
+    private static func tailWidth(_ index: Int) -> CGFloat { [120, 100, 140, 110, 130, 90][index % 6] }
 }
 
 /// A slow breath (opacity 1 → 0.55) for loading placeholders. Off under Reduce Motion.
@@ -393,7 +391,7 @@ struct SkeletonList: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SkeletonPulse {
-                Capsule().fill(Theme.fill).frame(width: 84, height: 11)
+                Capsule().fill(Theme.sidebarAccent).frame(width: 84, height: 12)
                     .frame(minHeight: 30, alignment: .leading)
                     .padding(.horizontal, 4).padding(.top, 12).padding(.bottom, 4)
             }

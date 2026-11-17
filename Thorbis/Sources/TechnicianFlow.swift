@@ -37,7 +37,8 @@ enum TechJobStep: Equatable {
         case .transition(let target):
             switch target {
             case "en_route": "On my way"
-            case "arrived": "Arrive"
+            // Paper F2 "Driving": the commit reads "I've arrived".
+            case "arrived": "I've arrived"
             case "in_progress": resuming ? "Resume work" : "Start work"
             case "dispatched": "Dispatch"
             default: "Mark \(target.statusLabel.lowercased())"

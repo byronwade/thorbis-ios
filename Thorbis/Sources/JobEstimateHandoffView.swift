@@ -69,7 +69,8 @@ private struct CustomerHandoffEstimateDetails: View {
                     CustomerSkeleton(caption: "Opening the current estimate…", heading: false)
                 }
             }
-            .padding(Theme.gutter).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+            .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
         }
         .background(Theme.canvas).foregroundStyle(Theme.foreground)
         .navigationTitle("EST-\(record.id.suffix(4).uppercased())")
@@ -134,7 +135,9 @@ struct JobEstimateHandoffView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         if reviewing { selectedReview } else { overview }
                     }
-                    .padding(Theme.gutter).frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
+                    // Paper v2: cards sit 16 from the screen edge.
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
+                    .frame(maxWidth: 900, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("job-estimate-handoff")
                 .safeAreaInset(edge: .bottom) { footer }
@@ -174,14 +177,24 @@ struct JobEstimateHandoffView: View {
     }
 
     private var overview: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(model.jobTitle).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                Text(model.complete ? "\(model.records.count) estimate\(model.records.count == 1 ? "" : "s") · Choose any work to approve" : "Some estimates still need a refresh")
+        // Paper 38C: cards 16 apart under the title.
+        VStack(alignment: .leading, spacing: 16) {
+            // Paper 38C: "Approve estimates" in the largest Bold, one quiet line under it.
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Approve estimates").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                    .accessibilityAddTraits(.isHeader)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(model.complete ? "Choose what you want done today" : "Some estimates still need a refresh")
                     .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            .padding(.horizontal, 4)
+            // The title sits 14 under the bar in Paper; the page's own top margin is 20.
+            .padding(.top, -6)
             if !model.approvalAuthority {
                 Text("You can review these estimates. Your current access doesn't allow approvals.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
             }
             if model.hasResults { results }
             if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.refresh() } }
@@ -193,8 +206,12 @@ struct JobEstimateHandoffView: View {
             ForEach(model.unavailableIDs, id: \.self) { id in
                 VStack(alignment: .leading, spacing: 8) {
                     Text("EST-\(id.suffix(4).uppercased()) · Unavailable").font(Theme.customerFont(type.body, weight: .medium))
-                    Text("Refresh to see this estimate before deciding.").font(Theme.customerFont(type.body))
+                    Text("Refresh to see this estimate before deciding.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .padding(PaperCardMetrics.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
             }
         }
     }
@@ -205,8 +222,8 @@ struct JobEstimateHandoffView: View {
                 let selected = model.selectedIDs.contains(record.id)
                 Button { model.setSelected(record.id, selected: !selected) } label: {
                     HStack(alignment: .top, spacing: 14) {
-                        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 25)).foregroundStyle(selected ? Theme.brandText : Theme.muted)
+                        // Paper 38C: a brand disc with a white check when chosen, an empty ring when not.
+                        CustomerRadio(selected: selected)
                             .frame(width: 30).frame(minHeight: 56)
                         estimateSummary(record)
                     }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
@@ -220,7 +237,8 @@ struct JobEstimateHandoffView: View {
             if model.detailsCurrent(record, authority: session.authorityRevision) {
                 Button { detailsID = record.id } label: {
                     Label("View details", systemImage: "doc.text")
-                        .font(Theme.customerFont(type.body, weight: .medium))
+                        .font(Theme.customerFont(type.small, weight: .semibold))
+                        .foregroundStyle(Theme.brandText)
                         .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
                         .contentShape(Rectangle())
                 }
@@ -246,6 +264,8 @@ struct JobEstimateHandoffView: View {
                             Button { model.chooseOption(estimateID: record.id, optionID: option.id) } label: {
                                 HStack(alignment: .top, spacing: 12) {
                                     Image(systemName: model.selection.optionIDs[record.id] == option.id ? "largecircle.fill.circle" : "circle")
+                                        .font(.system(size: 22))
+                                        .foregroundStyle(model.selection.optionIDs[record.id] == option.id ? Theme.brand : Theme.muted)
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
                                         Text(money(option.totalAmount, currency: option.currency)).font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
@@ -267,9 +287,10 @@ struct JobEstimateHandoffView: View {
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             }
         }
-        .padding(.vertical, 16)
+        // Paper v2: each estimate is its own card (radius 20) on the canvas; no rule between them.
+        .padding(PaperCardMetrics.inset)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+        .panelBackground()
     }
 
     private func selectionValue(_ record: EstimateRecord) -> String {
@@ -318,7 +339,9 @@ struct JobEstimateHandoffView: View {
 
     private var selectedReview: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Review selected work").font(Theme.customerFont(type.heading, weight: .medium)).accessibilityAddTraits(.isHeader)
+            Text("Review selected work").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
             Text("\(model.reviewed.count) separate estimates. You'll approve and sign each one.")
                 .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             ForEach(Array(model.reviewed.enumerated()), id: \.element.id) { index, item in
@@ -349,9 +372,31 @@ struct JobEstimateHandoffView: View {
                         .font(Theme.customerFont(type.body))
                 }
             }
-            ForEach(selectedTotals, id: \.currency) { value in
-                Text("Selected work · \(money(value.amount, currency: value.currency)) \(value.currency)")
-                    .font(Theme.customerFont(type.body, weight: .medium))
+            // Paper 38C's totals card: how many are selected, then the total in Bold under a hairline.
+            if !selectedTotals.isEmpty {
+                VStack(spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Selected").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 8)
+                        Text("\(model.reviewed.count) estimate\(model.reviewed.count == 1 ? "" : "s")")
+                            .font(Theme.customerFont(type.small)).monospacedDigit()
+                    }
+                    WellDivider(leading: 0)
+                    ForEach(selectedTotals, id: \.currency) { value in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(selectedTotals.count == 1 ? "Total" : "Total \(value.currency)")
+                                .font(Theme.customerFont(type.small, weight: .semibold))
+                            Spacer(minLength: 8)
+                            Text(money(value.amount, currency: value.currency))
+                                .font(Theme.customerFont(type.heading, weight: .bold)).monospacedDigit()
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(PaperCardMetrics.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
             }
             Text("These estimates stay separate and do not become one bill.").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
         }
@@ -412,6 +457,8 @@ struct JobEstimateHandoffView: View {
                 CustomerSecondaryButton(title: "Continue selected approvals", type: type) { checkpointID = next }
             }
         }
+        // Words on the canvas line up with the cards' text, 20 from the edge.
+        .padding(.horizontal, 4)
     }
     @ViewBuilder private var footer: some View {
         if reviewing || !model.complete || !model.eligibleIDs.isEmpty {
@@ -433,7 +480,7 @@ struct JobEstimateHandoffView: View {
                 .accessibilityIdentifier("handoff-review-selected")
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 12).background(Theme.canvas)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12).background(Theme.canvas)
         }
     }
     private func nextPending(after current: String?) -> String? {

@@ -27,10 +27,19 @@ struct EstimateRevisionEditorView: View {
     @ObservedObject private var catalog = PriceBookCatalog.shared
     @FocusState private var focus: EstimateBuilderFocus?
 
-    init(estimate: EstimateRecord, onSaved: @escaping (EstimateRecord) -> Void) {
+    /// Paper 35E "Restore this version": an older sent version whose lines fill the form in place of
+    /// the estimate's current ones. Saving is the same revise request.
+    let restoring: EstimateRevisionRecord?
+
+    init(estimate: EstimateRecord, restoring: EstimateRevisionRecord? = nil, onSaved: @escaping (EstimateRecord) -> Void) {
         self.estimate = estimate
+        self.restoring = restoring
         self.onSaved = onSaved
-        _editor = State(initialValue: EstimateRevisionEditorState(estimate: estimate))
+        if let restoring {
+            _editor = State(initialValue: EstimateRevisionEditorState(estimate: estimate, restoring: restoring))
+        } else {
+            _editor = State(initialValue: EstimateRevisionEditorState(estimate: estimate))
+        }
     }
 
     private var canRevise: Bool {
@@ -104,9 +113,11 @@ struct EstimateRevisionEditorView: View {
                 }
                 revisionFooter
             }
+            .environment(\.builderDocumentLabel, "EST-\(estimate.id.suffix(4).uppercased())")
             .background(Theme.canvas)
             .foregroundStyle(Theme.foreground)
-            .navigationTitle(editingDraft ? "Edit estimate" : "Revise estimate")
+            // Paper 35: the screen's title is the 34 Bold heading in the content.
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .cancellationAction) {
@@ -180,7 +191,7 @@ struct EstimateRevisionEditorView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+            if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
             if staleRevision {
                 Button { confirmReload = true } label: {
                     Label("Review latest estimate", systemImage: "arrow.clockwise")
@@ -209,6 +220,12 @@ struct EstimateRevisionEditorView: View {
             if editor.hasCreditLines && !canDiscount {
                 ErrorBanner(message: EstimateRevisionEditorError.discountCapabilityRequired.localizedDescription)
             }
+            if let restoring, editor.estimate.id == restoring.estimateId, !staleRevision {
+                Text("These are Revision \(restoring.revisionNumber)\u{2019}s lines. Check them, then save to restore this version.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
 
             estimateHeading
             mainSection
@@ -220,7 +237,7 @@ struct EstimateRevisionEditorView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 4)
         }
-        .padding(.horizontal, Theme.gutter)
+        .padding(.horizontal, PaperCardMetrics.margin)
         .padding(.top, 8)
         .padding(.bottom, 24)
         .frame(maxWidth: 640)
@@ -246,27 +263,52 @@ struct EstimateRevisionEditorView: View {
         }
     }
 
+    /// Paper 35: "Revise estimate" at 34 Bold, "EST-1042 · Danielle Marlowe · Revision 2" under it,
+    /// the title field, then the status and customer pills.
     private var estimateHeading: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            PaperEyebrow(reference: "EST-\(editor.estimate.id.suffix(4).uppercased())",
-                         text: "Revision \(editor.estimate.currentRevisionNumber ?? 0) · \(editingDraft ? "Edit draft" : "New replacement draft")")
-            TextField("Estimate title", text: $editor.title, prompt: .placeholder("Estimate title"), axis: .vertical)
-                .font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                .accessibilityLabel("Estimate title")
-                .disabled(busy || !canEdit)
+        let customer = store.customerName(estimate.customerId)
+        let status = DocumentStatus(estimateStatus: editor.estimate.status)
+        return VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(editingDraft ? "Edit estimate" : "Revise estimate")
+                    .font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text("EST-\(editor.estimate.id.suffix(4).uppercased()) \u{00B7} \(customer) \u{00B7} Revision \(editor.estimate.currentRevisionNumber ?? 0) \u{00B7} \(editingDraft ? "Edit draft" : "New replacement draft")")
+                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 4)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Title").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4).accessibilityHidden(true)
+                TextField("Estimate title", text: $editor.title, prompt: .placeholder("Estimate title"), axis: .vertical)
+                    .font(Theme.font(17, weight: .medium))
+                    .accessibilityLabel("Estimate title")
+                    .disabled(busy || !canEdit)
+                    .padding(.horizontal, 12).padding(.vertical, 12)
+                    .frame(minHeight: 48)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .padding(.top, 16)
             // At accessibility sizes the customer drops under the status instead of wrapping beside it.
             let statusLayout = typeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
             statusLayout {
                 HStack(spacing: 6) {
-                    Circle().fill(Theme.warning).frame(width: 7, height: 7)
-                    Text(editor.estimate.status.statusLabel).font(Theme.font(14, weight: .medium))
+                    Circle().fill(status.tone.hue).frame(width: 7, height: 7).accessibilityHidden(true)
+                    Text(status.word).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
                 }
+                .padding(.horizontal, 12).frame(minHeight: 40)
+                .background(Theme.card, in: Capsule())
                 .accessibilityElement(children: .combine)
-                Text(store.customerName(estimate.customerId))
-                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                    .accessibilityLabel("Customer \(store.customerName(estimate.customerId))")
+                Text(customer)
+                    .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    .padding(.horizontal, 12).frame(minHeight: 40)
+                    .background(Theme.card, in: Capsule())
+                    .accessibilityLabel("Customer \(customer)")
             }
+            .padding(.top, 12)
         }
     }
 
@@ -280,14 +322,15 @@ struct EstimateRevisionEditorView: View {
             })
         }
         return EstimateBuilderSection(
-            label: hasOptions ? "Main estimate" : (editor.lines.isEmpty ? "Items" : "Items · \(editor.lines.count)"),
+            label: hasOptions ? "Main estimate" : "Line items",
             caption: hasOptions ? "Saved with every revision. With options, the customer chooses one option." : nil,
             lines: editableLines, disabled: sectionsDisabled, focus: $focus, expandedLine: $expandedLine,
             totalLabel: "Subtotal", showTotal: hasOptions, memberPricing: memberPricing, materialsSwitch: storesLineGroups,
             lineActionsLeading: keyboardUp, menuItems: menu,
             addItem: { picker = EstimateBuilderTarget() },
             addDiscount: canDiscount && !hasOptions ? { discountTarget = EstimateBuilderTarget() } : nil,
-            removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } }
+            removed: { line, index in withAnimation { removed = RemovedLine(line: line, index: index, optionID: nil) } },
+            addItemAbove: !hasOptions, addItemNote: canUsePriceBook ? "Price book or custom" : "Custom item"
         )
     }
 
@@ -352,7 +395,7 @@ struct EstimateRevisionEditorView: View {
                     .accessibilityLabel("Option package description")
             }
             .disabled(disabled)
-            .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 4)
+            .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 4)
         }
         .id("option-\(option.id)")
     }

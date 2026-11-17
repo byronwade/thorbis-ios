@@ -9,38 +9,62 @@ import SwiftUI
 // - team:       /v1/organization/invitations
 // - get paid:   Stripe hosted onboarding (it, not Thorbis, takes owner ID, SSN, EIN and bank documents)
 
+extension EnvironmentValues {
+    /// The setup step a pushed or covered screen belongs to ("Step 2 / 10"), for a screen that
+    /// shows it in its own top bar (Paper 09B, the logo crop). Nil outside guided setup.
+    @Entry var setupStepLabel: String? = nil
+}
+
 enum SetupStep: String, CaseIterable, Identifiable {
-    case trade, company, legal, messages, hours, customers, services, team, payments, done
+    // Paper 08-17 order: welcome, company, communication, import, services, team, payments,
+    // operations, ready. Legal details (no Paper screen) follows the company.
+    case trade, company, legal, messages, customers, services, team, payments, hours, done
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .trade: "What kind of work do you do?"
-        case .company: "Your company"
+        case .trade: "Welcome to Thorbis"
+        case .company: "Tell us about the business"
         case .legal: "Legal details"
         case .messages: "How customers hear from you"
-        case .hours: "Hours, tax and terms"
-        case .customers: "Bring your customers"
-        case .services: "What you sell"
-        case .team: "Your team"
-        case .payments: "Get paid"
-        case .done: "You’re set up"
+        case .customers: "Import customers"
+        case .services: "Services and pricing"
+        case .team: "Invite your team"
+        case .payments: "Payments"
+        case .hours: "Operations defaults"
+        case .done: "You’re ready."
         }
     }
 
     /// Why we ask (GuidedFlow: reason-for-data on every step).
     var reason: String {
         switch self {
-        case .trade: "Thorbis uses your trade and service area on your profile and to suggest how jobs are set up."
-        case .company: "Your name, phone and address go on every estimate and invoice your customers see."
+        case .trade: "A few quick answers about your work. Everything can change later."
+        case .company: "This shows up on the estimates and invoices your customers see."
         case .legal: "Optional. Payment providers and lenders ask for these, so you only type them once."
         case .messages: "Estimates and invoices are emailed in your company’s name, and replies come back to you."
-        case .hours: "When you’re open, your time zone, and the sales tax and payment terms you usually charge."
-        case .customers: "Import your customer list from your old software, so nobody has to be typed in twice."
-        case .services: "Add the services and parts you sell with prices, so estimates take seconds."
-        case .team: "Invite technicians and office staff. Each person gets an email to join with their role."
-        case .payments: "Connect Stripe to take cards and get payouts. Stripe securely verifies your identity, business documents and bank account. Thorbis never stores your SSN, EIN or bank details."
-        case .done: "You can change any of this later from More."
+        case .customers: "Start with your customer list from your old software — or skip and add people as you go."
+        case .services: "Add the services and parts you sell with prices — these become line items on estimates and invoices."
+        case .team: "We’ll email each person an invite to join with their role. They can accept anytime — this doesn’t block setup."
+        case .payments: "Accept customer payments by card. Stripe verifies your identity, business documents and bank account — Thorbis never stores your SSN, EIN or bank details."
+        case .hours: "Set your hours, time zone, sales tax and payment terms. Tweak what matters."
+        case .done: "Your workspace is live. Anything you skipped can be finished later from More."
+        }
+    }
+
+    /// How a finished step reads in "Done during setup" (Paper 17).
+    var doneTitle: String {
+        switch self {
+        case .trade: "Your trade"
+        case .company: "Business profile"
+        case .legal: "Legal details"
+        case .messages: "Customer emails"
+        case .customers: "Customer import"
+        case .services: "Services and pricing"
+        case .team: "Team invites"
+        case .payments: "Customer payments"
+        case .hours: "Hours, tax and terms"
+        case .done: ""
         }
     }
 
@@ -148,7 +172,7 @@ struct SetupWizardView: View {
     @State private var finished: Set<SetupStep> = []
     /// True while Continue is working, so a double tap can't finish two steps.
     @State private var advancing = false
-    @State private var priceItems: [String] = []
+    @State private var priceItems: [PriceBookListItem] = []
     @State private var invites: [TeamInvitation] = []
     @State private var addingItem = false
     @State private var inviting = false
@@ -160,6 +184,8 @@ struct SetupWizardView: View {
     @State private var stepError: String?
     @State private var advanced = 0
     @FocusState private var focused: String?
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     /// Hours, tax and terms shows once the server knows those facts.
     private var steps: [SetupStep] {
@@ -167,20 +193,37 @@ struct SetupWizardView: View {
     }
     private var busy: Bool { advancing || facts.saving || facts.loading || importer.phase == .checking || importer.phase == .importing }
     private var index: Int { steps.firstIndex(of: step) ?? 0 }
+    /// Paper's step count, from the steps this person really has: "Step 2 / 10" on a phone
+    /// (08-17), "Step 2 of 10" on iPad (T08-T17).
+    private var stepLabel: String {
+        sizeClass == .regular ? "Step \(index + 1) of \(steps.count)" : "Step \(index + 1) / \(steps.count)"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Image(systemName: step.symbol).font(.system(size: 26)).foregroundStyle(Theme.markAccent)
-                    Text(step.title).font(Theme.font(24, weight: .medium)).padding(.top, 12)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(step.reason).font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.top, 6)
+                    // Paper 08-17: the 34 Bold title and its reason, 20 from the edge.
+                    VStack(alignment: .leading, spacing: 4) {
+                        if step == .done {
+                            Image(systemName: "checkmark").font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.brand)
+                                .frame(width: 48, height: 48)
+                                .background(Theme.brandSurface, in: Circle())
+                                .padding(.bottom, 8)
+                                .accessibilityHidden(true)
+                        }
+                        Text(step.title).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                        Text(step.reason).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 4)
                     content.padding(.top, 24)
-                    if let stepError { InlineProblem(message: stepError).padding(.top, 14) }
+                    if let stepError { InlineProblem(message: stepError).padding(.horizontal, 4).padding(.top, 14) }
                 }
-                .padding(Theme.gutter)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 20).padding(.bottom, 20)
                 .frame(maxWidth: 560, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 .id(step)
@@ -228,30 +271,58 @@ struct SetupWizardView: View {
 
     // MARK: Chrome
 
+    /// Paper 08-17: the back circle, "Step 2 / 10" in the middle, the step's state as a pill, and
+    /// a thin brand progress line under them.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                if index > 0 && step != .done {
+        VStack(alignment: .leading, spacing: 14) {
+            // One row, so the step count, the pill and Later never overlap at large text.
+            HStack(spacing: 8) {
+                if index > 0 {
                     Button { withAnimation(.easeOut(duration: 0.2)) { step = steps[index - 1] } } label: {
-                        Image(systemName: "chevron.left").font(.system(size: 17, weight: .medium))
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
+                        CreamCircleLabel(symbol: "chevron.left")
                     }
+                    .buttonStyle(PressStyle())
                     .accessibilityLabel("Back")
                     .disabled(busy)
+                } else {
+                    Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
                 }
-                Spacer()
-                Text(step == .done ? "" : "Step \(index + 1) of \(steps.count - 1)")
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                Spacer()
-                Button(step == .done ? "Close" : "Later") { dismiss() }
-                    .font(Theme.font(15, weight: .medium)).frame(minWidth: 44, minHeight: 44)
+                // Phone: 14 Medium in the middle. iPad: 14 SemiBold at the leading edge.
+                Text(stepLabel)
+                    .font(Theme.font(14, weight: sizeClass == .regular ? .semibold : .medium))
+                    .monospacedDigit().foregroundStyle(Theme.muted)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: sizeClass == .regular ? .leading : .center)
+                    .accessibilityHidden(true)
+                if !typeSize.isAccessibilitySize { statePill }
+                Button { dismiss() } label: {
+                    Text(step == .done ? "Close" : "Later")
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .lineLimit(1)
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
             }
-            ProgressView(value: Double(min(index, steps.count - 1)), total: Double(max(steps.count - 1, 1)))
-                .tint(Theme.foreground)
+            SetupProgressLine(fraction: Double(index + 1) / Double(max(steps.count, 1)))
+                .padding(.horizontal, 4)
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Step \(index + 1) of \(steps.count)")
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 4)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 2).padding(.bottom, 4)
         .foregroundStyle(Theme.foreground)
+    }
+
+    /// The step's own state, only from real evidence: fields the server refused, values waiting
+    /// on this phone, or a step already saved.
+    @ViewBuilder private var statePill: some View {
+        let toFix = step.facts.filter { facts.fieldErrors[$0] != nil }.count
+        if toFix > 0 {
+            SetupStatePill(text: "\(toFix) to fix", dot: Theme.statusInProgress, word: Theme.warning, fill: Theme.warningSurface)
+        } else if step.facts.contains(where: { facts.queued[$0] != nil }) {
+            SetupStatePill(text: "To sync", dot: Theme.statusInProgress, word: Theme.warning, fill: Theme.warningSurface)
+        } else if finished.contains(step) && step != .done {
+            SetupStatePill(text: "Saved", dot: Theme.statusDone, word: Theme.success, fill: Theme.successSurface)
+        }
     }
 
     private var footer: some View {
@@ -262,7 +333,7 @@ struct SetupWizardView: View {
                 Task { await advance(from: from) }
             } label: {
                 HStack(spacing: 8) {
-                    if facts.saving { ProgressView().tint(Theme.onInk) }
+                    if facts.saving { ProgressView().tint(.white) }
                     Text(step == .done ? "Start using Thorbis" : "Continue")
                 }
                 .inkCommit()
@@ -270,14 +341,27 @@ struct SetupWizardView: View {
             .buttonStyle(PressStyle())
             .disabled(busy)
             .accessibilityIdentifier("setup-continue")
-            if step != .done && step.required.isEmpty {
-                Button("Skip for now") { skip() }
-                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .disabled(busy)
+            if index == 0 && step != .done {
+                Text("\(max(steps.count - 1, 1)) short steps · answers save when you tap Continue")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8)
+            }
+            if step == .done {
+                Text("You can finish setup later from More.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 8).padding(.bottom, 8)
+            } else if step.required.isEmpty {
+                Button { skip() } label: {
+                    Text("Skip for now").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle)
+                        .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(busy)
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 6)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12).padding(.bottom, 6)
         .frame(maxWidth: 600)
         .frame(maxWidth: .infinity)
         .background(Theme.background)
@@ -288,30 +372,40 @@ struct SetupWizardView: View {
     @ViewBuilder private var content: some View {
         switch step {
         case .trade:
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 20) {
                 tradePicker
                 factField("service_areas", "Where you work", placeholder: "Towns, counties or ZIP codes", multiline: true)
                 factField("business_description", "About your business", placeholder: "One or two sentences customers will see", multiline: true)
             }
         case .company:
+            // Paper 09: logo, name, address, phone; then what the code also keeps (also known as,
+            // email, website, mailing address).
             VStack(alignment: .leading, spacing: 16) {
+                if facts.profile?.catalog.contains(where: { $0.factKey == "logo" }) == true {
+                    // Paper 09B: the logo's crop screen carries this step's count in its top bar
+                    // ("Step 2 / 10"; iPad "Step 2 of 10 · Company").
+                    CompanyLogoPicker().padding(.bottom, 6)
+                        .environment(\.setupStepLabel, sizeClass == .regular ? "\(stepLabel) · Company" : stepLabel)
+                }
                 factField("legal_name", "Business name", placeholder: "Wade Plumbing & Heating LLC", required: true)
-                if facts.profile?.catalog.contains(where: { $0.factKey == "logo" }) == true { CompanyLogoPicker() }
+                factField("business_address", "Business address", placeholder: "Street, city, state, ZIP", required: true, multiline: true)
+                factField("primary_phone", "Phone", placeholder: "(555) 555-0123", required: true)
                 factField("dba_names", "Also known as", placeholder: "The name on your trucks, if different")
-                factField("primary_phone", "Business phone", placeholder: "(555) 555-0123", required: true)
                 factField("primary_email", "Business email", placeholder: "office@company.com")
                 factField("website", "Website", placeholder: "company.com")
-                factField("business_address", "Business address", placeholder: "Street, city, state, ZIP", required: true, multiline: true)
-                Toggle("Mail goes to the same address", isOn: $mailingSame)
-                    .font(Theme.font(15)).tint(Theme.success).frame(minHeight: 44)
+                PaperCard {
+                    Toggle("Mail goes to the same address", isOn: $mailingSame)
+                        .font(Theme.font(16, weight: .medium)).tint(Theme.brand)
+                        .padding(.horizontal, PaperCardMetrics.inset)
+                        .frame(minHeight: 56)
+                }
                 if !mailingSame {
                     factField("mailing_address", "Mailing address", placeholder: "Street, city, state, ZIP", multiline: true)
                 }
             }
         case .legal:
             VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 6) {
-                    fieldTitle("Business type")
+                PaperFormField("Business type") {
                     let current = facts.drafts["entity_type"] ?? ""
                     let options = SetupEntityTypes.all + (current.isEmpty || SetupEntityTypes.all.contains(current) ? [] : [current])
                     ThorbisMenu(items: options.map { option in
@@ -321,24 +415,31 @@ struct SetupWizardView: View {
                             Text(current.isEmpty ? "Choose" : current).font(Theme.font(16))
                                 .foregroundStyle(current.isEmpty ? Theme.muted : Theme.foreground)
                             Spacer()
-                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 13)).foregroundStyle(Theme.muted)
+                            Image(systemName: "chevron.down").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                         }
-                        .padding(.horizontal, 14)
-                        .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                        .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+                        .fieldWell()
+                        .contentShape(Rectangle())
                     }
                 }
                 factField("formation_jurisdiction", "State where it was formed", placeholder: "Texas")
-                VStack(alignment: .leading, spacing: 6) {
-                    fieldTitle("Date formed")
-                    Toggle("I know the date", isOn: $hasFormedOn).font(Theme.font(15)).tint(Theme.success).frame(minHeight: 44)
+                PaperSection("Date formed") {
+                    Toggle("I know the date", isOn: $hasFormedOn)
+                        .font(Theme.font(16, weight: .medium)).tint(Theme.brand)
+                        .padding(.horizontal, PaperCardMetrics.inset)
+                        .frame(minHeight: 56)
                     if hasFormedOn {
-                        DatePicker("Date formed", selection: $formedOn, in: ...Date(), displayedComponents: .date)
-                            .datePickerStyle(.compact).labelsHidden()
+                        WellDivider()
+                        HStack {
+                            Text("Date").font(Theme.font(16, weight: .medium)).accessibilityHidden(true)
+                            Spacer()
+                            DatePicker("Date formed", selection: $formedOn, in: ...Date(), displayedComponents: .date)
+                                .datePickerStyle(.compact).labelsHidden()
+                        }
+                        .padding(.horizontal, PaperCardMetrics.inset)
+                        .frame(minHeight: 56)
                     }
                 }
-                note("Owner ID, SSN, EIN, ownership and bank documents are collected by Stripe in Get paid, encrypted and never stored in Thorbis.",
+                note("Owner ID, SSN, EIN, ownership and bank documents are collected by Stripe in Payments, encrypted and never stored in Thorbis.",
                      symbol: "lock")
             }
         case .messages:
@@ -346,10 +447,12 @@ struct SetupWizardView: View {
                 factField("email_sender_name", "Name on emails", placeholder: "Wade Plumbing")
                 factField("email_sender_address", "Replies go to", placeholder: "office@company.com")
                 if session.can("organization.settings.edit", feature: "job_booking_notices") {
-                    NavigationLink { NoticeSettingsView() } label: {
-                        PaperMenuRow("Who hears about jobs", symbol: "bell.badge", subtitle: "Email and in-app alerts for booked, changed and canceled jobs")
+                    PaperCard {
+                        NavigationLink { NoticeSettingsView() } label: {
+                            PaperMenuRow("Who hears about jobs", symbol: "bell.badge", subtitle: "Email and in-app alerts for booked, changed and canceled jobs")
+                        }
+                        .buttonStyle(RowPressStyle())
                     }
-                    .buttonStyle(RowPressStyle())
                 }
             }
         case .hours:
@@ -358,66 +461,142 @@ struct SetupWizardView: View {
                 if !facts.queued.isEmpty {
                     Label("Saved on this phone. It syncs when you're back online.", systemImage: "icloud.and.arrow.up")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
                 }
             }
         case .customers:
             CustomerImportPanel(model: importer) { finished.insert(.customers) }
         case .services:
+            // Paper 13: the price book as one card of rows, then the way to add to it.
             VStack(alignment: .leading, spacing: 12) {
-                if priceItems.isEmpty {
-                    Text("Nothing in your price book yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                } else {
-                    ForEach(priceItems.prefix(8), id: \.self) { name in
-                        Label(name, systemImage: "checkmark").font(Theme.font(15)).frame(minHeight: 36, alignment: .leading)
+                PaperSection("Your price book", count: priceItems.count) {
+                    if priceItems.isEmpty {
+                        Text("Nothing in your price book yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, PaperCardMetrics.inset)
+                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    } else {
+                        ForEach(Array(priceItems.prefix(8).enumerated()), id: \.offset) { index, item in
+                            if index > 0 { WellDivider(leading: PaperCardMetrics.inset + 38) }
+                            // Paper 13: the name, its unit under it, the price at the trailing edge.
+                            PaperListRow(leading: .icon("tag"), title: item.description, subtitle: item.unit,
+                                         amount: money(item.sellPrice.amount, currency: item.sellPrice.currency))
+                        }
                     }
-                    if priceItems.count > 8 { Text("and \(priceItems.count - 8) more").font(Theme.font(13)).foregroundStyle(Theme.muted) }
                 }
-                bordered(priceItems.isEmpty ? "Add your first service" : "Add another", symbol: "plus") { addingItem = true }
+                if priceItems.count > 8 {
+                    Text("+ \(priceItems.count - 8) more in your price book").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                }
+                addRow(priceItems.isEmpty ? "Add your first service" : "Add another service") { addingItem = true }
             }
         case .team:
+            // Paper 14/14A: who has been invited, then "Add another teammate".
             VStack(alignment: .leading, spacing: 12) {
-                ForEach(invites) { invite in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(invite.email).font(Theme.font(15, weight: .medium))
-                            Text("\(invite.roleLabel) · invite sent").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                if !invites.isEmpty {
+                    PaperSection("Invited", count: invites.count) {
+                        ForEach(Array(invites.enumerated()), id: \.element.id) { index, invite in
+                            if index > 0 { WellDivider() }
+                            PaperListRow(title: invite.email, subtitle: "\(invite.roleLabel) · invite sent")
                         }
-                        Spacer()
                     }
-                    .frame(minHeight: 48)
                 }
-                bordered(invites.isEmpty ? "Invite someone" : "Invite another", symbol: "person.badge.plus") { inviting = true }
+                addRow(invites.isEmpty ? "Invite a teammate" : "Add another teammate") { inviting = true }
+                note(invites.isEmpty ? "You choose each person’s role when you invite them."
+                                     : "Each person gets an email with a link to join — this doesn’t block setup.",
+                     symbol: "info.circle")
             }
         case .payments:
+            // Paper 15/15A: "Customer payments" with its state, then the way into Stripe.
             VStack(alignment: .leading, spacing: 12) {
-                if finished.contains(.payments) {
-                    Label("Card payments are on.", systemImage: "checkmark.circle.fill")
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.success)
+                HStack(alignment: .center, spacing: 8) {
+                    Text("Customer payments").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if finished.contains(.payments) {
+                        SetupStatePill(text: "Cards on", dot: Theme.statusDone, word: Theme.success, fill: Theme.successSurface)
+                    } else {
+                        SetupStatePill(text: "Stripe Connect", dot: nil, word: Theme.brandText, fill: Theme.brandSurface)
+                    }
                 }
-                bordered(finished.contains(.payments) ? "Review payments" : "Set up with Stripe", symbol: "creditcard") { showStripe = true }
+                .padding(.horizontal, 4)
+                Text(finished.contains(.payments) ? "Card payments are on. Open Stripe to check payouts."
+                                                  : "Customers pay invoices by card, and Stripe pays you out to your bank.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+                Button { showStripe = true } label: {
+                    RimmedButtonLabel(title: finished.contains(.payments) ? "Manage payouts" : "Set up payouts", symbol: "creditcard")
+                }
+                .buttonStyle(PressStyle())
                 note("Stripe asks for the owner’s name, date of birth, last four of the SSN or an ID photo, the business EIN, and a bank account for payouts.",
-                     symbol: "doc.text.magnifyingglass")
+                     symbol: "lock")
             }
         case .done:
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(steps.filter { $0 != .done }) { item in
-                    HStack(spacing: 12) {
-                        Image(systemName: skipped.contains(item) ? "circle" : "checkmark.circle.fill")
-                            .foregroundStyle(skipped.contains(item) ? Theme.muted : Theme.success)
-                        Text(item.title).font(Theme.font(15))
+            doneContent
+        }
+    }
+
+    /// Paper 17: what got done, then what was skipped, each one tap from finishing.
+    private var doneContent: some View {
+        let items = steps.filter { $0 != .done }
+        let completed = items.filter { !skipped.contains($0) }
+        let later = items.filter { skipped.contains($0) }
+        return VStack(alignment: .leading, spacing: 20) {
+            if !completed.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Text("Done during setup").font(Theme.font(13, weight: .semibold))
+                            .accessibilityAddTraits(.isHeader)
                         Spacer()
-                        if skipped.contains(item) {
-                            Button("Finish") { step = item }
-                                .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.brandText)
-                                .frame(minHeight: 44)
+                        Text("\(completed.count) / \(items.count)").font(Theme.font(13)).monospacedDigit()
+                    }
+                    .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4).padding(.bottom, 8)
+                    .accessibilityElement(children: .combine)
+                    PaperCard {
+                        ForEach(Array(completed.enumerated()), id: \.element.id) { index, item in
+                            if index > 0 { WellDivider(leading: PaperCardMetrics.inset + 36) }
+                            HStack(spacing: 12) {
+                                Image(systemName: "checkmark.circle").font(.system(size: 20, weight: .medium))
+                                    .foregroundStyle(Theme.statusDone)
+                                    .frame(width: 24)
+                                    .accessibilityHidden(true)
+                                Text(item.doneTitle).font(Theme.font(16, weight: .medium))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, PaperCardMetrics.inset)
+                            .frame(minHeight: 56)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityValue("Done")
                         }
                     }
-                    .frame(minHeight: 48)
+                }
+            }
+            if !later.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Finish later").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                        .accessibilityAddTraits(.isHeader)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(later) { item in
+                                Button { step = item } label: {
+                                    Text(item.doneTitle).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .padding(.horizontal, 14)
+                                        .frame(minHeight: 44)
+                                        .background(Theme.card, in: Capsule())
+                                        .contentShape(Capsule())
+                                }
+                                .buttonStyle(PressStyle())
+                                .accessibilityLabel("Finish \(item.doneTitle)")
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
+    /// Paper's selectable chips: the trade on a card pill, the chosen one in brand.
     private var tradePicker: some View {
         let picked = SetupTrades.parse(facts.drafts["industry"])
         return VStack(alignment: .leading, spacing: 8) {
@@ -431,12 +610,12 @@ struct SetupWizardView: View {
                         facts.drafts["industry"] = SetupTrades.join(next)
                     } label: {
                         HStack(spacing: 6) {
-                            if on { Image(systemName: "checkmark").font(.system(size: 13, weight: .medium)) }
-                            Text(trade).font(Theme.font(15, weight: on ? .medium : .regular))
+                            if on { Image(systemName: "checkmark").font(.system(size: 13, weight: .semibold)) }
+                            Text(trade).font(Theme.font(15, weight: .medium))
                         }
+                        .foregroundStyle(on ? Theme.brandText : Theme.foreground)
                         .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(on ? Theme.fill : .clear, in: Capsule())
-                        .overlay(Capsule().stroke(on ? Theme.foreground : Theme.border))
+                        .background(on ? Theme.brandSurface : Theme.card, in: Capsule())
                         .contentShape(Capsule())
                     }
                     .buttonStyle(PressStyle())
@@ -453,56 +632,53 @@ struct SetupWizardView: View {
         Binding(get: { facts.drafts[key] ?? "" }, set: { facts.drafts[key] = $0; facts.fieldErrors[key] = nil })
     }
 
+    /// Paper v2: a 13 Semibold label 4 in from its field.
     private func fieldTitle(_ title: String) -> some View {
-        Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, 4)
     }
 
     private func factField(_ key: String, _ title: String, placeholder: String, required: Bool = false, multiline: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                fieldTitle(title)
-                if required { Text("Required").font(Theme.font(12)).foregroundStyle(Theme.muted) }
-            }
-            TextField(placeholder, text: draft(key), axis: multiline ? .vertical : .horizontal)
+        PaperFormField(title, note: required ? "Required" : nil, error: facts.fieldErrors[key]) {
+            TextField(placeholder, text: draft(key), prompt: .placeholder(placeholder), axis: multiline ? .vertical : .horizontal)
                 .lineLimit(multiline ? 1...4 : 1...1)
+                .textFieldStyle(.plain)
                 .font(Theme.font(16))
+                .foregroundStyle(Theme.foreground)
                 .keyboardType(CompanyFact.keyboard(key))
                 .textContentType(CompanyFact.content(key))
                 .textInputAutocapitalization(CompanyFact.keyboard(key) == .default ? .words : .never)
                 .autocorrectionDisabled(CompanyFact.keyboard(key) != .default)
                 .focused($focused, equals: key)
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .frame(minHeight: 46)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius)
-                    .stroke(facts.fieldErrors[key] == nil ? Theme.border : Theme.destructive, lineWidth: 1))
-            if let error = facts.fieldErrors[key] {
-                InlineProblem(message: error).font(Theme.font(13))
-            }
+                .fieldWell()
+                .accessibilityLabel(title + (required ? ", required" : ""))
         }
     }
 
+    /// Paper 14's quiet info line: a muted glyph and 13pt words, no box.
     private func note(_ text: String, symbol: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(Theme.muted)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol).font(.system(size: 14)).foregroundStyle(Theme.muted).accessibilityHidden(true)
             Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
+        .padding(.horizontal, 8).padding(.top, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
     }
 
-    private func bordered(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+    /// Paper 14: "+ Add another teammate", a plain 16 Semibold row with a 44pt target.
+    private func addRow(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: symbol)
-                .font(Theme.font(15, weight: .medium))
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius).stroke(Theme.border))
-                .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+            HStack(spacing: 12) {
+                Image(systemName: "plus").font(.system(size: 17, weight: .semibold)).accessibilityHidden(true)
+                Text(title).font(Theme.font(16, weight: .semibold))
+            }
+            .foregroundStyle(Theme.foreground)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
-        .foregroundStyle(Theme.foreground)
     }
 
     // MARK: Flow
@@ -588,11 +764,46 @@ struct SetupWizardView: View {
 
     private func loadItems() async {
         guard let page = try? await api.priceBookItems(limit: 50) else { return }
-        priceItems = page.items.filter { $0.archivedAt == nil }.map(\.description)
+        priceItems = page.items.filter { $0.archivedAt == nil }
     }
 
     private func loadPayments() async {
         if (try? await api.merchantReadiness())?.chargesReady == true { finished.insert(.payments) }
+    }
+}
+
+/// Paper 08-17's header pill ("Saved", "2 to fix"): a dot and a 13 Semibold word on a tinted capsule.
+private struct SetupStatePill: View {
+    let text: String
+    let dot: Color?
+    let word: Color
+    let fill: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if let dot { Circle().fill(dot).frame(width: 6, height: 6).accessibilityHidden(true) }
+            Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(word).lineLimit(1)
+        }
+        .padding(.horizontal, 11).padding(.vertical, 5)
+        .background(fill, in: Capsule())
+        .fixedSize()
+    }
+}
+
+/// Paper 08-17's progress: a 4pt card track with the done part in brand blue.
+private struct SetupProgressLine: View {
+    let fraction: Double
+
+    var body: some View {
+        Capsule().fill(Theme.card)
+            .frame(height: 4)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule().fill(Theme.brand)
+                        .frame(width: proxy.size.width * CGFloat(min(max(fraction, 0), 1)), height: 4)
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: fraction)
     }
 }
 

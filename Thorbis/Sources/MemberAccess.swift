@@ -53,6 +53,7 @@ struct MemberAccessView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var removing: RoleMember?
     @State private var transferring: RoleMember?
     @State private var catalog: RoleBuilderCatalog?
@@ -73,52 +74,110 @@ struct MemberAccessView: View {
         return original.0 != choices.filter { $0.value != .role } || original.1 != scopes.filter { choices[$0.key] == .allow }
     }
 
+    private var firstName: String { member.member.displayName.split(separator: " ").first.map(String.init) ?? "them" }
+
     var body: some View {
-        List {
-            Section {
-                Button { changingRole = true } label: {
-                    HStack {
-                        Text("Role").foregroundStyle(Theme.foreground)
-                        Spacer()
-                        Text(member.roleLabel).foregroundStyle(Theme.muted)
-                        Image(systemName: "chevron.right").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.subtle)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                // Paper 62B: a 64pt avatar beside the name (28 Bold) and their role.
+                HStack(alignment: .center, spacing: 14) {
+                    Text(initials(member.member.displayName))
+                        .font(Theme.font(22, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .frame(width: 64, height: 64)
+                        .background(Theme.brandSurface, in: Circle())
+                        .dynamicTypeSize(...DynamicTypeSize.large)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(member.member.displayName)
+                            .font(Theme.heading()).tracking(-0.56)
+                            .lineLimit(2).minimumScaleFactor(0.6)
+                            .accessibilityAddTraits(.isHeader)
+                        Text(member.roleLabel).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
                 }
-            } header: {
-                Text(member.member.email)
-            }
-            Section {
-                ForEach(filtered) { capability in row(capability) }
-            } header: {
-                Text("Just for \(member.member.displayName.split(separator: " ").first.map(String.init) ?? "them")")
-            } footer: {
-                Text("Role follows their role. Allow adds it for this person. Never blocks it even if their role allows it.")
-            }
-            if let error { Section { ListErrorRow(message: error) } }
-            if OwnershipTransferRules.canOffer(member, session: session) {
-                Section {
-                    Button("Make \(member.member.displayName) the owner", role: .destructive) { transferring = member }
-                        .frame(minHeight: 44)
-                } header: {
-                    Text("Ownership")
-                } footer: {
-                    Text("Only the owner can hand ownership over. You stay on as an admin, and they can give it back later.")
+                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 16)
+
+                if let mail = URL(string: "mailto:\(member.member.email)") {
+                    Button { openURL(mail) } label: { RimmedButtonLabel(title: "Email", symbol: "envelope") }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Email \(member.member.displayName)")
+                        .paperCardMargin().padding(.bottom, 16)
+                }
+
+                PaperCard {
+                    PaperDetailRow("Email", value: member.member.email)
+                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
+                    WellDivider()
+                    Button { changingRole = true } label: {
+                        HStack(spacing: 8) {
+                            Text("Permissions").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                            Spacer(minLength: 8)
+                            Text(member.roleLabel).font(Theme.font(16)).foregroundStyle(Theme.muted).lineLimit(1)
+                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, PaperCardMetrics.inset)
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityLabel("Role, \(member.roleLabel)")
+                    .accessibilityHint("Change role")
+                }
+                .paperCardMargin()
+
+                if catalog == nil && error == nil {
+                    SkeletonRows(count: 6, leading: false).padding(.top, 20)
+                } else if !filtered.isEmpty {
+                    PaperSection("Just for \(firstName)", count: nil) {
+                        ForEach(filtered) { capability in
+                            if capability.id != filtered.first?.id { WellDivider() }
+                            row(capability)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                        }
+                    }
+                    .paperCardMargin().padding(.top, 20)
+                    footnote("Role follows their role. Allow adds it for this person. Never blocks it even if their role allows it.")
+                }
+                if let error { ErrorBanner(message: error).padding(.top, 12) }
+
+                if OwnershipTransferRules.canOffer(member, session: session) {
+                    PaperSection("Ownership", count: nil) {
+                        Button { transferring = member } label: {
+                            Text("Make \(member.member.displayName) the owner")
+                                .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                                .background(Theme.brandSurface, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                        .padding(PaperCardMetrics.inset - 4)
+                    }
+                    .paperCardMargin().padding(.top, 20)
+                    footnote("Only the owner can hand ownership over. You stay on as an admin, and they can give it back later.")
+                }
+                if MemberRemovalRules.canRemove(member, session: session) {
+                    PaperSection("Remove", count: nil) {
+                        Button { removing = member } label: {
+                            Text("Remove from team")
+                                .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                                .background(Theme.destructiveSurface, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                        .padding(PaperCardMetrics.inset - 4)
+                    }
+                    .paperCardMargin().padding(.top, 20)
+                    footnote("They lose access right away. Their account and past work stay, and you can invite them again.")
                 }
             }
-            if MemberRemovalRules.canRemove(member, session: session) {
-                Section {
-                    Button("Remove from team", role: .destructive) { removing = member }
-                        .frame(minHeight: 44)
-                } footer: {
-                    Text("They lose access right away. Their account and past work stay, and you can invite them again.")
-                }
-            }
+            .padding(.bottom, 32)
         }
+        .foregroundStyle(Theme.foreground)
         .searchable(text: $search, prompt: "Find a permission")
-        .scrollContentBackground(.hidden)
         .background(Theme.canvas)
-        .overlay(alignment: .top) { if catalog == nil && error == nil { SkeletonRows(count: 6, leading: false).background(Theme.canvas) } }
-        .navigationTitle(member.member.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbar {
@@ -143,9 +202,16 @@ struct MemberAccessView: View {
         .sorted { (choices[$0.id] ?? .role) != .role && (choices[$1.id] ?? .role) == .role ? true : $0.label < $1.label }
     }
 
+    /// The quiet sentence under a card (Paper 13 muted, 20 from the edge).
+    private func footnote(_ text: String) -> some View {
+        Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, Theme.gutter).padding(.top, 10)
+    }
+
     @ViewBuilder private func row(_ capability: RoleBuilderCatalog.Capability) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(capability.label).font(Theme.font(15, weight: .medium))
+        VStack(alignment: .leading, spacing: 8) {
+            Text(capability.label).font(Theme.font(16, weight: .medium))
             ThorbisSegmented(options: Choice.allCases.map { ($0, $0.rawValue) },
                              selection: Binding(get: { choices[capability.id] ?? .role }, set: { value in
                 choices[capability.id] = value

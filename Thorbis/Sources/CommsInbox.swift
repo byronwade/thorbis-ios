@@ -198,8 +198,10 @@ struct CommsInboxView: View {
         .toolbar {
             if access.notices && section.showsNotices && folder == .inbox && model.canMarkNoticesRead {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
-                    PaperCircleButton(symbol: "checkmark.circle", label: model.readCursor == nil ? "Mark all notices read" : "Continue marking read",
-                                      fill: Theme.card, bordered: true) { Task { await model.markNoticesRead(api: api) } }
+                    // Paper v2: the 44pt card circle with a check.
+                    Button { Task { await model.markNoticesRead(api: api) } } label: { CreamCircleLabel(symbol: "checkmark") }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel(model.readCursor == nil ? "Mark all notices read" : "Continue marking read")
                         .disabled(model.noticesLoading)
                 }
             }
@@ -235,63 +237,90 @@ struct CommsInboxView: View {
 
     // MARK: Header
 
+    /// Paper 49N: the 34 Bold title (a menu of sections), then one 15 muted line: the folder menu
+    /// and how many conversations wait unread.
     private var header: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                ThorbisMenu(items: access.sections.map { item in
-                    ThorbisMenuItem(item.menuTitle, icon: item.symbol, isSelected: item == section) { section = item }
-                }, accessibilityLabel: "\(section.title), switch what the Inbox shows") {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(section.title).font(Theme.font(34, weight: .medium)).tracking(-0.8)
-                            .foregroundStyle(Theme.foreground)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Image(systemName: "chevron.down").font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                    }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+            ThorbisMenu(items: access.sections.map { item in
+                ThorbisMenuItem(item.menuTitle, icon: item.symbol, isSelected: item == section) { section = item }
+            }, accessibilityLabel: "\(section.title), switch what Messages shows") {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(section.title).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                    Image(systemName: "chevron.down").font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.muted)
+                        .accessibilityHidden(true)
                 }
-                .accessibilityIdentifier("inbox-section-menu")
-                .accessibilityAddTraits(.isHeader)
-                // The Inbox is a beta on the web too: a quiet word, not a badge.
-                Text("Beta").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .accessibilityLabel("Beta")
-                Spacer(minLength: 0)
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .accessibilityIdentifier("inbox-section-menu")
+            .accessibilityAddTraits(.isHeader)
             let folders = CommsInboxScope.folders(section)
             if folders.count > 1 {
-                ThorbisMenu(items: folders.map { item in
-                    ThorbisMenuItem(item.title, icon: item.symbol, isSelected: item == folder) { folder = item }
-                }, accessibilityLabel: "Folder, \(folder.title)") {
-                    // The folder's icon keeps "Inbox" here from reading as a second title.
-                    HStack(spacing: 6) {
-                        Image(systemName: folder.symbol).font(.system(size: min(folderGlyph, 28), weight: .medium)).foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                        Text(folder.title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
-                        Image(systemName: "chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
+                HStack(alignment: .center, spacing: 6) {
+                    ThorbisMenu(items: folders.map { item in
+                        ThorbisMenuItem(item.title, icon: item.symbol, isSelected: item == folder) { folder = item }
+                    }, accessibilityLabel: "Folder, \(folder.title)") {
+                        // The folder's icon keeps "Inbox" here from reading as a second title.
+                        HStack(spacing: 5) {
+                            Image(systemName: folder.symbol).font(.system(size: min(folderGlyph, 28), weight: .medium)).foregroundStyle(Theme.muted)
+                                .accessibilityHidden(true)
+                            Text(folder.title).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted)
+                                .accessibilityHidden(true)
+                        }
+                        .frame(minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(minHeight: 44, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("inbox-folder-menu")
+                    if let unread = unreadSummary {
+                        Text("\u{00B7} \(unread)").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
                 }
-                .accessibilityIdentifier("inbox-folder-menu")
             } else {
-                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                Text(unreadSummary ?? subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(minHeight: 32, alignment: .leading)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 4)
     }
 
     private var subtitle: String {
         section == .notices ? "Booked, changed and assigned jobs" : section.title
     }
 
+    /// "3 unread" across what this section and folder hold. While older pages are still on the
+    /// server the count can only be a floor ("3+ unread"), and nothing unread is never claimed.
+    private var unreadSummary: String? {
+        guard !loading else { return nil }
+        let all = CommsInboxScope.items(section: section, folder: folder, filter: .all,
+                                        calls: access.calls && !model.callsDenied ? model.threads : [],
+                                        local: access.workspace ? local.threads : [],
+                                        notices: access.notices ? model.notices : [],
+                                        callFlags: local.callFlags, seen: model.seenIDs)
+        let count = all.filter { item in
+            switch item {
+            case .calls(let thread):
+                CommsInboxScope.callUnread(thread, flags: local.callFlags[thread.id] ?? CommsThreadFlags(), seen: model.seenIDs)
+            case .local(let thread): thread.unread
+            case .notice(let notice): !notice.read
+            }
+        }.count
+        let more = folder == .inbox && ((section.showsCalls && access.calls && model.callsCursor != nil)
+            || (section.showsNotices && access.notices && model.noticesCursor != nil))
+        if count > 0 { return more ? "\(count)+ unread" : "\(count) unread" }
+        return more || all.isEmpty ? nil : "All caught up"
+    }
+
     @ViewBuilder private var composeButton: some View {
-        let label = PaperCircleLabel(symbol: "square.and.pencil", size: 36, fill: Theme.card, bordered: true)
+        // Paper v2: the brand + circle starts a conversation.
+        let label = CreamCircleLabel(symbol: "plus", ink: true)
         switch section {
         case .texts:
             Button { composing = .text } label: { label }.buttonStyle(PressStyle()).accessibilityLabel("New text")
@@ -308,7 +337,9 @@ struct CommsInboxView: View {
     // MARK: Content
 
     @ViewBuilder private var content: some View {
-        ListViewBar(options: CommsInboxScope.filters(section).map(\.rawValue), selection: $filter)
+        // Paper 49N's segmented tabs, here the quick filters this section has.
+        PaperTabs(options: CommsInboxScope.filters(section).map(\.rawValue), selection: $filter)
+            .padding(.top, 12)
         if section.showsCalls, let error = model.callsError {
             ErrorBanner(message: error) { await model.refreshCalls(api: api) }
         }
@@ -341,21 +372,22 @@ struct CommsInboxView: View {
                               callFlags: local.callFlags, seen: model.seenIDs)
     }
 
+    /// Paper 49N: each day is a 13 Semibold label over one card of rows, a hairline between them.
     @ViewBuilder private func rows(_ list: [CommsInboxItem]) -> some View {
         let displayCalendar = calendarWithTimeZone
-        ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
-            let raw = item.at(in: section)
-            let heading = InboxNoticeDay.header(raw, after: index > 0 ? list[index - 1].at(in: section) : nil,
-                                                hasPrevious: index > 0, calendar: displayCalendar, locale: locale)
-            if let heading {
-                ListGroupLabel(title: dayLabel(heading, raw: raw, calendar: displayCalendar, item: item), first: index == 0)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("inbox-day-heading")
-            }
-            switch item {
-            case .calls(let thread): callRow(thread)
-            case .local(let thread): localRow(thread)
-            case .notice(let notice): noticeRow(notice)
+        let groups = CommsDayGrouping.groups(list, id: { $0.id }, at: { $0.at(in: section) }, calendar: displayCalendar, locale: locale) { heading, raw, item in
+            dayLabel(heading, raw: raw, calendar: displayCalendar, item: item)
+        }
+        ForEach(groups) { group in
+            CommsDayCard(title: group.title) {
+                ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
+                    if index > 0 { WellDivider(leading: 0) }
+                    switch item {
+                    case .calls(let thread): callRow(thread)
+                    case .local(let thread): localRow(thread)
+                    case .notice(let notice): noticeRow(notice)
+                    }
+                }
             }
         }
     }
@@ -385,6 +417,7 @@ struct CommsInboxView: View {
                 CommsThreadRow(thread: thread, section: section, unread: unread, alert: alert, starred: flags.starredAt != nil)
             }
             .buttonStyle(RowPressStyle())
+            .background(Theme.card)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel([thread.name, thread.calls.count > 1 ? "\(thread.calls.count) calls" : nil,
                                  alert, thread.line(in: section),
@@ -403,6 +436,7 @@ struct CommsInboxView: View {
         return RowSwipeContainer(id: thread.id, leading: swipe.leading, trailing: swipe.trailing, state: swipes) {
             Button { open = .local(thread.id) } label: { CommsLocalRow(thread: thread, folder: folder) }
                 .buttonStyle(RowPressStyle())
+                .background(Theme.card)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel([thread.contactName, thread.channel == .email ? "Email" : "Text", thread.line(in: folder),
                                      JobFiltering.date(thread.latestAt)?.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)),
@@ -427,6 +461,7 @@ struct CommsInboxView: View {
                 CommsNoticeRow(notice: notice)
             }
             .buttonStyle(RowPressStyle())
+            .background(Theme.card)
             .accessibilityElement(children: .combine)
             .accessibilityLabel([notice.title, notice.meta, spokenTime(notice.at), notice.read ? "Read" : "Unread"]
                 .filter { !$0.isEmpty }.joined(separator: ", "))
@@ -457,7 +492,7 @@ struct CommsInboxView: View {
 
     /// Each empty view says why it is empty (web inbox ListEmpty, one reason each).
     @ViewBuilder private var empty: some View {
-        let name = section == .all ? "the Inbox" : section.title
+        let name = section == .all ? "Messages" : section.title
         if section == .calls || section == .voicemail, model.callsDenied {
             ListRoomEmpty(title: "Calls are for the office.",
                           message: "The call log needs access to every customer. A call linked to your job shows on the job.")
@@ -488,7 +523,7 @@ struct CommsInboxView: View {
                     ListRoomEmpty(title: "No voicemail.",
                                   message: "Thorbis records calls from when they\u{2019}re answered, so it doesn\u{2019}t take voicemail yet. Calls nobody answered show as missed calls.")
                 case .texts:
-                    ListRoomEmpty(title: "No texts.", message: "Start a text from a customer or with the pencil above. Drafts stay on this device.",
+                    ListRoomEmpty(title: "No texts.", message: "Start a text from a customer or with the + above. Drafts stay on this device.",
                                   actionTitle: "New text") { composing = .text }
                 case .email:
                     ListRoomEmpty(title: "No email waiting.", message: "New mail lands here when an email account is connected.",
@@ -585,9 +620,148 @@ enum CommsOpen: Hashable {
 
 
 
-/// A caller's row (web rows.tsx CallRow): the avatar with its channel badge, the name (Medium
-/// while unread), how many calls, the compact age and the unread dot; then what happened and
-/// what was said. A missed call or voicemail nobody opened carries its word and dot.
+// MARK: - Day cards
+
+/// One day's rows: its label and the rows it holds, in list order.
+struct CommsDayGroup<Item>: Identifiable {
+    let id: String
+    let title: String
+    var items: [Item]
+}
+
+/// Splits an already-ordered list into days (presentation only), naming each with `label`.
+enum CommsDayGrouping {
+    static func groups<Item>(_ list: [Item], id: (Item) -> String, at: (Item) -> String?, calendar: Calendar, locale: Locale,
+                             label: (_ heading: String, _ raw: String?, _ item: Item) -> String) -> [CommsDayGroup<Item>] {
+        var groups: [CommsDayGroup<Item>] = []
+        for (index, item) in list.enumerated() {
+            let raw = at(item)
+            let heading = InboxNoticeDay.header(raw, after: index > 0 ? at(list[index - 1]) : nil,
+                                                hasPrevious: index > 0, calendar: calendar, locale: locale)
+            if let heading {
+                groups.append(CommsDayGroup(id: "day-\(id(item))", title: label(heading, raw, item), items: [item]))
+            } else if groups.isEmpty {
+                groups.append(CommsDayGroup(id: "day-\(id(item))", title: "", items: [item]))
+            } else {
+                groups[groups.count - 1].items.append(item)
+            }
+        }
+        return groups
+    }
+}
+
+/// Paper v2 section: a 13 Semibold muted label 8 above one card (radius 20), 16 from the screen's
+/// edges and 20 below the section before it.
+struct CommsDayCard<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+        VStack(alignment: .leading, spacing: 0) {
+            if !title.isEmpty {
+                Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("inbox-day-heading")
+                    .padding(.horizontal, 4).padding(.bottom, 8)
+            }
+            VStack(alignment: .leading, spacing: 0) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: shape)
+                .clipShape(shape)
+        }
+        .padding(.horizontal, 16).padding(.top, 20)
+    }
+}
+
+// MARK: - Rows
+
+/// How a row's 40pt circle reads (Paper 49N): unread in brand, a missed call nobody opened in
+/// the warning hue, the rest quiet.
+enum CommsAvatarTone {
+    case quiet, unread, alert
+
+    var fill: Color {
+        switch self {
+        case .quiet: Theme.fill
+        case .unread: Theme.brandSurface
+        case .alert: Theme.warningSurface
+        }
+    }
+
+    var ink: Color {
+        switch self {
+        case .quiet: Theme.subtle
+        case .unread: Theme.brandText
+        case .alert: Theme.warning
+        }
+    }
+}
+
+/// Paper 49N's row frame: an 8pt lane for the unread dot, the 40pt circle, then the words; 14
+/// above and below, on the card. At accessibility sizes the circle steps aside for the words.
+struct CommsRowShell<Avatar: View, Content: View>: View {
+    let unread: Bool
+    @ViewBuilder var avatar: Avatar
+    @ViewBuilder var content: Content
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Circle().fill(unread ? Theme.brand : .clear).frame(width: 8, height: 8)
+                .padding(.top, 16)
+                .frame(width: 8)
+                .accessibilityHidden(true)
+            if !typeSize.isAccessibilitySize { avatar }
+            VStack(alignment: .leading, spacing: 2) { content }
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.leading, 8).padding(.trailing, 14).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        // No fill here: the row's button sits on `Theme.card` so its press tint shows over it.
+        .contentShape(Rectangle())
+    }
+}
+
+/// A row's first line: the name (Semibold while unread), how many, the star, and the time, in
+/// brand while unread.
+struct CommsRowTitle: View {
+    let name: String
+    let time: String
+    let unread: Bool
+    var count: Int? = nil
+    var starred = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(name).font(Theme.font(16, weight: unread ? .semibold : .medium))
+                .foregroundStyle(Theme.foreground)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+            if let count, count > 1 {
+                Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+            }
+            if starred {
+                Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
+                    .accessibilityHidden(true)
+            }
+            Spacer(minLength: 8)
+            Text(time).font(Theme.font(13, weight: unread ? .semibold : .regular)).monospacedDigit()
+                .foregroundStyle(unread ? Theme.brandText : Theme.muted)
+                .fixedSize()
+        }
+    }
+}
+
+/// The time of day a row shows; the day is its card's label.
+private func commsRowTime(_ raw: String?) -> String {
+    JobFiltering.date(raw)?.tradeTime ?? ""
+}
+
+/// A caller's row (web rows.tsx CallRow, Paper 49N): the dot, the caller's circle, the name and
+/// time; then what happened with its glyph (a missed call in red) and what was said. A missed call
+/// or voicemail nobody opened carries its word under it.
 struct CommsThreadRow: View {
     let thread: CommsCallThread
     let section: CommsInboxSection
@@ -599,126 +773,126 @@ struct CommsThreadRow: View {
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
         let lead = thread.lead(in: section)
-        HStack(alignment: .top, spacing: 12) {
-            if !stacked { CommsAvatar(initials: thread.initials, symbol: lead.kind == .voicemail ? "recordingtape" : "phone.fill") }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(thread.name).font(Theme.font(15, weight: unread ? .medium : .regular))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(stacked ? nil : 1)
-                    if thread.calls.count > 1 {
-                        Text("\(thread.calls.count)").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                    }
-                    if starred {
-                        Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
-                    }
-                    Spacer(minLength: 8)
-                    Text(CommsAge.compact(lead.startedAt)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                        .fixedSize()
-                    Circle().fill(unread ? Theme.brand : .clear).frame(width: 7, height: 7)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                }
-                // The status word sits under the line, not beside it, so a voicemail's words get
-                // the full width instead of half of it.
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline, spacing: 5) {
-                        Image(systemName: lead.kind.symbol).font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(lead.kind == .missed || lead.kind == .dropped ? Theme.destructive : Theme.muted)
-                        Text(thread.line(in: section, alerted: alert != nil)).font(Theme.font(14))
-                            .foregroundStyle(unread ? Theme.foreground : Theme.muted)
-                            // The thread holds the rest; a long summary shouldn't fill the screen.
-                            .lineLimit(stacked ? 4 : 2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    if let alert {
-                        StatusLabel(tone: lead.kind == .voicemail ? .dispatched : .attention, word: alert, emphasis: .quiet)
-                            .fixedSize()
-                    }
-                }
+        let missed = lead.kind == .missed || lead.kind == .dropped
+        let tone: CommsAvatarTone = unread ? (alert != nil && lead.kind == .missed ? .alert : .unread) : .quiet
+        CommsRowShell(unread: unread) {
+            CommsAvatar(initials: thread.initials, symbol: lead.kind == .voicemail ? "recordingtape" : "phone.fill",
+                        tone: tone, badge: false)
+        } content: {
+            CommsRowTitle(name: thread.name, time: commsRowTime(lead.startedAt), unread: unread,
+                          count: thread.calls.count, starred: starred)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: lead.kind.symbol).font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(missed ? Theme.destructive : Theme.muted)
+                    .accessibilityHidden(true)
+                Text(thread.line(in: section, alerted: alert != nil)).font(Theme.font(15))
+                    .foregroundStyle(unread ? Theme.foreground : Theme.muted)
+                    // The thread holds the rest; a long summary shouldn't fill the screen.
+                    .lineLimit(stacked ? 4 : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let alert {
+                StatusLabel(tone: lead.kind == .voicemail ? .dispatched : .attention, word: alert, emphasis: .quiet)
+                    .fixedSize()
+                    .padding(.top, 2)
             }
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 
-/// A job notice in the inbox, laid out like the call and message rows around it: a round mark in
-/// the avatar column (a job, not a person), the title with its age and dot, the job under it.
+/// A job notice (Paper 77, and in Messages beside the conversations): the dot, a bell on brand
+/// while unread, what happened with its time, then the job it is about.
 struct CommsNoticeRow: View {
     let notice: StaffNotice
+    /// Paper 77: how long ago ("12m", "1h", "yesterday") in place of the time of day, for a list
+    /// with no day labels. Messages keeps the time of day under its day labels.
+    var relativeTime = false
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// "now", "12m", "3h", "yesterday", "4d", then the date ("Jun 15"). Empty when there is no time.
+    static func relative(_ raw: String?, now: Date = .now, calendar: Calendar = .current) -> String {
+        guard let date = JobFiltering.date(raw) else { return "" }
+        let seconds = now.timeIntervalSince(date)
+        if seconds < 60 { return "now" }
+        if seconds < 3600 { return "\(Int(seconds / 60))m" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
+                                           to: calendar.startOfDay(for: now)).day ?? 0
+        if days <= 0 { return "\(Int(seconds / 3600))h" }
+        if days == 1 { return "yesterday" }
+        if days < 7 { return "\(days)d" }
+        return date.formatted(.dateTime.month(.abbreviated).day())
+    }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
         let unread = !notice.read
-        HStack(alignment: .top, spacing: 12) {
-            if !stacked {
-                Image(systemName: "wrench.and.screwdriver").font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.subtle)
-                    .frame(width: 36, height: 36).background(Theme.fill, in: Circle())
-                    .accessibilityHidden(true)
+        let time = relativeTime ? Self.relative(notice.at) : commsRowTime(notice.at)
+        CommsRowShell(unread: unread) {
+            Image(systemName: "bell").font(.system(size: 15, weight: .medium))
+                .foregroundStyle(unread ? Theme.brand : Theme.muted)
+                .frame(width: 40, height: 40)
+                .background(unread ? Theme.brandSurface : Theme.fill, in: Circle())
+                .accessibilityHidden(true)
+        } content: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(notice.title).font(Theme.font(16, weight: unread ? .semibold : .regular))
+                    .foregroundStyle(unread ? Theme.foreground : Theme.muted)
+                    .lineLimit(stacked ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text(time).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted).fixedSize()
             }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(notice.title).font(Theme.font(15, weight: unread ? .medium : .regular))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(stacked ? nil : 1)
-                    Spacer(minLength: 8)
-                    Text(CommsAge.compact(notice.at)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted).fixedSize()
-                    Circle().fill(unread ? Theme.brand : .clear).frame(width: 7, height: 7)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                }
-                if !notice.meta.isEmpty {
-                    Text(notice.meta).font(Theme.font(14)).foregroundStyle(unread ? Theme.foreground : Theme.muted)
-                        .lineLimit(stacked ? nil : 2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if !notice.meta.isEmpty {
+                Text(notice.meta).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .lineLimit(stacked ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }
 
-/// A caller's initials (or a person) on the fill, with the channel's glyph on a small badge.
+/// A person's initials (or a person glyph) in a circle. On a row it is 40pt and toned (Paper
+/// 49N); a conversation's header keeps the channel's glyph on a small badge.
 struct CommsAvatar: View {
     let initials: String?
     let symbol: String
-    var size: CGFloat = 36
+    var size: CGFloat = 40
+    var tone: CommsAvatarTone = .quiet
+    var badge = true
 
     var body: some View {
         ZStack {
-            Circle().fill(Theme.fill)
+            Circle().fill(tone.fill)
             if let initials {
                 // The circle is a fixed size, so its letters can't follow Dynamic Type past it
                 // or the channel badge covers them.
-                Text(initials).font(Theme.font(size * 0.36, weight: .medium)).foregroundStyle(Theme.subtle)
+                Text(initials).font(Theme.font(size > 44 ? 17 : 14, weight: .semibold)).foregroundStyle(tone.ink)
                     .lineLimit(1).minimumScaleFactor(0.6)
                     .dynamicTypeSize(...DynamicTypeSize.large)
-                    .offset(x: -1, y: -1)
+                    .offset(x: badge ? -1 : 0, y: badge ? -1 : 0)
             } else {
-                Image(systemName: "person.fill").font(.system(size: size * 0.42)).foregroundStyle(Theme.muted)
+                Image(systemName: "person.fill").font(.system(size: size * 0.4)).foregroundStyle(tone.ink)
             }
         }
         .frame(width: size, height: size)
         .overlay(alignment: .bottomTrailing) {
-            Image(systemName: symbol).font(.system(size: size * 0.22, weight: .semibold))
-                .foregroundStyle(Theme.muted)
-                .frame(width: size * 0.42, height: size * 0.42)
-                .background(Theme.card, in: Circle())
-                .overlay(Circle().stroke(Theme.background, lineWidth: 1.5))
-                .offset(x: 5, y: 5)
+            if badge {
+                Image(systemName: symbol).font(.system(size: size * 0.22, weight: .semibold))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: size * 0.42, height: size * 0.42)
+                    .background(Theme.card, in: Circle())
+                    .overlay(Circle().stroke(Theme.background, lineWidth: 1.5))
+                    .offset(x: 5, y: 5)
+            }
         }
         .accessibilityHidden(true)
     }
 }
 
-/// A text or email conversation's row (web TextRow / EmailRow): the avatar with its channel
-/// badge, the name (Medium while unread), the compact age and the dot; then the newest line, or
-/// an email's subject. Ours and unsent says so ("Draft:", "Queued:").
+/// A text or email conversation's row (web TextRow / EmailRow, Paper 49N): the dot, the circle,
+/// the name and time; then the channel's glyph and the newest line, or an email's subject. Ours
+/// and unsent says so ("Draft:", "Queued:").
 struct CommsLocalRow: View {
     let thread: CommsLocalThread
     var folder: CommsFolder = .inbox
@@ -726,33 +900,23 @@ struct CommsLocalRow: View {
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
-        HStack(alignment: .top, spacing: 12) {
-            if !stacked { CommsAvatar(initials: thread.initials, symbol: thread.channel == .email ? "envelope.fill" : "bubble.left.fill") }
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(thread.contactName).font(Theme.font(15, weight: thread.unread ? .medium : .regular))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(stacked ? nil : 1)
-                    if thread.channel == .email && thread.messages.count > 1 {
-                        Text("\(thread.messages.count)").font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                    }
-                    if thread.flags.starredAt != nil {
-                        Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
-                    }
-                    Spacer(minLength: 8)
-                    Text(CommsAge.compact(thread.latestAt)).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
-                        .fixedSize()
-                    Circle().fill(thread.unread ? Theme.brand : .clear).frame(width: 7, height: 7)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                }
-                Text(thread.line(in: folder)).font(Theme.font(14))
+        let email = thread.channel == .email
+        CommsRowShell(unread: thread.unread) {
+            CommsAvatar(initials: thread.initials, symbol: email ? "envelope.fill" : "bubble.left.fill",
+                        tone: thread.unread ? .unread : .quiet, badge: false)
+        } content: {
+            CommsRowTitle(name: thread.contactName, time: commsRowTime(thread.latestAt), unread: thread.unread,
+                          count: email ? thread.messages.count : nil, starred: thread.flags.starredAt != nil)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: email ? "envelope" : "bubble.left").font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+                Text(thread.line(in: folder)).font(Theme.font(15))
                     .foregroundStyle(thread.unread ? Theme.foreground : Theme.muted)
                     .lineLimit(stacked ? 4 : 2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .contentShape(Rectangle())
     }
 }

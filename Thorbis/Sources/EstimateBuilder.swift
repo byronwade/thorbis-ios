@@ -443,7 +443,7 @@ struct PriceBookResultsList: View {
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.bottom, 24)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         .onAppear { resetPage() }
         .onChange(of: query) { _, _ in resetPage() }
         .onChange(of: kind) { _, _ in resetPage() }
@@ -503,7 +503,7 @@ struct PriceBookResultsList: View {
         VStack(alignment: .leading, spacing: 6) {
             if let title {
                 HStack {
-                    Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                    Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                         .accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 8)
                     if let trailing {
@@ -641,7 +641,6 @@ private struct PriceBookCatalogResultRow: View {
 
     @ViewBuilder private var standardRow: some View {
         let item = result.item
-        let stacked = false
         HStack(alignment: .center, spacing: 4) {
             if let toggleFavorite {
                 Button(action: toggleFavorite) {
@@ -655,30 +654,22 @@ private struct PriceBookCatalogResultRow: View {
             }
             Button(action: addItem) {
                 HStack(alignment: .center, spacing: 10) {
-                    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                         : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
-                    layout {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(PriceBookResultsList.highlighted(item.description, result.highlights))
-                                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit)")
-                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        }
-                        if !stacked { Spacer(minLength: 8) }
-                        VStack(alignment: stacked ? .leading : .trailing, spacing: 3) {
-                            Text(money(item.sellPrice.amount, currency: item.sellPrice.currency))
-                                .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .lineLimit(1).minimumScaleFactor(0.7)
-                            if let secondary = secondaryPrice {
-                                Text(secondary).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                            }
+                    // Paper 33: the name (16 Medium) over "kind · unit · price" (14 muted), the "+" circle trailing.
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(PriceBookResultsList.highlighted(item.description, result.highlights))
+                            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(PriceBookKindFilter(rawValue: item.kind)?.singular ?? item.kind.capitalized) · \(item.unit) · \(money(item.sellPrice.amount, currency: item.sellPrice.currency))")
+                            .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let secondary = secondaryPrice {
+                            Text(secondary).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     ZStack(alignment: .topTrailing) {
-                        PaperCircleLabel(symbol: "plus", size: 36, fill: quantity == nil ? Theme.fill : Theme.brandSurface)
+                        PaperCircleLabel(symbol: "plus", size: 44, fill: quantity == nil ? Theme.fill : Theme.brandSurface)
                         if let quantity {
                             Text("\(quantity)")
                                 .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.onInk)
@@ -689,8 +680,8 @@ private struct PriceBookCatalogResultRow: View {
                         }
                     }
                 }
-                .padding(.leading, toggleFavorite == nil ? 14 : 0).padding(.trailing, 6).padding(.vertical, 8)
-                .frame(minHeight: 60).contentShape(Rectangle())
+                .padding(.leading, toggleFavorite == nil ? 16 : 0).padding(.trailing, 6).padding(.vertical, 8)
+                .frame(minHeight: 64).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
@@ -717,6 +708,19 @@ extension PriceBookKindFilter {
 
 // MARK: - Lines (EB-09..EB-12)
 
+private struct BuilderDocumentLabelKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
+extension EnvironmentValues {
+    /// The document a builder's lines belong to ("EST-1058", "INV-2209"), for the full editor's
+    /// subtitle (Paper TE1). Set by the builder screen; nil when the screen names none.
+    var builderDocumentLabel: String? {
+        get { self[BuilderDocumentLabelKey.self] }
+        set { self[BuilderDocumentLabelKey.self] = newValue }
+    }
+}
+
 /// One editable line on any builder (estimate, option, invoice). Collapsed it reads like the
 /// customer's paper: the full description, quantity × price and the line total. A tap opens it in
 /// place with a big stepper, a price field and the description; ••• holds every other action.
@@ -742,9 +746,22 @@ struct BuilderLineRow: View {
     var priceIdentifier: String? = nil
     /// Keep both row actions clear of the keyboard's trailing Done control.
     var lineActionsLeading = false
+    /// Paper 35/35A: where the line came from ("Price book", "Custom"), shown before its price.
+    /// Without it the row reads "1 × $120.00".
+    var sourceLabel: String? = nil
 
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.builderDocumentLabel) private var documentLabel
+    @State private var fullEditor = false
+
+    /// Paper TE1's subtitle: what the line is and the document it is on.
+    private var editorSubtitle: String? {
+        var parts: [String] = []
+        if let sourceLabel { parts.append(sourceLabel == "Custom" ? "Custom item" : "\(sourceLabel) item") }
+        if let documentLabel { parts.append(documentLabel) }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
 
     private var removeLineButton: some View {
         Button(role: .destructive, action: remove) {
@@ -756,9 +773,10 @@ struct BuilderLineRow: View {
 
     private var closeLineButton: some View {
         Button(action: toggle) {
-            Text("Done").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .padding(.horizontal, 16).frame(minHeight: 44)
-                .background(Theme.fill, in: Capsule())
+            // Paper 35A: Done on the brand surface.
+            Text("Done").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                .padding(.horizontal, 18).frame(minHeight: 44)
+                .background(Theme.brandSurface, in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
@@ -774,7 +792,7 @@ struct BuilderLineRow: View {
         Group {
             if expanded { editor } else { summary }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .id(lineID)
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: "Remove line", remove)
@@ -782,43 +800,82 @@ struct BuilderLineRow: View {
 
     // MARK: Collapsed
 
+    /// Paper 35/35A: the name (16 Medium) over where it came from and its price (14 muted; the
+    /// line's total "for N" once there is more than one); on the trailing side the quantity pill,
+    /// where minus becomes remove at quantity 1 (Paper says so under the card, and the builder
+    /// offers Undo). A tap on the words opens the line; its other actions (move, duplicate, reset)
+    /// sit behind ••• once open. Paper draws no total column and no ••• on a closed row.
     private var summary: some View {
-        HStack(alignment: .top, spacing: 0) {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        return layout {
             Button(action: toggle) {
-                let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                     : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 10))
-                layout {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(name.isEmpty ? "Describe this item" : name)
-                            .font(Theme.font(16, weight: .medium))
-                            .foregroundStyle(name.isEmpty ? Theme.muted : Theme.foreground)
-                            .multilineTextAlignment(.leading)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name.isEmpty ? "Describe this item" : name)
+                        .font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                        .foregroundStyle(name.isEmpty ? Theme.muted : Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(detailText).font(Theme.font(14)).monospacedDigit()
+                        .foregroundStyle(priceText == nil ? Theme.warning : Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let note {
+                        Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(detailText).font(Theme.font(14)).monospacedDigit()
-                            .foregroundStyle(priceText == nil ? Theme.warning : Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let note {
-                            Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
                     }
-                    if !stacked { Spacer(minLength: 8) }
-                    Text(totalText)
-                        .font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .contentTransition(.numericText())
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .fixedSize(horizontal: !stacked, vertical: false)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
+                .padding(.vertical, 11)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(summaryLabel)
             .accessibilityHint("Opens quantity, price and description")
             .modifier(OptionalDraggable(payload: dragPayload, title: name))
-            menu.padding(.trailing, -10)
+            quantityPill
+                .padding(.bottom, stacked ? 11 : 0)
         }
+    }
+
+    /// The row's spoken summary: name, where it came from and price, quantity and line total.
+    private var summaryLabel: String {
+        [name.isEmpty ? "Describe this item" : name, detailText, note,
+         "quantity \(quantityValue)", "total \(totalText)"].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// Paper 35's quantity pill on the foreground-9% fill: trash (or minus), the count, plus.
+    private var quantityPill: some View {
+        let atOne = quantityValue <= 1
+        return HStack(spacing: 0) {
+            Button {
+                if atOne { remove() } else { quantity = String(quantityValue - 1) }
+            } label: {
+                Image(systemName: atOne ? "trash" : "minus").font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(atOne ? Theme.destructive : Theme.foreground)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel(atOne ? "Remove line" : "Decrease quantity")
+            Text("\(quantityValue)").font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(Theme.foreground)
+                .frame(minWidth: 18)
+                .accessibilityHidden(true)
+            Button {
+                quantity = String(min(100_000, quantityValue + 1))
+            } label: {
+                Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(quantityValue < 100_000 && isEnabled ? Theme.foreground : Theme.muted)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .disabled(quantityValue >= 100_000)
+            .accessibilityLabel("Increase quantity")
+            .accessibilityValue("\(quantityValue)")
+        }
+        .background(Theme.fill, in: Capsule())
+        .fixedSize()
+        .sensoryFeedback(.selection, trigger: quantity)
     }
 
     private var priceText: String? {
@@ -827,6 +884,15 @@ struct BuilderLineRow: View {
 
     private var detailText: String {
         let unit = unitLabel.flatMap { $0.isEmpty ? nil : " \($0)" } ?? ""
+        if let sourceLabel {
+            guard let priceText else { return "\(sourceLabel) · add a price" }
+            // Paper 40: more than one reads as the line's total, "Custom · $180.00 for 2".
+            if quantityValue > 1, let lineTotal {
+                return "\(sourceLabel) · \(money(lineTotal, currency: currency)) for \(quantityValue)"
+            }
+            let per = unitLabel.flatMap { $0.isEmpty || $0.lowercased() == "each" ? nil : " per \($0)" } ?? ""
+            return "\(sourceLabel) · \(priceText)\(per)"
+        }
         guard let priceText else { return "\(quantityValue)\(unit) · add a price" }
         return "\(quantityValue)\(unit) × \(priceText)"
     }
@@ -847,7 +913,25 @@ struct BuilderLineRow: View {
                     .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                     .accessibilityLabel("Line description")
                     .modifier(OptionalIdentifier(identifier: descriptionIdentifier))
+                // Paper TE1: long wording opens in the full editor.
+                Button {
+                    focus.wrappedValue = nil
+                    fullEditor = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Open full editor")
+                .accessibilityIdentifier("line-description-expand")
                 menu.padding(.trailing, -10)
+            }
+            .fullScreenCover(isPresented: $fullEditor) {
+                LineDescriptionEditor(text: $description, subtitle: editorSubtitle,
+                                      totalText: lineTotal == nil ? nil : totalText,
+                                      note: note, resetTitle: noteAction?.title, resetHint: noteAction?.hint,
+                                      reset: noteAction?.action)
             }
             let layout = stacked || typeSize >= .xxLarge ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
                                                          : AnyLayout(HStackLayout(spacing: 10))
@@ -997,7 +1081,7 @@ struct EstimateLineGroupsEditor: View {
                             .font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
                             .contentTransition(.numericText())
                     }
-                    .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 2)
+                    .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 2)
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isHeader)
                     .dropDestination(for: String.self) { ids, _ in drop(ids, before: groupLines.first?.id, group: group) }
@@ -1005,6 +1089,10 @@ struct EstimateLineGroupsEditor: View {
                 if group == .material && materialsSwitch && !groupLines.isEmpty { materialsVisibility }
                 ForEach(groupLines) { line in
                     lineRow(line, groupLines: groupLines)
+                        // Paper 35: a hairline between lines of one card.
+                        .overlay(alignment: .top) {
+                            if line.id != groupLines.first?.id { WellDivider(leading: 16) }
+                        }
                         .dropDestination(for: String.self) { ids, _ in drop(ids, before: line.id, group: group) }
                 }
             }
@@ -1042,7 +1130,8 @@ struct EstimateLineGroupsEditor: View {
             toggle: { withAnimation(Self.spring) { expandedLine = expandedLine == line.id ? nil : line.id } },
             remove: { remove(line.id) }, focus: focus, dragPayload: line.id.uuidString,
             descriptionIdentifier: "line-description",
-            lineActionsLeading: lineActionsLeading
+            lineActionsLeading: lineActionsLeading,
+            sourceLabel: Self.sourceLabel(line)
         )
         .accessibilityAction(named: "Move up") { if canMoveUp { withAnimation(Self.spring) { lines.moveLine(id: line.id, by: -1) } } }
         .accessibilityAction(named: "Move down") { if canMoveDown { withAnimation(Self.spring) { lines.moveLine(id: line.id, by: 1) } } }
@@ -1069,10 +1158,16 @@ struct EstimateLineGroupsEditor: View {
                     .transition(.opacity)
             }
         }
-        .padding(.horizontal, 14).padding(.bottom, 4)
+        .padding(.horizontal, 16).padding(.bottom, 4)
     }
 
     static let spring = Animation.spring(response: 0.3, dampingFraction: 1)
+
+    /// Paper 35: "Price book" for a line picked from the price book, "Custom" for one typed here.
+    static func sourceLabel(_ line: EstimateRevisionLineDraft) -> String {
+        if case .priceBookSelection(_, _)? = line.source { return "Price book" }
+        return "Custom"
+    }
 
     private func drop(_ ids: [String], before target: UUID?, group: EstimateLineGroup) -> Bool {
         guard let raw = ids.first, let id = UUID(uuidString: raw), lines.contains(where: { $0.id == id }) else { return false }
@@ -1110,12 +1205,139 @@ struct EstimateBuilderSection<Header: View>: View {
     let addItem: () -> Void
     var addDiscount: (() -> Void)? = nil
     let removed: (EstimateRevisionLineDraft, Int) -> Void
+    /// Paper 35: "Add item" is its own field above the label and the lines card, with this note
+    /// on its trailing side ("Price book or custom"). Off, it is the last row inside the card.
+    var addItemAbove = false
+    var addItemNote: String? = nil
+    /// Paper 30/32: "Scan or paste materials" under the add field; nil leaves it out.
+    var addMaterials: (() -> Void)? = nil
     @ViewBuilder var header: Header
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        if addItemAbove {
+            VStack(alignment: .leading, spacing: 10) {
+                addItemField
+                if let addMaterials {
+                    Button(action: addMaterials) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "barcode.viewfinder").font(.system(size: 15, weight: .medium))
+                            Text("Scan or paste materials").font(Theme.font(14, weight: .semibold))
+                        }
+                        .foregroundStyle(Theme.brandText)
+                        .frame(minHeight: 44).padding(.horizontal, 4)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(disabled || lines.count >= [EstimateRevisionLineDraft].maximumLines)
+                    .accessibilityIdentifier("estimate-add-materials")
+                }
+                if !lines.isEmpty {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 0)
+                        Text("\(lines.count) item\(lines.count == 1 ? "" : "s")").font(Theme.font(13)).monospacedDigit()
+                            .foregroundStyle(Theme.muted)
+                        if !menuItems.isEmpty {
+                            ThorbisMenu(items: menuItems, title: label, accessibilityLabel: "Actions for \(label)") {
+                                Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                                    .frame(width: 44, height: 32).contentShape(Rectangle())
+                            }
+                            .disabled(disabled)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    if let caption {
+                        Text(caption).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4)
+                    }
+                    PaperCard {
+                        VStack(alignment: .leading, spacing: 0) {
+                            header
+                            EstimateLineGroupsEditor(lines: $lines, disabled: disabled, focus: focus,
+                                                     expandedLine: $expandedLine, materialsSwitch: materialsSwitch,
+                                                     lineActionsLeading: lineActionsLeading, removed: removed)
+                            sectionTotal
+                            discountRow
+                        }
+                    }
+                }
+            }
+        } else {
+            stackedSection
+        }
+    }
+
+    /// Paper 35's add field: a 48-tall card (radius 14), the brand plus, "Add item" and the note.
+    private var addItemField: some View {
+        Button(action: addItem) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.brandText)
+                Text("Add item").font(Theme.font(16)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 8)
+                if let addItemNote {
+                    Text(addItemNote).font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+            }
+            .padding(.horizontal, 12).frame(minHeight: 48)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+        .disabled(disabled || lines.count >= [EstimateRevisionLineDraft].maximumLines)
+        .accessibilityLabel("Add item")
+        .accessibilityValue(label)
+        .accessibilityHint("Opens the price book")
+        .accessibilityIdentifier("estimate-add-item")
+    }
+
+    @ViewBuilder private var sectionTotal: some View {
+        if showTotal, !lines.isEmpty {
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(totalLabel).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Text(lines.subtotal().map { money($0, currency: "USD") } ?? "—")
+                        .font(Theme.monoFont(20, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .contentTransition(.numericText())
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                if let member = lines.memberTotal(memberPricing), let memberPricing {
+                    Text("Member \(money(member, currency: "USD")) · \(memberPricing.discountPercent)% off")
+                        .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .background(Theme.fill.opacity(0.45))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder private var discountRow: some View {
+        if let addDiscount, !lines.isEmpty {
+            Button(action: addDiscount) {
+                HStack(spacing: 10) {
+                    Image(systemName: "tag").font(.system(size: 15, weight: .medium))
+                    Text("Add discount").font(Theme.font(15, weight: .medium))
+                    Spacer(minLength: 0)
+                    Text("$ or %").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                }
+                .foregroundStyle(Theme.foreground)
+                .padding(.horizontal, 16).frame(minHeight: 48).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(disabled)
+            .accessibilityHint("Adds a credit line with a fixed amount")
+        }
+    }
+
+    /// The label (and its ••• menu) above one card holding the fields, lines, Add item, the total
+    /// and Add discount: an option package in the revision editor.
+    private var stackedSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 8) {
-                Text(label).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
+                Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                     .accessibilityAddTraits(.isHeader)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -1129,10 +1351,11 @@ struct EstimateBuilderSection<Header: View>: View {
             }
             // Flush with the card and the fields above it, so every left edge on the sheet lines up.
             .frame(minHeight: 32)
+            .padding(.horizontal, 4)
             if let caption {
                 Text(caption).font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.bottom, 2)
+                    .padding(.horizontal, 4).padding(.bottom, 2)
             }
             PaperCard {
                 VStack(alignment: .leading, spacing: 0) {
@@ -1142,52 +1365,20 @@ struct EstimateBuilderSection<Header: View>: View {
                                              lineActionsLeading: lineActionsLeading, removed: removed)
                     Button(action: addItem) {
                         HStack(spacing: 10) {
-                            Image(systemName: "plus").font(.system(size: 15, weight: .medium))
+                            Image(systemName: "plus").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
                             Text("Add item").font(Theme.font(16, weight: .medium))
                             Spacer(minLength: 0)
                         }
                         .foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 14).frame(minHeight: 52).contentShape(Rectangle())
+                        .padding(.horizontal, 16).frame(minHeight: 52).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(disabled || lines.count >= [EstimateRevisionLineDraft].maximumLines)
                     .accessibilityValue(label)
                     .accessibilityHint("Opens the price book")
                     .accessibilityIdentifier("estimate-add-item")
-                    if showTotal, !lines.isEmpty {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text(totalLabel).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.muted)
-                                Spacer(minLength: 8)
-                                Text(lines.subtotal().map { money($0, currency: "USD") } ?? "—")
-                                    .font(Theme.monoFont(20, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .contentTransition(.numericText())
-                                    .lineLimit(1).minimumScaleFactor(0.7)
-                            }
-                            if let member = lines.memberTotal(memberPricing), let memberPricing {
-                                Text("Member \(money(member, currency: "USD")) · \(memberPricing.discountPercent)% off")
-                                    .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-                            }
-                        }
-                        .padding(.horizontal, 14).padding(.vertical, 12)
-                        .background(Theme.fill.opacity(0.45))
-                        .accessibilityElement(children: .combine)
-                    }
-                    if let addDiscount, !lines.isEmpty {
-                        Button(action: addDiscount) {
-                            HStack(spacing: 10) {
-                                Image(systemName: "tag").font(.system(size: 15, weight: .medium))
-                                Text("Add discount").font(Theme.font(15, weight: .medium))
-                                Spacer(minLength: 0)
-                                Text("$ or %").font(Theme.font(14)).foregroundStyle(Theme.muted)
-                            }
-                            .foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 48).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(disabled)
-                        .accessibilityHint("Adds a credit line with a fixed amount")
-                    }
+                    sectionTotal
+                    discountRow
                 }
             }
         }
@@ -1200,11 +1391,13 @@ extension EstimateBuilderSection where Header == EmptyView {
          showTotal: Bool = true, memberPricing: MemberPricing? = nil, materialsSwitch: Bool = false,
          lineActionsLeading: Bool = false, menuItems: [ThorbisMenuItem] = [],
          addItem: @escaping () -> Void, addDiscount: (() -> Void)? = nil,
-         removed: @escaping (EstimateRevisionLineDraft, Int) -> Void) {
+         removed: @escaping (EstimateRevisionLineDraft, Int) -> Void,
+         addItemAbove: Bool = false, addItemNote: String? = nil, addMaterials: (() -> Void)? = nil) {
         self.init(label: label, caption: caption, lines: lines, disabled: disabled, focus: focus, expandedLine: expandedLine,
                   totalLabel: totalLabel, showTotal: showTotal, memberPricing: memberPricing,
                   materialsSwitch: materialsSwitch, lineActionsLeading: lineActionsLeading, menuItems: menuItems,
-                  addItem: addItem, addDiscount: addDiscount, removed: removed) { EmptyView() }
+                  addItem: addItem, addDiscount: addDiscount, removed: removed,
+                  addItemAbove: addItemAbove, addItemNote: addItemNote, addMaterials: addMaterials) { EmptyView() }
     }
 }
 
@@ -1300,6 +1493,7 @@ struct EstimateDiscountSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var percent = false
     @State private var text = ""
+    @State private var reason = ""
     @State private var problem: String?
     @FocusState private var focused: Bool
 
@@ -1323,44 +1517,86 @@ struct EstimateDiscountSheet: View {
         return percent ? "Discount · \(value)%" : "Discount"
     }
 
+    /// The credit line's wording: the label, then the reason when one was typed ("Discount — Loyalty").
+    private var creditDescription: String {
+        let why = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return why.isEmpty ? label : "\(label) \u{2014} \(why)"
+    }
+
     var body: some View {
-        ThorbisSheetScaffold(title: "Add discount", onClose: { dismiss() }, detents: [.medium, .large]) {
-            Text("Goes on \(target) as a credit line the customer sees. It's a fixed amount: it won't change if you change the items later.")
-                .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            ThorbisSegmented(options: [(false, "Amount ($)"), (true, "Percent (%)")], selection: $percent)
-            // v2: the affix sits inside the sunk well; the problem shows under it after Add is pressed.
-            HStack(spacing: 6) {
-                if !percent { Text("$").font(Theme.monoFont(22)).foregroundStyle(Theme.muted) }
-                TextField(percent ? "10" : "0.00", text: $text, prompt: .placeholder(percent ? "10" : "0.00"))
-                    .keyboardType(.decimalPad)
-                    .font(Theme.monoFont(22, weight: .medium))
-                    .focused($focused)
-                    .accessibilityLabel(percent ? "Discount percent" : "Discount amount in dollars")
-                if percent { Text("%").font(Theme.monoFont(22)).foregroundStyle(Theme.muted) }
+        // Paper 40D: "Discount or credit", its Type, the amount off, then the new total.
+        ThorbisSheetScaffold(title: "Discount or credit", onClose: { dismiss() }, detents: [.medium, .large]) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Type").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4)
+                    .accessibilityHidden(true)
+                ThorbisSegmented(options: [(true, "Percent"), (false, "Amount")], selection: $percent)
             }
-            .fieldWell()
-            .onChange(of: text) { _, _ in problem = nil }
-            if let problem {
-                FieldProblem(message: problem)
-            } else if let subtotal {
-                Text("Before discount \(money(subtotal, currency: "USD"))")
-                    .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+            // Paper 40D: "Amount off" over the field; the affix sits inside the sunk well and the
+            // problem shows under it after Add is pressed.
+            FormField(label: percent ? "Percent off" : "Amount off",
+                      help: "Goes on \(target) as a credit line the customer sees. It's a fixed amount: it won't change if you change the items later.",
+                      error: problem) {
+                HStack(spacing: 6) {
+                    if !percent { Text("$").font(Theme.monoFont(22)).foregroundStyle(Theme.muted) }
+                    TextField(percent ? "10" : "0.00", text: $text, prompt: .placeholder(percent ? "10" : "0.00"))
+                        .keyboardType(.decimalPad)
+                        .font(Theme.monoFont(22, weight: .medium))
+                        .focused($focused)
+                        .accessibilityLabel(percent ? "Discount percent" : "Discount amount in dollars")
+                    if percent { Text("%").font(Theme.monoFont(22)).foregroundStyle(Theme.muted) }
+                }
+                .fieldWell()
+                .onChange(of: text) { _, _ in problem = nil }
+            }
+            // Paper 40D: the reason the customer reads, as the invoice discount writes it.
+            FormField(label: "Reason \u{00B7} shown to customer", optional: true,
+                      help: "Shown as \u{201C}\(creditDescription)\u{201D}.") {
+                TextField("", text: $reason, prompt: .placeholder("Loyalty"))
+                    .font(Theme.font(16))
+                    .textInputAutocapitalization(.sentences)
+                    .accessibilityLabel("Reason")
+                    .fieldWell()
+                    .onChange(of: reason) { _, value in
+                        if value.count > 80 { reason = String(value.prefix(80)) }
+                    }
+            }
+            if let subtotal, let off = cents {
+                newTotalCard(subtotal: subtotal, off: off)
             }
             Button {
                 guard let cents else {
                     problem = percent ? "Enter a percent from 1 to 100, like 10." : "Enter an amount up to the subtotal, like 25.00."
                     return
                 }
-                apply(label, cents)
+                apply(creditDescription, cents)
                 dismiss()
             } label: {
-                Text(cents.map { "Add \(label.lowercased()) · −\(money($0, currency: "USD"))" } ?? "Add discount")
+                Text(cents.map { "Add \(label.lowercased()) · −\(money($0, currency: "USD"))" } ?? "Add")
                     .inkCommit()
             }
             .buttonStyle(PressStyle())
         }
         .onChange(of: percent) { _, _ in text = "" }
         .task { focused = true }
+    }
+
+    /// Paper 40D: what the section comes to with this discount, and what it was.
+    private func newTotalCard(subtotal: Int, off: Int) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("New total").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.success)
+                Text("Was \(money(subtotal, currency: "USD"))").font(Theme.font(14)).monospacedDigit()
+                    .foregroundStyle(Theme.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(money(subtotal - off, currency: "USD"))
+                .font(Theme.font(24, weight: .bold)).monospacedDigit().tracking(-0.4)
+                .foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.7)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .background(Theme.successSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityElement(children: .combine)
     }
 }

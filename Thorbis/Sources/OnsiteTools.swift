@@ -137,7 +137,8 @@ struct OfficeContact: Equatable {
 /// Two quiet circles, Call office and Text office, shown only when the workspace has a business
 /// phone this person can read. Drop it in a header or a toolkit row.
 struct OfficeContactActions: View {
-    var size: CGFloat = 36
+    /// Paper v2: header circles are 44.
+    var size: CGFloat = 44
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.openURL) private var openURL

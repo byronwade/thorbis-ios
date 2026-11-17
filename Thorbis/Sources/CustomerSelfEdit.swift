@@ -305,7 +305,7 @@ struct CustomerCommitButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if busy { ProgressView().tint(Theme.background) } else if let icon { Image(systemName: icon) }
+                if busy { ProgressView().tint(.white) } else if let icon { Image(systemName: icon) }
                 Text(title).font(Theme.customerFont(CustomerModeStyle.body, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -313,8 +313,9 @@ struct CustomerCommitButton: View {
             .padding(.horizontal, 16).padding(.vertical, 12)
             .frame(maxWidth: .infinity)
             .frame(minHeight: sizeClass == .regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
-            .foregroundStyle(Theme.background)
-            .background(Theme.foreground, in: RoundedRectangle(cornerRadius: 14))
+            // Paper v2: the commit is a brand pill with white type.
+            .foregroundStyle(Color.white)
+            .background(Theme.brand, in: Capsule())
         }
         .disabled(busy)
     }
@@ -444,7 +445,7 @@ struct CustomerModeContainer<Content: View>: View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "hand.wave").font(.system(size: 44)).foregroundStyle(Theme.brandText).accessibilityHidden(true)
-            Text("Thank you").font(Theme.customerFont(28, weight: .semibold)).tracking(-0.42)
+            Text("Thank you").font(Theme.customerFont(34, weight: .bold)).tracking(-0.85)
                 .accessibilityAddTraits(.isHeader)
             Text("Please hand the device back to your technician.")
                 .font(Theme.customerFont(CustomerModeStyle.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
@@ -568,79 +569,35 @@ struct CustomerSelfEditForm: View {
     @State private var showErrors = false
     @FocusState private var focused: Bool
 
-    private var businessName: String { session.activeOrganization?.name ?? "us" }
+    /// Paper 38H: "Wade's Plumbing uses these to reach you and find your home."
+    private var intro: String {
+        guard let name = session.activeOrganization?.name, !name.isEmpty else {
+            return "We use these to reach you and find your home."
+        }
+        return "\(name) uses these to reach you and find your home."
+    }
 
     var body: some View {
         Group {
         if let draft = Binding($model.draft) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Your details").font(Theme.customerFont(34, weight: .bold)).tracking(-0.68)
-                            .accessibilityAddTraits(.isHeader)
-                        Text("Check what \(businessName) has on file and fix anything that's wrong.")
-                            .font(Theme.customerFont(CustomerModeStyle.body)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.top, 8).padding(.bottom, 24)
+                    // Paper 38H: "My details" is the bar's title; one quiet sentence opens the page.
+                    Text(intro)
+                        .font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                        .padding(.top, 8).padding(.bottom, 16)
 
-                    group("You") {
-                        field("Name", text: draft.name, content: .name, error: showErrors ? draft.wrappedValue.nameError : nil)
-                        field("Mobile phone", text: draft.phone, content: .telephoneNumber, keyboard: .phonePad)
-                        field("Email", text: draft.email, content: .emailAddress, keyboard: .emailAddress,
-                              error: showErrors ? draft.wrappedValue.emailError : nil)
-                        field("Billing address", text: draft.address, content: .fullStreetAddress, axis: .vertical)
-                    }
-
-                    group("Best way to reach you") {
-                        HStack(spacing: 8) {
-                            ForEach(CustomerSelfEditDraft.preferredOptions) { option in
-                                choice(option.label, selected: draft.wrappedValue.preferredContact == option.value) {
-                                    draft.wrappedValue.preferredContact = draft.wrappedValue.preferredContact == option.value ? nil : option.value
-                                }
-                            }
-                        }
-                        Toggle(isOn: Binding(get: { draft.wrappedValue.allowsTexts == true },
-                                             set: { draft.wrappedValue.allowsTexts = $0 })) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Text me about my appointments").font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
-                                Text("On my way, arrival and job updates. Reply STOP any time.")
-                                    .font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
-                            }
-                        }
-                        .tint(Theme.brand)
-                        .frame(minHeight: 56)
-                        .padding(.top, 6)
-                    }
-
-                    if !draft.wrappedValue.locations.isEmpty {
-                        group(draft.wrappedValue.locations.count == 1 ? "Service address" : "Service addresses") {
-                            ForEach(draft.locations) { location in
-                                field(location.wrappedValue.label, text: location.address, content: .fullStreetAddress, axis: .vertical,
-                                      error: showErrors ? draft.wrappedValue.locationErrors[location.wrappedValue.id] : nil)
-                            }
-                        }
-                    }
-
-                    group("Other people we can contact") {
-                        ForEach(draft.contacts) { contact in
-                            VStack(alignment: .leading, spacing: 8) {
-                                field("Name", text: contact.name, content: .name,
-                                      error: showErrors ? draft.wrappedValue.contactErrors[contact.wrappedValue.id] : nil)
-                                field("Phone", text: contact.phone, content: .telephoneNumber, keyboard: .phonePad)
-                                field("Email", text: contact.email, content: .emailAddress, keyboard: .emailAddress)
-                            }
-                            .padding(.bottom, 12)
-                        }
-                        Text("Add someone").font(Theme.customerFont(CustomerModeStyle.smallest, weight: .medium)).foregroundStyle(Theme.muted).padding(.top, 2)
-                        field("Name", text: draft.newContactName, content: .name,
-                              error: showErrors ? draft.wrappedValue.newContactError : nil)
-                        field("Phone", text: draft.newContactPhone, content: .telephoneNumber, keyboard: .phonePad)
-                        field("Email", text: draft.newContactEmail, content: .emailAddress, keyboard: .emailAddress)
-                    }
+                    // Each group is its own function so the body stays quick to type-check.
+                    detailsGroup(draft)
+                    locationsGroup(draft)
+                    reachGroup(draft)
+                    contactsGroup(draft)
                 }
                 .frame(maxWidth: CustomerModeStyle.readableWidth, alignment: .leading)
-                .padding(.horizontal, Theme.gutter)
+                // Paper: cards sit 16 from the screen edge; words on the canvas add 4.
+                .padding(.horizontal, PaperCardMetrics.margin)
                 .frame(maxWidth: .infinity)
                 .padding(.bottom, 24)
             }
@@ -672,27 +629,125 @@ struct CustomerSelfEditForm: View {
             }
         }
         }
+        // Paper 38H: the bar reads "My details".
+        .navigationTitle("My details")
         .task { await model.load(api: api) }
+    }
+
+    // MARK: Groups
+
+    /// Paper 38H: the fields of one group share a card, a hairline between them.
+    private func detailsGroup(_ draft: Binding<CustomerSelfEditDraft>) -> some View {
+        let nameError: String? = showErrors ? draft.wrappedValue.nameError : nil
+        let emailError: String? = showErrors ? draft.wrappedValue.emailError : nil
+        return group(nil) {
+            card {
+                field("Name", text: draft.name, content: .name, error: nameError, first: true)
+                field("Mobile phone", text: draft.phone, content: .telephoneNumber, keyboard: .phonePad)
+                field("Email", text: draft.email, content: .emailAddress, keyboard: .emailAddress, error: emailError)
+                field("Billing address", text: draft.address, content: .fullStreetAddress, axis: .vertical)
+            }
+        }
+    }
+
+    @ViewBuilder private func locationsGroup(_ draft: Binding<CustomerSelfEditDraft>) -> some View {
+        if !draft.wrappedValue.locations.isEmpty {
+            group(draft.wrappedValue.locations.count == 1 ? "Service address" : "Service addresses") {
+                card {
+                    ForEach(draft.locations) { location in
+                        field(location.wrappedValue.label, text: location.address, content: .fullStreetAddress, axis: .vertical,
+                              error: showErrors ? draft.wrappedValue.locationErrors[location.wrappedValue.id] : nil,
+                              first: location.wrappedValue.id == draft.wrappedValue.locations.first?.id)
+                    }
+                }
+            }
+        }
+    }
+
+    private func reachGroup(_ draft: Binding<CustomerSelfEditDraft>) -> some View {
+        group("Best way to reach you") {
+            HStack(spacing: 8) {
+                ForEach(CustomerSelfEditDraft.preferredOptions) { option in
+                    choice(option.label, selected: draft.wrappedValue.preferredContact == option.value) {
+                        draft.wrappedValue.preferredContact = draft.wrappedValue.preferredContact == option.value ? nil : option.value
+                    }
+                }
+            }
+            // Paper 38H: "Text me updates" is a switch row on its own card.
+            card {
+                Toggle(isOn: Binding(get: { draft.wrappedValue.allowsTexts == true },
+                                     set: { draft.wrappedValue.allowsTexts = $0 })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Text me updates").font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
+                        Text("On my way, arrival and job updates. Reply STOP any time.")
+                            .font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .tint(Theme.brand)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .frame(minHeight: 64)
+            }
+        }
+    }
+
+    private func contactsGroup(_ draft: Binding<CustomerSelfEditDraft>) -> some View {
+        group("Other people we can contact") {
+            ForEach(draft.contacts) { contact in
+                card {
+                    field("Name", text: contact.name, content: .name,
+                          error: showErrors ? draft.wrappedValue.contactErrors[contact.wrappedValue.id] : nil, first: true)
+                    field("Phone", text: contact.phone, content: .telephoneNumber, keyboard: .phonePad)
+                    field("Email", text: contact.email, content: .emailAddress, keyboard: .emailAddress)
+                }
+                .padding(.bottom, 4)
+            }
+            Text("Add someone").font(Theme.customerFont(CustomerModeStyle.smallest, weight: .medium)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4).padding(.top, 2)
+            card {
+                field("Name", text: draft.newContactName, content: .name,
+                      error: showErrors ? draft.wrappedValue.newContactError : nil, first: true)
+                field("Phone", text: draft.newContactPhone, content: .telephoneNumber, keyboard: .phonePad)
+                field("Email", text: draft.newContactEmail, content: .emailAddress, keyboard: .emailAddress)
+            }
+        }
     }
 
     // MARK: Pieces
 
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+    /// A group of cards, 16 from the next (Paper 38H). `title` is the Semibold section label at the
+    /// customer floor, 8 above its cards; the first group (the customer's own details) has none.
+    private func group<Content: View>(_ title: String?, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.customerFont(CustomerModeStyle.smallest, weight: .semibold)).foregroundStyle(Theme.muted)
-                .accessibilityAddTraits(.isHeader)
+            if let title {
+                Text(title).font(Theme.customerFont(CustomerModeStyle.smallest, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.horizontal, 4)
+            }
             content()
         }
-        .padding(.bottom, 24)
+        .padding(.bottom, 16)
     }
 
+    /// Paper 38H: one card (radius 20) holding a group's rows.
+    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground(cornerRadius: Theme.cardRadius)
+    }
+
+    /// One row of a card: the quiet label over the value (Medium), a hairline above every row but
+    /// the card's first. A problem turns the label red and says what to fix under the value.
     private func field(_ label: String, text: Binding<String>, content: UITextContentType? = nil,
-                       keyboard: UIKeyboardType = .default, axis: Axis = .horizontal, error: String? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+                       keyboard: UIKeyboardType = .default, axis: Axis = .horizontal, error: String? = nil,
+                       first: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !first { WellDivider() }
             VStack(alignment: .leading, spacing: 2) {
-                Text(label).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.muted)
+                Text(label).font(Theme.customerFont(CustomerModeStyle.smallest))
+                    .foregroundStyle(error == nil ? Theme.muted : Theme.destructive)
                 TextField("", text: text, axis: axis)
-                    .font(Theme.customerFont(CustomerModeStyle.body))
+                    .font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
                     .textContentType(content)
                     .keyboardType(keyboard)
                     .textInputAutocapitalization(keyboard == .emailAddress ? .never : .words)
@@ -700,12 +755,13 @@ struct CustomerSelfEditForm: View {
                     .lineLimit(axis == .vertical ? 1...3 : 1...1)
                     .focused($focused)
                     .accessibilityLabel(label)
+                if let error {
+                    Text(error).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .padding(.horizontal, 14).padding(.vertical, 8)
-            .frame(minHeight: 68, alignment: .leading)
-            .panelBackground(cornerRadius: 12)
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(error == nil ? Theme.border : Theme.destructive))
-            if let error { Text(error).font(Theme.customerFont(CustomerModeStyle.smallest)).foregroundStyle(Theme.destructive) }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
         }
     }
 
@@ -714,8 +770,7 @@ struct CustomerSelfEditForm: View {
             Text(title).font(Theme.customerFont(CustomerModeStyle.body, weight: .medium))
                 .frame(maxWidth: .infinity).frame(height: CustomerModeStyle.commitHeight)
                 .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
-                .background(selected ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Theme.brandText : Theme.border))
+                .background(selected ? Theme.brandSurface : Theme.card, in: Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -743,7 +798,7 @@ struct CustomerSelfEditReview: View {
         let changes = model.draft?.changeSummary ?? []
         return ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Review changes").font(Theme.customerFont(24, weight: .medium)).tracking(-0.36)
+                Text("Review changes").font(Theme.customerFont(34, weight: .bold)).tracking(-0.85)
                     .accessibilityAddTraits(.isHeader)
                 Text("These save to the customer's record and activity under your name.")
                     .font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
@@ -753,8 +808,8 @@ struct CustomerSelfEditReview: View {
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                 }
-                .padding(.horizontal, 14)
-                .panelBackground(cornerRadius: 12)
+                .padding(.horizontal, 16)
+                .panelBackground(cornerRadius: Theme.cardRadius)
                 if let saveError = model.saveError {
                     Text(saveError).font(Theme.customerFont(13)).foregroundStyle(Theme.destructive)
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)

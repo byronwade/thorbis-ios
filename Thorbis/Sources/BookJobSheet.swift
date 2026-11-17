@@ -155,8 +155,12 @@ struct NewJobSheet: View {
     private var canCreateCustomer: Bool { session.can("customer.create", feature: "core_crm") }
     private var locked: Bool { busy || savedJob != nil }
 
-    init(preselected: Customer? = nil) {
-        _draft = State(initialValue: FieldJobDraft(customerID: preselected?.id ?? ""))
+    /// - Parameter locationID: one of the preselected customer's service locations (a property's
+    ///   "New job here", a unit's "Start a job for this unit"). Dropped when it isn't theirs.
+    init(preselected: Customer? = nil, locationID: String? = nil) {
+        var initial = FieldJobDraft(customerID: preselected?.id ?? "")
+        if preselected != nil { initial.locationID = locationID }
+        _draft = State(initialValue: initial)
         if let preselected { _knownNames = State(initialValue: [preselected.id: preselected.name]) }
     }
 
@@ -166,18 +170,19 @@ struct NewJobSheet: View {
                 topBar
                 ScrollViewReader { reader in
                 ScrollView {
-                    // In the order a call gives it: who, what, where, when, who goes.
+                    // Paper 75: the job's title and description lead, then a chip for each thing still
+                    // to set (customer, schedule, assignee), then each one's own section.
                     VStack(alignment: .leading, spacing: 24) {
-                        // v2: the form's title on the compact ramp, Medium.
-                        Text("New job")
-                            .font(Theme.font(24, weight: .medium)).tracking(-0.3)
-                            .accessibilityAddTraits(.isHeader)
-                            .padding(.top, 4)
-                        callerSection
-                        problemSection
+                        VStack(alignment: .leading, spacing: 10) {
+                            composerHead
+                            composerChips(reader)
+                            quickPicks
+                        }
+                        .padding(.top, 6)
+                        callerSection.id("book-job-caller-section")
                         if !draft.customerID.isEmpty || addingCustomer { addressSection }
                         if canAssign {
-                            whenSection
+                            whenSection.id("book-job-when")
                             techSection.id("book-job-tech")
                         }
                         if let error {
@@ -186,6 +191,12 @@ struct NewJobSheet: View {
                                 .foregroundStyle(Theme.destructive)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityIdentifier("new-job-error")
+                            if savedJob != nil {
+                                Button("Try again") { Task { await book() } }
+                                    .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
+                                    .frame(minHeight: 44)
+                                    .disabled(busy)
+                            }
                             if let savedJob, session.can("job.view", feature: "jobs") {
                                 Button("Open the job") { createdJobID = savedJob.id }
                                     .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
@@ -209,8 +220,7 @@ struct NewJobSheet: View {
                 }
             }
             .foregroundStyle(Theme.foreground).background(Theme.canvas).buttonStyle(.plain)
-            // The one commit rides above the keyboard, so typing never hides it.
-            .safeAreaInset(edge: .bottom) { commit }
+            // Paper 75: the one commit is the brand circle in the header, so typing never hides it.
             .toolbar(.hidden, for: .navigationBar)
             .onAppear(perform: start)
             .onChange(of: draft.customerID) { _, _ in callerProblem = nil }
@@ -251,24 +261,143 @@ struct NewJobSheet: View {
         !draft.title.isEmpty || !draft.notes.isEmpty || !query.isEmpty || !newName.isEmpty || !newPhone.isEmpty || !newAddress.isEmpty
     }
 
+    /// Paper 75's header: close on a card circle, the workspace on a 44pt card pill (its initial on
+    /// a brand tile), and the commit as the brand circle with an up arrow.
     private var topBar: some View {
-        HStack {
-            Button { dismiss() } label: {
-                Image(systemName: "xmark").frame(width: 38, height: 38).background(Theme.fill, in: Circle())
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-            }
+        let workspace = session.activeOrganization?.name ?? "Workspace"
+        return HStack(spacing: 8) {
+            Button { dismiss() } label: { CreamCircleLabel(symbol: "xmark") }
             .accessibilityLabel("Cancel new job").disabled(busy)
-            Spacer()
-            HStack(spacing: 5) {
-                Image("ThorbisMark").resizable().scaledToFit().frame(width: 16, height: 16).accessibilityHidden(true)
-                Text(session.activeOrganization?.name ?? "Workspace").font(Theme.font(13, weight: .medium)).lineLimit(1)
+            Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                Text(String(workspace.prefix(1)).uppercased())
+                    .font(Theme.font(12, weight: .bold)).foregroundStyle(Color.white)
+                    .frame(width: 22, height: 22)
+                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .accessibilityHidden(true)
+                Text(workspace).font(Theme.font(14, weight: .semibold)).lineLimit(1)
             }
-            .padding(.horizontal, 12).frame(height: 30).background(Theme.fill, in: Capsule())
-            Spacer()
-            // Balances the close button so the workspace pill stays centred.
-            Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
+            .padding(.leading, 8).padding(.trailing, 12).frame(height: 44)
+            .background(Theme.card, in: Capsule())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("New job in \(workspace)")
+            .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 0)
+            commit
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 6).padding(.bottom, 10)
+        .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
+    }
+
+    // MARK: Title, description and chips (Paper 75)
+
+    /// The job's title in 28 Bold and its description in 16, both typed straight onto the canvas.
+    private var composerHead: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("", text: $draft.title, prompt: .placeholder("Water heater leaking"), axis: .vertical)
+                .font(Theme.heading()).tracking(-0.56)
+                .lineLimit(1...3)
+                .focused($focus, equals: .title)
+                .accessibilityLabel("Job title")
+                .disabled(locked)
+            if draft.titleIsTooLong {
+                FieldProblem(message: "Keep the job title to 200 characters.")
+            } else if let titleProblem {
+                FieldProblem(message: titleProblem)
+            }
+            TextField(text: $draft.notes,
+                      prompt: .placeholder("Add description \u{2014} what's the problem, where, anything the tech should know\u{2026}"),
+                      axis: .vertical) { Text("Job description") }
+                .font(Theme.font(16))
+                .lineLimit(1...8)
+                .focused($focus, equals: .notes)
+                .accessibilityLabel("Job description")
+                .disabled(locked)
+            if draft.notesAreTooLong { FieldProblem(message: "Keep notes to 10,000 characters.") }
+        }
+    }
+
+    /// One 40pt card chip per thing the job can carry. A set chip reads its value in the brand ink;
+    /// a tap goes to that part of the form.
+    private func composerChips(_ reader: ScrollViewProxy) -> some View {
+        let customerName = draft.customerID.isEmpty ? nil : (match(for: draft.customerID)?.name ?? "Customer")
+        return FlowRow(spacing: 8, lineSpacing: 4) {
+            composerChip(customerName ?? "Customer", symbol: "person", isSet: customerName != nil,
+                         spoken: customerName.map { "Customer, \($0)" } ?? "Customer, not chosen") {
+                withAnimation { reader.scrollTo("book-job-caller-section", anchor: .top) }
+                if draft.customerID.isEmpty && !addingCustomer { focus = .caller }
+            }
+            if canAssign {
+                composerChip(scheduleChipTitle ?? "Schedule", symbol: "clock", isSet: scheduleChipTitle != nil,
+                             spoken: scheduleChipTitle.map { "Schedule, \($0)" } ?? "Schedule, not set") {
+                    focus = nil
+                    withAnimation { reader.scrollTo("book-job-when", anchor: .top) }
+                }
+                composerChip(tech?.displayName ?? "Assignee", symbol: "person.badge.plus", isSet: tech != nil,
+                             spoken: tech.map { "Assignee, \($0.displayName)" } ?? "Assignee, nobody yet") {
+                    focus = nil
+                    withAnimation { reader.scrollTo("book-job-tech", anchor: .top) }
+                }
+            }
+        }
+        // Paper sets the chips on the 16pt card margin; the title sits on the 20pt gutter.
+        .padding(.horizontal, 16 - Theme.gutter)
+    }
+
+    /// "Today 10:30 AM", "Tomorrow", "Nov 21 1:00 PM"; nil until a day is chosen.
+    private var scheduleChipTitle: String? {
+        let dayWord: String
+        switch dayChoice {
+        case .notYet: return nil
+        case .today: dayWord = "Today"
+        case .tomorrow: dayWord = "Tomorrow"
+        case .pick: dayWord = pickedDay.formatted(.dateTime.month(.abbreviated).day())
+        }
+        guard let when else { return dayWord }
+        return "\(dayWord) \(when.clockTime)"
+    }
+
+    private func composerChip(_ title: String, symbol: String, isSet: Bool, spoken: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(isSet ? Theme.brandText : Theme.muted)
+                    .accessibilityHidden(true)
+                Text(title).font(Theme.font(14, weight: isSet ? .semibold : .medium))
+                    .foregroundStyle(isSet ? Theme.brandText : Theme.subtle)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12).frame(height: 40)
+            .background(isSet ? Theme.brandSurface : Theme.card, in: Capsule())
+            // 44pt to press; the chip itself stays Paper's 40.
+            .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(spoken)
+    }
+
+    /// Quick picks while the title is still blank: this workspace's own recent titles.
+    @ViewBuilder private var quickPicks: some View {
+        let picks = draft.title.trimmingCharacters(in: .whitespaces).isEmpty ? BookJobSearch.commonTitles(store.jobs, limit: 5) : []
+        if !picks.isEmpty && savedJob == nil {
+            FlowRow(spacing: 6, lineSpacing: 6) {
+                ForEach(picks, id: \.self) { title in
+                    Button { draft.title = title; error = nil } label: {
+                        // Paper's choice chip: 40 tall on the field fill, 14 Medium.
+                        Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .lineLimit(1).fixedSize()
+                            .padding(.horizontal, 12).frame(height: 40)
+                            .background(Theme.fill, in: Capsule())
+                            .padding(.vertical, 2).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Use \(title)")
+                }
+            }
+            .padding(.horizontal, 16 - Theme.gutter)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Recent job titles")
+        }
     }
 
     // MARK: Who's calling
@@ -511,62 +640,6 @@ struct NewJobSheet: View {
         }
     }
 
-    // MARK: Problem
-
-    private var problemSection: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            PaperFormField("What's wrong?") {
-                TextField("", text: $draft.title, prompt: .placeholder("AC not cooling"), axis: .vertical)
-                    .font(Theme.font(16))
-                    .lineLimit(1...3)
-                    .focused($focus, equals: .title)
-                    .accessibilityLabel("Job title")
-                    .disabled(locked)
-                    .fieldWell()
-                // Quick picks while the problem is still blank; once typed they get out of the way.
-                let picks = draft.title.trimmingCharacters(in: .whitespaces).isEmpty ? BookJobSearch.commonTitles(store.jobs, limit: 5) : []
-                if !picks.isEmpty && savedJob == nil {
-                    FlowRow(spacing: 6, lineSpacing: 6) {
-                        ForEach(picks, id: \.self) { title in
-                            Button { draft.title = title; error = nil } label: {
-                                Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                                    .lineLimit(1).fixedSize()
-                                    .padding(.horizontal, 12).frame(height: 34)
-                                    .background(Theme.card, in: Capsule())
-                                    .overlay(Capsule().strokeBorder(Theme.border))
-                                    .padding(.vertical, 5).contentShape(Rectangle())
-                            }
-                            .buttonStyle(PressStyle())
-                            .accessibilityLabel("Use \(title)")
-                        }
-                    }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("Recent job titles")
-                }
-                if draft.titleIsTooLong {
-                    FieldProblem(message: "Keep the job title to 200 characters.")
-                } else if let titleProblem {
-                    FieldProblem(message: titleProblem)
-                }
-            }
-            PaperFormField("Notes for the tech", note: "Optional") {
-                TextField(text: $draft.notes, prompt: .placeholder("Gate code 4412. Dog in the back yard."),
-                          axis: .vertical) { Text("Job description") }
-                    .font(Theme.font(15))
-                    .lineLimit(2...6)
-                    .focused($focus, equals: .notes)
-                    .accessibilityLabel("Job description")
-                    .disabled(locked)
-                    .fieldWell()
-                if draft.notesAreTooLong {
-                    FieldProblem(message: "Keep notes to 10,000 characters.")
-                } else {
-                    Text("The tech reads this before they arrive.").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                }
-            }
-        }
-    }
-
     // MARK: Where
 
     @ViewBuilder private var addressSection: some View {
@@ -759,8 +832,9 @@ struct NewJobSheet: View {
                 }
                 Spacer(minLength: 8)
                 if suggested {
-                    Text("Suggested").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 8).frame(height: 24).background(Theme.fill, in: Capsule())
+                    // Paper 53A: "Suggested" as a brand chip.
+                    Text("Suggested").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .padding(.horizontal, 10).frame(height: 26).background(Theme.brandSurface, in: Capsule())
                 }
                 if chosen {
                     Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
@@ -790,25 +864,29 @@ struct NewJobSheet: View {
     }
 
     /// The one commit is never pre-disabled (design.thorbis.com "Don't lock the commit"): pressed
-    /// with something missing, it says what under the field. While saving, the word stays and the
-    /// mark turns.
+    /// with something missing, it says what under the field. Paper 75 draws it as the header's
+    /// brand circle with an up arrow; while saving the arrow gives way to a turning mark.
     private var commit: some View {
-        Button {
+        let allowed = session.can("job.create", feature: "jobs")
+        return Button {
             if savedJob == nil && !canBook { showProblems(); return }
             Task { await book() }
         } label: {
-            HStack(spacing: 8) {
-                if busy { ProgressView().tint(Theme.onInk) }
-                Text(savedJob == nil ? "Book job" : "Try again")
+            ZStack {
+                CreamCircleLabel(symbol: savedJob == nil ? "arrow.up" : "arrow.clockwise", ink: true)
+                    .opacity(busy ? 0 : 1)
+                if busy {
+                    ProgressView().tint(Color.white)
+                        .frame(width: 44, height: 44)
+                        .background(Theme.brand, in: Circle())
+                }
             }
-            .inkCommit(enabled: session.can("job.create", feature: "jobs"))
+            .opacity(allowed ? 1 : 0.4)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(savedJob == nil ? "Book job" : "Try saving again")
         .accessibilityIdentifier("book-job-commit")
-        .disabled(busy || !session.can("job.create", feature: "jobs"))
-        .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 10)
-        .background(Theme.canvas)
+        .disabled(busy || !allowed)
     }
 
     /// Says what's missing under each field, and moves to the first one.
@@ -839,7 +917,8 @@ struct NewJobSheet: View {
     // MARK: Actions
 
     private func start() {
-        if draft.customerID.isEmpty { focus = .caller } else if draft.title.isEmpty { focus = .title }
+        // Paper 75: the composer opens with the caret in the title.
+        if draft.title.isEmpty { focus = .title } else if draft.customerID.isEmpty { focus = .caller }
         #if DEBUG
         if PaperPreview.enabled && PaperPreview.screen == "book-job" { query = "Mar" }
         // `--paper-preview-form-errors`: Book job pressed with the form blank, so the field errors show.
@@ -902,6 +981,8 @@ struct NewJobSheet: View {
         guard session.generation == generation, draft.customerID == customerID, !Task.isCancelled else { return }
         locations = places.filter { $0.customerId == customerID && $0.organizationId == organizationID }
         locationsLoaded = true
+        // A place handed in (New job here, Start a job for this unit) stays only when it is theirs.
+        if let chosen = draft.locationID, !locations.contains(where: { $0.id == chosen }) { draft.locationID = nil }
         // One place on file is the place; with several the CSR picks.
         if draft.locationID == nil, locations.count == 1 { draft.locationID = locations[0].id }
     }

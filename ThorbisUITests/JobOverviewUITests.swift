@@ -2,76 +2,95 @@ import XCTest
 
 @MainActor
 final class JobOverviewUITests: XCTestCase {
-    func testPhotosAreDirectlyReachableFromMoneyAndActivityStillOpens() {
+    /// Waits until an Activity filter chip (`activity-filter-<name>`) reads as the chosen one.
+    private func waitForChosen(_ chip: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: chip)],
+                       timeout: timeout) == .completed
+    }
+
+    /// Paper 21 and 21A: three sections (Overview, Money, Activity); photos are Activity's Photos
+    /// chip, one tap from Activity, and the other sections stay one tap away from the photos.
+    func testPhotosAreOneChipFromActivityAndTheSectionsStayReachable() {
         continueAfterFailure = false
         let app = preview("job", working: true)
         let money = app.buttons["job-section-money"]
         XCTAssertTrue(money.waitForExistence(timeout: 15)); money.tap()
-        let photos = app.buttons["job-section-photos"]
-        XCTAssertTrue(photos.waitForExistence(timeout: 5))
-        XCTAssertEqual(photos.label, "Photos")
-        for section in ["overview", "money", "activity", "photos"] {
+        XCTAssertFalse(app.buttons["job-section-photos"].exists, "Paper's job has three sections")
+        for section in ["overview", "money", "activity"] {
             let button = app.buttons["job-section-\(section)"]
             XCTAssertGreaterThanOrEqual(button.frame.width, 43.5, section)
             XCTAssertGreaterThanOrEqual(button.frame.height, 43.5, section)
         }
-        photos.tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: photos)], timeout: 5), .completed)
-        let filter = app.buttons["activity-filter"]
-        XCTAssertTrue(filter.waitForExistence(timeout: 10))
-        XCTAssertTrue(filter.label.lowercased().contains("photos"), filter.label)
-        capture(app, name: "Job direct Photos section")
         let activity = app.buttons["job-section-activity"]
         XCTAssertTrue(activity.isHittable); activity.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "all"), object: filter)], timeout: 5), .completed)
+        let all = app.buttons["activity-filter-all"]
+        let photos = app.buttons["activity-filter-photos"]
+        XCTAssertTrue(photos.waitForExistence(timeout: 10))
+        XCTAssertTrue(waitForChosen(all), "Activity opens on All")
+        XCTAssertGreaterThanOrEqual(photos.frame.height, 43.5)
+        photos.tap()
+        XCTAssertTrue(waitForChosen(photos))
+        capture(app, name: "Job Activity photos")
+        // Over the photos the chips and the sections stay in reach.
+        XCTAssertTrue(all.waitForExistence(timeout: 5))
+        XCTAssertTrue(all.isHittable); all.tap()
+        XCTAssertTrue(waitForChosen(all))
+        photos.tap()
+        XCTAssertTrue(waitForChosen(photos))
         XCTAssertTrue(money.isHittable); money.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: money)], timeout: 5), .completed)
     }
 
-    func testDirectPhotosSectionIsInTheLargeTextChooser() {
+    func testPhotosChipIsReachableAtLargeText() {
         continueAfterFailure = false
         let app = preview("job", accessibleText: true, working: true)
         let chooser = app.buttons["job-section-chooser"]
         XCTAssertTrue(chooser.waitForExistence(timeout: 15)); chooser.tap()
-        let photos = app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@", "Photos", "job-section-chooser")).firstMatch
-        XCTAssertTrue(photos.waitForExistence(timeout: 5)); photos.tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Photos"), object: chooser)], timeout: 10), .completed, chooser.label)
-        let filter = app.buttons["activity-filter"]
-        XCTAssertTrue(filter.waitForExistence(timeout: 10))
-        XCTAssertTrue(filter.label.lowercased().contains("photos"), filter.label)
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Activity", "job-section-chooser")).firstMatch.tap()
+        let photos = app.buttons["activity-filter-photos"]
+        let content = app.scrollViews.firstMatch
+        XCTAssertTrue(photos.waitForExistence(timeout: 10))
+        for _ in 0..<8 where !photos.isHittable { content.swipeUp() }
+        XCTAssertTrue(photos.isHittable); photos.tap()
+        XCTAssertTrue(waitForChosen(photos, timeout: 10))
+        XCTAssertTrue(chooser.waitForExistence(timeout: 10))
+        XCTAssertTrue(chooser.label.contains("Activity"), chooser.label)
         capture(app, name: "Job Photos large text chooser")
     }
 
+    /// Leaving the photos for another section and coming back opens Activity on the filter that
+    /// was chosen before the photos, not on the photo grid.
     func testReturningFromPhotosKeepsThePreviousActivityFilter() {
         continueAfterFailure = false
         let app = preview("job", working: true)
         let activity = app.buttons["job-section-activity"]
         XCTAssertTrue(activity.waitForExistence(timeout: 15)); activity.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: activity)], timeout: 5), .completed)
-        let filter = app.buttons["activity-filter"]
+        let notes = app.buttons["activity-filter-notes"]
+        let photos = app.buttons["activity-filter-photos"]
         let content = app.scrollViews.firstMatch
-        for _ in 0..<6 where !filter.isHittable { content.swipeUp() }
-        XCTAssertTrue(filter.isHittable); filter.tap()
-        menuRow(app, "Notes").tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
-        let photos = app.buttons["job-section-photos"]
-        XCTAssertTrue(photos.waitForExistence(timeout: 5)); photos.tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "photos"), object: filter)], timeout: 5), .completed)
+        XCTAssertTrue(notes.waitForExistence(timeout: 10))
+        for _ in 0..<6 where !notes.isHittable { content.swipeUp() }
+        XCTAssertTrue(notes.isHittable); notes.tap()
+        XCTAssertTrue(waitForChosen(notes))
+        photos.tap()
+        XCTAssertTrue(waitForChosen(photos))
         let money = app.buttons["job-section-money"]
         XCTAssertTrue(money.isHittable); money.tap()
         XCTAssertTrue(activity.isHittable)
         activity.tap()
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS[c] %@", "notes"), object: filter)], timeout: 5), .completed)
+        XCTAssertTrue(notes.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitForChosen(notes), "Activity reopens on the filter chosen before the photos")
     }
 
-    func testLongInvoiceBalanceKeepsAllFourJobSectionsTappable() {
+    func testLongInvoiceBalanceKeepsEveryJobSectionTappable() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-extreme-invoice"]
         app.launch()
         var previous: XCUIElement?
-        for section in ["overview", "money", "activity", "photos"] {
+        for section in ["overview", "money", "activity"] {
             let button = app.buttons["job-section-\(section)"]
             XCTAssertTrue(button.waitForExistence(timeout: 15), section)
             for _ in 0..<5 where !button.isHittable { app.swipeUp() }
@@ -142,13 +161,13 @@ final class JobOverviewUITests: XCTestCase {
 
     func testJobHeaderKeepsTitleClearOfNavigationAndBalanceOpensInvoice() {
         let app = preview("job", working: true)
-        // v2: the header leads with the street (`job-title`), the problem under it.
+        // Paper F4: on the visit the job's title (`job-title`) is the bar's centred title, between
+        // Back and the bar's circles.
         let title = app.staticTexts["job-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 20))
         let bar = app.navigationBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 5))
-        XCTAssertGreaterThanOrEqual(title.frame.minY, bar.frame.maxY,
-                                    "The job title must not sit behind navigation controls")
+        assertTitleClearOfBarControls(title, in: app)
         // Cream sheet: the balance is the Money cluster's "Due on site" row ("$340.00 due"); it opens Money.
         let balance = app.buttons["job-chip-amount"]
         XCTAssertTrue(balance.waitForExistence(timeout: 20))
@@ -216,7 +235,7 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(payment.waitForExistence(timeout: 20))
         XCTAssertTrue(work.waitForExistence(timeout: 20))
         XCTAssertTrue(title.isHittable)
-        XCTAssertGreaterThanOrEqual(title.frame.minY, app.navigationBars.firstMatch.frame.maxY)
+        assertTitleClearOfBarControls(title, in: app)
         XCTAssertTrue(work.isHittable)
         scrollUntilHittable(payment, in: app)
         XCTAssertTrue(payment.isHittable)
@@ -246,8 +265,8 @@ final class JobOverviewUITests: XCTestCase {
             XCTAssertLessThanOrEqual(activity.frame.maxX, app.frame.maxX)
             capture(app, name: accessible ? "Job tabs at large text" : "Job tabs on narrow phone")
             activity.tap()
-            // Activity's one filter popover ("Showing all ▾").
-            XCTAssertTrue(app.buttons["activity-filter"].waitForExistence(timeout: 10))
+            // Paper 21B: Activity's filter chips, "All" first.
+            XCTAssertTrue(app.buttons["activity-filter-all"].waitForExistence(timeout: 10))
             app.terminate()
         }
     }
@@ -309,37 +328,42 @@ final class JobOverviewUITests: XCTestCase {
 
     /// Scrolls until `element` is clear of the job's bottom bar. A row that has scrolled under the
     /// bar still reports `isHittable` (its hit point is on screen), so a tap on it lands on the bar's
-    /// camera or commit instead (iPad: the swipes can leave "More job details" right behind it).
+    /// commit instead (iPad: the swipes can leave "More job details" right behind it). Paper F4: a
+    /// job under way has no circles in its bar, so the bar is measured from its commit.
     private func revealAboveJobBar(_ element: XCUIElement, in app: XCUIApplication) {
-        let camera = app.buttons["job-bar-camera"]
-        func barTop() -> CGFloat { camera.exists ? camera.frame.minY - 12 : app.frame.maxY }
+        let commit = app.buttons["job-commit"]
+        func barTop() -> CGFloat { commit.exists ? commit.frame.minY - 12 : app.frame.maxY }
         for _ in 0..<12 where !(element.isHittable && element.frame.maxY <= barTop()) {
             app.swipeUp(velocity: .slow)
         }
         XCTAssertLessThanOrEqual(element.frame.maxY, barTop(), "\(element.label) should scroll clear of the job's bar")
     }
 
-    /// Off Overview the header is one line (title and status word); the customer, balance, Customer
-    /// view and Call/Text/Directions live on Overview and come back with it.
-    func testDocumentTabsKeepJobNameWithoutRepeatingOverviewActions() {
+    /// Paper 23, 24 and 21B: Money and Activity keep the job's header (its name, the status chip
+    /// and the other chips) over the sections. Overview's own cards (the customer, the balance,
+    /// Customer view, the capture tiles) and the visit's steps stay on Overview and come back with
+    /// it. (Paper F4: a job under way has no Call/Text/Directions circles; its Photo tile stands
+    /// for Overview's own actions.)
+    func testDocumentTabsKeepTheJobHeaderWithoutRepeatingOverviewCards() {
         let app = preview("job", working: true)
-        XCTAssertTrue(app.buttons["job-call"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["job-tool-photo"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["job-customer-view"].exists)
         XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 20))
         for tab in ["Money", "Activity"] {
             thorbisSection(app, tab).tap()
             let name = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "AC not cooling", "412 Birchwood Ln")).firstMatch
             XCTAssertTrue(name.waitForExistence(timeout: 5), "\(tab) keeps the job's name")
-            XCTAssertTrue(app.staticTexts["Job status, In progress"].exists || app.otherElements["Job status, In progress"].exists,
-                          "\(tab) keeps the status as a word")
-            XCTAssertFalse(app.buttons["job-call"].exists, "\(tab) must not repeat Overview's contact actions")
+            // The header's status chip: a menu button when the status can move, a word otherwise.
+            let status = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Job status,")).firstMatch
+            XCTAssertTrue(status.waitForExistence(timeout: 5), "\(tab) keeps the header's status chip")
+            XCTAssertFalse(app.buttons["job-tool-photo"].exists, "\(tab) must not repeat Overview's capture tiles")
             XCTAssertFalse(app.buttons["job-customer-link"].exists, "\(tab) must not repeat the customer line")
             XCTAssertFalse(app.buttons["job-customer-view"].exists, "\(tab) must not repeat the header's Customer view")
             XCTAssertFalse(app.buttons["job-chip-amount"].exists, "\(tab) must not repeat the balance")
             XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Step ")).firstMatch.exists)
         }
         thorbisSection(app, "Overview").tap()
-        XCTAssertTrue(app.buttons["job-call"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["job-tool-photo"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["job-customer-view"].exists)
     }
 
@@ -353,13 +377,16 @@ final class JobOverviewUITests: XCTestCase {
 
     func testLongJobTitleWrapsOnEstimateTab() {
         let app = XCUIApplication()
+        // A job not yet under way: its 34 Bold title is in the page's header on every section. (On
+        // the visit, Paper F4 moves the title into the bar, one line.)
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-estimates",
-                               "--paper-preview-working-job", "--paper-preview-long-job-title"]
+                               "--paper-preview-long-job-title"]
         app.launch()
         let titles = app.staticTexts.matching(NSPredicate(format: "label == %@", "Diagnose the upstairs air conditioner and replace the damaged compressor at the back of the property"))
         XCTAssertTrue(titles.firstMatch.waitForExistence(timeout: 20))
-        // iPad lists the job beside its detail too: the header is the rightmost copy.
-        let title = titles.allElementsBoundByIndex.max { $0.frame.minX < $1.frame.minX } ?? titles.firstMatch
+        // On iPad the list beside the detail carries the title too: the header is the copy that
+        // wraps the most.
+        let title = titles.allElementsBoundByIndex.max { $0.frame.height < $1.frame.height } ?? titles.firstMatch
         // Money's header is one line of title and status, but a long title still wraps in full.
         // Three lines on a phone; the iPad's wider detail column needs two.
         XCTAssertGreaterThan(title.frame.height, app.usesTabletLayout ? 30 : 45, "The complete job title should wrap instead of truncating")
@@ -376,17 +403,20 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
 
-        for title in ["Reschedule", "Add to Calendar", "Reassign technician", "Wrap up", "Follow-ups", "Customer view", "Copy job ID"] {
+        // "Wrap up," is the menu's row ("Wrap up, Closeout checklist"), never the bar's "Wrap up · 3 left".
+        for title in ["Reschedule", "Add to Calendar", "Reassign technician", "Wrap up,", "Follow-ups", "Customer view", "Copy job ID"] {
             // The header door shares the name; check the menu's own row.
             let action = title == "Customer view" ? thorbisCustomerViewMenuItem(app) : button(startingWith: title, in: app)
-            XCTAssertTrue(action.waitForExistence(timeout: 3), "Missing secondary action: \(title)")
-            // A long menu opens at half height and scrolls; reach lower rows the way a person would.
-            if !action.isHittable { app.buttons["Reschedule"].swipeUp() }
+            XCTAssertTrue(action.waitForExistence(timeout: 5), "Missing secondary action: \(title)")
+            // Paper 21K / F8: the menu is a bottom sheet (a lead card, then the rows in cards). A long
+            // one opens at half height and scrolls; reach each row with short drags, either way.
+            revealMenuRow(action, in: app)
             XCTAssertTrue(action.isHittable, "Secondary action is unreachable: \(title)")
         }
         capture(app, name: "Job More menu")
 
-        if !app.buttons["Reschedule"].isHittable { app.buttons["Copy job ID"].swipeDown() }
+        revealMenuRow(app.buttons["Reschedule"], in: app)
+        XCTAssertTrue(app.buttons["Reschedule"].isHittable, "Reschedule must be back in reach")
         app.buttons["Reschedule"].tap()
         XCTAssertTrue(app.buttons["Save schedule"].waitForExistence(timeout: 5))
         app.buttons["Cancel"].tap()
@@ -405,8 +435,14 @@ final class JobOverviewUITests: XCTestCase {
         capture(app, name: "In-progress Job Overview")
         for _ in 0..<6 where !app.buttons["Job actions"].isHittable { app.swipeDown() }
         app.buttons["Job actions"].tap()
-        button(startingWith: "Wrap up", in: app).tap()
-        XCTAssertTrue(app.staticTexts["Wrap up this job"].waitForExistence(timeout: 5))
+        // The menu's row ("Wrap up, Closeout checklist"), not the bar's commit ("Wrap up · 3 left").
+        let wrap = button(startingWith: "Wrap up,", in: app)
+        XCTAssertTrue(wrap.waitForExistence(timeout: 5))
+        revealMenuRow(wrap, in: app)
+        XCTAssertTrue(wrap.isHittable, "Wrap up must be in reach in the menu sheet")
+        wrap.tap()
+        // Paper F5: a job under way wraps up under the visit's steps, its checklist titled "Finish checklist".
+        XCTAssertTrue(app.staticTexts["Finish checklist"].waitForExistence(timeout: 5))
     }
 
     func testInProgressJobPaymentStepOpensItsInvoice() {
@@ -483,21 +519,22 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(chooser.label.contains("Overview") || chooser.label.contains("On site"), chooser.label)
         chooser.tap()
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Activity", "job-section-chooser")).firstMatch.tap()
-        // v2: one "Showing all ▾" popover (`activity-filter`) replaced the row of filter chips.
-        let filter = app.buttons["activity-filter"]
-        for _ in 0..<5 where !filter.isHittable { content.swipeUp() }
-        XCTAssertTrue(filter.isHittable)
-        filter.tap()
-        menuRow(app, "Photos").tap()
+        // Paper 21B: Activity's filters are a row of chips (`activity-filter-<name>`).
+        let photos = app.buttons["activity-filter-photos"]
+        let notes = app.buttons["activity-filter-notes"]
+        XCTAssertTrue(photos.waitForExistence(timeout: 10))
+        for _ in 0..<5 where !photos.isHittable { content.swipeUp() }
+        XCTAssertTrue(photos.isHittable)
+        photos.tap()
+        XCTAssertTrue(waitForChosen(photos, timeout: 10))
         XCTAssertTrue(chooser.waitForExistence(timeout: 10))
         XCTAssertTrue(chooser.isHittable, "The chooser must remain reachable on Photos")
-        XCTAssertTrue(chooser.label.contains("Photos"))
-        XCTAssertTrue(filter.waitForExistence(timeout: 5))
-        XCTAssertTrue(filter.label.contains("photos"), filter.label)
-        for _ in 0..<5 where !filter.isHittable { content.swipeUp() }
-        XCTAssertTrue(filter.isHittable, "Photos must be able to switch back to notes")
-        filter.tap()
-        menuRow(app, "Notes").tap()
+        XCTAssertTrue(chooser.label.contains("Activity"), chooser.label)
+        XCTAssertTrue(notes.waitForExistence(timeout: 5))
+        for _ in 0..<5 where !notes.isHittable { content.swipeUp() }
+        XCTAssertTrue(notes.isHittable, "Photos must be able to switch back to notes")
+        notes.tap()
+        XCTAssertTrue(waitForChosen(notes))
         // A note's row reads "Note · You"; an empty feed says so.
         let note = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Note")).firstMatch
         XCTAssertTrue(note.waitForExistence(timeout: 10) || app.staticTexts["No activity yet"].exists)
@@ -514,19 +551,11 @@ final class JobOverviewUITests: XCTestCase {
         jobs.terminate()
 
         if jobs.usesTabletLayout { return assertSidebarNamesTheJobUnderWay() }
+        // Paper v2: the drawer (29N) lists places only, no recent records; still no floating chip.
         let app = preview("more", working: true)
-        let underWay = app.buttons.matching(NSPredicate(format: "label ENDSWITH %@", ", In progress")).firstMatch
-        XCTAssertTrue(underWay.waitForExistence(timeout: 20), "The drawer's Recents name the job under way")
-        capture(app, name: "Drawer with the job under way in Recents")
+        XCTAssertTrue(app.scrollViews["drawer-rows"].waitForExistence(timeout: 20))
+        capture(app, name: "Drawer, Paper v2")
         XCTAssertFalse(app.buttons.matching(chipQuery).firstMatch.exists, "No floating current-job chip")
-        let newJob = app.buttons["drawer-new"]
-        XCTAssertTrue(newJob.exists)
-        // Cream sheet: Recents follow every place, so they may start under the foot; the list scrolls
-        // them clear of it.
-        let list = app.scrollViews["drawer-rows"]
-        for _ in 0..<6 where underWay.frame.maxY > newJob.frame.minY { list.swipeUp(velocity: .slow) }
-        XCTAssertLessThanOrEqual(underWay.frame.maxY, newJob.frame.minY, "Recents scroll clear of the drawer's foot")
-        XCTAssertTrue(underWay.isHittable, "The job under way is reachable in Recents")
     }
 
     /// iPad: the sidebar's foot names the job under way once, above the account, and only the sidebar
@@ -562,6 +591,27 @@ final class JobOverviewUITests: XCTestCase {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: up ? 0.7 : 0.4))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: up ? -220 : 220)),
                     withVelocity: .slow, thenHoldForDuration: 0.3)
+    }
+
+    /// Brings a row of the open menu sheet into reach. Short, slow drags inside the sheet, up for a
+    /// row below the fold and down for one scrolled past the top, so no row is stepped over and a
+    /// long swipe never flings the sheet away. The first drag up also grows a half-height sheet.
+    private func revealMenuRow(_ row: XCUIElement, in app: XCUIApplication) {
+        for _ in 0..<16 where !row.isHittable {
+            drag(app, up: row.frame.midY > app.frame.height * 0.3)
+        }
+    }
+
+    /// On the visit the job's title is the bar's centred title (Paper F2 to F4): inside the bar,
+    /// never under Back or the bar's circles.
+    private func assertTitleClearOfBarControls(_ title: XCUIElement, in app: XCUIApplication) {
+        let actions = app.buttons["Job actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 5))
+        XCTAssertFalse(title.frame.intersects(actions.frame), "The job title must not sit behind navigation controls")
+        let back = app.navigationBars.buttons["Back"].firstMatch
+        if back.exists {
+            XCTAssertFalse(title.frame.intersects(back.frame), "The job title must not sit behind Back")
+        }
     }
 
     /// A row in the open `ThorbisMenu` popover (the last match: the popover sits above the page).

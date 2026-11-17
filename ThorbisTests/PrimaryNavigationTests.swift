@@ -11,9 +11,51 @@ final class PrimaryNavigationTests: XCTestCase {
     func testScheduleIsTheInitialPrimaryDestination() {
         XCTAssertEqual(PrimaryTab.initial, .schedule)
         XCTAssertEqual(DrawerPlaces.title(.schedule, role: .technician), "Schedule")
-        XCTAssertEqual(DrawerPlaces.title(.home, role: .owner), "Today")
+        XCTAssertEqual(DrawerPlaces.title(.home, role: .owner), "Dashboard")
         XCTAssertEqual(DrawerPlaces.title(.schedule, role: .office), "Schedule", "The same screen reads as the schedule the office runs")
-        XCTAssertEqual(DrawerPlaces.title(.inbox, role: .technician), "Inbox")
+        XCTAssertEqual(DrawerPlaces.title(.inbox, role: .technician), "Messages")
+        XCTAssertEqual(DrawerPlaces.title(.team, role: .owner), "Team")
+    }
+
+    // MARK: Paper v2 drawer (Navigation 29N, 57N, 58N)
+
+    func testPaperDrawerFollowsEachRolesOrder() {
+        let records = LocalWorkspaceSection.allCases
+        func make(_ role: WorkRole) -> DrawerSections {
+            DrawerSections.make(local: records, role: role, opens: permitted(role))
+        }
+        let tech = make(.technician)
+        XCTAssertEqual(tech.sections.first?.kind, .primary)
+        XCTAssertEqual(tech.sections[0].places, [.schedule, .jobs, .customers, .inbox])
+        XCTAssertEqual(tech.sections[1].kind, .tools)
+        XCTAssertEqual(tech.sections[1].rows, [.place(.priceBook), .local(.equipment)])
+
+        let office = make(.office)
+        XCTAssertEqual(office.sections[0].places, [.schedule, .jobs, .money, .customers, .inbox],
+                       "This office test role cannot open the Dashboard")
+        XCTAssertEqual(office.sections[1].kind, .manage)
+        XCTAssertEqual(office.sections[1].rows, [.place(.properties), .local(.equipment), .local(.agreements), .place(.reports)])
+
+        let owner = make(.owner)
+        XCTAssertEqual(owner.sections[0].places, [.home, .money, .reports, .schedule, .inbox])
+        XCTAssertEqual(owner.sections[1].kind, .business)
+        XCTAssertEqual(owner.sections[1].rows, [.place(.customers), .local(.agreements), .place(.properties),
+                                                .local(.equipment), .local(.fleet)])
+        XCTAssertFalse(PlaceSection.primary.hasHeading, "The main places carry no heading")
+        XCTAssertEqual(PlaceSection.business.rawValue, "Business")
+    }
+
+    func testPaperDrawerStillListsEveryReachablePlaceExactlyOnce() {
+        for role in [WorkRole.technician, .office, .owner] {
+            let result = DrawerSections.make(local: LocalWorkspaceSection.allCases, role: role, opens: permitted(role))
+            let expected = Set(MenuItem.allCases.filter(permitted(role)))
+            XCTAssertEqual(Set(result.places), expected, "\(role): places Paper reaches from a hub stay under More")
+            XCTAssertEqual(result.places.count, expected.count, "\(role): no place is listed twice")
+            XCTAssertEqual(Set(result.sections.flatMap(\.local)), Set(LocalWorkspaceSection.allCases), "\(role): every record is listed")
+            XCTAssertEqual(result.sections.flatMap(\.local).count, LocalWorkspaceSection.allCases.count)
+        }
+        let more = DrawerSections.make(role: .owner, opens: { _ in true }).sections.first { $0.kind == .more }
+        XCTAssertEqual(more?.places.first, .jobs, "Jobs is not in Paper's owner menu, so it leads More")
     }
 
     func testPrimaryDestinationsRemainStableWhenRoleAccessIsLimited() {

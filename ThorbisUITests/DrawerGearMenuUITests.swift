@@ -57,34 +57,8 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(favorite.waitForNonExistence(timeout: 10))
     }
 
-    func testRecentJobCanBeAddedOpenedAndRemovedFromFavorites() throws {
-        guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone Recent surface") }
-        continueAfterFailure = false
-        let app = XCUIApplication()
-        let id = "00000000-0000-4000-8000-000000002214"
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office", "--paper-preview-drawer-open"]
-        app.launch()
-        XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 30))
-        let recent = app.buttons["drawer-recent-\(id)"]
-        for _ in 0..<8 where !recent.isHittable { app.scrollViews["drawer-rows"].swipeUp() }
-        XCTAssertTrue(recent.waitForExistence(timeout: 10)); recent.press(forDuration: 1)
-        let existing = app.buttons["Remove from favorites"]
-        if existing.waitForExistence(timeout: 1) { existing.tap(); recent.press(forDuration: 1) }
-        let add = app.buttons["Add to favorites"]
-        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
-        let favorite = app.buttons["drawer-favorite-record-\(id)"]
-        for _ in 0..<8 where !favorite.isHittable { app.scrollViews["drawer-rows"].swipeDown() }
-        XCTAssertTrue(favorite.waitForExistence(timeout: 15))
-        favorite.tap()
-        XCTAssertTrue(app.buttons["job-section-money"].waitForExistence(timeout: 15))
-        // The existing pushed-screen drawer gap is covered separately; return to the root for cleanup.
-        app.buttons["Back"].firstMatch.tap()
-        app.openDrawer()
-        XCTAssertTrue(favorite.waitForExistence(timeout: 15)); favorite.press(forDuration: 1)
-        let remove = app.buttons["Remove from favorites"]
-        XCTAssertTrue(remove.waitForExistence(timeout: 5)); remove.tap()
-        XCTAssertTrue(favorite.waitForNonExistence(timeout: 10))
-    }
+    // Paper v2 (Navigation 29N/57N/58N): the drawer lists no recent records, so the Recent →
+    // Favorites path is gone from the drawer; favorites are still added from a record's own menu.
 
     func testTopNewMenuOpensPermittedCustomerCreate() throws {
         guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
@@ -131,31 +105,25 @@ final class DrawerGearMenuUITests: XCTestCase {
         let prefix = app.usesTabletLayout ? "sidebar" : "drawer"
         if !app.usesTabletLayout {
             XCTAssertTrue(app.buttons["drawer-workspace-menu"].exists)
-            XCTAssertTrue(app.buttons["drawer-new-menu"].exists)
-            XCTAssertTrue(app.buttons["drawer-new"].exists, "The direct New job shortcut remains available")
+            XCTAssertTrue(app.buttons["drawer-new-menu"].exists, "Paper's + circle opens New")
             XCTAssertTrue(app.buttons["drawer-settings"].exists)
         }
+        // Paper v2 office menu (57N): Schedule, Jobs, Money, Customers, Messages lead; places Paper
+        // reaches from a hub (Estimates, Invoices) follow under More.
+        let schedule = app.buttons["\(prefix)-schedule"]
         let jobs = app.buttons["\(prefix)-jobs"]
         let estimates = app.buttons["\(prefix)-estimates"]
         let invoices = app.buttons["\(prefix)-invoices"]
         XCTAssertTrue(jobs.waitForExistence(timeout: 15))
         XCTAssertTrue(estimates.exists)
         XCTAssertTrue(invoices.exists)
+        XCTAssertLessThan(schedule.frame.minY, jobs.frame.minY)
         XCTAssertLessThan(jobs.frame.minY, estimates.frame.minY)
         XCTAssertLessThan(estimates.frame.minY, invoices.frame.minY)
-        let work = app.buttons["\(prefix)-workspace-work"]
-        XCTAssertTrue(work.exists)
-        XCTAssertEqual(work.value as? String, "Expanded")
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "Web-aligned sidebar"
+        shot.name = "Paper v2 drawer (office)"
         shot.lifetime = .keepAlways
         add(shot)
-        let other = app.buttons["\(prefix)-workspace-other"]
-        if other.exists {
-            if !app.usesTabletLayout { app.revealDrawerRow("workspace-other") }
-            other.tap()
-            if app.usesTabletLayout { app.showSidebar() } else { app.openDrawer() }
-        }
         let drafts = app.buttons["\(prefix)-drafts"]
         XCTAssertTrue(drafts.exists)
         XCTAssertTrue(drafts.label.contains(app.usesTabletLayout ? "On this iPad" : "On this phone"), drafts.label)

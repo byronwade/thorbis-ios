@@ -40,7 +40,7 @@ final class JobListSearchUITests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
         app.buttons["Filter jobs"].tap()
-        XCTAssertTrue(app.staticTexts["Ordering"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Sort by"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Filters"].exists)
     }
 
@@ -76,7 +76,8 @@ final class JobListSearchUITests: XCTestCase {
         XCTAssertTrue(customer.waitForExistence(timeout: 10))
         let commit = app.buttons["book-job-commit"]
         XCTAssertTrue(commit.exists)
-        XCTAssertLessThan(customer.frame.minY, commit.frame.minY)
+        // Paper 75: the commit is the header's arrow, above the caller.
+        XCTAssertLessThan(commit.frame.minY, customer.frame.minY)
         // Since #216 the commit is never pre-disabled ("Don't lock the commit"): pressed without a
         // caller it books nothing, stays on the sheet and says what is missing under the caller.
         commit.tap()

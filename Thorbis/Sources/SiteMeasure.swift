@@ -247,23 +247,36 @@ struct SiteMeasureView: View {
                     .shadow(radius: 2).allowsHitTesting(false).accessibilityHidden(true)
             }
             VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    Button("Close") { session.pause(); onClose() }
-                        .buttonStyle(ThorbisBarButtonStyle())
+                // Paper 21N: a 44pt card circle to close, "Measure" centred, Clear as a fill pill.
+                HStack(spacing: 12) {
+                    Button { session.pause(); onClose() } label: { CreamCircleLabel(symbol: "xmark") }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Close")
                         .accessibilityIdentifier("measure-close")
-                    Spacer()
+                    Spacer(minLength: 0)
+                    Text("Measure").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
                     if !session.points.isEmpty {
-                        Button("Clear") { session.reset() }
-                            .buttonStyle(ThorbisBarButtonStyle())
-                            .accessibilityIdentifier("measure-clear")
+                        Button { session.reset() } label: {
+                            Text("Clear").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                .padding(.horizontal, 18).frame(minHeight: 44)
+                                .background(Theme.card, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("measure-clear")
+                    } else {
+                        Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
                     }
                 }
+                .padding(.horizontal, -4)
                 if let error { ErrorBanner(message: error) }
                 Spacer()
                 VStack(spacing: 12) {
                     if let distance {
                         Text(MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale))
-                            .font(Theme.moneyFont(.hero)).monospacedDigit()
+                            .font(Theme.font(34, weight: .bold)).monospacedDigit()
                             .lineLimit(1).minimumScaleFactor(0.6)
                             .accessibilityLabel("Distance \(MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale))")
                             .accessibilityIdentifier("measure-result")
@@ -271,11 +284,11 @@ struct SiteMeasureView: View {
                     }
                     if !cameraDenied {
                         Text(sampleMeters != nil ? "Save to add this to the job, or tap to measure again." : session.hint)
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                            .font(Theme.font(14)).foregroundStyle(Theme.subtle).multilineTextAlignment(.center)
                     }
                     if let distance {
                         Button { save(distance) } label: {
-                            Label("Save to job", systemImage: "square.and.arrow.down").inkCommit(height: 56)
+                            Label("Save to job", systemImage: "square.and.arrow.down").inkCommit()
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("measure-save")
@@ -286,7 +299,7 @@ struct SiteMeasureView: View {
                 .frame(maxWidth: .infinity)
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             }
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
         }
         .onAppear {
             cameraDenied = [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video)) && sampleMeters == nil

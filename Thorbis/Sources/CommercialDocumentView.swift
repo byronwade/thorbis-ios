@@ -11,7 +11,10 @@ struct CommercialDocumentView: View {
                 PaperEmptyState(symbol: "doc.badge.ellipsis", title: "Document unavailable", message: error,
                                 actionTitle: preview.loading ? nil : "Try again", action: { load() })
                     .frame(maxHeight: .infinity).background(Theme.canvas)
-            } else { ProgressView("Preparing document…") }
+            } else {
+                ProgressView("Preparing document…").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.canvas)
+            }
         }
         .navigationTitle("Document")
         .navigationBarTitleDisplayMode(.inline)

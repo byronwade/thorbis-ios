@@ -29,9 +29,9 @@ struct OnMyWayIntent: AppIntent {
     }
 }
 
-/// "Show my schedule": opens the Schedule tab.
+/// "Show today's schedule" (Paper 94B's wording): opens the Schedule tab.
 struct OpenScheduleIntent: AppIntent {
-    static let title: LocalizedStringResource = "Show my schedule"
+    static let title: LocalizedStringResource = "Show today's schedule"
     static let description = IntentDescription("Opens today's schedule in Thorbis.")
     static let openAppWhenRun = true
 
@@ -76,6 +76,7 @@ struct ThorbisShortcuts: AppShortcutsProvider {
         AppShortcut(intent: OpenScheduleIntent(),
                     phrases: ["Open my schedule in \(.applicationName)",
                               "Show my schedule in \(.applicationName)",
+                              "Show today's schedule in \(.applicationName)",
                               "Open my \(.applicationName) schedule",
                               "Today's schedule in \(.applicationName)",
                               "What's on today in \(.applicationName)"],

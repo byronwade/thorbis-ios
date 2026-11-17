@@ -53,6 +53,7 @@ struct PaperInvoiceCollectionFooter: View {
                 if let invoiceReference {
                     Text("For \(invoiceReference)")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
                         .accessibilityIdentifier("job-collect-selected-invoice")
                 }
                 PrimaryButton(title: "Collect payment", busy: model.isRecording, action: onCollectPayment)
@@ -62,10 +63,12 @@ struct PaperInvoiceCollectionFooter: View {
                 if let reason = model.collectBlockedReason {
                     Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
                         .accessibilityHidden(true)
                 }
             }
-                .padding(.horizontal, 20)
+                // Paper v2: the commit pill sits 16 from the screen edge, like the cards above it.
+                .padding(.horizontal, PaperCardMetrics.margin)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
                 .background(Theme.canvas)

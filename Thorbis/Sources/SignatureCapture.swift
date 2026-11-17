@@ -3,11 +3,28 @@ import SwiftUI
 /// Sign-on-glass for an estimate approval or invoice authorization. The drawing is uploaded as
 /// job media (PNG, tagged "signature") and its id goes with the approval, so the signature is
 /// kept with the job and shows on the document.
+/// One row of the "Estimate summary" card above the signature (Paper 36): the line's name, a quiet
+/// word under it, and its amount as the caller already formats it.
+struct SignatureSummaryLine: Identifiable {
+    let id: String
+    let title: String
+    var detail: String? = nil
+    let amount: String
+}
+
 struct SignatureCaptureSheet: View {
     let title: String
     let summary: String
     let jobID: String
     var suggestedName = ""
+    /// Paper 36's 34 Bold heading: "Sign estimate" for an estimate, "Sign invoice" for an invoice.
+    var heading = "Sign invoice"
+    /// Paper 36 "Estimate summary": the section label, the document's number at its trailing edge,
+    /// the lines and the total. The card shows only when the caller passes lines.
+    var summaryTitle = "Estimate summary"
+    var reference: String? = nil
+    var lines: [SignatureSummaryLine] = []
+    var totalText: String? = nil
     /// Saves the ink on the phone to send once online (OF-01); nil where signing needs signal.
     var queueOffline: (@MainActor (_ png: Data, _ clientAssetID: String, _ signerName: String, _ signedAt: String) -> Bool)? = nil
     /// Runs the approval or authorization with the uploaded signature; returns an error message on failure.
@@ -27,6 +44,8 @@ struct SignatureCaptureSheet: View {
     @State private var clientAssetID = UUID().uuidString
     /// Set when the commit is pressed with the name or signature missing, so it says which.
     @State private var attempted = false
+    /// True while a finger is drawing, so the page under the pad holds still.
+    @State private var drawing = false
     @FocusState private var nameFocused: Bool
 
     private var hasInk: Bool { SignatureInk.hasInk(strokes) }
@@ -42,87 +61,201 @@ struct SignatureCaptureSheet: View {
     }
     private var canSubmit: Bool { hasInk && !trimmedName.isEmpty && trimmedName.count <= 120 && !busy && !session.isOffline }
 
+    /// Paper 36: the 34 Bold heading, the summary of what is signed, the signer's name, "Sign to
+    /// approve" with Clear, the pad with the signer under its line, then what signing means and
+    /// the commit.
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
+                if lines.isEmpty {
+                    form
+                    Spacer(minLength: 0)
+                } else {
+                    // With the summary the page is taller than a small phone, so it scrolls. A
+                    // stroke on the pad stops the scroll until the finger lifts, so signing never
+                    // drags the page.
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) { form }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .scrollDisabled(drawing)
+                    .scrollDismissesKeyboard(.interactively)
+                }
                 Text(summary)
-                    .font(Theme.font(15))
+                    .font(Theme.font(13))
                     .foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                TextField("Customer's full name", text: $name, prompt: .placeholder("Customer's full name"))
-                    .focused($nameFocused)
-                    .textContentType(.name)
-                    .submitLabel(.done)
-                    .font(Theme.font(17))
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 48)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                ZStack(alignment: .bottomLeading) {
-                    pad
-                    // A signature line, like the paper form the customer expects.
-                    HStack(alignment: .lastTextBaseline, spacing: 6) {
-                        Text("×").font(Theme.font(20)).foregroundStyle(.black.opacity(0.62))
-                        Rectangle().fill(.black.opacity(0.2)).frame(height: 1)
-                    }
-                    .padding(.horizontal, 18).padding(.bottom, 52)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-                    HStack {
-                        Text("Sign above the line").font(Theme.font(13)).foregroundStyle(.black.opacity(0.62))
-                        Spacer()
-                        if hasInk {
-                            Button("Clear") { strokes = []; uploaded = nil; clientAssetID = UUID().uuidString }
-                                .font(Theme.font(13, weight: .medium))
-                                .frame(minWidth: 44, minHeight: 44)
-                        }
-                    }
-                    .padding(.horizontal, 14).padding(.bottom, 6)
-                }
-                .frame(height: 220)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius))
-                .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius).stroke(Theme.border))
-                .accessibilityLabel("Signature pad")
-                if let error { ListErrorRow(message: error) }
-                Spacer(minLength: 0)
+                    .padding(.horizontal, Theme.gutter).padding(.vertical, 16)
                 // Not pre-disabled for a missing name or signature: pressing says which, under it.
                 // Offline it stays off (a signature is never kept to send later), and says why.
-                PrimaryButton(title: title, busy: busy) {
-                    guard canSubmit else {
-                        attempted = true
-                        if trimmedName.isEmpty || trimmedName.count > 120 { nameFocused = true }
-                        return
-                    }
-                    Task { await sign() }
-                }
-                .disabled(busy || session.isOffline)
-                if !busy, session.isOffline || attempted, let reason = blockedReason {
-                    Group {
-                        if session.isOffline {
-                            Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        } else {
-                            FieldProblem(message: reason)
+                VStack(spacing: 8) {
+                    PrimaryButton(title: title, icon: "checkmark", busy: busy) {
+                        guard canSubmit else {
+                            attempted = true
+                            if trimmedName.isEmpty || trimmedName.count > 120 { nameFocused = true }
+                            return
                         }
+                        Task { await sign() }
                     }
-                    .frame(maxWidth: .infinity)
+                    .disabled(busy || session.isOffline)
+                    if !busy, session.isOffline || attempted, let reason = blockedReason {
+                        Group {
+                            if session.isOffline {
+                                Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            } else {
+                                FieldProblem(message: reason)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
                 }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 12)
             }
-            .padding(20)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Theme.canvas)
-            .navigationTitle("Customer signature")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) }
+                ThorbisToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { CreamCircleLabel(symbol: "xmark") }
+                        .buttonStyle(PressStyle())
+                        .disabled(busy)
+                        .accessibilityLabel("Cancel")
+                }
+                // Paper 36: "Sign later" in quiet type opposite the close circle; it leaves the
+                // sheet without signing, the same as Cancel.
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: {
+                        Text("Sign later").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 4)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy)
+                }
             }
             .onAppear { if name.isEmpty { name = suggestedName } }
         }
         .interactiveDismissDisabled(busy)
     }
 
-    private var pad: some View {
-        SignaturePad(strokes: $strokes) {
-            uploaded = nil
-            clientAssetID = UUID().uuidString
+    /// Everything above the consent sentence: heading, summary, name, and the pad.
+    @ViewBuilder private var form: some View {
+        Text(heading).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, Theme.gutter).padding(.top, 14)
+        if !lines.isEmpty { summaryCard }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Customer's name").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4)
+                .accessibilityHidden(true)
+            TextField("Customer's full name", text: $name, prompt: .placeholder("Customer's full name"))
+                .focused($nameFocused)
+                .textContentType(.name)
+                .submitLabel(.done)
+                .font(Theme.font(17))
+                .padding(.horizontal, 14)
+                .frame(minHeight: 48)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 22)
+        HStack(alignment: .center) {
+            Text("Sign to approve").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            if hasInk {
+                Button("Clear") { strokes = []; uploaded = nil; clientAssetID = UUID().uuidString }
+                    .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .accessibilityLabel("Clear signature")
+            }
+        }
+        .frame(minHeight: 44)
+        .padding(.horizontal, Theme.gutter).padding(.top, 14)
+        ZStack(alignment: .bottom) {
+            pad
+            // Paper 36: a hairline to sign on, with who signs centred under it.
+            VStack(spacing: 10) {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                Text(trimmedName.isEmpty ? "Customer" : "\(trimmedName) \u{00B7} Customer")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .padding(.horizontal, 24).padding(.bottom, 20)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .frame(height: 200)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityLabel("Signature pad")
+        .padding(.horizontal, PaperCardMetrics.margin)
+        if let error {
+            ListErrorRow(message: error).padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
+        }
+    }
+
+    /// Paper 36 "Estimate summary": 64pt rows (16 Medium name, 14 muted word, 16 Medium amount) with
+    /// hairlines between, then Total in 16 Semibold against the amount in 28 Bold.
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(summaryTitle).font(Theme.font(13, weight: .semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                if let reference { Text(reference).font(Theme.monoFont(13)) }
+            }
+            .foregroundStyle(Theme.muted)
+            .padding(.horizontal, 4)
+            VStack(spacing: 0) {
+                ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                    if index > 0 { WellDivider(leading: 0) }
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(line.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let detail = line.detail, !detail.isEmpty {
+                                Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(line.amount).font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .fixedSize()
+                    }
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 64)
+                    .accessibilityElement(children: .combine)
+                }
+                if let totalText {
+                    WellDivider(leading: 0)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("Total").font(Theme.font(16, weight: .semibold))
+                        Spacer(minLength: 8)
+                        Text(totalText).font(Theme.heading()).monospacedDigit().tracking(-0.56)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    .foregroundStyle(Theme.foreground)
+                    .padding(.top, 14).padding(.bottom, 16)
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(.horizontal, PaperCardMetrics.inset)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 22)
+    }
+
+    private var pad: some View {
+        // Paper 36: brand ink on the card. The saved image stays black on white (SignatureInk.png).
+        SignaturePad(strokes: $strokes, ink: Theme.brand, surface: Theme.card,
+                     onStroke: {
+                         uploaded = nil
+                         clientAssetID = UUID().uuidString
+                     },
+                     onDrawing: { active in drawing = active })
     }
 
     /// OF-01: without signal the ink is saved on the phone and sent once online, when the caller
@@ -175,27 +308,46 @@ struct SignatureCaptureSheet: View {
     }
 }
 
-/// The drawing surface for a finger signature: black ink on white in light and dark mode.
+/// The drawing surface for a finger signature. Paper draws it in brand ink on the card, so callers
+/// pass `ink` and `surface`; the saved image is always black on white (`SignatureInk.png`).
 /// `onStroke` runs after each finished stroke so a caller can drop an upload made for older ink.
+/// `onDrawing` says when a finger goes down on the pad and when it lifts (or the touch is taken
+/// away), so a pad inside a scroll view can hold the page still while someone signs.
 struct SignaturePad: View {
     @Binding var strokes: [[CGPoint]]
+    var ink: Color = .black
+    var surface: Color = .white
     var onStroke: () -> Void = {}
+    var onDrawing: (Bool) -> Void = { _ in }
     @State private var current: [CGPoint] = []
+    /// Resets by itself when the touch ends or is cancelled.
+    @GestureState private var touching = false
 
     var body: some View {
         Canvas { context, _ in
             for stroke in strokes + [current] where stroke.count > 1 {
-                context.stroke(SignatureInk.path(stroke), with: .color(.black), style: SignatureInk.style)
+                context.stroke(SignatureInk.path(stroke), with: .color(ink), style: SignatureInk.style)
             }
         }
-        .background(Color.white)
+        .background(surface)
         .gesture(DragGesture(minimumDistance: 0)
+            .updating($touching) { _, state, _ in state = true }
             .onChanged { current.append($0.location) }
             .onEnded { _ in
                 strokes.append(current)
                 current = []
                 onStroke()
             })
+        .onChange(of: touching) { _, active in
+            onDrawing(active)
+            // A touch the system took away never reaches onEnded: keep what was drawn.
+            if !active, current.count > 1 {
+                strokes.append(current)
+                current = []
+                onStroke()
+            }
+        }
+        .onDisappear { onDrawing(false) }
     }
 }
 

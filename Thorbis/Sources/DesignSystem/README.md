@@ -9,23 +9,25 @@ Linear's mobile app sets the layout grammar; design.thorbis.com is the law for t
 controls, forms, words, places and states ("Linear grammar. Not Linear dress"). The full rules are
 at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
 
-- **Palette:** dark is Linear's greys (canvas `#0A0A0A`, panel `#171717`), cream type `#F7F4EE`,
-  cool grey body, dimmer marker. Light is the warm cream sheet (canvas `#F7F4EE`, panel `#FDFCFA`).
-  `Theme.field` is the sunk well under a field or select; `Theme.fill` is a chip or circle. One
-  electric-blue accent (`Theme.brand`) for selected, focus and the one live thing. Status hues are
-  the site's success/error/info/warning, tuned in lightness only. Place marks: `markOlive`,
-  `markForest`, `markPumpkin`, `markBurnt`, `markAccent`. `python3 scripts/tests/contrast.py`
-  reports 0 failures (4.5:1 text, 3:1 marks, both themes, Increase Contrast).
-- **Type:** 400 and 500 only (`Theme.allowed()` maps semibold and heavier to 500). The staff ramp
+- **Palette (Paper v2, 16 November 2026):** Paper's tokens. Dark: canvas `#1F1F1F`, card
+  `#232323`, sidebar `#141414`, type `#EDEDED`. Light: canvas `#FAF9F6`, card `#FFFFFF`, sidebar
+  `#F3F2EE`, type `#1A1A1A`. `Theme.field` is the sunk well under a field or select; `Theme.fill`
+  is a chip or circle; `Theme.sidebar` / `sidebarAccent` are the drawer and its chosen place. One
+  electric blue, `#2F6BFF` (`Theme.brand`), for selected, focus, switches and the one live thing.
+  `Theme.ai*` is Paper's purple, for AI help only. Place marks: `markOlive`, `markForest`,
+  `markPumpkin`, `markBurnt`, `markAccent`. `python3 scripts/tests/contrast.py` reports 0
+  failures (4.5:1 text, 3:1 marks, both themes, Increase Contrast).
+- **Type:** Inter 400 to 700 (`Theme.allowed()` maps heavy and black to bold). The staff ramp
   (`Theme.onRamp`) is compact: body/row title 15, secondary 14, chrome 13 Medium, captions 12,
-  sheet titles 16–17, detail titles 24, root titles 26, money hero 30. Customer-facing views use
+  sheet titles 16–17, detail titles 24, root titles 34, money hero 30. Customer-facing views use
   `Theme.customerFont` (the older ramp) to keep their 17pt / 56pt floors.
 - **Depth:** Rest (planar sheets and panels), Sink (`fieldWell()`, `ThorbisSelect`,
   `ThorbisSheetGroup`: one step darker, inset, 1px rim), Lift (`.inkCommit()` / `.dangerCommit()`:
   ink, radius 10, 1px rim, light from above, 1px drop, press sinks through `PressStyle`), Overlay
   (`ThorbisMenu` popovers only). No fifth.
-- **No separators:** `WellDivider` and `ThorbisSheetDivider` draw nothing; `PaperCard` has no rim;
-  no coloured side rails. A 1px rim is for fields, commits, chips and photos only.
+- **Separators (Paper v2):** `WellDivider` and `ThorbisSheetDivider` draw a hairline between rows
+  inside one grouped card, inset to the row text. Never between cards or under a heading;
+  `PaperCard` has no rim; no coloured side rails.
 - **Status is a word:** `StatusLabel` (a small `StatusMark` in the hue, then the word). Rows lead
   with the street; the status word sits in the subtitle (`JobListRowContent`,
   `DocumentListRowContent`) or at the trailing edge (`CustomerListRowContent`, search). Never a

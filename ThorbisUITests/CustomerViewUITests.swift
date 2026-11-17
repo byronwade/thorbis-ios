@@ -18,12 +18,15 @@ final class CustomerViewUITests: XCTestCase {
         XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one visible Customer view door")
         XCTAssertEqual(door.label, "Show customer")
         door.tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         capture(app, "Customer view home")
 
         // Estimates: the job's multi-estimate selection and approval.
         let approve = app.buttons["customer-view-approve-estimates"]
+        // The button now sits under the cards; off-screen rows drop out of the snapshot.
+        for _ in 0..<8 where !approve.exists { app.swipeUp(velocity: .slow) }
         XCTAssertTrue(approve.waitForExistence(timeout: 10))
+        reveal(approve, in: app)
         approve.tap()
         XCTAssertTrue(app.scrollViews["job-estimate-handoff"].waitForExistence(timeout: 10))
         capture(app, "Customer view estimates")
@@ -31,6 +34,7 @@ final class CustomerViewUITests: XCTestCase {
 
         // An invoice, with its own payments and balance.
         let invoice = app.buttons["customer-invoice-\(invoiceA)"]
+        for _ in 0..<8 where !invoice.exists { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
         reveal(invoice, in: app)
         invoice.tap()
@@ -43,7 +47,7 @@ final class CustomerViewUITests: XCTestCase {
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         reveal(details, in: app)
         details.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Check what")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "uses these to reach you")).firstMatch.waitForExistence(timeout: 10))
         capture(app, "Customer view details")
 
         // One authenticated staff hand-back closes the whole Customer view.
@@ -51,7 +55,7 @@ final class CustomerViewUITests: XCTestCase {
         XCTAssertTrue(exit.waitForExistence(timeout: 5))
         exit.tap()
         XCTAssertTrue(door.waitForExistence(timeout: 15))
-        XCTAssertFalse(app.staticTexts["Your job documents"].exists)
+        XCTAssertFalse(app.staticTexts["customer-view-title"].exists)
     }
 
     func testEstimateDetailOpensCustomerViewOnThatEstimateAndHandsBackToTheEstimate() {
@@ -68,7 +72,7 @@ final class CustomerViewUITests: XCTestCase {
         capture(app, "Customer view estimate deep link")
         ownerExit(app)
         XCTAssertTrue(app.buttons["Show customer"].firstMatch.waitForExistence(timeout: 15))
-        XCTAssertFalse(app.staticTexts["Your job documents"].exists)
+        XCTAssertFalse(app.staticTexts["customer-view-title"].exists)
     }
 
     func testInvoiceDetailOpensCustomerViewOnThatInvoice() {
@@ -88,14 +92,14 @@ final class CustomerViewUITests: XCTestCase {
         capture(app, "Customer view invoice deep link")
         ownerExit(app)
         XCTAssertTrue(app.buttons["Customer view, edit or open the PDF"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.staticTexts["Your job documents"].exists)
+        XCTAssertFalse(app.staticTexts["customer-view-title"].exists)
     }
 
     func testChangedDetailsStillGoThroughStaffReviewAfterHandBack() {
         let app = launch()
         let door = app.buttons["job-customer-view"]
         XCTAssertTrue(door.waitForExistence(timeout: 20)); door.tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         let details = revealCustomerDetails(in: app)
         XCTAssertTrue(details.waitForExistence(timeout: 10))
         reveal(details, in: app)
@@ -104,7 +108,7 @@ final class CustomerViewUITests: XCTestCase {
         XCTAssertTrue(name.waitForExistence(timeout: 10))
         name.tap(); name.typeText(" Jr")
         app.buttons["Done"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         ownerExit(app)
         XCTAssertTrue(app.staticTexts["Review changes"].waitForExistence(timeout: 10), "Customer edits need the technician's review")
         capture(app, "Customer view details review")
@@ -164,7 +168,7 @@ final class CustomerViewUITests: XCTestCase {
         let bar = app.navigationBars.firstMatch
         let back = bar.buttons["Customer view"].exists ? bar.buttons["Customer view"] : bar.buttons.element(boundBy: 0)
         back.tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

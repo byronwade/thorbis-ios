@@ -11,6 +11,8 @@ enum ActivityRecordLabel {
 /// Wraps an activity row in a link only when the row already names a real record.
 struct ActivityLink<Content: View>: View {
     let destination: ActivityDestination?
+    /// False on the customer's timeline (Paper 48G), where the row's time takes the trailing edge.
+    var showsChevron = true
     @ViewBuilder var content: () -> Content
 
     var body: some View {
@@ -26,9 +28,9 @@ struct ActivityLink<Content: View>: View {
         HStack(spacing: 8) {
             content()
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            if destination != nil {
+            if destination != nil && showsChevron {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.muted)
                     .accessibilityHidden(true)
             }
@@ -47,23 +49,28 @@ struct JobNoteDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if loading { SkeletonRows(count: 3, inset: 0) }
+            // Paper: the words on one card, radius 20, 16 from the edge; the time under it in 13 muted.
+            VStack(alignment: .leading, spacing: 8) {
+                if loading { SkeletonRows(count: 3, inset: 0).padding(.horizontal, 4) }
                 if let error {
-                    ErrorBanner(message: error) { await load() }
+                    ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin)
                 }
                 if let note {
-                    Text(note.body)
-                        .font(Theme.font(17))
-                        .foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
+                    PaperCard(padding: PaperCardMetrics.inset) {
+                        Text(note.body)
+                            .font(Theme.font(16))
+                            .lineSpacing(3)
+                            .foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
                     Text(ActivityRecordLabel.noteWhen(note.createdAt))
                         .font(Theme.font(13))
                         .foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
                 }
             }
-            .padding(.horizontal, Theme.gutter)
+            .padding(.horizontal, PaperCardMetrics.margin)
             .padding(.vertical, 16)
         }
         .background(Theme.canvas)
@@ -97,26 +104,30 @@ struct JobMediaDetailView: View {
 
     var body: some View {
         ScrollView {
+            // Paper: a 16 Medium title over a 14 muted line, then the file on a radius-20 card.
             VStack(alignment: .leading, spacing: 12) {
-                if loading || preview.loading { SkeletonRows(count: 3, inset: 0) }
+                if loading || preview.loading { SkeletonRows(count: 3, inset: 0).padding(.horizontal, 4) }
                 if let message = error ?? preview.error {
-                    ErrorBanner(message: message) { await load() }
+                    ErrorBanner(message: message) { await load() }.padding(.horizontal, -PaperCardMetrics.margin)
                 }
                 if let asset {
-                    Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
-                        .font(Theme.font(17, weight: .medium))
-                        .foregroundStyle(Theme.foreground)
-                    Text(asset.kind == "photo" ? "Photo" : "Document")
-                        .font(Theme.font(13))
-                        .foregroundStyle(Theme.muted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                            .font(Theme.font(16, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                        Text(asset.kind == "photo" ? "Photo" : "Document")
+                            .font(Theme.font(14))
+                            .foregroundStyle(Theme.muted)
+                    }
+                    .padding(.horizontal, 4)
                 }
                 if let url = preview.url {
                     NativeDocumentPreview(url: url)
                         .frame(minHeight: 420)
-                        .clipShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 }
             }
-            .padding(.horizontal, Theme.gutter)
+            .padding(.horizontal, PaperCardMetrics.margin)
             .padding(.vertical, 16)
         }
         .background(Theme.canvas)
@@ -157,19 +168,33 @@ struct CustomerContactDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if loading { SkeletonRows(count: 3, inset: 0) }
-                if let error { ErrorBanner(message: error) { await load() } }
+            // Paper record: the name in 34 Bold with a 15 muted line, then the ways to reach them on one card.
+            VStack(alignment: .leading, spacing: 0) {
+                if loading { SkeletonRows(count: 3, inset: 0).padding(.horizontal, 4) }
+                if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin) }
                 if let contact {
-                    Text(contact.name).font(Theme.font(22, weight: .medium)).foregroundStyle(Theme.foreground)
-                    if let role = contact.role, !role.isEmpty {
-                        Text(role).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(contact.name).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                            .lineLimit(2).minimumScaleFactor(0.7)
+                            .foregroundStyle(Theme.foreground)
+                            .accessibilityAddTraits(.isHeader)
+                        if let role = contact.role, !role.isEmpty {
+                            Text(role).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        }
                     }
-                    labeled("Phone", contact.phone)
-                    labeled("Email", contact.email)
+                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.bottom, 16)
+                    let phone = filled(contact.phone)
+                    let email = filled(contact.email)
+                    if phone != nil || email != nil {
+                        PaperCard {
+                            if let phone { labeled("Phone", phone) }
+                            if phone != nil, email != nil { WellDivider() }
+                            if let email { labeled("Email", email) }
+                        }
+                    }
                 }
             }
-            .padding(.horizontal, Theme.gutter)
+            .padding(.horizontal, PaperCardMetrics.margin)
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -179,16 +204,19 @@ struct CustomerContactDetailView: View {
         .task { await load() }
     }
 
-    private func labeled(_ title: String, _ value: String?) -> some View {
-        Group {
-            if let value, !value.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    Text(value).font(Theme.font(17)).foregroundStyle(Theme.foreground).textSelection(.enabled)
-                }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            }
+    private func filled(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// One card row: the 14 muted label over its 16 Medium value.
+    private func labeled(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title).font(Theme.font(14)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground).textSelection(.enabled)
         }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 9)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
     }
 
     private func load() async {
@@ -215,18 +243,26 @@ struct ServiceLocationDetailView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if loading { SkeletonRows(count: 3, inset: 0) }
-                if let error { ErrorBanner(message: error) { await load() } }
+            // Paper record: the place's name in 34 Bold, then its address (and notes) on one card.
+            VStack(alignment: .leading, spacing: 0) {
+                if loading { SkeletonRows(count: 3, inset: 0).padding(.horizontal, 4) }
+                if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin) }
                 if let location {
-                    Text(location.label).font(Theme.font(22, weight: .medium)).foregroundStyle(Theme.foreground)
-                    Text(location.address).font(Theme.font(17)).foregroundStyle(Theme.foreground).textSelection(.enabled)
-                    if let notes = location.notes, !notes.isEmpty {
-                        Text(notes).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text(location.label).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .lineLimit(2).minimumScaleFactor(0.7)
+                        .foregroundStyle(Theme.foreground)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.bottom, 16)
+                    PaperCard(padding: PaperCardMetrics.inset) {
+                        Text(location.address).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .textSelection(.enabled)
+                        if let notes = location.notes, !notes.isEmpty {
+                            Text(notes).font(Theme.font(14)).foregroundStyle(Theme.muted).padding(.top, 2)
+                        }
                     }
                 }
             }
-            .padding(.horizontal, Theme.gutter)
+            .padding(.horizontal, PaperCardMetrics.margin)
             .padding(.vertical, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }

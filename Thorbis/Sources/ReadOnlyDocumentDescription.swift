@@ -82,11 +82,20 @@ struct ReadOnlyDocumentDescription: View {
             if snapshot.access == access && snapshot.session == DescriptionSessionIdentity(session) && access.permits(session) {
                 NavigationStack {
                     ScrollView {
+                        // Paper TE6: the wording on a card, 16 from the screen edges.
                         Text(text)
                             .font(readerFont())
+                            .foregroundStyle(Theme.foreground)
+                            .lineSpacing(3)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(Theme.gutter)
+                            .padding(16)
+                            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                                .stroke(Theme.hairline, lineWidth: 1))
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                            .padding(.bottom, 24)
                     }
                     .navigationTitle("Description")
                     .navigationBarTitleDisplayMode(.inline)

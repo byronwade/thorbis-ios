@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// MA-15 inside a grouped List: the words stay body colour and only the mark is tinted.
+/// Paper 73C inside a card or grouped list: the load problem in a row. The words stay body
+/// colour (16pt) and only the mark carries the warning tone.
 struct ListErrorRow: View {
     let message: String
 
@@ -8,8 +9,9 @@ struct ListErrorRow: View {
         Label {
             Text(message).foregroundStyle(Theme.foreground)
         } icon: {
-            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(Theme.destructive)
+            Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.warning)
         }
-        .font(Theme.font(15))
+        .font(Theme.font(16))
+        .frame(minHeight: 44, alignment: .leading)
     }
 }

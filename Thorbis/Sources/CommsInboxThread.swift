@@ -100,12 +100,13 @@ struct CommsRecordingControl: View {
             HStack(spacing: 12) {
                 Button { Task { await player.toggle(callID, path: path, api: api) } } label: {
                     ZStack {
-                        Circle().fill(Theme.ink)
+                        // Paper 51: the play circle is the brand's, its glyph white.
+                        Circle().fill(Theme.brand)
                         if player.loadingID == callID {
-                            ProgressView().tint(Theme.onInk)
+                            ProgressView().tint(Color.white)
                         } else {
                             Image(systemName: active && player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.onInk)
+                                .font(.system(size: 16, weight: .medium)).foregroundStyle(Color.white)
                         }
                     }
                     .frame(width: 44, height: 44)
@@ -116,7 +117,7 @@ struct CommsRecordingControl: View {
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Theme.fill).frame(height: 4)
-                        Capsule().fill(Theme.foreground).frame(width: max(4, proxy.size.width * fraction), height: 4)
+                        Capsule().fill(Theme.brand).frame(width: max(4, proxy.size.width * fraction), height: 4)
                     }
                     .frame(maxHeight: .infinity)
                     .contentShape(Rectangle())
@@ -176,37 +177,57 @@ struct CommsThreadMenu: View {
             items.append(ThorbisMenuItem("Move to Bin", icon: "trash", role: .destructive) { store.bin(id); onMoved() })
         }
         return ThorbisMenu(items: items, title: name, accessibilityLabel: "Conversation options") {
-            PaperCircleLabel(symbol: "ellipsis", size: 36, fill: Theme.card, bordered: true)
+            CreamCircleLabel(symbol: "ellipsis")
         }
         .accessibilityIdentifier("inbox-thread-menu")
     }
 }
 
-/// The top of a conversation: who, how to reach them, and where it is filed.
+/// The top of a conversation (Paper 49C): the name in 17 Semibold centred between the bar's
+/// circles, how to reach them in 13 under it, and where it is filed when that isn't the inbox.
 private struct CommsThreadHeader: View {
     let name: String
-    let initials: String?
-    let symbol: String
     let detail: String?
     let place: CommsFolder
-    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var line: String {
+        var parts: [String] = []
+        if let detail, !detail.isEmpty, detail != name { parts.append(detail) }
+        if place != .inbox { parts.append("In \(place.title)") }
+        return parts.joined(separator: " \u{00B7} ")
+    }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            if !typeSize.isAccessibilitySize { CommsAvatar(initials: initials, symbol: symbol, size: 48) }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(Theme.font(24, weight: .medium)).tracking(-0.4)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                if let detail, !detail.isEmpty, detail != name {
-                    Text(detail).font(Theme.monoFont(14)).foregroundStyle(Theme.muted).textSelection(.enabled)
-                }
-                if place != .inbox {
-                    Text("In \(place.title)").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                }
+        VStack(spacing: 0) {
+            Text(name).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .accessibilityAddTraits(.isHeader)
+            if !line.isEmpty {
+                Text(line).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
-            Spacer(minLength: 0)
         }
+        .frame(maxWidth: 220)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Paper 49C's call circle: the phone's dialer for this number, when it has one to dial.
+private struct CommsCallCircle: View {
+    let url: URL
+    let name: String
+    @Environment(\.openURL) private var openURL
+
+    /// The dialer link for a number, or nil when there is nothing to dial.
+    static func url(_ phone: String?) -> URL? {
+        guard let phone, !phone.isEmpty else { return nil }
+        return OfficeContact(name: "", phone: phone).callURL
+    }
+
+    var body: some View {
+        Button { openURL(url) } label: { CreamCircleLabel(symbol: "phone") }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Call \(name)")
     }
 }
 
@@ -225,20 +246,17 @@ struct CommsCallThreadView: View {
     var body: some View {
         let thread = model.thread(threadID)
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 10) {
                 if let thread {
-                    CommsThreadHeader(name: thread.name, initials: thread.initials, symbol: "phone.fill",
-                                      detail: thread.displayNumber, place: local.flags(threadID).place)
-                        .padding(.bottom, 4)
                     ForEach(thread.calls, id: \.id) { call in
                         CommsCallCard(call: call, model: model, player: player,
                                       canLink: session.can("job.edit") && session.can("customer.view"))
                     }
                 } else {
-                    ListRoomEmpty(title: "These calls aren\u{2019}t in the log anymore.", message: "Pull to refresh the Inbox.")
+                    ListRoomEmpty(title: "These calls aren\u{2019}t in the log anymore.", message: "Pull to refresh Messages.")
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
+            .padding(.horizontal, 16).padding(.vertical, 12)
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
@@ -246,6 +264,14 @@ struct CommsCallThreadView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let thread {
+                ThorbisToolbarItem(placement: .principal) {
+                    CommsThreadHeader(name: thread.name, detail: thread.displayNumber, place: local.flags(threadID).place)
+                }
+                if let call = CommsCallCircle.url(thread.number) {
+                    ThorbisToolbarItem(placement: .topBarTrailing) {
+                        CommsCallCircle(url: call, name: thread.name)
+                    }
+                }
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     CommsThreadMenu(id: threadID, name: thread.name,
                                     unread: CommsInboxScope.callUnread(thread, flags: local.flags(threadID), seen: model.seenIDs),
@@ -281,10 +307,15 @@ struct CommsCallCard: View {
         let kind = call.kind
         let headingLayout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
                                                          : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        let alarming = kind == .missed || kind == .dropped
         VStack(alignment: .leading, spacing: 12) {
             headingLayout {
-                Image(systemName: kind.symbol).font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(kind == .missed || kind == .dropped ? Theme.destructive : Theme.muted)
+                // Paper 49C: the call's glyph in a 32pt circle, green when it was answered.
+                Image(systemName: kind.symbol).font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(alarming ? Theme.destructive : kind == .answered ? Theme.success : Theme.muted)
+                    .frame(width: 32, height: 32)
+                    .background(alarming ? Theme.destructiveSurface : kind == .answered ? Theme.successSurface : Theme.fill, in: Circle())
+                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
                     .accessibilityHidden(true)
                 Text(kind.heading).font(Theme.font(15, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
@@ -320,8 +351,8 @@ struct CommsCallCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ThorbisPanelStyle(), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+        // Paper v2: the card's tone does the work; no rim.
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $choosingJob) {
             CommsLinkJobSheet(call: call, jobs: CallLogRules.linkableJobs(store.jobs)) { jobID in
@@ -345,8 +376,9 @@ struct CommsCallCard: View {
                 if showTranscript && detail == nil { Task { await loadTranscript() } }
             } label: {
                 HStack {
+                    // Paper 49C: "Transcript" is a brand word on the call's card.
                     Text(showTranscript ? "Hide transcript" : "Transcript")
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
                     Spacer()
                     Image(systemName: "chevron.down").rotationEffect(.degrees(showTranscript ? 180 : 0))
                         .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
@@ -440,7 +472,7 @@ struct CommsCallCard: View {
 }
 
 /// The newest jobs on this phone, as web's Link to job menu offers, in a Thorbis sheet.
-private struct CommsLinkJobSheet: View {
+struct CommsLinkJobSheet: View {
     let call: BookingCallRecord
     let jobs: [Job]
     let onPick: (String?) -> Void
@@ -504,12 +536,8 @@ struct CommsLocalThreadView: View {
         let thread = store.thread(threadID)
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) {
                     if let thread {
-                        CommsThreadHeader(name: thread.contactName, initials: thread.initials,
-                                          symbol: thread.channel == .email ? "envelope.fill" : "bubble.left.fill",
-                                          detail: thread.channel == .email ? thread.email : thread.phone, place: thread.flags.place)
-                            .padding(.bottom, 6)
                         if thread.messages.isEmpty {
                             Text("No messages yet. What you write below is saved as a draft on this device.")
                                 .font(Theme.font(14)).foregroundStyle(Theme.muted)
@@ -523,7 +551,7 @@ struct CommsLocalThreadView: View {
                         ListRoomEmpty(title: "This conversation is gone.", message: "It may have been discarded on this device.")
                     }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
+                .padding(.horizontal, 16).padding(.vertical, 12)
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { proxy.scrollTo("end", anchor: .bottom) }
@@ -535,6 +563,15 @@ struct CommsLocalThreadView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let thread {
+                ThorbisToolbarItem(placement: .principal) {
+                    CommsThreadHeader(name: thread.contactName, detail: thread.channel == .email ? thread.email : thread.phone,
+                                      place: thread.flags.place)
+                }
+                if thread.channel == .sms, let call = CommsCallCircle.url(thread.phone) {
+                    ThorbisToolbarItem(placement: .topBarTrailing) {
+                        CommsCallCircle(url: call, name: thread.contactName)
+                    }
+                }
                 ThorbisToolbarItem(placement: .topBarTrailing) {
                     CommsThreadMenu(id: threadID, name: thread.contactName, unread: thread.unread, store: store) { dismiss() }
                 }
@@ -588,23 +625,29 @@ struct CommsLocalThreadView: View {
 
     @ViewBuilder private func bubble(_ message: CommsLocalMessage, thread: CommsLocalThread) -> some View {
         let ours = message.direction == .outbound
+        // Paper 49C: theirs on the card, ours on the brand side, each with a 6pt corner toward its
+        // side. Nothing here is ever sent (no provider), so ours stays on the brand tint rather
+        // than Paper's solid "delivered" blue; a draft adds a dashed rim.
+        let draft = ours && message.status == .draft
+        let shape = UnevenRoundedRectangle(topLeadingRadius: 18, bottomLeadingRadius: ours ? 18 : 6,
+                                           bottomTrailingRadius: ours ? 6 : 18, topTrailingRadius: 18, style: .continuous)
         VStack(alignment: ours ? .trailing : .leading, spacing: 4) {
             Text(message.body).font(Theme.font(16)).lineSpacing(2)
                 .foregroundStyle(Theme.foreground)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 14).padding(.vertical, 10)
-                .background(ours ? Theme.surface : Theme.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .background(ours ? Theme.brandSurface : Theme.card, in: shape)
                 .overlay {
-                    if ours {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .strokeBorder(Theme.hairline, style: StrokeStyle(lineWidth: 1, dash: message.status == .draft ? [4, 3] : []))
+                    if draft {
+                        shape.strokeBorder(Theme.brand, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     }
                 }
+                .frame(maxWidth: 280, alignment: ours ? .trailing : .leading)
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let status = statusLine(message) { StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet, size: 12) }
                 if let when = JobFiltering.date(message.at) {
-                    Text(when.tradeTime).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                    Text(when.tradeTime).font(Theme.font(12)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
                 let items = messageMenu(message, thread: thread)
                 if !items.isEmpty {
@@ -616,7 +659,6 @@ struct CommsLocalThreadView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: ours ? .trailing : .leading)
-        .padding(ours ? .leading : .trailing, 40)
         .accessibilityElement(children: .contain)
     }
 
@@ -657,8 +699,7 @@ struct CommsLocalThreadView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ThorbisPanelStyle(), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
     }
 
     private func addressLine(_ label: String, _ addresses: [String]) -> some View {
@@ -686,46 +727,36 @@ struct CommsTextComposer: View {
     var body: some View {
         let ready = !body_.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let stacked = typeSize.isAccessibilitySize
-        VStack(alignment: .leading, spacing: 6) {
-            if stacked { field }
+        // Paper 49C: a 44pt card circle, then the field on a card capsule with the brand send
+        // circle inside it; the footnote centred under them.
+        VStack(alignment: .leading, spacing: 8) {
+            if stacked { capsule(actions: false) }
             HStack(alignment: .bottom, spacing: 8) {
                 ThorbisMenu(items: cannedItems, title: "Canned replies", accessibilityLabel: "Canned replies", arrowEdge: .bottom) {
-                    PaperCircleLabel(symbol: "text.bubble", size: 36, fill: Theme.fill)
+                    CreamCircleLabel(symbol: "plus")
                 }
                 .accessibilityIdentifier("inbox-canned")
-                if stacked { Spacer(minLength: 0) } else { field }
-                Button { scheduling = true } label: {
-                    PaperCircleLabel(symbol: "clock", size: 36, fill: Theme.fill)
+                if stacked {
+                    Spacer(minLength: 0)
+                    scheduleButton(ready: ready)
+                    sendButton(ready: ready)
+                } else {
+                    capsule(actions: true)
                 }
-                .buttonStyle(PressStyle())
-                .disabled(!ready)
-                .opacity(ready ? 1 : 0.4)
-                .accessibilityLabel("Schedule draft")
-                Button { save(nil) } label: {
-                    Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.onInk)
-                        .frame(width: 36, height: 36)
-                        .background(Theme.ink, in: Circle())
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(!ready)
-                .opacity(ready ? 1 : 0.4)
-                .accessibilityLabel("Save draft")
-                .accessibilityIdentifier("inbox-save-draft")
             }
             // A footnote, not content: capped so at the largest sizes it doesn't take the room the
             // conversation needs.
-            HStack {
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
                 Text("Drafts stay on this device").font(Theme.font(12)).foregroundStyle(Theme.muted)
-                Spacer(minLength: 8)
                 if let counter = CommsSMS.counter(body_) {
-                    Text(counter).font(Theme.monoFont(12)).foregroundStyle(Theme.muted)
+                    Text(counter).font(Theme.font(12)).monospacedDigit().foregroundStyle(Theme.muted)
                 }
+                Spacer(minLength: 0)
             }
             .dynamicTypeSize(...DynamicTypeSize.accessibility1)
-            .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 6)
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
         .background(Theme.background)
         .onAppear {
             guard !loaded else { return }
@@ -747,10 +778,51 @@ struct CommsTextComposer: View {
             .lineLimit(1...6)
             .font(Theme.font(16))
             .focused($focused)
-            .padding(.horizontal, 12).padding(.vertical, 10)
+            .padding(.vertical, 11)
             .frame(minHeight: 44)
-            .background(Theme.field, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .accessibilityIdentifier("inbox-text-field")
+    }
+
+    /// The field on its 48-tall card capsule; with `actions`, Schedule and the send circle sit
+    /// inside it at the trailing end.
+    private func capsule(actions: Bool) -> some View {
+        let ready = !body_.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack(alignment: .bottom, spacing: 2) {
+            field
+            if actions {
+                scheduleButton(ready: ready)
+                sendButton(ready: ready)
+            }
+        }
+        .padding(.leading, 16).padding(.trailing, actions ? 2 : 16)
+        .frame(minHeight: 48)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private func scheduleButton(ready: Bool) -> some View {
+        Button { scheduling = true } label: {
+            Image(systemName: "clock").font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.muted)
+                .frame(width: 36, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(!ready)
+        .opacity(ready ? 1 : 0.4)
+        .accessibilityLabel("Schedule draft")
+    }
+
+    /// Saves the text as a draft (nothing sends): the brand circle with an up arrow.
+    private func sendButton(ready: Bool) -> some View {
+        Button { save(nil) } label: {
+            Image(systemName: "arrow.up").font(.system(size: 16, weight: .semibold)).foregroundStyle(Color.white)
+                .frame(width: 36, height: 36)
+                .background(Theme.brand, in: Circle())
+                .frame(width: 44, height: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .disabled(!ready)
+        .opacity(ready ? 1 : 0.4)
+        .accessibilityLabel("Save draft")
+        .accessibilityIdentifier("inbox-save-draft")
     }
 
     private var cannedItems: [ThorbisMenuItem] {

@@ -9,13 +9,13 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .home: "Home"
+        case .home: "Dashboard"
         case .schedule: "Schedule"
         case .jobs: "Jobs"
         case .customers: "Customers"
         case .properties: "Properties"
         case .attention: "Needs attention"
-        case .inbox: "Inbox"
+        case .inbox: "Messages"
         case .estimates: "Estimates"
         case .invoices: "Invoices"
         case .billing: "Billing schedules"
@@ -23,7 +23,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .money: "Money"
         case .reports: "Reports"
         case .scorecard: "My scorecard"
-        case .team: "Team & permissions"
+        case .team: "Team"
         case .notices: "Notification rules"
         case .drafts: "Message drafts"
         }
@@ -51,23 +51,23 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .home: "house"
+        case .home: "square.grid.2x2"
         case .schedule: "calendar"
         case .jobs: "briefcase"
-        case .customers: "person.2"
-        case .properties: "mappin.and.ellipse"
+        case .customers: "person"
+        case .properties: "house"
         case .attention: "exclamationmark.circle"
-        case .inbox: "tray"
+        case .inbox: "bubble.left"
         case .estimates: "doc.text"
         case .invoices: "doc.plaintext"
         case .billing: "list.bullet.rectangle"
         case .priceBook: "book.closed"
-        case .money: "chart.bar"
-        case .reports: "chart.xyaxis.line"
+        case .money: "banknote"
+        case .reports: "chart.bar"
         case .scorecard: "target"
-        case .team: "person.2.badge.gearshape"
+        case .team: "person.2"
         case .notices: "bell.badge"
-        case .drafts: "bubble.left"
+        case .drafts: "square.and.pencil"
         }
     }
 
@@ -143,8 +143,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     init?(serverTab id: String) { self.init(rawValue: id == "revenue" ? "money" : id) }
 
     /// Whether the place is listed in the menu, the iPad sidebar and Customize menu. Notification
-    /// rules live in Settings; Reports sits inside Money for anyone who can open Money, so a role
-    /// without Money still finds Reports on its own. Neither changes what a role can open.
+    /// rules live in Settings. Paper v2 lists Reports as a place of its own for office and owners.
     @MainActor func listed(_ session: SessionController) -> Bool {
         Self.listed(self, permitted: { $0.permitted(session) })
     }
@@ -152,7 +151,6 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     static func listed(_ item: MenuItem, permitted: (MenuItem) -> Bool) -> Bool {
         switch item {
         case .notices: false
-        case .reports: permitted(.reports) && !permitted(.money)
         default: permitted(item)
         }
     }
@@ -160,8 +158,8 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     @MainActor func permitted(_ session: SessionController) -> Bool {
         switch self {
         case .schedule, .jobs: session.can("job.view", feature: "jobs")
-        // The owner's day at a glance; other roles keep their menus exactly as they were.
-        case .home: session.can("job.view", feature: "jobs") && WorkRole(session) == .owner
+        // Paper v2: the Dashboard leads the office and owner menus (52, 58).
+        case .home: session.can("job.view", feature: "jobs") && WorkRole(session) != .technician
         case .customers, .properties: session.can("customer.view", feature: "core_crm")
         case .attention: session.can("invoice.view", feature: "invoicing") || session.can("estimate.view", feature: "estimates")
         case .inbox: CommsInboxAccess(session).visible
@@ -394,11 +392,14 @@ struct CompanyMobileLayout: Codable {
     let updatedBy: String?
 }
 
-/// More → Customize menu: pick and order up to four tabs, and hide what a role never uses.
+/// Paper 65A Menu and start screen: where the app opens, pick and order up to four tabs, and hide
+/// what a role never uses. On iPad (Paper T10B) where the app opens sits beside the menu.
 struct CustomizeMenuView: View {
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
+    @State private var startupDestination: StartupDestination = .automatic
+    @State private var showingWhatsNew = false
 
     private var isOwner: Bool { session.can("organization.settings.edit") }
     private var company: Bool { layout.source == .company }
@@ -406,67 +407,274 @@ struct CustomizeMenuView: View {
     private var editable: Bool { !company || isOwner }
     private func canBeTab(_ item: MenuItem) -> Bool { layout.canBeTab(item) }
 
-    var body: some View {
-        List {
-            Section {
-                ForEach(layout.tabs) { item in
-                    Label(item.title, systemImage: item.symbol)
-                        .opacity(item.permitted(session) ? 1 : 0.45)
-                }
-                .onMove { if editable { layout.tabs.move(fromOffsets: $0, toOffset: $1) } }
-                .onDelete { offsets in if editable { offsets.map { layout.tabs[$0] }.forEach(layout.removeTab) } }
-                .moveDisabled(!editable)
-                .deleteDisabled(!editable)
-            } header: {
-                Text("Pinned to the top")
-            } footer: {
-                Text(footer)
-            }
+    /// Two columns need this much room; a narrower iPad window keeps the phone's one list.
+    private static let wideWidth: CGFloat = 640
 
-            let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && canBeTab($0) }
-            if editable, layout.tabs.count < MenuLayout.maxTabs, !addable.isEmpty {
-                Section("Pin to the top") {
-                    ForEach(addable) { item in
-                        Button { withAnimation { layout.addTab(item) } } label: {
-                            Label(item.title, systemImage: item.symbol)
-                                .foregroundStyle(Theme.foreground)
+    var body: some View {
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                GeometryReader { geometry in
+                    if geometry.size.width >= Self.wideWidth { tabletColumns } else { phoneList }
+                }
+            } else {
+                phoneList
+            }
+        }
+        .background(Theme.canvas)
+        .navigationBarTitleDisplayMode(.inline)
+        .thorbisDestination(isPresented: $showingWhatsNew) { WhatsNewHistoryView() }
+        .task { await layout.refreshCompanyLayout(api: api) }
+        .task(id: StartupDestination.scope(session: session, api: api)?.key) {
+            startupDestination = StartupDestination.scope(session: session, api: api).map { StartupDestinationPreferences().get(for: $0) } ?? .automatic
+        }
+    }
+
+    /// The phone's screen: one list, top to bottom.
+    private var phoneList: some View {
+        List {
+            // Paper 65A: the title in 34 Bold on the canvas, one muted line under it.
+            Section {
+                titleBlock
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 0, trailing: 4))
+            }
+            // Paper 65A: every start place as a radio row, then "Your menu", then More.
+            startSection(radio: true)
+            pinnedSection(title: "Your menu")
+            addSection
+            showSection
+            moreSection
+            actionSection
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(20)
+        .listRowSeparatorTint(Theme.hairline)
+        .environment(\.editMode, .constant(editable ? .active : .inactive))
+        .scrollContentBackground(.hidden)
+    }
+
+    /// Paper T10B (iPad): the title across the top; "Open the app to", More and the layout action on
+    /// the left, "Your menu" on the right.
+    private var tabletColumns: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            titleBlock
+                .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 4)
+            HStack(alignment: .top, spacing: 0) {
+                List {
+                    startSection(radio: true)
+                    moreSection
+                    actionSection
+                }
+                .listStyle(.insetGrouped)
+                .listSectionSpacing(20)
+                .listRowSeparatorTint(Theme.hairline)
+                .scrollContentBackground(.hidden)
+                List {
+                    pinnedSection(title: "Your menu")
+                    addSection
+                    showSection
+                }
+                .listStyle(.insetGrouped)
+                .listSectionSpacing(20)
+                .listRowSeparatorTint(Theme.hairline)
+                .environment(\.editMode, .constant(editable ? .active : .inactive))
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Menu and start screen").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                .lineLimit(2).minimumScaleFactor(0.7)
+                .accessibilityAddTraits(.isHeader)
+            Text("Make the menu yours").font(Theme.font(15)).foregroundStyle(Theme.muted)
+        }
+        .foregroundStyle(Theme.foreground)
+    }
+
+    /// What the start-screen control shows as chosen: a place this role lost falls back to Automatic.
+    private var chosenStart: StartupDestination {
+        startupDestination.permitted(session) ? startupDestination : .automatic
+    }
+
+    /// Moved here from Settings: the place this device opens to (Paper "Open the app to"). The phone
+    /// picks from a menu; the iPad lists every place with a radio mark (Paper T10B).
+    @ViewBuilder private func startSection(radio: Bool) -> some View {
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let choices = StartupDestination.allCases.filter { $0.permitted(session) }
+            Section {
+                if radio {
+                    ForEach(choices, id: \.rawValue) { destination in
+                        startRadioRow(destination, scope: scope)
+                    }
+                    .listRowBackground(Theme.card)
+                } else {
+                    ThorbisMenu(items: choices.map { destination in
+                        ThorbisMenuItem(destination.displayTitle, isSelected: startupDestination == destination) {
+                            StartupDestinationPreferences().set(destination, for: scope)
+                            startupDestination = destination
+                        }
+                    }, title: "Open the app to") {
+                        HStack(spacing: 8) {
+                            Text(chosenStart.displayTitle)
+                                .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .accessibilityHint("Applies the next time you open the app on this device")
+                    .listRowBackground(Theme.card)
+                }
+            } header: {
+                sectionLabel("Open the app to")
+            }
+        }
+    }
+
+    /// Paper T10B's start-screen row: the place in 16 Medium, a radio mark at the trailing edge.
+    private func startRadioRow(_ destination: StartupDestination, scope: StartupDestinationScope) -> some View {
+        let chosen = chosenStart == destination
+        return Button {
+            StartupDestinationPreferences().set(destination, for: scope)
+            startupDestination = destination
+        } label: {
+            HStack(spacing: 8) {
+                Text(destination.displayTitle).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                Spacer(minLength: 8)
+                Image(systemName: chosen ? "largecircle.fill.circle" : "circle").font(.system(size: 20))
+                    .foregroundStyle(chosen ? Theme.brandText : Theme.muted)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityHint("Applies the next time you open the app on this device")
+    }
+
+    /// The pinned places: drag to reorder, swipe (or the minus) to remove.
+    private func pinnedSection(title: String) -> some View {
+        Section {
+            ForEach(layout.tabs) { item in
+                menuLabel(item)
+                    .opacity(item.permitted(session) ? 1 : 0.45)
+            }
+            .onMove { if editable { layout.tabs.move(fromOffsets: $0, toOffset: $1) } }
+            .onDelete { offsets in if editable { offsets.map { layout.tabs[$0] }.forEach(layout.removeTab) } }
+            .moveDisabled(!editable)
+            .deleteDisabled(!editable)
+            .listRowBackground(Theme.card)
+        } header: {
+            sectionLabel(title)
+        } footer: {
+            sectionNote(footer)
+        }
+    }
+
+    @ViewBuilder private var addSection: some View {
+        let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && canBeTab($0) }
+        if editable, layout.tabs.count < MenuLayout.maxTabs, !addable.isEmpty {
+            Section {
+                ForEach(addable) { item in
+                    Button { withAnimation { layout.addTab(item) } } label: {
+                        HStack(spacing: 8) {
+                            menuLabel(item)
+                            Spacer(minLength: 8)
+                            Image(systemName: "star").font(.system(size: 16)).foregroundStyle(Theme.muted)
+                                .accessibilityHidden(true)
                         }
                     }
                 }
-            }
-
-            Section {
-                ForEach(MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && $0.route != nil }) { item in
-                    Toggle(isOn: Binding(get: { !layout.hidden.contains(item) },
-                                         set: { show in if show { layout.hidden.remove(item) } else { layout.hidden.insert(item) } })) {
-                        Label(item.title, systemImage: item.symbol)
-                    }
-                    .disabled(!editable)
-                }
+                .listRowBackground(Theme.card)
             } header: {
-                Text("Show in menu")
-            } footer: {
-                Text("Hidden places stay here to turn back on; nothing is removed.")
-            }
-
-            if isOwner && !company {
-                Section {
-                    Button("Use this layout for everyone") { withAnimation { layout.makeCompanyLayout() } }
-                } footer: {
-                    Text("Everyone in \(session.activeOrganization?.name ?? "your company") gets these pinned places and this menu.")
-                }
-            } else if !company && !layout.isDefault {
-                Section {
-                    Button("Reset to the standard layout") { withAnimation { layout.reset() } }
-                }
+                sectionLabel("Pin to the top")
             }
         }
-        .environment(\.editMode, .constant(editable ? .active : .inactive))
-        .scrollContentBackground(.hidden)
-        .background(Theme.canvas)
-        .navigationTitle("Customize menu")
-        .navigationBarTitleDisplayMode(.inline)
-        .task { await layout.refreshCompanyLayout(api: api) }
+    }
+
+    private var showSection: some View {
+        Section {
+            ForEach(MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && $0.route != nil }) { item in
+                Toggle(isOn: Binding(get: { !layout.hidden.contains(item) },
+                                     set: { show in if show { layout.hidden.remove(item) } else { layout.hidden.insert(item) } })) {
+                    menuLabel(item)
+                }
+                .tint(Theme.brand)
+                .disabled(!editable)
+            }
+            .listRowBackground(Theme.card)
+        } header: {
+            sectionLabel("Show in menu")
+        } footer: {
+            sectionNote("Hidden places stay here to turn back on; nothing is removed.")
+        }
+    }
+
+    /// Paper 65A / T10B "More": what changed in the app, one tap away.
+    private var moreSection: some View {
+        Section {
+            // A button, not a link: the phone's list is in edit mode, where row links don't open.
+            Button { showingWhatsNew = true } label: {
+                HStack(spacing: 8) {
+                    Text("What's new").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .listRowBackground(Theme.card)
+        } header: {
+            sectionLabel("More")
+        }
+    }
+
+    /// Paper 65A: the layout actions as one quiet pill at the end.
+    @ViewBuilder private var actionSection: some View {
+        if isOwner && !company {
+            Section {
+                Button { withAnimation { layout.makeCompanyLayout() } } label: { RimmedButtonLabel(title: "Use this layout for everyone", symbol: "person.3") }
+                    .buttonStyle(PressStyle())
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+            } footer: {
+                sectionNote("Everyone in \(session.activeOrganization?.name ?? "your company") gets these pinned places and this menu.")
+            }
+        } else if !company && !layout.isDefault {
+            Section {
+                Button { withAnimation { layout.reset() } } label: { RimmedButtonLabel(title: "Reset to the standard layout", symbol: "arrow.counterclockwise") }
+                    .buttonStyle(PressStyle())
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+            }
+        }
+    }
+
+    /// A place in the menu: its glyph in the muted tone, its name in 16 Medium.
+    private func menuLabel(_ item: MenuItem) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: item.symbol).font(.system(size: 17)).foregroundStyle(Theme.muted)
+                .frame(width: 24).accessibilityHidden(true)
+            Text(item.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+        }
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Paper's section label: 13 Semibold, muted, sentence case.
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted).textCase(nil)
+    }
+
+    private func sectionNote(_ text: String) -> some View {
+        Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
     }
 
     private var footer: String {

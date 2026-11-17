@@ -114,7 +114,7 @@ struct DocumentListRowContent: View {
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                     if let subtitle, !subtitle.isEmpty {
-                        Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.subtle)
+                        Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
                             .lineLimit(stacked ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
                     }

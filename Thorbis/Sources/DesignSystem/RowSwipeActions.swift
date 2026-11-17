@@ -13,15 +13,15 @@ import UIKit
 // - Thresholds: half an action's width opens it; past 55% of the row (or a fast fling) a full swipe
 //   runs the one action marked for it. One row is open per screen; scrolling closes it, and a tap
 //   on an open row closes it rather than opening the record.
-// - The buttons are Thorbis buttons with the word showing, in our tokens: ink, the panel, or a
-//   status's text on its own surface (all pairs held by scripts/tests/contrast.py).
+// - The buttons are Thorbis buttons with the word showing (Paper P-04: 15 Semibold), in our tokens:
+//   white on brand blue, the panel, or a status's text on its own surface.
 // - Gestures are never the only path: each screen also offers these actions on the record itself,
 //   and the row exposes them to VoiceOver as custom actions (`rowSwipeAccessibility`).
 
 /// One button behind a row.
 struct RowSwipeAction: Identifiable {
     enum Tone {
-        /// The ink commit: type-colour fill, inverse type.
+        /// The commit (Paper P-04's "Edit" cell): brand-blue fill, white 15 Semibold word.
         case ink
         /// The panel: the quiet fill with the type colour.
         case panel
@@ -272,7 +272,7 @@ private struct RowSwipeButton: View {
 
     private var fill: Color {
         switch action.tone {
-        case .ink: Theme.ink
+        case .ink: Theme.brand
         case .panel: Theme.fill
         case .status(let tone): tone.surface
         }
@@ -280,7 +280,7 @@ private struct RowSwipeButton: View {
 
     private var word: Color {
         switch action.tone {
-        case .ink: Theme.onInk
+        case .ink: Color.white
         case .panel: Theme.foreground
         case .status(let tone): tone.text
         }
@@ -297,7 +297,7 @@ private struct RowSwipeButton: View {
                     Image(systemName: action.symbol).font(.system(size: 17, weight: .medium)).accessibilityHidden(true)
                 }
                 Text(action.title)
-                    .font(Theme.font(13, weight: .medium))
+                    .font(Theme.font(15, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                     .minimumScaleFactor(0.85)

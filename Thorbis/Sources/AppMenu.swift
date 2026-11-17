@@ -51,6 +51,14 @@ final class RecentItems: ObservableObject {
         saveSearches()
     }
 
+    /// Search's × on one recent search: removes those words from this person and workspace's list.
+    func removeSearch(_ text: String) {
+        guard let owner else { return }
+        searches.removeAll { $0.caseInsensitiveCompare(text) == .orderedSame }
+        searchesByOwner[owner] = searches.isEmpty ? nil : searches
+        saveSearches()
+    }
+
     /// Search's Clear: only this person and workspace's searches.
     func clearSearches() {
         guard let owner else { return }
@@ -188,13 +196,16 @@ struct AppMenuEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Edit menu").font(Theme.font(17, weight: .medium))
+                // Paper sheets: the title in 22 Bold, the close word in the brand's words colour.
+                Text("Edit menu").font(Theme.font(22, weight: .bold))
+                    .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
                 Button("Done", action: done)
-                    .font(Theme.font(17, weight: .medium))
+                    .font(Theme.font(16, weight: .semibold))
+                    .foregroundStyle(Theme.brandText)
                     .frame(minWidth: 44, minHeight: 44)
             }
-            .padding(.leading, 20)
+            .padding(.leading, Theme.gutter)
             .padding(.trailing, 12)
             .padding(.vertical, 8)
             list
@@ -234,7 +245,7 @@ struct AppMenuEditor: View {
 
     private func caption(_ text: String) -> some View {
         Text(text)
-            .font(Theme.font(13))
+            .font(Theme.font(13, weight: .semibold))
             .foregroundStyle(Theme.muted)
             .textCase(nil)
     }
@@ -257,14 +268,14 @@ struct AppMenuEditor: View {
                 .font(.system(size: 18, weight: .medium))
                 .frame(width: 26)
             Text(item.title)
-                .font(Theme.font(17))
+                .font(Theme.font(16, weight: .medium))
                 .lineLimit(1)
             Spacer(minLength: 0)
             if editable {
                 Button { toggle(item) } label: {
                     Image(systemName: inBar ? "minus.circle" : "plus.circle")
                         .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(canPin ? Theme.foreground : Theme.muted.opacity(0.5))
+                        .foregroundStyle(canPin ? (inBar ? Theme.muted : Theme.brandText) : Theme.muted.opacity(0.5))
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -273,10 +284,10 @@ struct AppMenuEditor: View {
                 .accessibilityLabel(inBar ? "Unpin \(item.title)" : "Pin \(item.title) to the top")
             }
         }
-        .frame(minHeight: 44)
+        .frame(minHeight: 52)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 4))
+        .listRowInsets(EdgeInsets(top: 0, leading: Theme.gutter, bottom: 0, trailing: 4))
     }
 
     private func move(from source: IndexSet, to destination: Int) {

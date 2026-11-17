@@ -137,6 +137,13 @@ struct OwnerHomeView: View {
     @State private var reviewScope: SavedWorkScope?
     @State private var showPayments = false
     @State private var showMoney = false
+    /// What came in today, when the newest page of payments reaches back past midnight; nil until
+    /// then, so a partial read never prints a smaller, wrong figure.
+    @State private var collectedToday: Int?
+    /// Paper 52/58: each section's label folds its card away (the chevron before the label).
+    @State private var needsCollapsed = false
+    @State private var moneyCollapsed = false
+    @State private var techsCollapsed = false
 
     private var canInvoices: Bool { session.can("invoice.view", feature: "invoicing") }
     private var canEstimates: Bool { session.can("estimate.view", feature: "estimates") }
@@ -147,26 +154,34 @@ struct OwnerHomeView: View {
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Home", subtitle: headline(day), showsCreate: true)
+                // Paper 52/58: the Dashboard title, the day and what's moving under it.
+                PaperHeader(title: "Dashboard", subtitle: headline(day), showsCreate: true)
                 OfflineBanner()
                 SavedCopyNote(savedAt: savedAt).padding(.bottom, 6)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let error { ErrorBanner(message: error) }
-                VStack(alignment: .leading, spacing: 18) {
+                // The figures: the month's money large, then today's people and jobs as cards.
+                VStack(alignment: .leading, spacing: 10) {
+                    revenueHero
                     if store.loading && store.jobs.isEmpty {
                         SkeletonRows().padding(.horizontal, -PaperCardMetrics.margin)
                     } else {
-                        glance(day)
+                        glance(day, proxy: proxy)
                     }
+                }
+                .paperCardMargin()
+                .padding(.top, 4)
+                VStack(alignment: .leading, spacing: 20) {
+                    needsYou(day)
                     if canInvoices || canEstimates { moneyToday }
-                    needsYou
                     techs(day).id("home-techs")
                 }
                 .paperCardMargin()
-                // Redesign phase 3: every section is a semibold header with its count over one well.
+                .padding(.top, 22)
+                // Every section is a semibold label with its count over one card.
                 .environment(\.paperGroupedWells, true)
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, 40)
         }
         #if DEBUG
         // Screenshots of the lower sections: --paper-preview-scroll-end.
@@ -198,13 +213,14 @@ struct OwnerHomeView: View {
 
     // MARK: Header
 
-    /// "Sat, Oct 31 · 14 jobs · 3 techs out".
+    /// "Tue, Jul 21 · 12 jobs in progress" (Paper 52); a quiet day says how many are booked instead.
     private func headline(_ day: [Job]) -> String {
         let date = Date.now.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
-        let out = OwnerDay.techsOut(store.jobs)
-        var parts = [date, "\(day.count) job\(day.count == 1 ? "" : "s")"]
-        parts.append(out == 0 ? "no techs out" : "\(out) tech\(out == 1 ? "" : "s") out")
-        return parts.joined(separator: " · ")
+        let active = day.filter { OwnerDay.activeStatuses.contains($0.status) }.count
+        let jobs = active > 0
+            ? "\(active) job\(active == 1 ? "" : "s") in progress"
+            : "\(day.count) job\(day.count == 1 ? "" : "s") today"
+        return [date, jobs].joined(separator: " · ")
     }
 
     /// The oldest copy on screen that came from this phone instead of the server.
@@ -213,69 +229,183 @@ struct OwnerHomeView: View {
          canEstimates ? api.savedCopyDate("/v1/estimates") : nil].compactMap { $0 }.min()
     }
 
-    // MARK: Today at a glance
+    // MARK: Figures
 
-    /// Today's progress, Linear style: "4 of 14 done" over a thin bar, then the four states as
-    /// counts led by their status glyph. Each count opens the jobs behind it.
-    @ViewBuilder private func glance(_ day: [Job]) -> some View {
-        let counts = Dictionary(grouping: day) { HomeJobState(status: $0.status) }.mapValues(\.count)
-        PaperSection("Today", count: day.isEmpty ? nil : day.count) {
-            VStack(alignment: .leading, spacing: 0) {
-                progress(done: counts[.done] ?? 0, total: day.count)
-                // v2: not a grid of equal tiles. Each state is a quiet row: its word with its mark,
-                // then the count in a tabular column. Each opens the jobs behind it.
-                VStack(spacing: 0) {
-                    ForEach(HomeJobState.allCases, id: \.self) { state in
-                        let count = counts[state] ?? 0
-                        NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                StatusLabel(tone: state.tone, word: state.title, emphasis: count == 0 ? .quiet : .strong, size: 15)
-                                Spacer(minLength: 8)
-                                Text("\(count)").font(Theme.monoFont(15, weight: .medium))
-                                    .foregroundStyle(count == 0 ? Theme.muted : Theme.foreground)
-                            }
-                            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
+    /// Paper's figure card: 16 padding on the card, radius 20.
+    private static let cardPadding: CGFloat = 16
+
+    /// The month's money, large (Paper 52 "Revenue today", 58 "Revenue"). The revenue report is kept
+    /// in whole months, so the card names its month and says it is the month so far, never "today".
+    /// The bars are the months the report carries, this month in brand blue. Opens Revenue.
+    @ViewBuilder private var revenueHero: some View {
+        if let report = revenue, !report.truncated, let month = report.months.last {
+            let months = Array(report.months.suffix(12))
+            NavigationLink(value: PaperRoute.revenue) {
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Collected in \(Self.monthName(month.month))")
+                            .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        Text(money(month.collected, currency: "USD"))
+                            // Paper 52/58: the lead figure in 44 Bold; one line, shrinking before it clips.
+                            .font(Theme.display()).tracking(Theme.displayTracking())
+                            .foregroundStyle(Theme.foreground)
+                            .lineLimit(1).minimumScaleFactor(0.5)
+                        Text("Month so far").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if months.count > 1 && !typeSize.isAccessibilitySize {
+                        VStack(alignment: .trailing, spacing: 10) {
+                            Text("Trailing \(months.count) mo").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            Self.monthBars(months)
                         }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("\(state.title), \(count) job\(count == 1 ? "" : "s") today")
-                        .accessibilityHint("Lists them")
+                        .frame(maxHeight: .infinity, alignment: .top)
                     }
                 }
-                .padding(.bottom, 6)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityElement(children: .combine)
+            .accessibilityHint("Opens revenue")
+            .accessibilityIdentifier("home-revenue")
+        }
+    }
+
+    /// Paper 58's trailing bars: one per month, the latest in brand blue. Decorative; the card's
+    /// words carry the figure.
+    private static func monthBars(_ months: [RevenueReport.Month]) -> some View {
+        let peak = max(months.map(\.collected).max() ?? 1, 1)
+        return HStack(alignment: .bottom, spacing: 4) {
+            ForEach(Array(months.enumerated()), id: \.element.id) { index, month in
+                Capsule()
+                    .fill(index == months.count - 1 ? Theme.brand : Theme.muted.opacity(0.55))
+                    .frame(width: 5, height: max(5, 38 * CGFloat(month.collected) / CGFloat(peak)))
             }
         }
+        .frame(height: 38, alignment: .bottom)
+        .accessibilityHidden(true)
+    }
+
+    /// Today's people and jobs as Paper 52's cards: Active techs and Jobs in progress side by side,
+    /// then Completed today with its count on the right and the day's progress under it. Each card
+    /// opens the jobs (or the techs) behind it.
+    @ViewBuilder private func glance(_ day: [Job], proxy: ScrollViewProxy) -> some View {
+        let counts = Dictionary(grouping: day) { HomeJobState(status: $0.status) }.mapValues(\.count)
+        let people = OwnerDay.techs(store.jobs)
+        let out = OwnerDay.techsOut(store.jobs)
+        let onSite = counts[.onSite] ?? 0
+        let onTheWay = counts[.onTheWay] ?? 0
+        let stacked = typeSize.isAccessibilitySize
+        let pair = stacked ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+        VStack(alignment: .leading, spacing: 10) {
+            pair {
+                Button {
+                    withMotion(.easeOut(duration: 0.3)) { proxy.scrollTo("home-techs", anchor: .top) }
+                } label: {
+                    statTile(label: "Active techs",
+                             value: people.isEmpty ? "0" : "\(out)/\(people.count)",
+                             detail: people.isEmpty ? "No one booked today"
+                                 : out == people.count ? "Everyone is on a job"
+                                 : "\(people.count - out) not on a job")
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Shows the techs")
+                NavigationLink(value: PaperRoute.homeList(.jobs(.onSite))) {
+                    statTile(label: "Jobs in progress", value: "\(onSite)",
+                             detail: onTheWay == 0 ? "None on the way" : "\(onTheWay) on the way")
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Lists them")
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            completedCard(done: counts[.done] ?? 0, scheduled: counts[.scheduled] ?? 0, total: day.count)
+            // Kept from before Paper v2 (not in Paper 52): today's still-to-start and on-the-way
+            // lists stay one tap away, shown only when they hold jobs.
+            let scheduled = counts[.scheduled] ?? 0
+            if scheduled > 0 || onTheWay > 0 {
+                HStack(spacing: 16) {
+                    if scheduled > 0 { glanceLink("\(scheduled) still to start", state: .scheduled) }
+                    if onTheWay > 0 { glanceLink("\(onTheWay) on the way", state: .onTheWay) }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("home-glance")
     }
 
-    /// "4 of 14 done" and a thin bar in the done green; an empty day says so instead of 0 of 0.
-    private func progress(done: Int, total: Int) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(total == 0 ? "No visits booked today" : "\(done) of \(total) done")
-                    .font(Theme.font(17, weight: .medium)).monospacedDigit()
-                Spacer(minLength: 8)
-                if total > 0 {
-                    Text("\(Int((Double(done) / Double(total) * 100).rounded()))%")
-                        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
-                }
+    private func glanceLink(_ title: String, state: HomeJobState) -> some View {
+        NavigationLink(value: PaperRoute.homeList(.jobs(state))) {
+            HStack(spacing: 4) {
+                Text(title).font(Theme.font(14, weight: .medium)).monospacedDigit()
+                Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).accessibilityHidden(true)
             }
-            if total > 0 {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Theme.fill)
-                        Capsule().fill(Theme.statusDone)
-                            .frame(width: max(done == 0 ? 0 : 6, proxy.size.width * CGFloat(done) / CGFloat(total)))
-                    }
-                }
-                .frame(height: 6)
-                .accessibilityHidden(true)
-            }
+            .foregroundStyle(Theme.brandText)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+        .buttonStyle(PressStyle())
+    }
+
+    /// A figure card: 13 Semibold label, the figure in bold tabular, one muted line.
+    private func statTile(label: String, value: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+            // Paper 52: the figure in 28 Bold, tabular.
+            Text(value).font(Theme.heading().monospacedDigit()).tracking(-0.56).foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Self.cardPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+
+    /// "Completed today" with the count on the right (Paper 52), then a thin bar in the done green;
+    /// an empty day says so instead of 0 of 0. Opens today's finished jobs.
+    private func completedCard(done: Int, scheduled: Int, total: Int) -> some View {
+        NavigationLink(value: PaperRoute.homeList(.jobs(.done))) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Completed today").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        Text(total == 0 ? "No visits booked today"
+                             : scheduled == 0 ? "\(done) of \(total) done"
+                             : "\(done) of \(total) done · \(scheduled) still to start")
+                            .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text("\(done)").font(Theme.heading().monospacedDigit()).tracking(-0.56).foregroundStyle(Theme.foreground)
+                }
+                if total > 0 {
+                    GeometryReader { geometry in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Theme.fill)
+                            Capsule().fill(Theme.statusDone)
+                                .frame(width: max(done == 0 ? 0 : 6, geometry.size.width * CGFloat(done) / CGFloat(total)))
+                        }
+                    }
+                    .frame(height: 6)
+                    .accessibilityHidden(true)
+                }
+            }
+            .padding(Self.cardPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Lists them")
         .accessibilityIdentifier("home-progress")
     }
 
@@ -285,6 +415,25 @@ struct OwnerHomeView: View {
         JobFiltering.date(raw).map { Calendar.current.isDateInToday($0) } ?? false
     }
 
+    /// Where a money row leads.
+    private enum MoneyTarget {
+        case route(PaperRoute)
+        case overview
+        case payments
+    }
+
+    private struct MoneyItem: Identifiable {
+        let id: String
+        let title: String
+        var amount: String? = nil
+        /// A quiet word before the amount (Paper's "Fri" beside Payroll due).
+        var note: String? = nil
+        var subtitle: String? = nil
+        let target: MoneyTarget
+    }
+
+    /// Paper 52's Money card: label rows 56 tall, the amount in semibold tabular on the right, the
+    /// open balance beside the section label. Each row opens the records behind it.
     @ViewBuilder private var moneyToday: some View {
         let issuedToday = invoices.filter { $0.status != "void" && $0.status != "draft" && Self.isToday($0.issuedAt) }
         let invoiced = issuedToday.reduce(into: HomeAmounts()) { $0.add(paperLinesTotal($1.lines) ?? 0, $1.currency) }
@@ -294,79 +443,94 @@ struct OwnerHomeView: View {
         let waiting = sent.reduce(into: HomeAmounts()) {
             $0.add(paperLinesTotal($1.lines) ?? 0, $1.lines.first?.unitPrice.currency ?? "USD")
         }
-        // Collected first when the report has it (money in), then what's due: unpaid and waiting.
-        let collected = revenue.flatMap { report in report.truncated ? nil : report.months.last }
-        PaperSection("Money") {
+        let zero = money(0, currency: "USD")
+        let items: [MoneyItem] = {
+            var rows: [MoneyItem] = []
+            guard loaded else { return rows }
+            if canInvoices {
+                rows.append(MoneyItem(id: "unpaid", title: "Outstanding (AR)", amount: owed.isEmpty ? zero : owed.text,
+                                      note: unpaid.isEmpty ? nil : "\(unpaid.count)",
+                                      target: .route(.homeList(.unpaid))))
+                // Paper 52's second row. Opens Payments, where today's are listed one by one.
+                if let collectedToday {
+                    rows.append(MoneyItem(id: "collected", title: "Collected today",
+                                          amount: money(collectedToday, currency: "USD"), target: .payments))
+                }
+                rows.append(MoneyItem(id: "invoiced", title: "Invoiced today", amount: invoiced.isEmpty ? zero : invoiced.text,
+                                      note: issuedToday.isEmpty ? nil : "\(issuedToday.count)",
+                                      target: .route(.homeList(.invoicedToday))))
+            }
+            if canEstimates {
+                rows.append(MoneyItem(id: "estimates", title: "Estimates waiting", amount: waiting.isEmpty ? zero : waiting.text,
+                                      note: sent.isEmpty ? nil : "\(sent.count)",
+                                      target: .route(.homeList(.estimatesWaiting(staleOnly: false)))))
+            }
+            if canInvoices {
+                // Web parity: outstanding, aging and who to chase (money.tsx); every payment collected.
+                rows.append(MoneyItem(id: "overview", title: "Money overview", subtitle: "Outstanding, aging and who to chase", target: .overview))
+                rows.append(MoneyItem(id: "payments", title: "Payments", subtitle: "Every payment, by card or cash", target: .payments))
+            }
+            return rows
+        }()
+        PaperSection(title: "Money", collapsed: $moneyCollapsed) {
             VStack(spacing: 0) {
                 if !loaded {
                     PaperListRow(title: "Reading invoices and estimates…")
                 }
-                if let month = collected {
-                    // The server reports whole months (UTC); the label names its month, never "today".
-                    NavigationLink(value: PaperRoute.revenue) {
-                        moneyRow(symbol: "arrow.down.circle", tint: Theme.markForest,
-                                 title: "Collected in \(Self.monthName(month.month))",
-                                 subtitle: "Month so far",
-                                 amount: money(month.collected, currency: "USD"))
-                    }.buttonStyle(RowPressStyle())
-                }
-                if loaded && canInvoices {
-                    if collected != nil { WellDivider(leading: Self.moneyDivider) }
-                    NavigationLink(value: PaperRoute.homeList(.unpaid)) {
-                        moneyRow(symbol: "exclamationmark.circle", tint: unpaid.isEmpty ? Theme.markGrey : Theme.markBurnt,
-                                 title: "Unpaid",
-                                 subtitle: unpaid.isEmpty ? "Every sent invoice is paid" : "\(unpaid.count) invoice\(unpaid.count == 1 ? "" : "s") with a balance",
-                                 amount: owed.isEmpty ? money(0, currency: "USD") : owed.text)
-                    }.buttonStyle(RowPressStyle())
-                    WellDivider(leading: Self.moneyDivider)
-                    NavigationLink(value: PaperRoute.homeList(.invoicedToday)) {
-                        moneyRow(symbol: "doc.plaintext", tint: Theme.markOlive,
-                                 title: "Invoiced today",
-                                 subtitle: issuedToday.isEmpty ? "No invoices sent yet today" : "\(issuedToday.count) invoice\(issuedToday.count == 1 ? "" : "s")",
-                                 amount: invoiced.isEmpty ? money(0, currency: "USD") : invoiced.text)
-                    }.buttonStyle(RowPressStyle())
-                    WellDivider(leading: Self.moneyDivider)
-                    // Web parity: outstanding, aging and who to chase (money.tsx).
-                    Button { showMoney = true } label: {
-                        moneyRow(symbol: "chart.bar", tint: Theme.markAccent, title: "Money overview",
-                                 subtitle: "Outstanding, aging and who to chase", amount: "")
-                    }.buttonStyle(RowPressStyle())
-                    WellDivider(leading: Self.moneyDivider)
-                    // Web parity: every payment collected, by card, cash or refunded.
-                    Button { showPayments = true } label: {
-                        moneyRow(symbol: "creditcard", tint: Theme.markForest, title: "Payments",
-                                 subtitle: "Every payment, by card or cash", amount: "")
-                    }.buttonStyle(RowPressStyle())
-                }
-                if loaded && canEstimates {
-                    if canInvoices || collected != nil { WellDivider(leading: Self.moneyDivider) }
-                    NavigationLink(value: PaperRoute.homeList(.estimatesWaiting(staleOnly: false))) {
-                        moneyRow(symbol: "doc.text", tint: Theme.markPumpkin,
-                                 title: "Estimates waiting",
-                                 subtitle: sent.isEmpty ? "No estimates out with customers" : "\(sent.count) sent, not answered yet",
-                                 amount: waiting.isEmpty ? money(0, currency: "USD") : waiting.text)
-                    }.buttonStyle(RowPressStyle())
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    moneyLink(item, divider: index > 0)
                 }
             }
-            .padding(.vertical, PaperCardMetrics.edge)
+        } accessory: {
+            if loaded && canInvoices && !owed.isEmpty {
+                Text("\(owed.text) open").font(Theme.font(13)).monospacedDigit()
+            }
         }
         .accessibilityIdentifier("home-money")
     }
 
-    /// The hairline under a money row starts past its place mark.
-    private static let moneyDivider: CGFloat = PaperCardMetrics.inset + 26 + 12
-
-    /// A money figure as a row: the place mark, what it is and how many, the amount in semibold.
-    private func moneyRow(symbol: String, tint: Color, title: String, subtitle: String, amount: String) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            PlaceMark(symbol: symbol, tint: tint)
-            PaperListRow(title: title, subtitle: subtitle, subtitleLines: 2) {
-                Text(amount).font(Theme.rowAmountFont(15)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            .environment(\.paperRowInset, 0)
+    @ViewBuilder private func moneyLink(_ item: MoneyItem, divider: Bool) -> some View {
+        switch item.target {
+        case .route(let route):
+            NavigationLink(value: route) { moneyRow(item, divider: divider) }.buttonStyle(RowPressStyle())
+        case .overview:
+            Button { showMoney = true } label: { moneyRow(item, divider: divider) }.buttonStyle(RowPressStyle())
+        case .payments:
+            Button { showPayments = true } label: { moneyRow(item, divider: divider) }.buttonStyle(RowPressStyle())
         }
-        .padding(.horizontal, PaperCardMetrics.inset)
+    }
+
+    /// 16 Medium label, the amount in 16 Semibold tabular (a count before it in the muted 13), or a
+    /// chevron for a row that opens a place. A hairline sits between rows, inset to the text.
+    private func moneyRow(_ item: MoneyItem, divider: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(item.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let subtitle = item.subtitle {
+                    Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let amount = item.amount {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    if let note = item.note {
+                        Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                    Text(amount).font(Theme.monoFont(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+            } else {
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            }
+        }
+        .padding(.trailing, Self.cardPadding).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .overlay(alignment: .top) { if divider { WellDivider(leading: 0) } }
+        .padding(.leading, Self.cardPadding)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
@@ -383,7 +547,7 @@ struct OwnerHomeView: View {
         return out.string(from: date)
     }
 
-    // MARK: Needs you
+    // MARK: Needs attention
 
     private var savedWork: SavedWorkSnapshot? {
         guard let scope = SavedWorkScope.capture(session: session, api: api, media: media, outbox: outbox) else { return nil }
@@ -392,81 +556,132 @@ struct OwnerHomeView: View {
                      commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning)
     }
 
-    @ViewBuilder private var needsYou: some View {
+    /// One thing that needs someone: a tinted mark, what it is, how much or how old, and where it leads.
+    private struct NeedItem: Identifiable {
+        let id: String
+        let symbol: String
+        let tint: Color
+        let title: String
+        let subtitle: String
+        /// The next step, spoken to VoiceOver; the row itself opens it.
+        let action: String
+        /// Nil opens the saved-work review instead of a list.
+        let route: PaperRoute?
+        var identifier: String? = nil
+    }
+
+    /// Paper 52's Needs attention card: each row a coloured mark, a 16 Medium title over one muted
+    /// line, and a chevron. The full list, item by item, stays one tap away under it.
+    @ViewBuilder private func needsYou(_ day: [Job]) -> some View {
         let unpaid = NeedsAttention.unpaid(invoices)
         let stale = NeedsAttention.waiting(estimates)
         let unscheduled = NeedsAttention.unscheduled(store.jobs)
+        let unassigned = day.filter { $0.assignedToUserId == nil && $0.status != "completed" }
         let work = savedWork
         let syncProblem = (work?.attentionCount ?? 0) > 0 || (work?.hasListingWarning ?? false)
-        let count = (unpaid.isEmpty ? 0 : 1) + (stale.isEmpty ? 0 : 1) + (unscheduled.isEmpty ? 0 : 1) + (syncProblem ? 1 : 0)
-        PaperSection("Needs you", count: count == 0 ? nil : count) {
+        let items: [NeedItem] = {
+            var rows: [NeedItem] = []
+            if syncProblem, let work {
+                rows.append(NeedItem(id: "sync", symbol: "arrow.triangle.2.circlepath", tint: Theme.warning,
+                                     title: work.hasListingWarning ? "Saved work needs checking" : "\(work.attentionCount) change\(work.attentionCount == 1 ? "" : "s") did not sync",
+                                     subtitle: "Saved on this phone, not on the server yet", action: "Review", route: nil,
+                                     identifier: "home-needs-sync"))
+            }
+            if !unassigned.isEmpty {
+                rows.append(NeedItem(id: "unassigned", symbol: "exclamationmark.triangle", tint: Theme.destructive,
+                                     title: "\(unassigned.count) same-day job\(unassigned.count == 1 ? "" : "s") unassigned",
+                                     subtitle: "No tech assigned yet",
+                                     action: session.can("job.assign", feature: "jobs") ? "Assign" : "Review",
+                                     route: .homeList(.tech(userID: nil, name: "Not assigned"))))
+            }
+            if !unpaid.isEmpty {
+                let owed = unpaid.reduce(into: HomeAmounts()) { $0.add($1.1, $1.0.currency) }
+                rows.append(NeedItem(id: "unpaid", symbol: "clock", tint: Theme.warning,
+                                     title: "\(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")",
+                                     subtitle: "\(owed.text)\(oldest(unpaid.first?.0.issuedAt, verb: "issued"))",
+                                     action: "Review", route: .homeList(.unpaid)))
+            }
+            if !stale.isEmpty {
+                rows.append(NeedItem(id: "estimates", symbol: "doc.text", tint: Theme.brandText,
+                                     title: "\(stale.count) estimate\(stale.count == 1 ? "" : "s") waiting on the customer",
+                                     subtitle: "Sent a week or more ago\(oldest(stale.first?.sentAt, verb: "sent"))",
+                                     action: "Follow up", route: .homeList(.estimatesWaiting(staleOnly: true))))
+            }
+            if !unscheduled.isEmpty {
+                rows.append(NeedItem(id: "unscheduled", symbol: "calendar.badge.exclamationmark", tint: Theme.muted,
+                                     title: "\(unscheduled.count) job\(unscheduled.count == 1 ? "" : "s") without a time",
+                                     subtitle: "Booked, not on the schedule yet",
+                                     action: session.can("job.assign", feature: "jobs") ? "Schedule" : "Review",
+                                     route: .homeList(.unscheduled)))
+            }
+            return rows
+        }()
+        // Paper 58 speaks to the owner ("Needs your attention"); Paper 52's office title is plain.
+        PaperSection(session.can("organization.settings.edit") ? "Needs your attention" : "Needs attention",
+                     count: items.isEmpty ? nil : items.count, collapsed: $needsCollapsed) {
             VStack(spacing: 0) {
-                if syncProblem, let work {
-                    Button { reviewScope = SavedWorkScope.capture(session: session, api: api, media: media, outbox: outbox) } label: {
-                        needRow(word: "Not synced", tone: .inProgress,
-                                title: work.hasListingWarning ? "Saved work needs checking" : "\(work.attentionCount) change\(work.attentionCount == 1 ? "" : "s") did not sync",
-                                subtitle: "Saved on this phone, not on the server yet", action: "Review")
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityIdentifier("home-needs-sync")
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    needLink(item, divider: index > 0)
                 }
-                if !unpaid.isEmpty {
-                    let owed = unpaid.reduce(into: HomeAmounts()) { $0.add($1.1, $1.0.currency) }
-                    NavigationLink(value: PaperRoute.homeList(.unpaid)) {
-                        needRow(word: "Unpaid", tone: .attention,
-                                title: "\(unpaid.count) unpaid invoice\(unpaid.count == 1 ? "" : "s")",
-                                subtitle: "\(owed.text)\u{00A0}owed\(oldest(unpaid.first?.0.issuedAt, verb: "issued"))", action: "Review")
-                    }.buttonStyle(RowPressStyle())
-                }
-                if !stale.isEmpty {
-                    NavigationLink(value: PaperRoute.homeList(.estimatesWaiting(staleOnly: true))) {
-                        needRow(word: "Waiting", tone: .scheduled,
-                                title: "\(stale.count) estimate\(stale.count == 1 ? "" : "s") waiting on the customer",
-                                subtitle: "Sent a week or more ago\(oldest(stale.first?.sentAt, verb: "sent"))", action: "Follow up")
-                    }.buttonStyle(RowPressStyle())
-                }
-                if !unscheduled.isEmpty {
-                    NavigationLink(value: PaperRoute.homeList(.unscheduled)) {
-                        needRow(word: "No time", tone: .unscheduled,
-                                title: "\(unscheduled.count) job\(unscheduled.count == 1 ? "" : "s") without a time",
-                                subtitle: "Booked, not on the schedule yet", action: session.can("job.assign", feature: "jobs") ? "Schedule" : "Review")
-                    }.buttonStyle(RowPressStyle())
-                }
-                if count == 0 {
+                if items.isEmpty {
                     PaperListRow(title: loaded ? "Nothing needs you right now" : "Checking…",
-                                 subtitle: loaded ? "Unpaid invoices, waiting estimates, jobs without a time and failed syncs show up here." : nil,
+                                 subtitle: loaded ? "Unassigned jobs, unpaid invoices, waiting estimates, jobs without a time and failed syncs show up here." : nil,
                                  subtitleLines: 3)
+                        .environment(\.paperRowInset, Self.cardPadding)
                 }
-                // The full list, item by item, stays one tap away.
-                WellDivider()
                 NavigationLink(value: PaperRoute.attention) {
-                    PaperListRow(title: "Everything in Needs attention", subtitle: "Each invoice, estimate and job, one by one")
+                    needRow(NeedItem(id: "all", symbol: "list.bullet", tint: Theme.muted,
+                                     title: "Everything in Needs attention", subtitle: "Each invoice, estimate and job, one by one",
+                                     action: "Opens the list", route: .attention),
+                            divider: true)
                 }.buttonStyle(RowPressStyle())
             }
-            .padding(.vertical, PaperCardMetrics.edge)
         }
         .accessibilityIdentifier("home-needs-you")
     }
 
-    /// Something that needs the owner (v2): what it is, then its status word with its mark and how
-    /// old, never a lone mark. The next step is spoken to VoiceOver; the row itself opens it, so the
-    /// view keeps one action (the header's New) instead of a column of equal buttons.
-    private func needRow(word: String, tone: StatusTone, title: String, subtitle: String, action: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                StatusLabel(tone: tone, word: word)
-                Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-                    .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
-                    .fixedSize(horizontal: false, vertical: true)
+    @ViewBuilder private func needLink(_ item: NeedItem, divider: Bool) -> some View {
+        if let route = item.route {
+            NavigationLink(value: route) { needRow(item, divider: divider) }
+                .buttonStyle(RowPressStyle())
+                .modifier(OptionalIdentifier(identifier: item.identifier))
+        } else {
+            Button { reviewScope = SavedWorkScope.capture(session: session, api: api, media: media, outbox: outbox) } label: {
+                needRow(item, divider: divider)
             }
+            .buttonStyle(RowPressStyle())
+            .modifier(OptionalIdentifier(identifier: item.identifier))
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+    }
+
+    /// A 34-wide lane for the mark, then the words and a chevron; the hairline between rows starts
+    /// at the words, as in Paper.
+    private func needRow(_ item: NeedItem, divider: Bool) -> some View {
+        HStack(alignment: .center, spacing: 0) {
+            Image(systemName: item.symbol).font(.system(size: 20, weight: .regular)).foregroundStyle(item.tint)
+                .frame(width: 34, alignment: .leading)
+                .accessibilityHidden(true)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(item.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(item.subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            }
+            .padding(.trailing, 14).padding(.vertical, 11)
+            .frame(minHeight: 56)
+            .overlay(alignment: .top) { if divider { WellDivider(leading: 0) } }
+        }
+        .padding(.leading, Self.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityHint(action)
+        .accessibilityHint(item.action)
     }
 
     /// " · oldest issued 12 days ago".
@@ -487,7 +702,7 @@ struct OwnerHomeView: View {
         let people = OwnerDay.techs(store.jobs)
         let unassigned = day.filter { $0.assignedToUserId == nil }
         if !people.isEmpty || !unassigned.isEmpty {
-            PaperSection(title: "Techs", count: people.count) {
+            PaperSection(title: "Techs", count: people.count, collapsed: $techsCollapsed) {
                 VStack(spacing: 0) {
                     ForEach(people) { tech in
                         let name = name(tech.userID)
@@ -560,6 +775,16 @@ struct OwnerHomeView: View {
             rosterLoaded = true
         }
         if MenuItem.money.permitted(session) { revenue = (try? await api.revenueReport()) ?? revenue }
+        // Paper 52 "Collected today": the newest page of payments, counted only when it reaches
+        // back past midnight (or is the whole tape), so the row never comes up short.
+        if canInvoices, let tape = try? await api.companyPayments(maxPages: 1) {
+            let midnight = Calendar.current.startOfDay(for: .now)
+            let covers = tape.complete
+                || tape.payments.contains { (JobFiltering.date($0.recordedAt) ?? .distantFuture) < midnight }
+            collectedToday = covers
+                ? tape.payments.filter { !$0.refunded && Self.isToday($0.recordedAt) }.reduce(0) { $0 + $1.amount }
+                : nil
+        }
     }
 }
 

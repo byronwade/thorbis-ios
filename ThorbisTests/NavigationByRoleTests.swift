@@ -65,14 +65,14 @@ final class NavigationByRoleTests: XCTestCase {
         XCTAssertEqual(layout.tabs, [.schedule, .inbox, .customers, .jobs])
     }
 
-    func testNotificationRulesLiveInSettingsAndReportsInsideMoney() {
+    func testNotificationRulesLiveInSettingsAndReportsIsItsOwnPlace() {
         XCTAssertEqual(MenuItem.notices.title, "Notification rules")
         XCTAssertFalse(MenuItem.listed(.notices, permitted: { _ in true }))
-        XCTAssertFalse(MenuItem.listed(.reports, permitted: { _ in true }), "Reports is a tab of Money")
-        XCTAssertTrue(MenuItem.listed(.reports, permitted: { $0 != .money }), "Without Money, Reports stays its own place")
+        XCTAssertTrue(MenuItem.listed(.reports, permitted: { _ in true }), "Paper v2 lists Reports for office and owners")
+        XCTAssertTrue(MenuItem.listed(.reports, permitted: { $0 != .money }))
         let menu = AppMenuContent.menu(tabs: [.schedule], hidden: [], order: [], permitted: { _ in true })
         XCTAssertFalse(menu.contains(.notices))
-        XCTAssertFalse(menu.contains(.reports))
+        XCTAssertTrue(menu.contains(.reports))
         XCTAssertTrue(menu.contains(.money))
         XCTAssertTrue(menu.contains(.inbox))
     }

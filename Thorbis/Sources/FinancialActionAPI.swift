@@ -23,6 +23,26 @@ struct FieldEstimateOptionRequest: Encodable {
     let lines: [FieldEstimateLineInput]
 }
 
+/// One sent version of an estimate, as the server froze it when it went out
+/// (`GET /v1/estimates/{id}/revisions/{revisionNumber}`). Read-only history (Paper 35B, 35E):
+/// `status` is "issued", "approved" or "declined"; `supersededAt` is set once a later one replaced it.
+struct EstimateRevisionRecord: Decodable, Identifiable, Hashable {
+    let id: String
+    let estimateId: String
+    let revisionNumber: Int
+    let status: String
+    let title: String
+    let lines: [FieldLine]
+    let options: [FieldEstimateOption]?
+    let totalAmount: Int
+    let currency: String
+    let issuedAt: String?
+    let approvedAt: String?
+    let declinedAt: String?
+    let supersededAt: String?
+    let supersededByRevisionNumber: Int?
+}
+
 struct FieldInvoiceLinesRequest: Encodable {
     let expectedLinesRevision: Int
     let lines: [FieldInvoiceLineInput]
@@ -256,6 +276,15 @@ extension APIClient {
 
     func reviseFieldEstimate(_ id: String, request: FieldEstimateReviseRequest) async throws -> EstimateRecord {
         try await send("POST", financialPath("/v1/estimates", id: id, suffix: "/revise"), body: request)
+    }
+
+    /// One sent version of an estimate, exactly as it went out. Versions are numbered from 1 up to
+    /// the estimate's `currentRevisionNumber`; the server has no list route, so each is read alone.
+    func fieldEstimateRevision(_ id: String, number: Int) async throws -> EstimateRevisionRecord {
+        guard number > 0 else {
+            throw Problem(title: "Invalid estimate revision", status: nil, detail: "\(number)")
+        }
+        return try await send("GET", financialPath("/v1/estimates", id: id, suffix: "/revisions/\(number)"))
     }
 
     func replaceFieldInvoiceLines(_ id: String, request: FieldInvoiceLinesRequest) async throws -> InvoiceRecord {

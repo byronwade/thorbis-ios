@@ -11,23 +11,43 @@ struct CustomersView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
     @State private var newName = ""
-    @State private var selectedView = CustomerListScope.recent.rawValue
+    /// Paper 47 opens on the alphabetical book; Recent and Archived sit behind the filter circle.
+    @State private var selectedView = CustomerListScope.all.rawValue
     @State private var stateFilter = "Any state"
+    /// Narrows the book by name, street or phone where the shell has no Search to hand over to.
+    @State private var query = ""
     @State private var records: [CustomerRecord] = []
     @State private var recordsLoading = true
     @State private var loadGeneration = 0
     @State private var busy = false
     @State private var error: String?
+    /// Paper 48H "Archived customers", pushed from the filter circle.
+    @State private var showArchived = false
+    /// Paper 48B "Archive customer" for the row that was swiped or long-pressed.
+    @State private var archiveTarget: CustomerRecord?
+    /// Paper 47: one row open at a time; scrolling closes it.
+    @StateObject private var swipes = RowSwipeState()
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// The header's + (set by the phone shell). Without it (iPad) the floating New customer stays.
+    @Environment(\.paperCreate) private var headerCreate
+    /// The phone shell's Search; the field hands over to it ("Search or ask").
+    @Environment(\.paperSearch) private var openSearch
 
     private var scope: CustomerListScope { CustomerListScope(rawValue: selectedView) ?? .recent }
     private var items: [CustomerRecord] {
-        scope.customers(from: records).filter { customer in
+        let words = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Archived customers live on their own page (Paper 48H), not in the book.
+        return scope.customers(from: active).filter { customer in
             let matchesState = stateFilter == "Any state"
                 || (stateFilter == "Archived") == customer.archived
-            return matchesState
+            let matchesQuery = words.isEmpty
+                || [customer.name, customer.address, customer.phone].contains { $0?.localizedCaseInsensitiveContains(words) == true }
+            return matchesState && matchesQuery
         }
     }
+    /// The book: everyone who is not archived.
+    private var active: [CustomerRecord] { records.filter { !$0.archived } }
+    private var canArchive: Bool { session.can("customer.archive", feature: "core_crm") }
     private var activeJobs: Int { store.jobs.filter { !["completed", "canceled"].contains($0.status) }.count }
 
     /// Paper 47: an alphabetical book, one letter per section. Recent keeps its newest-first
@@ -47,23 +67,33 @@ struct CustomersView: View {
         let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                // Finding a customer is the bar's Search; Recent / All / Archived narrow the book.
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(records.count) customers · \(activeJobs) active jobs", showsCreate: true)
-                // v2 List room: the view bar is the text tabs alone; the book has no other filter.
-                ListViewBar(options: CustomerListScope.allCases.map(\.rawValue), selection: $selectedView)
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(active.count) \(active.count == 1 ? "customer" : "customers") · \(activeJobs) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
+                // Paper 47: "Search or ask" on the card, the book's filter circle inside it.
+                searchBar.padding(.top, 2)
                 if let error = error ?? store.error {
                     ErrorBanner(message: error) { _ = await store.refresh(api); await loadCustomers() }
+                        .padding(.top, 12)
                 }
-                if recordsLoading && records.isEmpty { ListRoomSkeleton(count: 7, threeLines: false) }
-                // Rows on the canvas under a 13 Medium label per letter (Recent keeps one group);
-                // space between groups, no lines, no panel. Lazy, so a long book stays cheap.
+                if recordsLoading && records.isEmpty { ListRoomSkeleton(count: 7, threeLines: false).padding(.top, 12) }
+                // Paper 47: a letter label (13 Semibold, count trailing) over one card per letter;
+                // Recent keeps its newest-first order in one group.
                 ForEach(Array(sections.enumerated()), id: \.element.0) { index, section in
-                    ListGroupLabel(title: section.0, count: section.1.count, first: index == 0)
-                    ForEach(section.1) { customer in
-                        customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
+                    PaperSection(section.0, count: section.1.count) {
+                        // Clipped to the card, so a swiped row's Archive cell keeps the card's corners.
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(section.1.enumerated()), id: \.element.id) { rowIndex, customer in
+                                if rowIndex > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? 16 : 60) }
+                                customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous))
                     }
+                    .padding(.horizontal, PaperCardMetrics.margin)
+                    .padding(.top, index == 0 ? 14 : 8)
                 }
-                if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
+                if items.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recordsLoading {
+                    ListRoomEmpty(title: "No customers match.", message: "Try a name, street or phone number.")
+                } else if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
                         ListRoomEmpty(title: "No archived customers.", message: "Customers you archive move here.")
                     } else {
@@ -76,40 +106,67 @@ struct CustomersView: View {
             .padding(.bottom, 24)
         }
         .refreshable { await store.refresh(api); await SavedCopies.$liveOnly.withValue(true) { await loadCustomers() } }
+        .onScrollPhaseChange { _, phase in if phase != .idle { swipes.close() } }
         .background(Theme.canvas).toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
-            if session.can("customer.create", feature: "core_crm") && !items.isEmpty {
+            // Paper 47 creates from the header's +; where there is none (iPad) the floating one stays.
+            if headerCreate == nil && session.can("customer.create", feature: "core_crm") && !items.isEmpty {
                 FloatingCreateButton(title: "New customer", disabled: busy) { showNew = true }
             }
         }
         .task(id: store.customers.map(\.id).sorted().joined(separator: "|")) { await loadCustomers() }
         .sheet(isPresented: $showNew) { SheetSurface {
-            NewCustomerSheet { _ in Task { await loadCustomers() } }
+            NewCustomerSheet(onCreated: { _ in Task { await loadCustomers() } }, offersBooking: true)
         } }
         .sheet(item: $newJobFor) { customer in SheetSurface { NewJobSheet(preselected: customer) } }
+        .thorbisDestination(isPresented: $showArchived) {
+            ArchivedCustomersView(customers: records) { _ in
+                _ = await store.refresh(api)
+                await SavedCopies.$liveOnly.withValue(true) { await loadCustomers() }
+            }
+        }
+        .thorbisDestination(item: $archiveTarget) { target in
+            ArchiveCustomerView(customerID: target.id, customerName: target.name) { _ in
+                _ = await store.refresh(api)
+                await SavedCopies.$liveOnly.withValue(true) { await loadCustomers() }
+            }
+        }
     }
     private func customerRow(_ customer: CustomerRecord, jobs: [Job]) -> some View {
         let now = Date()
         let summaryJob = JobFiltering.customerJobSummary(jobs, customerID: customer.id, now: now)?.job
         let jobCount = jobs.count
         let listCustomer = Customer(id: customer.id, name: customer.name, archived: customer.archived, createdAt: customer.createdAt)
-        // iPad selects into the detail column beside the list; iPhone pushes.
         let late = summaryJob.map { isLate($0, now: now) } ?? false
+        // Paper 47: a trailing swipe offers Archive, which opens Archive customer (48B) for a reason.
+        var swipe: [RowSwipeAction] = []
+        if canArchive && !customer.archived {
+            swipe.append(RowSwipeAction(id: "row-swipe-archive-\(customer.id)", title: "Archive", symbol: "archivebox",
+                                        spokenName: "Archive \(customer.name)") {
+                swipes.close()
+                archiveTarget = customer
+            })
+        }
+        let swipeActions = swipe
+        return RowSwipeContainer(id: customer.id, trailing: swipeActions, state: swipes) {
         // iPad selects into the detail column beside the list; iPhone pushes.
-        return PaperSplitLink(id: customer.id, value: listCustomer) {
-            // v2 List room: the name, then street · phone; the open job's status word and when trail,
-            // otherwise how many jobs.
-            CustomerRoomRow(name: customer.name, detail: rowDetail(customer),
-                            status: summaryJob.map { job in
-                                late ? (StatusTone.attention, "Late", "Late, \(job.status.statusLabel)")
-                                     : (StatusTone(jobStatus: job.status, hasTime: job.scheduledFor != nil), job.status.statusLabel, job.status.statusLabel)
+        PaperSplitLink(id: customer.id, value: listCustomer) {
+            // Paper 47: initials, the name over the street, the open job's status mark trailing.
+            // VoiceOver still hears the status, when the visit is, and how many jobs.
+            CustomerBookRow(name: customer.name, street: rowStreet(customer),
+                            tone: summaryJob.map { job in
+                                late ? StatusTone.attention : StatusTone(jobStatus: job.status, hasTime: job.scheduledFor != nil)
                             },
-                            when: summaryJob.flatMap { visitWhen($0, now: now) },
+                            spoken: summaryJob.map { job in
+                                (late ? "Late, " : "") + job.status.statusLabel + (visitWhen(job, now: now).map { ", \($0)" } ?? "")
+                            },
                             jobs: "\(jobCount) \(jobCount == 1 ? "job" : "jobs")",
                             archived: customer.archived)
         }
         .buttonStyle(RowPressStyle())
+        .background(ThorbisPanelStyle())
         .accessibilityIdentifier("customer-row-\(customer.id)")
+        .rowSwipeAccessibility(swipeActions)
         // MA-12: the common actions on long-press; each also exists on the customer.
         .contextMenu {
             if let phone = customer.phone.map({ $0.filter { $0.isNumber || $0 == "+" } }), phone.count >= 7 {
@@ -123,6 +180,10 @@ struct CustomersView: View {
                 Button("New job for \(customer.name)", systemImage: "plus") { newJobFor = listCustomer }
             }
             Button("Copy name", systemImage: "doc.on.doc") { UIPasteboard.general.string = customer.name }
+            if canArchive && !customer.archived {
+                Button("Archive customer", systemImage: "archivebox", role: .destructive) { archiveTarget = customer }
+            }
+        }
         }
     }
 
@@ -132,11 +193,68 @@ struct CustomersView: View {
         return date < now
     }
 
-    /// Where and how to reach them: the street, then the phone.
-    private func rowDetail(_ customer: CustomerRecord) -> String? {
+    /// Paper 47: the street under the name; the phone when there is no street.
+    private func rowStreet(_ customer: CustomerRecord) -> String? {
         let street = customer.address.flatMap { NextStopPlace(jobID: "", organizationID: "", customerID: "", address: $0).firstLine }
-        let parts = [street, customer.phone].compactMap { $0?.isEmpty == false ? $0 : nil }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return [street, customer.phone].compactMap { $0?.isEmpty == false ? $0 : nil }.first
+    }
+
+    /// "Search or ask" on the card (46 tall, radius 14) with the book's filter circle inside it.
+    /// On the phone it hands over to Search; elsewhere it narrows this book.
+    private var searchBar: some View {
+        HStack(spacing: 8) {
+            if let openSearch {
+                Button(action: openSearch.run) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
+                        Text("Search or ask").font(Theme.font(16)).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Search")
+                .accessibilityIdentifier("customers-search")
+            } else {
+                Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                TextField("Search customers", text: $query, prompt: .placeholder("Search customers"))
+                    .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .frame(minHeight: 46)
+                    .accessibilityIdentifier("customers-search")
+                if !query.isEmpty {
+                    Button { query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
+                            .frame(width: 32, height: 44).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Clear search")
+                }
+            }
+            ThorbisMenu(items: filterItems, title: "Show", accessibilityLabel: "Filter customers") {
+                PaperCircleLabel(symbol: "line.3.horizontal.decrease", size: 40,
+                                 fill: scope == .all ? Theme.fill : Theme.brandSurface)
+            }
+            .accessibilityValue(scope.rawValue)
+            .accessibilityIdentifier("header-filter")
+        }
+        .padding(.leading, 12).padding(.trailing, 3)
+        .frame(minHeight: 46)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, PaperCardMetrics.margin)
+    }
+
+    /// Recent and All customers narrow this book; archived customers have their own page
+    /// (Paper 48H), with Restore on each row.
+    private var filterItems: [ThorbisMenuItem] {
+        var menu: [ThorbisMenuItem] = []
+        for option in [CustomerListScope.recent, CustomerListScope.all] {
+            menu.append(ThorbisMenuItem(option.rawValue, isSelected: option == scope) { selectedView = option.rawValue })
+        }
+        menu.append(ThorbisMenuItem("Archived customers", icon: "archivebox") { showArchived = true })
+        return menu
     }
 
     /// When the open visit is, in the same words as Jobs ("Today 4 p.m."), for booked work only.
@@ -173,6 +291,117 @@ struct CustomersView: View {
             self.error = error.localizedDescription
         }
     }
+}
+
+/// Paper 47's row: 32pt initials in a 44 column, the name (16 Medium) over the street (14 muted),
+/// and the open job's status mark (18) trailing; an empty 18pt slot keeps the column when there is none.
+private struct CustomerBookRow: View {
+    let name: String
+    var street: String? = nil
+    var tone: StatusTone? = nil
+    /// What VoiceOver says for the mark: the status word and when the visit is.
+    var spoken: String? = nil
+    /// "3 jobs": read by VoiceOver when there is no open job to name.
+    var jobs: String? = nil
+    var archived = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stacked = typeSize.isAccessibilitySize
+        HStack(alignment: .center, spacing: 0) {
+            // At accessibility sizes the initials give their width back to the name.
+            if !stacked {
+                CustomerInitials(name: name).frame(width: 44, alignment: .leading)
+            }
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name).font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                        .foregroundStyle(archived ? Theme.muted : Theme.foreground)
+                        .lineLimit(stacked ? nil : 2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let street, !street.isEmpty {
+                        Text(street).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .lineLimit(stacked ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                trailing
+            }
+            .padding(.trailing, 16).padding(.vertical, 11)
+        }
+        .padding(.leading, 16)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityWords)
+    }
+
+    @ViewBuilder private var trailing: some View {
+        if archived {
+            Text("Archived").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted).fixedSize()
+        } else if let tone {
+            StatusGlyph(tone: tone, label: spoken ?? "", size: 18)
+        } else {
+            Color.clear.frame(width: 18, height: 18)
+        }
+    }
+
+    private var accessibilityWords: String {
+        let status = archived ? "Archived" : (tone != nil ? spoken : jobs)
+        return [name, street, status].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+}
+
+/// Initials on a quiet fill (Paper 47): 12 Semibold in the secondary ink, 32pt circle.
+private struct CustomerInitials: View {
+    let name: String
+
+    var body: some View {
+        Text(Self.initials(name))
+            .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.subtle)
+            .frame(width: 32, height: 32)
+            .background(Theme.fill, in: Circle())
+            .dynamicTypeSize(...DynamicTypeSize.large)
+            .accessibilityHidden(true)
+    }
+
+    static func initials(_ name: String) -> String {
+        let words = name.split(whereSeparator: { $0 == " " || $0 == "-" }).filter { $0.first?.isLetter == true }
+        return words.prefix(2).compactMap { $0.first.map(String.init) }.joined().uppercased()
+    }
+}
+
+/// Paper 48N's hub rows, each a page about the customer.
+private enum CustomerHubPart: String, Hashable, Identifiable {
+    case jobs, property, equipment, membership, money
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .jobs: "Jobs"
+        case .property: "Property"
+        case .equipment: "Equipment"
+        case .membership: "Membership"
+        case .money: "Money"
+        }
+    }
+
+    /// The compiled records a page needs: `tab` drives the loaders ("Jobs", "Money", else none).
+    var tab: String {
+        switch self {
+        case .jobs: "Jobs"
+        case .money: "Money"
+        default: "Overview"
+        }
+    }
+}
+
+private struct CustomerHubRow: Identifiable {
+    let part: CustomerHubPart
+    let subtitle: String?
+    var id: CustomerHubPart { part }
 }
 
 private enum CustomerLocationSheet: Identifiable {
@@ -249,6 +478,8 @@ struct CustomerDetailView: View {
     @State private var activityLoading = false
     @State private var activityError: String?
     @State private var activityLoadGeneration = 0
+    /// Paper 48G's chips over the timeline: All, Visits, Payments.
+    @State private var activityFilter = "All"
     @State private var locationState = ServiceLocationCollectionState()
     @State private var error: String?
     @State private var showNewJob = false
@@ -260,7 +491,12 @@ struct CustomerDetailView: View {
     @State private var locationToRemove: ServiceLocationRecord?
     @State private var isRemovingLocation = false
     @State private var locationError: String?
+    /// The records the open hub page needs: "Jobs" and "Money" load the compiled records.
     @State private var tab = "Overview"
+    /// Paper 48N: the hub row whose page is pushed ("Everything for Danielle").
+    @State private var openPart: CustomerHubPart?
+    /// DEBUG previews open a hub page once.
+    @State private var previewOpened = false
     @State private var records: CustomerJobCompilation?
     @State private var recordsLoading = false
     @State private var recordsError: String?
@@ -278,26 +514,31 @@ struct CustomerDetailView: View {
     @State private var smsConsentChoice: Bool?
     @State private var smsConsentError: String?
     @State private var showCustomerMode = false
+    @State private var showEditCustomer = false
+    /// Paper 48B "Archive customer", pushed from Customer actions or from Edit customer.
+    @State private var showArchive = false
+    @State private var archiveAfterEdit = false
+    @State private var restoring = false
     @State private var handoff: DeviceHandoff?
     private var jobs: [Job] { store.jobs.filter { $0.customerId == customer.id } }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
+    private var canArchive: Bool { session.can("customer.archive", feature: "core_crm") }
+    private var isArchived: Bool { record?.archived ?? customer.archived ?? false }
     private var contacts: [CustomerContactRecord] { contactState.contacts }
     private var contactsLoaded: Bool { contactState.isLoaded }
     private var locations: [ServiceLocationRecord] { locationState.locations }
 
-    /// Member pricing for the subtitle ("Member, 15% off").
+    /// Member pricing for the hub's Membership row ("Comfort Club · 15% off").
     @State private var pricing: MemberPricing?
+    /// The customer's equipment for the hub's row ("Equipment · 2", then what it is). Nil until
+    /// it loads, or when this person can't read it.
+    @State private var equipment: [EquipmentRecord]?
     /// The customer's jobs as GET /v1/jobs?customerId returns them: the notes line for Jobs.
     @State private var jobRecords: [JobRecord] = []
     @State private var showAllPast = false
     @Environment(\.openURL) private var openURL
     @Environment(\.inboxText) private var inboxText
 
-    /// Overview | Jobs · N | Money: the page's one selector row.
-    private var jobsLabel: String { session.can("job.view", feature: "jobs") ? "Jobs · \(jobs.count)" : "Jobs" }
-    private var tabBinding: Binding<String> {
-        Binding(get: { tab == "Jobs" ? jobsLabel : tab }, set: { tab = $0.hasPrefix("Jobs") ? "Jobs" : $0 })
-    }
     private var primaryPhone: String? { contacts.first(where: \.primary)?.phone ?? record?.phone }
     private var primaryEmail: String? { contacts.first(where: \.primary)?.email ?? record?.email }
     private var directionsURL: URL? {
@@ -307,33 +548,24 @@ struct CustomerDetailView: View {
     var body: some View {
         ScrollViewReader { reader in
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                OfflineBanner().padding(.horizontal, -Theme.gutter)
-                SavedCopyNote(savedAt: api.savedCopyDate("/v1/customers/\(customer.id)")).padding(.horizontal, -Theme.gutter)
+            // Paper 48N: the name, one line of facts, New job with Call and Text, then one card that
+            // leads to everything about the customer. Cards sit 16 from the edge, titles 20.
+            VStack(alignment: .leading, spacing: 0) {
+                OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
+                SavedCopyNote(savedAt: api.savedCopyDate("/v1/customers/\(customer.id)")).padding(.horizontal, -PaperCardMetrics.margin)
                 customerIdentity
-                actionCircles
-                PaperTabs(options: ["Overview", jobsLabel, "Money"], selection: tabBinding, textTabs: true)
-                    .padding(.horizontal, -Theme.gutter)
+                actionRow.padding(.top, 16)
                 if let error {
-                    ErrorBanner(message: error) { await load() }
+                    ErrorBanner(message: error) { await load() }.padding(.top, 16)
                 }
-                switch tab {
-                case "Jobs":
-                    if session.can("job.view", feature: "jobs") { jobsSection }
-                    else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
-                case "Money": moneySection
-                default: overview
+                VStack(alignment: .leading, spacing: 20) {
+                    hub
+                    overview
                 }
-                // At accessibility sizes a pinned New job would cover half the screen, so it
-                // follows the content instead (as on the customer presentation).
-                if typeSize.isAccessibilitySize { customerPrimaryActions.padding(.horizontal, -Theme.gutter) }
+                .padding(.top, 20)
                 Color.clear.frame(height: 1).id("customer-end")
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
-            // Redesign phase 2: every section here is a semibold header over a grouped well.
-            .environment(\.paperGroupedWells, true)
-            // v2 Record room, as on the job: sections are space and a label, no panels.
-            .environment(\.paperRecordRoom, true)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
         }
         #if DEBUG
         // `--paper-preview-scroll center|bottom`: the lower sections, once they have loaded.
@@ -358,16 +590,31 @@ struct CustomerDetailView: View {
             let items = customerMenuItems
             if !items.isEmpty {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
-                    ThorbisMenu(items: items, accessibilityLabel: "Customer actions") { PaperCircleLabel(symbol: "ellipsis", fill: Theme.fill, bordered: true) }
+                    // Paper 48N: the ⋯ circle on the card, 44.
+                    ThorbisMenu(items: items, accessibilityLabel: "Customer actions") { PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card) }
                 }
             }
         }
-        .safeAreaInset(edge: .bottom) { if !typeSize.isAccessibilitySize { customerPrimaryActions } }
+        .thorbisDestination(item: $openPart) { part in hubPage(part) }
+        .thorbisDestination(isPresented: $showArchive) {
+            ArchiveCustomerView(customerID: customer.id, customerName: record?.name ?? customer.name) { saved in
+                record = saved
+                _ = await store.refresh(api)
+            }
+        }
+        .onChange(of: openPart) { before, part in
+            tab = part?.tab ?? "Overview"
+            // Back from Equipment: the row's count and names follow what was added or removed.
+            if before == .equipment && part == nil {
+                Task { equipment = try? await api.customerEquipment(customer.id) }
+            }
+        }
         .deviceHandoffs($handoff)
         .task { await load() }
         .task { await loadSmsConsent() }
         .task { await loadJobEmails() }
         .task(id: customer.id) { pricing = try? await api.memberPricing(customer.id) }
+        .task(id: customer.id) { equipment = try? await api.customerEquipment(customer.id) }
         .task { await loadActivity(reset: true) }
         .task(id: recordsScope) {
             if recordsPublishedScope != recordsScope {
@@ -380,8 +627,12 @@ struct CustomerDetailView: View {
         .onAppear {
             RecentItems.shared.record(.customer, id: customer.id, title: customer.name, subtitle: "Customer")
             #if DEBUG
-            if PaperPreview.enabled && ["customer-records", "customer-jobs"].contains(PaperPreview.screen) { tab = "Jobs" }
-            if PaperPreview.enabled && PaperPreview.screen == "customer-money" { tab = "Money" }
+            // Once: coming back from the pushed page must not push it again.
+            if PaperPreview.enabled && !previewOpened {
+                previewOpened = true
+                if ["customer-records", "customer-jobs"].contains(PaperPreview.screen) { openPart = .jobs }
+                if PaperPreview.screen == "customer-money" { openPart = .money }
+            }
             #endif
         }
         .onChange(of: tab, initial: true) { _, selectedTab in
@@ -396,7 +647,19 @@ struct CustomerDetailView: View {
                 if tab == "Jobs" { await loadJobRecords() }
             }
         }
-        .sheet(isPresented: $showNewJob) { SheetSurface { NewJobSheet(preselected: customer) } }
+        // New job and the location sheets present from whichever screen is showing: here, or the
+        // pushed hub page (`hubPresentations`), never both.
+        .sheet(isPresented: openPart == nil ? $showNewJob : Binding<Bool>.constant(false)) { SheetSurface { NewJobSheet(preselected: customer) } }
+        .sheet(isPresented: $showEditCustomer, onDismiss: {
+            // Paper 48C's "Archive customer" closes the sheet first, then 48B is pushed.
+            if archiveAfterEdit {
+                archiveAfterEdit = false
+                showArchive = true
+            }
+        }) {
+            EditCustomerSheet(customerID: customer.id, onSaved: { _ in Task { await load() } },
+                              onArchive: { archiveAfterEdit = true })
+        }
         .fullScreenCover(isPresented: $showCustomerMode, onDismiss: { Task { await load(); await loadSmsConsent() } }) {
             CustomerSelfEditView(customerID: customer.id) { showCustomerMode = false }
         }
@@ -407,13 +670,13 @@ struct CustomerDetailView: View {
                 error = nil
             }
         } }
-        .sheet(item: $locationSheet) { item in SheetSurface {
+        .sheet(item: openPart == nil ? $locationSheet : Binding<CustomerLocationSheet?>.constant(nil)) { item in SheetSurface {
             ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
                 locationState.save(saved)
                 locationError = nil
             }
         } }
-        .thorbisConfirm(item: $locationToRemove,
+        .thorbisConfirm(item: openPart == nil ? $locationToRemove : Binding<ServiceLocationRecord?>.constant(nil),
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
                         actions: { location in
@@ -431,119 +694,323 @@ struct CustomerDetailView: View {
         })
     }
 
-    /// Details always open (address first), the open job, membership, contacts, places, equipment,
-    /// then the customer's activity.
+    /// What has no row in Paper 48N's hub stays on the page under it: the open job, the account's
+    /// details, the contacts, then the customer's activity.
     @ViewBuilder private var overview: some View {
+        if session.can("job.view", feature: "jobs") { nextVisit }
         if record == nil && error == nil {
-            PaperCard { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
+            PaperSection("Details") { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
         } else {
             details
+            contactPreferences
         }
-        if session.can("job.view", feature: "jobs") { nextVisit }
-        CustomerMembershipSection(customerID: customer.id)
         contactsSection.id("customer-contacts")
-        locationsSection
-        CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
         activitySection
+        recordSection
     }
 
-    /// Call, Text, Email and Directions as labelled quiet circles; only the ones this customer has.
-    @ViewBuilder private var actionCircles: some View {
-        let dialable = primaryPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
-        let mail = MailDraft(recipient: primaryEmail)
-        if dialable != nil || mail != nil || directionsURL != nil {
-            let count = (dialable != nil ? 2 : 0) + (mail != nil ? 1 : 0) + (directionsURL != nil ? 1 : 0)
-            // At accessibility sizes two across, like the job's reach circles: a sideways-scrolling row
-            // cut "Directions" off the edge, so the last action was easy to miss with large text.
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4, alignment: .top),
-                                     count: typeSize.isAccessibilitySize ? min(2, count) : count), spacing: 12) {
-                actionCircleItems(dialable: dialable, mail: mail)
-            }
-            .accessibilityElement(children: .contain)
-        }
-    }
-
-    @ViewBuilder private func actionCircleItems(dialable: String?, mail: MailDraft?) -> some View {
-        if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
-            PaperLabeledCircle(symbol: "phone", title: "Call") { openURL(call) }
-            PaperLabeledCircle(symbol: "message", title: "Text") { inboxText(text, name: customer.name, openURL: openURL) }
-        }
-        if let mail { PaperLabeledCircle(symbol: "envelope", title: "Email") { handoff = .mail(mail) } }
-        if let directionsURL {
-            PaperLabeledCircle(symbol: "arrow.triangle.turn.up.right.diamond", title: "Directions",
-                               accessibilityLabel: "Directions in Maps") { openURL(directionsURL) }
-        }
-    }
-
-    /// New job: the page's one ink commit, pinned at the bottom.
-    @ViewBuilder private var customerPrimaryActions: some View {
-        if session.can("job.create", feature: "jobs") {
-            Button { showNewJob = true } label: {
-                Label("New job", systemImage: "plus").inkCommit()
-            }
-            .buttonStyle(PressStyle())
-            .accessibilityIdentifier("customer-new-job-action")
-            .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 8).background(Theme.canvas)
-        }
-    }
-
-    /// v2 Record room (after Linear's project overview): the name at 24 Medium, then the quiet
-    /// properties (membership, type, since, archived) as marked words. No avatar: the name is the
-    /// page. The job count lives on the Jobs tab, once.
-    private var customerIdentity: some View {
-        let name = record?.name ?? customer.name
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(name)
-                .font(Theme.font(24, weight: .medium)).tracking(-0.3)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            let properties = identityProperties
-            if !properties.isEmpty {
-                FlowRow(spacing: 14, lineSpacing: 6) {
-                    ForEach(properties, id: \.text) { property in
-                        HStack(spacing: 5) {
-                            Image(systemName: property.symbol).font(Theme.font(12, weight: .medium))
-                                .foregroundStyle(property.tint).accessibilityHidden(true)
-                            Text(property.text).font(Theme.font(13, weight: .medium)).monospacedDigit()
-                                .foregroundStyle(Theme.subtle)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+    /// Paper 48A "Contact preferences": how this customer may be reached about their jobs, each
+    /// on its own 56pt row. Phone calls have no preference on the server, so that row is not drawn.
+    @ViewBuilder private var contactPreferences: some View {
+        if record != nil, smsConsentLoaded || jobEmails != nil {
+            PaperSection("Contact preferences") {
+                VStack(alignment: .leading, spacing: 0) {
+                    if smsConsentLoaded {
+                        smsConsentRow.frame(minHeight: 56).padding(.horizontal, PaperCardMetrics.inset)
+                    }
+                    if smsConsentLoaded && jobEmails != nil { WellDivider() }
+                    if jobEmails != nil {
+                        jobEmailsRow.frame(minHeight: 56).padding(.horizontal, PaperCardMetrics.inset)
                     }
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(properties.map(\.text).joined(separator: ", "))
+            }
+        }
+    }
+
+    /// Paper 48A "Record": Archive customer as a row at the foot of the page. It opens Archive
+    /// customer (48B), the same page Customer actions opens.
+    @ViewBuilder private var recordSection: some View {
+        if canArchive, record != nil, !isArchived {
+            PaperSection("Record") {
+                Button { showArchive = true } label: {
+                    HStack(spacing: 12) {
+                        Text("Archive customer").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    }
+                    .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("customer-record-archive")
+            }
+        }
+    }
+
+    /// Paper 48N "Everything for Danielle": one card of rows, each opening its own page.
+    private var hub: some View {
+        let rows = hubRows
+        return PaperSection("Everything for \(hubName)") {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { WellDivider(leading: 16) }
+                    hubRow(row.part, subtitle: row.subtitle)
+                }
+            }
+        }
+    }
+
+    /// The hub's rows, each with what the app already knows about it; a row with nothing to say
+    /// yet shows its title alone.
+    private var hubRows: [CustomerHubRow] {
+        [CustomerHubRow(part: .jobs, subtitle: jobsSummary),
+         CustomerHubRow(part: .property, subtitle: propertySummary),
+         CustomerHubRow(part: .equipment, subtitle: equipmentSummary),
+         CustomerHubRow(part: .membership, subtitle: membershipSummary),
+         CustomerHubRow(part: .money, subtitle: "Estimates and invoices")]
+    }
+
+    /// The first name for a person ("Everything for Danielle"); a business keeps its whole name.
+    private var hubName: String {
+        let name = record?.name ?? customer.name
+        guard record?.accountType != "commercial", let first = name.split(separator: " ").first else { return name }
+        return String(first)
+    }
+
+    private func hubTitle(_ part: CustomerHubPart) -> String {
+        if part == .property && locations.count > 1 { return "Properties · \(locations.count)" }
+        if part == .equipment, let count = equipment?.count, count > 0 { return "Equipment · \(count)" }
+        return part.title
+    }
+
+    /// "Trane XR14 condenser · Rheem water heater": the first two things on file.
+    private var equipmentSummary: String? {
+        guard let equipment else { return nil }
+        guard !equipment.isEmpty else { return "No equipment yet" }
+        return equipment.prefix(2).map(\.name).joined(separator: " · ")
+    }
+
+    /// "AC not cooling · Today 4:00 p.m. · 6 past".
+    private var jobsSummary: String? {
+        guard session.can("job.view", feature: "jobs") else { return nil }
+        guard !jobs.isEmpty else { return "No jobs yet" }
+        var parts: [String] = []
+        if let open = JobFiltering.customerJobSummary(jobs, customerID: customer.id)?.job {
+            parts.append(open.title)
+            if let date = JobFiltering.date(open.scheduledFor) { parts.append(date.visitLabel()) }
+        }
+        let past = jobs.filter { ["completed", "canceled"].contains($0.status) }.count
+        if past > 0 { parts.append("\(past) past") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// "412 Birchwood Ln · gate 4482#": the first service place's street and its gate.
+    private var propertySummary: String? {
+        guard let place = locations.first(where: { $0.kind == "service" }) ?? locations.first else { return nil }
+        let street = NextStopPlace(jobID: "", organizationID: "", customerID: "", address: place.address).firstLine ?? place.address
+        let gate = place.gateCode.flatMap { $0.isEmpty ? nil : "gate \($0)" }
+        return [street, gate].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// "Comfort Club · 15% off", "Member", or "Not a member", once the server has said.
+    private var membershipSummary: String? {
+        guard let pricing else { return nil }
+        guard pricing.isMember else { return "Not a member" }
+        let discount = pricing.discountPercent > 0 ? "\(pricing.discountPercent)% off" : nil
+        return [pricing.membership?.name ?? "Member", discount].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// A hub row: 16 Medium title over a 14 muted line, a quiet chevron trailing, 60 tall.
+    private func hubRow(_ part: CustomerHubPart, subtitle: String?) -> some View {
+        let title = hubTitle(part)
+        return Button { openPart = part } label: {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            }
+            .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityLabel(title)
+        .accessibilityValue(subtitle ?? "")
+        .accessibilityIdentifier("customer-hub-\(part.rawValue)")
+    }
+
+    /// A hub row's page, pushed: its title, then the same sections the customer always had.
+    @ViewBuilder private func hubPage(_ part: CustomerHubPart) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hubTitle(part)).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(record?.name ?? customer.name).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 4).padding(.top, 10)
+                switch part {
+                case .jobs:
+                    if session.can("job.view", feature: "jobs") { jobsSection }
+                    else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
+                case .property:
+                    locationsSection
+                case .equipment:
+                    CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
+                case .membership:
+                    CustomerMembershipSection(customerID: customer.id)
+                case .money:
+                    moneySection
+                }
+                // At accessibility sizes a pinned New job would cover half the screen, so it
+                // follows the content instead.
+                if part == .jobs && typeSize.isAccessibilitySize { newJobBar }
+            }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+        }
+        .foregroundStyle(Theme.foreground).background(Theme.canvas)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Theme.canvas, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .safeAreaInset(edge: .bottom) { if part == .jobs && !typeSize.isAccessibilitySize { newJobBar } }
+        .refreshable {
+            await SavedCopies.$liveOnly.withValue(true) {
+                await load()
+                if part == .jobs || part == .money { await loadRecords() }
+                if part == .jobs { await loadJobRecords() }
+            }
+        }
+        // The pushed page presents its own New job and location sheets; the covered customer
+        // screen stands down while a page is open.
+        .sheet(isPresented: $showNewJob) { SheetSurface { NewJobSheet(preselected: customer) } }
+        .sheet(item: $locationSheet) { item in SheetSurface {
+            ServiceLocationSheet(customerID: customer.id, location: item.location) { saved in
+                locationState.save(saved)
+                locationError = nil
+            }
+        } }
+        .thorbisConfirm(item: $locationToRemove,
+                        title: { _ in "Remove service location?" },
+                        message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
+                        actions: { location in
+            [ThorbisConfirmAction("Remove \(location.label)", role: .destructive) {
+                Task { await removeLocation(location) }
+            }]
+        })
+    }
+
+    /// New job under the customer's job history (the empty history points to it).
+    @ViewBuilder private var newJobBar: some View {
+        if session.can("job.create", feature: "jobs") {
+            Button { showNewJob = true } label: { Text("New job").inkCommit() }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("customer-new-job-action")
+                .padding(.horizontal, typeSize.isAccessibilitySize ? 0 : PaperCardMetrics.margin).padding(.vertical, 8)
+                .background(Theme.canvas)
+        }
+    }
+
+    /// Paper 48N: New job (the page's one brand commit) beside 50pt Call and Text circles. Email and
+    /// Directions live in Customer actions. At accessibility sizes the circles drop under New job.
+    @ViewBuilder private var actionRow: some View {
+        let dialable = primaryPhone.map { $0.filter { $0.isNumber || $0 == "+" } }.flatMap { $0.count >= 7 ? $0 : nil }
+        let canCreate = session.can("job.create", feature: "jobs")
+        if canCreate || dialable != nil {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+                : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+            layout {
+                if canCreate {
+                    Button { showNewJob = true } label: { Text("New job").inkCommit() }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("customer-new-job-action")
+                }
+                if let dialable, let call = URL(string: "tel:\(dialable)"), let text = URL(string: "sms:\(dialable)") {
+                    HStack(spacing: 8) {
+                        reachCircle("phone", label: "Call") { openURL(call) }
+                        reachCircle("message", label: "Text") { inboxText(text, name: customer.name, openURL: openURL) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A 50pt card circle beside New job.
+    private func reachCircle(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.foreground)
+                .frame(width: 50, height: 50)
+                .background(Theme.card, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(label)
+    }
+
+    /// Paper 48N: the name at 34 Bold, then one muted line: phone · customer since 2022
+    /// ("Archived" leads when it is).
+    private var customerIdentity: some View {
+        let name = record?.name ?? customer.name
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(name)
+                .font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            if let line = identityLine {
+                Text(line).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 4)
+        .padding(.horizontal, 4).padding(.top, 10)
     }
 
-    /// Membership, the account type, since when, and archived: each only when the record or the
-    /// server says so. There is no balance here: it only exists once the records load (Money).
-    private var identityProperties: [(text: String, symbol: String, tint: Color)] {
-        var properties: [(text: String, symbol: String, tint: Color)] = []
-        if record?.archived ?? customer.archived ?? false {
-            properties.append(("Archived", "archivebox", Theme.muted))
-        }
-        if let pricing, pricing.isMember {
-            properties.append((pricing.discountPercent > 0 ? "Member, \(pricing.discountPercent)% off" : "Member", "star", Theme.markOlive))
-        }
-        if let type = record?.accountType {
-            properties.append((type.statusLabel, type == "commercial" ? "building.2" : "house", Theme.muted))
-        }
+    private var identityLine: String? {
+        var parts: [String] = []
+        if isArchived { parts.append("Archived") }
+        if let phone = primaryPhone, !phone.isEmpty { parts.append(phone) }
         if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
-            properties.append(("Since \(date.formatted(.dateTime.year()))", "calendar", Theme.muted))
+            parts.append("customer since \(date.formatted(.dateTime.year()))")
         }
-        return properties
+        guard let first = parts.first else { return nil }
+        parts[0] = first.prefix(1).uppercased() + first.dropFirst()
+        return parts.joined(separator: " · ")
     }
 
     /// Always open, on one panel: address first, then phone and email, then the rest (F18).
+    /// Whether Details has a line to show, now that the text and email choices sit under
+    /// Contact preferences: an empty card is never drawn.
+    private func hasDetailLines(_ record: CustomerRecord) -> Bool {
+        if record.accountType != nil || record.industry != nil || record.preferredContact != nil || record.billingTerms != nil { return true }
+        if let address = record.address, !address.isEmpty, !CustomerFacts.address(address, isIn: locations.map(\.address)) { return true }
+        if let phone = record.phone, !phone.isEmpty, !CustomerFacts.phone(phone, isIn: contacts.compactMap(\.phone)) { return true }
+        if let email = record.email, !email.isEmpty, !CustomerFacts.email(email, isIn: contacts.compactMap(\.email)) { return true }
+        return false
+    }
+
     @ViewBuilder private var details: some View {
-        if let record {
-            PaperCard {
+        if let record, hasDetailLines(record) {
+            PaperSection("Details") {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Every fact once: the address shows here only when no location below carries it,
-                    // the phone and email only when no contact does. The type is a property up top.
+                    // Every fact once: the address shows here only when no location carries it,
+                    // the phone and email only when no contact does.
+                    if let type = record.accountType { detailLine("Type") { Text(type.statusLabel) } }
                     if let address = record.address, !address.isEmpty, !CustomerFacts.address(address, isIn: locations.map(\.address)) {
                         detailLine("Address") { AddressLink(address: address) }
                     }
@@ -556,8 +1023,6 @@ struct CustomerDetailView: View {
                     if let industry = record.industry { detailLine("Industry") { Text(industry) } }
                     if let preferred = record.preferredContact { detailLine("Contact preference") { Text(preferred.statusLabel) } }
                     if let terms = record.billingTerms { detailLine("Billing terms") { Text(terms) } }
-                    if smsConsentLoaded { smsConsentRow.padding(.horizontal, PaperCardMetrics.inset) }
-                    if jobEmails != nil { jobEmailsRow.padding(.horizontal, PaperCardMetrics.inset) }
                 }
                 .padding(.vertical, PaperCardMetrics.edge)
             }
@@ -601,22 +1066,56 @@ struct CustomerDetailView: View {
         return "You"
     }
 
-    /// Save to Contacts, Customer view and the record changes. Email is a circle on the page.
+    /// Email and Directions (Paper 48N keeps only Call and Text on the page), Save to Contacts,
+    /// Customer view and the record changes.
     private var customerMenuItems: [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
+        if let mail = MailDraft(recipient: primaryEmail) {
+            items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
+        }
+        if let directionsURL {
+            items.append(ThorbisMenuItem("Directions", icon: "arrow.triangle.turn.up.right.diamond") { openURL(directionsURL) })
+        }
         if let record {
             items.append(ThorbisMenuItem("Save to Contacts", icon: "person.crop.circle.badge.plus") {
                 handoff = .contact(ContactCardDraft.make(customer: record))
             })
         }
-        guard canEdit else { return items }
-        return items + [
+        if canEdit {
+            // Paper 48C: edit the customer's details in one sheet.
+            items.append(ThorbisMenuItem("Edit customer", icon: "pencil") { showEditCustomer = true })
             // Customer view: hands the phone to the customer to check and fix their details.
-            ThorbisMenuItem("Customer view", icon: "person.crop.rectangle",
-                            subtitle: "Hand the phone over to check their details") { showCustomerMode = true },
-            ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add },
-            ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add },
-        ]
+            items.append(ThorbisMenuItem("Customer view", icon: "person.crop.rectangle",
+                                         subtitle: "Hand the phone over to check their details") { showCustomerMode = true })
+            items.append(ThorbisMenuItem("Add contact", icon: "person.badge.plus", isDisabled: !contactsLoaded) { contactSheet = .add })
+            items.append(ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add })
+        }
+        // Paper 48B / 48H: archive the customer, or bring an archived one back.
+        if canArchive, record != nil {
+            if isArchived {
+                items.append(ThorbisMenuItem("Restore customer", icon: "arrow.uturn.backward", isDisabled: restoring) {
+                    Task { await restoreCustomer() }
+                })
+            } else {
+                items.append(ThorbisMenuItem("Archive customer", icon: "archivebox", role: .destructive) { showArchive = true })
+            }
+        }
+        return items
+    }
+
+    private func restoreCustomer() async {
+        guard !restoring else { return }
+        restoring = true
+        defer { restoring = false }
+        do {
+            record = try await api.restoreCustomer(customer.id)
+            error = nil
+            _ = await store.refresh(api)
+        } catch is CancellationError {
+        } catch {
+            self.error = error.isConnectivityFailure ? "Restoring needs a connection. Try again when you have signal."
+                                                     : error.plainMessage(subject: "this customer")
+        }
     }
 
     private func contactMenuItems(_ contact: CustomerContactRecord) -> [ThorbisMenuItem] {
@@ -663,7 +1162,7 @@ struct CustomerDetailView: View {
         let stacked = typeSize.isAccessibilitySize
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout())
         return layout {
-            Text("Job texts").foregroundStyle(Theme.muted)
+            Text("Texts").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                 // The menu below says "Job texts" itself, so VoiceOver doesn't stop on the label alone.
                 .accessibilityHidden(canEdit)
             if !stacked { Spacer() }
@@ -710,7 +1209,8 @@ struct CustomerDetailView: View {
     private var jobEmailsRow: some View {
         VStack(alignment: .leading, spacing: 2) {
             Toggle(isOn: Binding(get: { jobEmails ?? true }, set: { next in Task { await saveJobEmails(next) } })) {
-                Text("Job emails").foregroundStyle(Theme.muted)
+                Text("Emails").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .accessibilityLabel("Job emails")
             }
             .tint(Theme.brand)
             .disabled(!canEdit || jobEmailsSaving || session.isOffline)
@@ -983,7 +1483,7 @@ struct CustomerDetailView: View {
             }
             if !past.isEmpty {
                 VStack(spacing: 0) {
-                    PaperSection("Past", count: past.count) {
+                    PaperSection("Past jobs", count: past.count) {
                         VStack(spacing: 0) {
                             ForEach(Array(shownPast.enumerated()), id: \.element.id) { index, job in
                                 if index > 0 { WellDivider() }
@@ -1144,20 +1644,30 @@ struct CustomerDetailView: View {
                     }
                     .accessibilityIdentifier("customer-activity-retry")
                 }
-                PaperSection("Activity", count: activity.isEmpty ? nil : activity.count) {
-                    if activityLoading && activity.isEmpty {
-                        SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset)
-                    } else if activity.isEmpty {
-                        emptyText(activityError == nil ? "Nothing yet" : "Not loaded").padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 6)
-                    } else {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(activity) { event in
-                                ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id)) {
-                                    PaperListRow(title: event.summary, subtitle: activityTimestamp(event.occurredAt), subtitleLines: 1)
-                                }
-                            }
+                // Paper 48G: the label, the chips, then a timeline on the canvas (no card): a month
+                // label over rows of a 32pt mark on a rail, what happened and when.
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Activity").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if !activity.isEmpty {
+                            Text("\(activity.count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
                         }
-                        .padding(.vertical, PaperCardMetrics.edge)
+                    }
+                    .frame(minHeight: 26)
+                    .padding(.horizontal, 4).padding(.bottom, 8)
+                    if activityLoading && activity.isEmpty {
+                        PaperCard { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
+                    } else if activity.isEmpty {
+                        PaperCard {
+                            emptyText(activityError == nil ? "Nothing yet" : "Not loaded")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 6)
+                        }
+                    } else {
+                        activityChips
+                        activityTimeline
                     }
                 }
                 .accessibilityIdentifier("customer-activity")
@@ -1175,6 +1685,139 @@ struct CustomerDetailView: View {
                 }
             }
         }
+    }
+
+    private static let activityFilters = ["All", "Visits", "Payments"]
+
+    private func activityMatches(_ event: CustomerHistoryEntry) -> Bool {
+        if activityFilter == "Visits" { return event.kind == "job" }
+        if activityFilter == "Payments" { return event.kind == "payment" || event.kind == "invoice" }
+        return true
+    }
+
+    /// Paper 48G's chips: 36 tall pills (a 44pt target), the chosen one in the ink.
+    private var activityChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(CustomerDetailView.activityFilters, id: \.self) { name in
+                    activityChip(name)
+                }
+            }
+        }
+    }
+
+    private func activityChip(_ name: String) -> some View {
+        let selected = activityFilter == name
+        return Button { activityFilter = name } label: {
+            Text(name).font(Theme.font(14, weight: selected ? .semibold : .medium))
+                .foregroundStyle(selected ? Theme.background : Theme.subtle)
+                .padding(.horizontal, 12).frame(minHeight: 36)
+                .background(selected ? Theme.foreground : Theme.card, in: Capsule())
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("customer-activity-filter-\(name.lowercased())")
+    }
+
+    /// The loaded history under the chosen chip, newest first, in "Today" and month groups.
+    private var activityGroups: [CustomerActivityGroup] {
+        var groups: [CustomerActivityGroup] = []
+        for event in activity where activityMatches(event) {
+            let title = activityGroupTitle(event.occurredAt)
+            if let last = groups.last, last.title == title {
+                groups[groups.count - 1].events.append(event)
+            } else {
+                groups.append(CustomerActivityGroup(id: groups.count, title: title, events: [event]))
+            }
+        }
+        return groups
+    }
+
+    @ViewBuilder private var activityTimeline: some View {
+        let groups = activityGroups
+        if groups.isEmpty {
+            Text("No \(activityFilter.lowercased()) in the activity loaded so far.")
+                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4).padding(.top, 12)
+        } else {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(groups) { group in
+                    Text(group.title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 10)
+                    ForEach(Array(group.events.enumerated()), id: \.element.id) { index, event in
+                        activityRow(event, last: index == group.events.count - 1)
+                    }
+                }
+            }
+        }
+    }
+
+    private func activityRow(_ event: CustomerHistoryEntry, last: Bool) -> some View {
+        let mark = activityMark(event.kind)
+        return ActivityLink(destination: ActivityDestinationMapping.customerHistory(event, customerID: customer.id),
+                            showsChevron: false) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: mark.symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(mark.ink)
+                    .frame(width: 32, height: 32)
+                    .background(mark.fill, in: Circle())
+                    .accessibilityHidden(true)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(event.summary).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(activityTime(event.occurredAt)).font(Theme.font(13)).monospacedDigit()
+                        .foregroundStyle(Theme.muted)
+                }
+                .padding(.top, 6)
+            }
+            .padding(.bottom, last ? 8 : 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // The rail: a 2pt line from under the mark to the next row's mark.
+            .background(alignment: .topLeading) {
+                if !last {
+                    Rectangle().fill(Theme.hairline).frame(width: 2)
+                        .padding(.leading, 15).padding(.top, 32)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func activityMark(_ kind: String) -> CustomerActivityMark {
+        switch kind {
+        case "payment": return CustomerActivityMark(symbol: "dollarsign", ink: Theme.success, fill: Theme.successSurface)
+        case "job": return CustomerActivityMark(symbol: "box.truck", ink: Theme.warning, fill: Theme.warningSurface)
+        case "contact": return CustomerActivityMark(symbol: "person", ink: Theme.brandText, fill: Theme.brandSurface)
+        case "location": return CustomerActivityMark(symbol: "mappin.and.ellipse", ink: Theme.brandText, fill: Theme.brandSurface)
+        case "estimate": return CustomerActivityMark(symbol: "doc.text", ink: Theme.foreground, fill: Theme.fill)
+        case "invoice": return CustomerActivityMark(symbol: "doc.plaintext", ink: Theme.foreground, fill: Theme.fill)
+        default: return CustomerActivityMark(symbol: "clock", ink: Theme.foreground, fill: Theme.fill)
+        }
+    }
+
+    /// "Today", "March", or "March 2025" outside this year.
+    private func activityGroupTitle(_ raw: String) -> String {
+        guard let date = JobFiltering.date(raw) else { return "Earlier" }
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDate(date, equalTo: .now, toGranularity: .year) {
+            return date.formatted(.dateTime.month(.wide))
+        }
+        return date.formatted(.dateTime.month(.wide).year())
+    }
+
+    /// The row's trailing time: the clock today, else "Mar 12" (with the year outside this one).
+    private func activityTime(_ raw: String) -> String {
+        guard let date = JobFiltering.date(raw) else { return "" }
+        if Calendar.current.isDateInToday(date) { return date.tradeTime }
+        if Calendar.current.isDate(date, equalTo: .now, toGranularity: .year) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().year())
     }
 
     private func loadActivity(reset: Bool) async {
@@ -1321,6 +1964,20 @@ enum CustomerJobOrder {
 }
 
 /// Made once: the customer's activity list formats a stamp per row on every render.
+/// One "Today" or month group of the customer's timeline (Paper 48G).
+private struct CustomerActivityGroup: Identifiable {
+    let id: Int
+    let title: String
+    var events: [CustomerHistoryEntry]
+}
+
+/// A timeline row's 32pt mark: its symbol, ink and surface.
+private struct CustomerActivityMark {
+    let symbol: String
+    let ink: Color
+    let fill: Color
+}
+
 @MainActor private enum ActivityStamp {
     static let abbreviated: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()

@@ -30,7 +30,9 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined {
-                _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
+                // Paper 71: say what alerts are for first; its commit shows the system prompt.
+                // "Maybe later" leaves the system unasked, so nothing below registers.
+                await PermissionPrimerPresenter.ask(.notifications)
             }
             let granted = await center.notificationSettings().authorizationStatus
             guard [.authorized, .provisional, .ephemeral].contains(granted) else { return }

@@ -163,7 +163,7 @@ struct CustomerFinancingLine: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let monthly = FinancingWords.monthly(example), let terms = example.terms {
-                Text(monthly).font(Theme.customerMonoFont(type.heading, weight: .medium))
+                Text(monthly).font(Theme.customerMonoFont(type.heading, weight: .semibold))
                     .minimumScaleFactor(0.7).lineLimit(1)
                 Text(terms).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -184,11 +184,22 @@ struct FinancingTermsSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(offer.disclosure ?? "")
-                    .font(Theme.customerFont(type.body))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(Theme.gutter)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(offer.disclosure ?? "")
+                        .font(Theme.customerFont(type.body))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // Paper 38F: the lender's words on one card (radius 20), 16 from the edges.
+                        .padding(PaperCardMetrics.inset)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    // Paper 38F: who offers the financing, in quiet type under the card.
+                    Text("Financing is offered by \(offer.lenderName), a lending partner. Your details go straight to them.")
+                        .font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
+                }
+                .padding(.horizontal, PaperCardMetrics.margin)
+                .padding(.vertical, 12)
             }
             .background(Theme.background)
             .foregroundStyle(Theme.foreground)
@@ -196,7 +207,8 @@ struct FinancingTermsSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarTrailing, customerFacing: true) {
-                    Button("Close") { dismiss() }.font(Theme.customerFont(type.small, weight: .medium)).frame(minHeight: 44)
+                    Button("Close") { dismiss() }.font(Theme.customerFont(type.small, weight: .semibold))
+                        .foregroundStyle(Theme.brandText).frame(minHeight: 44)
                 }
             }
         }

@@ -203,7 +203,8 @@ struct CustomerEstimatePresentation: View {
                             .accessibilityIdentifier("customer-estimate-opening")
                     }
                 }
-                .padding(.horizontal, Theme.gutter)
+                // Paper: cards sit 16 from the screen edge; titles add 4 to line up at 20.
+                .padding(.horizontal, PaperCardMetrics.margin)
                 .padding(.top, 8)
                 .padding(.bottom, 24)
                 .frame(maxWidth: type.regular ? 1000 : .infinity, alignment: .leading)
@@ -248,8 +249,9 @@ struct CustomerEstimatePresentation: View {
 
     private var chooseScreen: some View {
         VStack(alignment: .leading, spacing: 18) {
-            header(eyebrow: "Estimate for \(customerName)", title: "Choose an option",
-                   summary: "Tap one. You’ll see every line before you sign.")
+            // Paper 38: "Choose your fix" over what the work is, then "Pick one repair" above the cards.
+            header(eyebrow: flow.issuedRevision?.title ?? flow.estimate.title, title: "Choose your fix")
+            CustomerIncludedLabel(type: type, title: "Pick one repair")
             let options = flow.options
             if type.regular && options.count <= 3 {
                 HStack(alignment: .top, spacing: 16) {
@@ -274,29 +276,29 @@ struct CustomerEstimatePresentation: View {
         }
     }
 
-    /// The whole card is the choice (F25): price first, then the option's name and what it is.
+    /// The whole card is the choice (F25): the option's name and price, then what it is.
     /// Every line is shown on the next step ("Review <option>"), so the card carries no second link.
     private func optionCard(_ option: FieldEstimateOption) -> some View {
         let selected = flow.selectedOptionID == option.id
         let total = money(option.totalAmount, currency: option.currency)
         return VStack(alignment: .leading, spacing: 0) {
             Button { flow.choose(option.id) } label: {
+                // Paper 38: the option's name and its price on one line (both Bold), what it is under
+                // them in muted, then the "Choose this" pill ("In your cart" with a check once chosen).
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(option.title).font(Theme.customerFont(type.body, weight: .bold))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         Text(total)
-                            .font(Theme.customerFont(type.heading + 6, weight: .medium)).monospacedDigit().tracking(-0.3)
+                            .font(Theme.customerFont(type.body, weight: .bold)).monospacedDigit()
                             .minimumScaleFactor(0.6).lineLimit(1)
-                        Spacer(minLength: 8)
-                        CustomerRadio(selected: selected)
                     }
-                    Text(option.title).font(Theme.customerFont(type.body, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
                     if !option.description.isEmpty {
-                        Text(option.description).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
+                        Text(option.description).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                             .lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 4)
+                            .padding(.top, 2)
                     }
                     if let saved = customerSavingsText(option.lines, currency: option.currency) {
                         Text("Includes \(savingsLabel(isMember).lowercased()) of \(saved)")
@@ -307,13 +309,21 @@ struct CustomerEstimatePresentation: View {
                         CustomerFinancingLine(example: example, type: type)
                             .padding(.top, 6)
                     }
-                    Text("\(option.lines.count) \(option.lines.count == 1 ? "item" : "items")")
-                        .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-                        .padding(.top, 10)
+                    HStack(spacing: 6) {
+                        Image(systemName: selected ? "checkmark" : "plus")
+                            .font(.system(size: 15, weight: .semibold))
+                            .accessibilityHidden(true)
+                        Text(selected ? "In your cart" : "Choose this")
+                            .font(Theme.customerFont(type.small, weight: .semibold))
+                    }
+                    .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(selected ? Theme.brandSurface : Theme.fill, in: Capsule())
+                    .padding(.top, 12)
                 }
                 .foregroundStyle(Theme.foreground)
                 .frame(maxWidth: .infinity, minHeight: type.target, alignment: .topLeading)
-                .padding(18)
+                .padding(16)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -323,10 +333,10 @@ struct CustomerEstimatePresentation: View {
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // Selection is the blue ring and the radio; the screen's only ink is the commit (CP-07).
-        .panelBackground(cornerRadius: 14)
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(selected ? Theme.brand : Theme.border, lineWidth: selected ? 2 : 1))
+        // Selection is the brand ring and the chosen pill; the screen's only fill is the commit (CP-07).
+        .panelBackground(cornerRadius: Theme.cardRadius)
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            .strokeBorder(Theme.brand, lineWidth: selected ? 1.5 : 0))
         .animation(.easeOut(duration: 0.15), value: selected)
     }
 
@@ -334,10 +344,17 @@ struct CustomerEstimatePresentation: View {
     /// its quantity and amount, and the total that will be signed.
     private var reviewScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
-            let index = flow.options.firstIndex { $0.id == flow.selectedOptionID }
-            header(eyebrow: flow.hasOptions ? "Option \((index ?? 0) + 1) of \(flow.options.count)" : "Your estimate",
-                   title: flow.choiceName, summary: flow.hasOptions ? flow.selectedOption?.description : nil)
+            if let option = flow.selectedOption {
+                // Paper 38A "Your cart": what was chosen on its own row with Change, then every line.
+                let index = flow.options.firstIndex { $0.id == option.id }
+                header(eyebrow: "Option \((index ?? 0) + 1) of \(flow.options.count)", title: "Your cart")
+                cartRow(option)
+            } else {
+                // Paper 37L "Your estimate": the estimate's number and who it is for under the title.
+                header(eyebrow: "EST-\(flow.estimate.id.suffix(4).uppercased()) \u{00B7} \(customerName)", title: "Your estimate")
+            }
             if let projected = verifiedCustomerLines {
+                CustomerSummaryLabel(count: projected.count, type: type)
                 CustomerIncludedLines(lines: projected, type: type,
                                       rows: customerSavingsRows(flow.lines, currency: flow.currency, isMember: isMember)
                                           + (flow.total.map { [CustomerAmountRow(label: "Total", amount: money($0, currency: flow.currency), emphasis: true)] } ?? []))
@@ -350,6 +367,40 @@ struct CustomerEstimatePresentation: View {
                 seeTerms
             }
         }
+    }
+
+    /// Paper 38A's cart row: the chosen option (16 Semibold over its muted description), its price,
+    /// and the "Change" pill that goes back to the options.
+    private func cartRow(_ option: FieldEstimateOption) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(option.title).font(Theme.customerFont(type.small, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                if !option.description.isEmpty {
+                    Text(option.description).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(money(option.totalAmount, currency: option.currency))
+                .font(Theme.customerMonoFont(type.small, weight: .semibold))
+                .lineLimit(1).fixedSize()
+            Button { flow.back() } label: {
+                Text("Change").font(Theme.customerFont(type.small, weight: .semibold))
+                    .foregroundStyle(Theme.foreground)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .background(Theme.fill, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+            .disabled(actionBusy)
+            .accessibilityLabel("Change option")
+        }
+        .padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground(cornerRadius: Theme.cardRadius)
     }
 
     private var signScreen: some View {
@@ -365,7 +416,7 @@ struct CustomerEstimatePresentation: View {
                     .font(Theme.customerFont(type.body))
                     .padding(.horizontal, 16)
                     .frame(minHeight: type.target)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             }
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -373,20 +424,18 @@ struct CustomerEstimatePresentation: View {
                     Spacer()
                     if SignatureInk.hasInk(strokes) {
                         Button("Clear") { strokes = [] }
-                            .font(Theme.customerFont(type.small, weight: .medium))
+                            .font(Theme.customerFont(type.small, weight: .semibold))
+                            .foregroundStyle(Theme.brandText)
                             .frame(minWidth: type.target, minHeight: 44)
                     }
                 }
-                ZStack(alignment: .bottomLeading) {
-                    SignaturePad(strokes: $strokes)
-                    if !SignatureInk.hasInk(strokes) {
-                        Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
-                            .padding(16).allowsHitTesting(false)
-                    }
+                // Paper 38A: brand ink on the card, a hairline to sign on and the signer under it.
+                ZStack(alignment: .bottom) {
+                    SignaturePad(strokes: $strokes, ink: Theme.brand, surface: Theme.card)
+                    CustomerSignatureGuide(name: name, showsHint: !SignatureInk.hasInk(strokes), type: type)
                 }
                 .frame(height: type.regular ? 260 : 220)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 .accessibilityLabel("Signature box. Sign with your finger.")
                 .accessibilityIdentifier("customer-estimate-signature-pad")
                 .accessibilityValue(handoff?.signature != nil ? "Signature saved for this estimate" : SignatureInk.hasInk(strokes) ? "Signature entered" : "Signature required")
@@ -401,14 +450,14 @@ struct CustomerEstimatePresentation: View {
 
     private var doneScreen: some View {
         VStack(alignment: .center, spacing: 18) {
-            Image(systemName: "checkmark.circle.fill").font(.system(size: 64)).foregroundStyle(Theme.success)
-                .accessibilityHidden(true).padding(.top, 40)
-            Text("Approved").font(Theme.customerFont(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
+            CustomerSuccessMark().padding(.top, 40)
+            if flow.total != nil {
+                Text(flow.totalText).font(Theme.customerMonoFont(type.total, weight: .bold)).tracking(-1)
+                    .minimumScaleFactor(0.6).lineLimit(1)
+            }
+            Text("Approved").font(Theme.customerFont(type.heading, weight: .bold)).accessibilityAddTraits(.isHeader)
             Text(doneSentence).font(Theme.customerFont(type.body)).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            if flow.total != nil {
-                Text(flow.totalText).font(Theme.customerMonoFont(type.total, weight: .medium))
-            }
             Text(handoff == nil && returnToDocuments == nil ? "Thank you. Please hand the device back to your technician." : "This estimate is approved. Continue when you're ready.")
                 .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -455,7 +504,16 @@ struct CustomerEstimatePresentation: View {
             } else if flow.step == .done || reviewReady {
             switch flow.step {
             case .choose:
-                CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
+                if typeSize.isAccessibilitySize {
+                    // The cart bar's three columns don't fit at accessibility sizes; the full-width commit does.
+                    CustomerPresentationCommit(title: flow.reviewTitle, enabled: flow.canReview, busy: false, type: type) { flow.review() }
+                } else {
+                    // Paper 38: the cart bar. What is chosen and its price, then "Review cart".
+                    CustomerCartBar(count: flow.selectedOption == nil ? 0 : 1,
+                                    totalText: flow.selectedOption == nil ? nil : flow.totalText,
+                                    detail: flow.selectedOption?.title ?? "Choose one to continue",
+                                    reviewLabel: flow.reviewTitle, enabled: flow.canReview, type: type) { flow.review() }
+                }
                 // The disabled commit already reads "Choose an option", so no second line repeats it.
                 if let error { hint(error, danger: true) }
                 CustomerQuietActions {
@@ -470,9 +528,10 @@ struct CustomerEstimatePresentation: View {
                 CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: verifiedCustomerLines != nil, busy: actionBusy, type: type) { Task { await startSigning() } }
                     .accessibilityIdentifier("customer-estimate-approve")
                 if let error { hint(error, danger: true) }
-                // PresentDetail.dc.html: "See other options" is the quiet action right under the commit.
+                // Paper 38A: "Keep shopping" goes back to the options; it sits right under the commit
+                // because the bar's trailing corner is the technician's lock.
                 CustomerQuietActions {
-                    if flow.hasOptions { CustomerTextButton(title: "See other options", type: type) { flow.back() } }
+                    if flow.hasOptions { CustomerTextButton(title: "Keep shopping", type: type) { flow.back() } }
                     CustomerTextButton(title: "Not today", type: type) { confirmNotToday = true }
                 }
                 if let returnToDocuments {
@@ -510,7 +569,7 @@ struct CustomerEstimatePresentation: View {
                 }
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12).padding(.bottom, 8)
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
         .background(Theme.canvas)
@@ -533,15 +592,16 @@ struct CustomerEstimatePresentation: View {
             .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Present.dc.html: a quiet eyebrow, the 30pt title, then one plain-language sentence in body colour.
+    /// Paper 37 / 38: the title in the largest Bold, the quiet line (who, which option) under it in
+    /// muted at the customer floor, then one plain-language sentence.
     private func header(eyebrow: String, title: String, summary: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(eyebrow).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            Text(title).font(Theme.customerFont(type.heading + 6, weight: .medium)).tracking(-0.4)
+            Text(title).font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
                 .accessibilityAddTraits(.isHeader)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
+            Text(eyebrow).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
             if let summary, !summary.isEmpty {
                 Text(summary).font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
                     .lineSpacing(3)
@@ -549,6 +609,7 @@ struct CustomerEstimatePresentation: View {
                     .padding(.top, 6)
             }
         }
+        .padding(.horizontal, 4)
     }
 
     // MARK: Actions
@@ -822,7 +883,7 @@ struct CustomerInvoicePresentation: View {
                 VStack(alignment: .leading, spacing: 20) {
                     if let sent { sentScreen(sent) } else if signing { signScreen } else if payChoice != nil { payScreen } else { invoiceScreen }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
                 .frame(maxWidth: type.regular ? 760 : .infinity, alignment: .leading)
                 .frame(maxWidth: .infinity)
                 if typeSize.isAccessibilitySize { bottomBar }
@@ -844,26 +905,72 @@ struct CustomerInvoicePresentation: View {
         return offer.example(for: due)
     }
 
+    /// The customer signs for the work before paying (the bottom bar's order).
+    private var needsSignature: Bool { canSign && !authorized && invoice.jobId != nil }
     private var latestApplication: FinancingApplication? { applications.first }
     private var financingStatus: String? { latestApplication.flatMap { FinancingWords.status($0, forCustomer: true) } }
 
     private var invoiceScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Invoice for \(customerName)").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-                Text(due == 0 ? "Paid in full" : "Amount due").font(Theme.customerFont(type.heading + 4, weight: .medium))
-                    .accessibilityAddTraits(.isHeader)
+            // Paper 38D: a centred hero. The quiet label, the amount in the largest Bold, who it's for.
+            VStack(alignment: .center, spacing: 2) {
                 if due > 0 {
-                    Text(dueText).font(Theme.customerMonoFont(type.total + 8, weight: .medium))
+                    Text("Amount due").font(Theme.customerFont(type.small, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(dueText).font(Theme.customerMonoFont(type.total + 8, weight: .bold)).tracking(-1)
                         .minimumScaleFactor(0.6).lineLimit(1)
+                        .padding(.top, 6)
+                } else {
+                    Text("Paid in full").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                        .accessibilityAddTraits(.isHeader)
                 }
-                // CP-17: where the application stands, in words.
+                Text("Invoice for \(customerName)").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                // CP-17: where the application stands, in words. Paper 38G: an approval is a success pill.
                 if let financingStatus {
-                    Text(financingStatus).font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if latestApplication?.status == "approved" {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).accessibilityHidden(true)
+                            Text(financingStatus).font(Theme.customerFont(type.small, weight: .semibold))
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .foregroundStyle(Theme.success)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Theme.successSurface, in: Capsule())
+                        .padding(.top, 10)
+                    } else {
+                        Text(financingStatus).font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 6)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity)
             CustomerLinesCard(lines: invoice.lines, currency: invoice.currency, type: type, rows: amountRows)
+            // Paper 38D: "Pay over time" is its own row under the invoice, once paying is the next step.
+            if !needsSignature, let example = dueExample {
+                Button { pay() } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Pay over time").font(Theme.customerFont(type.small, weight: .medium))
+                            CustomerFinancingLine(example: example, type: type)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    }
+                    .foregroundStyle(Theme.foreground)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .panelBackground(cornerRadius: Theme.cardRadius)
+                .accessibilityHint("Shows how to pay over time")
+            }
             if let signedBy {
                 Label("Signed by \(signedBy)", systemImage: "signature")
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.foreground)
@@ -886,14 +993,15 @@ struct CustomerInvoicePresentation: View {
 
     private var payScreen: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Invoice for \(customerName)").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-                Text(payChoice?.title ?? "").font(Theme.customerFont(type.heading + 4, weight: .medium))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(payChoice?.title ?? "").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
                     .accessibilityAddTraits(.isHeader).fixedSize(horizontal: false, vertical: true)
+                Text("Invoice for \(customerName)").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
             }
+            .padding(.horizontal, 4)
             if payChoice?.canPayInFull == true {
                 payCard(.inFull, title: "Pay in full") {
-                    Text(dueText).font(Theme.customerMonoFont(type.total, weight: .medium)).minimumScaleFactor(0.6).lineLimit(1)
+                    Text(dueText).font(Theme.customerMonoFont(type.total, weight: .bold)).minimumScaleFactor(0.6).lineLimit(1)
                     Text("Card or Tap to Pay with your technician").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
                 }
             }
@@ -917,21 +1025,22 @@ struct CustomerInvoicePresentation: View {
         return Button { payChoice?.selected = method; error = nil } label: {
             HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(title).font(Theme.customerFont(type.heading, weight: .medium))
+                    Text(title).font(Theme.customerFont(type.body, weight: .semibold))
                     content()
                 }
                 Spacer(minLength: 8)
                 CustomerRadio(selected: selected)
             }
-            .padding(18)
+            .padding(16)
             .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
             .foregroundStyle(Theme.foreground)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
-        .panelBackground(cornerRadius: 14)
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(selected ? Theme.brand : Theme.border, lineWidth: selected ? 2 : 1))
+        // Paper v2: a card (radius 20) with the brand ring only when chosen.
+        .panelBackground(cornerRadius: Theme.cardRadius)
+        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+            .strokeBorder(Theme.brand, lineWidth: selected ? 1.5 : 0))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -950,7 +1059,7 @@ struct CustomerInvoicePresentation: View {
                     .font(Theme.customerFont(type.body))
                     .padding(.horizontal, 16)
                     .frame(minHeight: type.target)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     .accessibilityLabel("Mobile number for the application")
             } else {
                 CustomerSecondaryButton(title: "Use a different number", type: type) { otherPhone = "" }
@@ -963,6 +1072,10 @@ struct CustomerInvoicePresentation: View {
                 }
                 .buttonStyle(.plain)
             }
+            // Paper 38F: who the lender is, under the form.
+            Text("Financing is offered by \(offer.lenderName), a lending partner. Your details go straight to them.")
+                .font(Theme.customerFont(type.small)).foregroundStyle(Theme.subtle)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
     }
@@ -981,9 +1094,8 @@ struct CustomerInvoicePresentation: View {
 
     private func sentScreen(_ application: FinancingApplication) -> some View {
         VStack(alignment: .center, spacing: 18) {
-            Image(systemName: "checkmark.circle.fill").font(.system(size: 64)).foregroundStyle(Theme.success)
-                .accessibilityHidden(true).padding(.top, 40)
-            Text("Application sent").font(Theme.customerFont(type.heading + 6, weight: .medium)).accessibilityAddTraits(.isHeader)
+            CustomerSuccessMark().padding(.top, 40)
+            Text("Application sent").font(Theme.customerFont(type.heading, weight: .bold)).accessibilityAddTraits(.isHeader)
             Text("Sent to •••• \(application.sentToLast4)").font(Theme.customerFont(type.body))
             Text(money(application.amount.amount, currency: application.amount.currency))
                 .font(Theme.customerMonoFont(type.total, weight: .medium))
@@ -998,8 +1110,9 @@ struct CustomerInvoicePresentation: View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Invoice · \(money(total, currency: invoice.currency))").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
-                Text("Sign for the work").font(Theme.customerFont(type.heading + 4, weight: .medium)).accessibilityAddTraits(.isHeader)
+                Text("Sign for the work").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85).accessibilityAddTraits(.isHeader)
             }
+            .padding(.horizontal, 4)
             Text("By signing, I confirm the work and charges on this invoice.")
                 .font(Theme.customerFont(type.body)).fixedSize(horizontal: false, vertical: true)
             TextField("Your full name", text: $name, prompt: .placeholder("Your full name"))
@@ -1007,22 +1120,19 @@ struct CustomerInvoicePresentation: View {
                 .font(Theme.customerFont(type.body))
                 .padding(.horizontal, 16)
                 .frame(minHeight: type.target)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 .accessibilityLabel("Your full name")
-            ZStack(alignment: .bottomLeading) {
-                SignaturePad(strokes: $strokes)
-                if !SignatureInk.hasInk(strokes) {
-                    Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(.black.opacity(0.62))
-                        .padding(16).allowsHitTesting(false)
-                }
+            // Paper 38A: brand ink on the card, a hairline to sign on and the signer under it.
+            ZStack(alignment: .bottom) {
+                SignaturePad(strokes: $strokes, ink: Theme.brand, surface: Theme.card)
+                CustomerSignatureGuide(name: name, showsHint: !SignatureInk.hasInk(strokes), type: type)
             }
             .frame(height: type.regular ? 260 : 220)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
             .overlay(alignment: .topTrailing) {
                 if SignatureInk.hasInk(strokes) {
                     Button("Clear") { strokes = [] }
-                        .font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(.black)
+                        .font(Theme.customerFont(type.small, weight: .semibold)).foregroundStyle(Theme.brandText)
                         .frame(minWidth: type.target, minHeight: 44)
                 }
             }
@@ -1071,7 +1181,7 @@ struct CustomerInvoicePresentation: View {
                 CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
             }
         }
-        .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12).padding(.bottom, 8)
         .frame(maxWidth: type.regular ? 640 : .infinity)
         .frame(maxWidth: .infinity)
         .background(Theme.canvas)
@@ -1204,6 +1314,8 @@ struct CustomerLinesCard: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(lines) { line in
+                // Paper 38D / 39E: a hairline between lines.
+                if line.id != lines.first?.id { WellDivider(leading: 0) }
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
                         VStack(alignment: .leading, spacing: 8) {
@@ -1226,6 +1338,7 @@ struct CustomerLinesCard: View {
                 Text("Nothing listed yet.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted).padding(.vertical, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            if !rows.isEmpty { WellDivider(leading: 0) }
             ForEach(rows, id: \.self) { row in
                 Group {
                     if dynamicTypeSize.isAccessibilitySize {
@@ -1245,9 +1358,8 @@ struct CustomerLinesCard: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        .padding(.horizontal, 18)
-        .panelBackground(cornerRadius: 14)
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border))
+        .padding(.horizontal, 16)
+        .panelBackground(cornerRadius: Theme.cardRadius)
     }
 
     private func lineDetails(_ line: FieldLine) -> some View {
@@ -1255,7 +1367,7 @@ struct CustomerLinesCard: View {
             if let readingAccess {
                 ReadOnlyDocumentDescription(text: line.description, fontSize: type.body, access: readingAccess, customerFacing: true)
             } else {
-                Text(line.description).font(Theme.customerFont(type.body))
+                Text(line.description).font(Theme.customerFont(type.small, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
             Text("Qty \(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency)) each")
@@ -1266,17 +1378,18 @@ struct CustomerLinesCard: View {
 
     private func lineValue(_ line: FieldLine) -> some View {
         Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
-            .font(Theme.customerMonoFont(type.body))
+            .font(Theme.customerMonoFont(type.small, weight: .bold))
     }
 
     private func amountLabel(_ row: CustomerAmountRow) -> some View {
-        Text(row.label).font(Theme.customerFont(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+        Text(row.label).font(Theme.customerFont(row.emphasis ? type.body : type.small, weight: row.emphasis ? .semibold : .regular))
+            .foregroundStyle(row.emphasis ? Theme.foreground : Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private func amountValue(_ row: CustomerAmountRow) -> some View {
         Text(row.amount)
-            .font(Theme.customerMonoFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular))
+            .font(Theme.customerMonoFont(row.emphasis ? type.heading : type.small, weight: row.emphasis ? .bold : .medium))
             .minimumScaleFactor(0.6).lineLimit(1)
     }
 }
@@ -1310,26 +1423,110 @@ struct CustomerPresentationCommit: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                if busy { ProgressView().tint(Theme.background) }
+                if busy { ProgressView().tint(.white) }
                 if let compactTitle {
                     ViewThatFits(in: .horizontal) {
                         Text(title).lineLimit(1)
                         Text(compactTitle).lineLimit(2).minimumScaleFactor(0.8)
                     }
-                    .font(Theme.customerFont(type.body, weight: .medium)).multilineTextAlignment(.center)
+                    .font(Theme.customerFont(type.small, weight: .semibold)).multilineTextAlignment(.center)
                     .accessibilityLabel(title)
                 } else {
-                    Text(title).font(Theme.customerFont(type.body, weight: .medium)).lineLimit(2).multilineTextAlignment(.center)
+                    Text(title).font(Theme.customerFont(type.small, weight: .semibold)).lineLimit(2).multilineTextAlignment(.center)
                         .minimumScaleFactor(0.8)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: type.regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
             .padding(.horizontal, 16)
-            .foregroundStyle(enabled ? Theme.background : Theme.muted)
-            .background(enabled ? Theme.foreground : Theme.fill, in: RoundedRectangle(cornerRadius: 14))
+            // Paper v2: the commit is a brand pill with white type; off is a quiet well.
+            .foregroundStyle(enabled ? Color.white : Theme.muted)
+            .background(enabled ? Theme.brand : Theme.fill, in: Capsule())
         }
         .buttonStyle(.plain)
         .disabled(!enabled || busy)
+    }
+}
+
+/// Paper 38's cart bar under the options: a cart with the count on it, the price of what is chosen
+/// over its name, and the "Review cart" pill. One rounded bar on the card colour with a hairline rim.
+struct CustomerCartBar: View {
+    let count: Int
+    /// The chosen option's total; nil until something is chosen.
+    let totalText: String?
+    let detail: String
+    /// What VoiceOver hears for the pill: the action with the option and amount ("Review Repair · $340.00").
+    let reviewLabel: String
+    let enabled: Bool
+    let type: CustomerType
+    let action: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "cart").font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.foreground)
+                .frame(width: 36, height: 36)
+                .overlay(alignment: .topTrailing) {
+                    if count > 0 {
+                        Text("\(count)").font(Theme.font(12, weight: .bold)).monospacedDigit().foregroundStyle(Color.white)
+                            .padding(.horizontal, 5)
+                            .frame(minWidth: 18, minHeight: 18)
+                            .background(Theme.brand, in: Capsule())
+                            .offset(x: 4, y: -2)
+                    }
+                }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 0) {
+                if let totalText {
+                    Text(totalText).font(Theme.customerMonoFont(type.small, weight: .bold))
+                        .foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                Text(detail).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            Button(action: action) {
+                Text("Review cart").font(Theme.customerFont(type.small, weight: .semibold))
+                    .foregroundStyle(enabled ? Color.white : Theme.muted)
+                    .lineLimit(1)
+                    .padding(.horizontal, 22)
+                    .frame(minHeight: 48)
+                    .background(enabled ? Theme.brand : Theme.fill, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
+            .accessibilityLabel(reviewLabel)
+        }
+        .padding(.leading, 16).padding(.trailing, 10).padding(.vertical, 10)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 34, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 34, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+}
+
+/// Paper 38A / 38C: inside the signature box, the hairline to sign on with the signer's name under
+/// it; "Sign here with your finger" sits above the line until there is ink. Never takes a touch.
+struct CustomerSignatureGuide: View {
+    let name: String
+    let showsHint: Bool
+    let type: CustomerType
+
+    var body: some View {
+        let signer = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        VStack(spacing: 6) {
+            if showsHint {
+                Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+            }
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            if !signer.isEmpty {
+                Text(signer).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20).padding(.bottom, 12)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -1382,7 +1579,8 @@ struct CustomerTextButton: View {
 }
 
 /// Every line of what the customer is approving on one sheet: the line's whole description,
-/// its amount, "2 × $120.00" when there's more than one, then the total. No separators.
+/// its amount, "2 × $120.00" when there's more than one, then the total. Paper 37: a hairline
+/// between lines and above the totals.
 struct CustomerIncludedLines: View {
     let lines: [FieldLine]
     let type: CustomerType
@@ -1395,6 +1593,7 @@ struct CustomerIncludedLines: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                if index > 0 { WellDivider() }
                 VStack(alignment: .leading, spacing: 6) {
                     if dynamicTypeSize.isAccessibilitySize {
                         description(line, index: index)
@@ -1418,23 +1617,25 @@ struct CustomerIncludedLines: View {
                             .font(Theme.customerFont(type.small)).monospacedDigit().foregroundStyle(Theme.muted)
                     }
                 }
-                .padding(.horizontal, 18).padding(.vertical, 16)
+                .padding(.horizontal, 16).padding(.vertical, 14)
                 .accessibilityElement(children: readingAccess == nil ? .combine : .contain)
             }
             if lines.isEmpty {
                 Text("Nothing listed yet.").font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(18)
             }
+            if !rows.isEmpty { WellDivider() }
             ForEach(rows, id: \.self) { row in
                 HStack(alignment: .firstTextBaseline) {
-                    Text(row.label).font(Theme.customerFont(row.emphasis ? type.heading : type.body, weight: row.emphasis ? .medium : .regular))
+                    Text(row.label).font(Theme.customerFont(row.emphasis ? type.body : type.small, weight: row.emphasis ? .semibold : .regular))
+                        .foregroundStyle(row.emphasis ? Theme.foreground : Theme.muted)
                     Spacer(minLength: 8)
                     Text(row.amount)
-                        .font(Theme.customerFont(row.emphasis ? type.total : type.body, weight: row.emphasis ? .medium : .regular)).monospacedDigit()
+                        .font(Theme.customerFont(row.emphasis ? type.heading : type.small, weight: row.emphasis ? .bold : .medium)).monospacedDigit()
                         .minimumScaleFactor(0.6).lineLimit(1)
                 }
-                // On the same sheet as the lines (no band, no rule): the total reads by size alone.
-                .padding(.horizontal, 18).padding(.top, row.emphasis ? 10 : 12).padding(.bottom, row.emphasis ? 18 : 12)
+                // On the same card as the lines, under one hairline: the total reads by size.
+                .padding(.horizontal, 16).padding(.top, row.emphasis ? 10 : 8).padding(.bottom, row.emphasis ? 16 : 8)
                 .accessibilityElement(children: .combine)
             }
         }
@@ -1448,7 +1649,7 @@ struct CustomerIncludedLines: View {
                                         accessibilityContext: descriptionContext.map { "\($0), item \(index + 1)" })
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text(LineText(line.description).name).font(Theme.customerFont(type.body, weight: .medium))
+            Text(LineText(line.description).name).font(Theme.customerFont(type.small, weight: .semibold))
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1457,7 +1658,7 @@ struct CustomerIncludedLines: View {
 
     private func amount(_ line: FieldLine) -> some View {
         Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
-            .font(Theme.customerFont(type.body, weight: .medium)).monospacedDigit()
+            .font(Theme.customerFont(type.small, weight: .bold)).monospacedDigit()
     }
 }
 
@@ -1482,9 +1683,41 @@ struct CustomerIncludedLabel: View {
     let type: CustomerType
     var title = "What’s included"
     var body: some View {
-        Text(title).font(Theme.customerFont(type.small, weight: .medium)).foregroundStyle(Theme.muted)
+        Text(title).font(Theme.customerFont(type.small, weight: .semibold)).foregroundStyle(Theme.muted)
             .accessibilityAddTraits(.isHeader)
-            .padding(.bottom, -10)
+            .padding(.horizontal, 4)
+            .padding(.bottom, -12)
+    }
+}
+
+/// Paper 37 "Summary  3 items": the section label over the lines, the count at the trailing edge.
+struct CustomerSummaryLabel: View {
+    let count: Int
+    let type: CustomerType
+    var title = "Summary"
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title).font(Theme.customerFont(type.small, weight: .semibold))
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            Text("\(count) \(count == 1 ? "item" : "items")").font(Theme.customerFont(type.small)).monospacedDigit()
+        }
+        .foregroundStyle(Theme.muted)
+        .padding(.horizontal, 4)
+        .padding(.bottom, -12)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Paper 39A / 38G: the success mark, a 64pt circle on the success surface with a check.
+struct CustomerSuccessMark: View {
+    var body: some View {
+        Image(systemName: "checkmark")
+            .font(.system(size: 26, weight: .semibold))
+            .foregroundStyle(Theme.statusDone)
+            .frame(width: 72, height: 72)
+            .background(Theme.successSurface, in: Circle())
+            .accessibilityHidden(true)
     }
 }
 
@@ -1496,10 +1729,10 @@ struct CustomerSecondaryButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title).font(Theme.customerFont(type.body, weight: .medium))
+            Text(title).font(Theme.customerFont(type.small, weight: .semibold))
                 .frame(maxWidth: .infinity, minHeight: type.target)
                 .foregroundStyle(Theme.foreground)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14))
+                .background(Theme.fill, in: Capsule())
         }
         .buttonStyle(.plain)
     }

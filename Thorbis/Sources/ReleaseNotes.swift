@@ -13,6 +13,236 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-16-office-pages",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "building.2", title: "Business settings in one place",
+                      detail: "Company, payments, operations and team settings are listed together on one page."),
+                .init(symbol: "phone.bubble", title: "A fuller call page",
+                      detail: "Read the whole transcript, play the recording faster, and link the call to a job from its menu."),
+                .init(symbol: "icloud.and.arrow.up", title: "Send saved work now",
+                      detail: "Saved on this phone lists what is waiting, with Send now and Keep working at the bottom."),
+                .init(symbol: "chart.bar", title: "Dashboard and Money you can fold",
+                      detail: "Tap a section's label to fold it away; the dashboard also shows what was collected today."),
+                .init(symbol: "magnifyingglass", title: "Price book search up top",
+                      detail: "Search and switch between kinds of item at the top of the price book."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-estimate-versions",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "clock.arrow.circlepath", title: "Estimate versions",
+                      detail: "See every version you sent, what changed in each, and restore an older one as a new draft."),
+                .init(symbol: "doc.text.viewfinder", title: "Scan parts into an estimate",
+                      detail: "Scan or paste a parts list when you build a new estimate, the same as on invoices."),
+                .init(symbol: "tag", title: "Say why you gave a discount",
+                      detail: "Add a reason to a discount and your customer sees it on the estimate."),
+                .init(symbol: "crop", title: "Crop your logo",
+                      detail: "Move and zoom your logo before it goes on invoices and texts."),
+                .init(symbol: "hand.raised", title: "Why we ask for access",
+                      detail: "A short page explains each permission before your phone asks for it."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-schedule-and-booking",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "line.3.horizontal.decrease", title: "Filter jobs your way",
+                      detail: "Filter Jobs by tech, unassigned, status or a date range, and sort by time, update or name."),
+                .init(symbol: "square.and.pencil", title: "A quicker New job",
+                      detail: "Start with what's wrong, then pick the customer, time and tech from chips under it."),
+                .init(symbol: "checklist", title: "Setup steps on an empty schedule",
+                      detail: "Until setup is finished, an empty schedule shows what is left and takes you there."),
+                .init(symbol: "map", title: "Call or book from the map",
+                      detail: "The map's stop card can call the customer or book another job at that address."),
+                .init(symbol: "person.2", title: "A suggested tech",
+                      detail: "Assign shows who has the fewest jobs that day first, and how many each tech has."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-job-in-the-field",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "timer", title: "An on-site timer",
+                      detail: "While you work, the job shows time on site with Pause, and tiles for photo, voice note and parts."),
+                .init(symbol: "ellipsis.circle", title: "A clearer job menu",
+                      detail: "The job menu opens from the bottom, and you can cancel a job or jump to its details from it."),
+                .init(symbol: "flag.checkered", title: "When each step happened",
+                      detail: "Job status shows the time you were dispatched, started driving and arrived."),
+                .init(symbol: "pencil.tip", title: "Better photo markup",
+                      detail: "Draw with a pen or highlighter in five colours, erase, and undo or redo."),
+                .init(symbol: "rectangle.split.2x1", title: "Share before and after",
+                      detail: "Send a before-and-after pair as one picture, and add captions to photos."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-customer-records",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "archivebox", title: "Archive customers",
+                      detail: "Archive a customer with a reason, see archived customers on their own page, and restore them."),
+                .init(symbol: "person.badge.plus", title: "Save and book in one step",
+                      detail: "Save a new customer and go straight to booking their job; note how they found you."),
+                .init(symbol: "wrench.and.screwdriver", title: "Pages for units and trucks",
+                      detail: "Each piece of equipment and each truck opens its own page; start a job from a unit."),
+                .init(symbol: "house", title: "More on a property",
+                      detail: "Get directions, edit access notes, call or text contacts and start a job from a property."),
+                .init(symbol: "list.bullet.below.rectangle", title: "A customer timeline",
+                      detail: "A customer's activity is a timeline you can filter to visits or payments."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-field-and-ipad-paper",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "arrow.up.left.and.arrow.down.right", title: "Write descriptions full screen",
+                      detail: "Open a line's description in a full editor and preview how your customer will read it."),
+                .init(symbol: "car", title: "A clearer next stop",
+                      detail: "Today's card shows the drive and access note; after you're paid, On my way to the next stop is one tap."),
+                .init(symbol: "ipad.landscape", title: "Board and Money on iPad",
+                      detail: "The Board and Money pages use the full width on iPad, and Schedule opens side by side."),
+                .init(symbol: "lock.iphone", title: "New widgets and Lock Screen",
+                      detail: "The Lock Screen shows the job, a timer and one button; widgets list today's jobs by time."),
+                .init(symbol: "person.text.rectangle", title: "A friendlier customer view",
+                      detail: "Customers see a greeting, their estimates and invoices, and their own contact details."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-join-a-team",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "person.badge.plus", title: "Join a team from an invite",
+                      detail: "Open or paste your invite link to join; switch between companies from Join another workspace."),
+                .init(symbol: "sparkles", title: "A short intro for new phones",
+                      detail: "Three quick pages show what Thorbis does before you log in for the first time."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-account-pages",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "person.crop.circle", title: "Edit your name and password",
+                      detail: "From Settings, Account and data: change your name or password without leaving the app."),
+                .init(symbol: "hand.raised", title: "See what the app can use",
+                      detail: "Privacy and permissions lists camera, location, microphone and notification access."),
+                .init(symbol: "bell", title: "Your own notifications page",
+                      detail: "Turn notifications on and choose your morning summary from Settings, Notifications."),
+                .init(symbol: "xmark.circle", title: "Cancel a maintenance plan clearly",
+                      detail: "Cancelling a plan opens its own page that says what ends before you confirm."),
+                .init(symbol: "barcode.viewfinder", title: "Scan or paste materials",
+                      detail: "On an invoice, scan part codes or paste a parts list and add the price book matches."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-estimates-invoices-paper",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "doc.text", title: "Estimate and invoice pages, redone",
+                      detail: "Each shows its number, status and progress up top, then the lines and an Edit button."),
+                .init(symbol: "plus.forwardslash.minus", title: "Change quantities in place",
+                      detail: "Line items have a minus and plus right in the row while you build an estimate or invoice."),
+                .init(symbol: "signature", title: "A cleaner signature pad",
+                      detail: "Customers sign under their name, with Clear beside the pad."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-setup-paper",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "person.badge.key", title: "A fresh log in and sign up",
+                      detail: "Logging in, signing up and resetting your password use the new look, with clearer steps."),
+                .init(symbol: "checklist", title: "Business setup, step by step",
+                      detail: "Each setup step shows where you are, and Business settings groups company, payments and team."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-settings-team-paper",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "gearshape", title: "Settings in clear cards",
+                      detail: "Account, workspace, notifications and appearance each have their own card, and Appearance has its own page."),
+                .init(symbol: "person.2", title: "Team and permissions, tidied",
+                      detail: "See each person's role, open pending invites, and turn permissions on or off per role."),
+                .init(symbol: "wrench.and.screwdriver", title: "Equipment, fleet and properties",
+                      detail: "Lists and forms for equipment, vans, properties and maintenance plans now match the rest of the app."),
+                .init(symbol: "creditcard", title: "A simpler Collect payment",
+                      detail: "Tap to Pay leads, with a code to scan, check, cash or bank transfer underneath."),
+                .init(symbol: "checkmark.seal", title: "Wrap up, reschedule and assign",
+                      detail: "The close-out checklist, moving a visit and assigning a tech all use the new cards and buttons."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-field-day-paper",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "calendar", title: "A cleaner Schedule and Jobs",
+                      detail: "Your next stop leads Schedule, and Jobs groups your work by in progress, scheduled and done."),
+                .init(symbol: "briefcase", title: "Job pages in cards",
+                      detail: "Each part of a job sits in its own card, with status, time and tech as chips under the title."),
+                .init(symbol: "clock.badge.exclamationmark", title: "Running late",
+                      detail: "From the job's ••• menu, text the customer a new arrival time from your phone."),
+                .init(symbol: "hand.raised", title: "Can't start a job",
+                      detail: "Tell the office why you can't start, with a note and photos; it lands on the job."),
+                .init(symbol: "bubble.left", title: "Messages and Search, restyled",
+                      detail: "Conversations, notices and search results now sit in labelled cards by day."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-dashboard-money-paper",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "square.grid.2x2", title: "A clearer Dashboard",
+                      detail: "Revenue this month, active techs, jobs in progress and what needs you, each in its own card."),
+                .init(symbol: "banknote", title: "Money at a glance",
+                      detail: "Collected, outstanding and overdue sit up top, with aging and who to chase below."),
+                .init(symbol: "doc.text", title: "Estimates and invoices by status",
+                      detail: "Search and switch between open, approved, unpaid, paid and drafts."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-customers-paper",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "person.2", title: "Customers, A to Z",
+                      detail: "The customer list is grouped by letter, and each customer page leads with New job, Call and Text."),
+                .init(symbol: "square.stack", title: "Everything for a customer in one card",
+                      detail: "Jobs, property, equipment, membership and money each open from one card on the customer page."),
+                .init(symbol: "pencil", title: "Edit a customer in one sheet",
+                      detail: "Change name, phone, email and addresses from the customer's ••• menu."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-account-and-data",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "person.crop.circle", title: "Account and data in Settings",
+                      detail: "See your account, open privacy settings, and ask to delete your account from the app."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-paper-menu",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "A menu built for your role",
+                      detail: "Technicians, office staff and owners each see their main places first, then Tools, Manage or Business."),
+                .init(symbol: "magnifyingglass", title: "Search or ask from the menu",
+                      detail: "Search sits at the top of the menu, with a + button for anything new."),
+                .init(symbol: "bubble.left", title: "Inbox is now Messages",
+                      detail: "Home is now Dashboard, and office staff get it too."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-16-paper-colors",
+            date: "2026-11-16",
+            highlights: [
+                .init(symbol: "paintpalette", title: "A brighter, clearer look",
+                      detail: "New colours in light and dark, a brighter blue, bolder titles and large screen titles."),
+                .init(symbol: "line.3.horizontal", title: "Rows are easier to tell apart",
+                      detail: "A thin line now sits between rows inside a card, so long lists are easier to scan."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-12-estimate-save-and-menu",
             date: "2026-11-12",
             highlights: [

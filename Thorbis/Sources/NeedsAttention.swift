@@ -49,7 +49,8 @@ struct NeedsAttentionView: View {
                 // count; rows lead with their status glyph and amounts are semibold tabular.
                 // v2: the detail title on the ramp (24), one quiet line, then a group per kind.
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Needs attention").font(Theme.font(30, weight: .medium)).tracking(-0.4)
+                    // Paper v2: every screen title is 34 Bold, tracked -0.02em.
+                    Text("Needs attention").font(Theme.font(34, weight: .bold)).tracking(-0.68)
                         .accessibilityAddTraits(.isHeader)
                     Text(loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking…")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)

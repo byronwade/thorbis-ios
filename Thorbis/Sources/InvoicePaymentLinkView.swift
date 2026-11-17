@@ -5,6 +5,8 @@ struct InvoicePaymentLinkView: View {
     @ObservedObject var model: InvoicePaymentCollectionModel
     let payLink: FieldInvoicePayLink?
     let requestedBalanceCents: Int?
+    /// The invoice's number as the sheet that opened this shows it ("INV-2209").
+    let invoiceReference: String
     let customerName: String
     let isCreating: Bool
     let canCreate: Bool
@@ -18,10 +20,21 @@ struct InvoicePaymentLinkView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text(customerName).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    MoneyFigure(label: "Balance due", cents: model.outstandingCents ?? 0,
-                                currency: model.invoice?.currency ?? "USD")
+                // Paper 39C Scan to pay: the balance centred in the largest Bold over the invoice and the
+                // customer in 15 muted, the code on a white card, the scan caption and the waiting line,
+                // then the link.
+                VStack(alignment: .center, spacing: 20) {
+                    VStack(spacing: 4) {
+                        Text(money(model.outstandingCents ?? 0, currency: model.invoice?.currency ?? "USD"))
+                            .font(Theme.font(34, weight: .bold)).monospacedDigit().tracking(-1)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .accessibilityLabel("Balance due \(money(model.outstandingCents ?? 0, currency: model.invoice?.currency ?? "USD"))")
+                        Text("\(invoiceReference) \u{00B7} \(customerName)")
+                            .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity)
                     if let error { ErrorBanner(message: error) }
                     if let loadError = model.loadError {
                         ErrorBanner(message: loadError) { await model.load() }
@@ -45,15 +58,17 @@ struct InvoicePaymentLinkView: View {
                     }
                 }
                 .frame(maxWidth: 520)
-                .padding(20)
+                .padding(.horizontal, PaperCardMetrics.margin)
+                .padding(.top, 8).padding(.bottom, 20)
                 .frame(maxWidth: .infinity)
             }
             .refreshable { await model.load() }
         }
-        .background(Theme.canvas)
+        .background(Theme.background)
         .foregroundStyle(Theme.foreground)
-        .navigationTitle("Payment link")
-        .navigationBarTitleDisplayMode(.inline)
+        // Paper 39C: "Scan to pay" as the large title.
+        .navigationTitle("Scan to pay")
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ThorbisToolbarItem(placement: .topBarTrailing) {
                 Button("Done", action: onDone).frame(minWidth: 44, minHeight: 44)
@@ -81,20 +96,19 @@ struct InvoicePaymentLinkView: View {
         switch invoiceState {
         case .paid:
             Label("Invoice paid", systemImage: "checkmark.circle.fill")
-                .font(Theme.font(22, weight: .medium)).foregroundStyle(Theme.success)
+                .font(Theme.font(22, weight: .bold)).foregroundStyle(Theme.success)
                 .accessibilityIdentifier("invoice-payment-confirmed")
         case .changed:
             recovery("Invoice changed", message: "The balance or invoice status has changed. Use a new link for the current balance.")
         case .ready:
             switch PaymentLinkPresentation(link: payLink, at: date) {
             case .ready(let url, let expiration):
-                Text("Scan to pay").font(Theme.font(22, weight: .medium))
                 if let renderedCode, renderedCode.url == url {
                     Image(uiImage: UIImage(cgImage: renderedCode.image))
                         .interpolation(.none).resizable().scaledToFit()
-                        .frame(maxWidth: 280)
-                        .padding(12)
-                        .background(.white, in: RoundedRectangle(cornerRadius: Theme.cardRadius))
+                        .frame(maxWidth: 204)
+                        .padding(18)
+                        .background(.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .frame(maxWidth: .infinity)
                         .accessibilityLabel("Payment QR code")
                         .accessibilityHint("The customer scans this with their phone camera")
@@ -103,12 +117,31 @@ struct InvoicePaymentLinkView: View {
                     Text("Share the secure link to open checkout on the customer’s phone.")
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
-                Text("Ask \(customerName) to scan with their phone camera to pay by card.")
+                // Paper 39C: the caption as wide as the code, then the waiting line with its spinner.
+                Text("Ask the customer to scan with their phone camera")
                     .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
-                ShareLink(item: url) {
-                    Label("Share payment link", systemImage: "square.and.arrow.up").inkCommit()
+                    .frame(maxWidth: 240)
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small).tint(Theme.brandText)
+                        .accessibilityHidden(true)
+                    Text("Waiting for payment")
+                        .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                .accessibilityElement(children: .combine)
+                // Paper 39C: a pill on the field fill, the words alone in 16 Semibold, 50 tall.
+                ShareLink(item: url) {
+                    Text("Text the link instead")
+                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .padding(.horizontal, 12)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Theme.fill, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
                 .accessibilityIdentifier("share-invoice-payment-link")
                 Button(copiedURL == url ? "Link copied" : "Copy link") {
                     UIPasteboard.general.string = url.absoluteString
@@ -128,7 +161,7 @@ struct InvoicePaymentLinkView: View {
 
     private func recovery(_ title: String, message: String) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(title).font(Theme.font(22, weight: .medium))
+            Text(title).font(Theme.font(22, weight: .bold))
             Text(message).font(Theme.font(15)).foregroundStyle(Theme.muted)
             PrimaryButton(title: "Create new payment link", busy: isCreating, action: onCreate)
                 .disabled(!canCreate)

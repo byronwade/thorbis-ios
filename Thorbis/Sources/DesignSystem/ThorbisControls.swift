@@ -74,7 +74,8 @@ struct ThorbisSelect<Value: Hashable>: View {
 
 // MARK: - ThorbisSegmented (replaces a `.pickerStyle(.segmented)` `Picker`)
 
-/// A pill segmented control: a track with the chosen segment raised as a card. For a small,
+/// A segmented control (Paper P3 / P6): a 14pt-radius track, 3pt inside it the chosen segment
+/// raised on an 11pt-radius tile; 14 Semibold when chosen, 14 Medium muted otherwise. For a small,
 /// fixed set of choices (two to four) shown side by side.
 struct ThorbisSegmented<Value: Hashable>: View {
     let options: [(value: Value, label: String)]
@@ -95,7 +96,7 @@ struct ThorbisSegmented<Value: Hashable>: View {
             }
         }
         .padding(3)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
     }
@@ -109,7 +110,7 @@ struct ThorbisSegmented<Value: Hashable>: View {
             let isOn = option.value == selection
             Button { selection = option.value } label: {
                 Text(option.label)
-                    .font(Theme.font(15, weight: .medium))
+                    .font(Theme.font(14, weight: isOn ? .semibold : .medium))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: horizontal, vertical: !horizontal)
                     .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
@@ -117,8 +118,7 @@ struct ThorbisSegmented<Value: Hashable>: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background {
                         if isOn {
-                            RoundedRectangle(cornerRadius: 15, style: .continuous).fill(Theme.selectedSegment)
-                                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                            RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Theme.selectedSegment)
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }
@@ -147,10 +147,10 @@ struct ThorbisConfirmAction: Identifiable {
     }
 }
 
-/// The confirm modal (v2, design.thorbis.com "Cancel job is a modal"): a clean system sheet on the
-/// panel, the question as a 17pt Medium title with the consequence under it, then the commit(s)
-/// inside the sheet's padding (a destructive one in the danger tone, the word naming the
-/// consequence) and a quiet Keep/Cancel. No floating card, no glass.
+/// The confirm modal (Paper P4 Confirm): centred on the panel, a destructive choice leads with
+/// its mark in a 52pt red-surface circle, then the question as a 20 Bold title that names the
+/// thing and one 15pt muted line that says what happens. One choice sits beside Cancel as two
+/// 50pt pills (the red one repeats the verb); several choices stack above Cancel.
 struct ThorbisConfirmCard: View {
     let title: String
     var message: String? = nil
@@ -160,42 +160,55 @@ struct ThorbisConfirmCard: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
+    private var destructive: ThorbisConfirmAction? { actions.first { $0.role == .destructive } }
+    /// Two pills side by side only when there is one choice and the type is not enlarged.
+    private var sideBySide: Bool { actions.count == 1 && !typeSize.isAccessibilitySize }
+    /// The bin for a delete or remove; a warning triangle for any other destructive choice.
+    private var markSymbol: String {
+        let word = (destructive?.title ?? "").lowercased()
+        return word.hasPrefix("delete") || word.hasPrefix("remove") ? "trash" : "exclamationmark.triangle"
+    }
+
     var body: some View {
         // Only the words scroll. The choices stay pinned under them, so at an accessibility size a
         // long title or message can never push Cancel or the action below the screen.
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 20) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(title).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                VStack(spacing: 10) {
+                    if destructive != nil {
+                        Image(systemName: markSymbol)
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(Theme.destructive)
+                            .frame(width: 52, height: 52)
+                            .background(Theme.destructiveSurface, in: Circle())
+                            .padding(.bottom, 4)
+                            .accessibilityHidden(true)
+                    }
+                    Text(title).font(Theme.font(20, weight: .bold)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                     if let message {
-                        Text(message).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                        Text(message).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 22)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 24)
             }
             .scrollBounceBehavior(.basedOnSize)
 
-            VStack(spacing: 12) {
-                ForEach(actions) { action in
-                    Button { onChoose(action) } label: {
-                        if action.role == .destructive {
-                            Text(action.title).dangerCommit()
-                        } else {
-                            Text(action.title).inkCommit()
-                        }
-                    }
-                    .buttonStyle(PressStyle())
+            if sideBySide {
+                HStack(spacing: 10) {
+                    cancelButton
+                    ForEach(actions) { action in choiceButton(action) }
                 }
-                Button(action: onCancel) {
-                    Text("Cancel").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity).frame(minHeight: 44)
-                        .contentShape(Rectangle())
+            } else {
+                VStack(spacing: 10) {
+                    ForEach(actions) { action in choiceButton(action) }
+                    cancelButton
                 }
-                .buttonStyle(PressStyle())
             }
         }
         .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
@@ -206,14 +219,196 @@ struct ThorbisConfirmCard: View {
                                   ? [.large] : [.height(estimatedHeight), .large])
     }
 
+    private func choiceButton(_ action: ThorbisConfirmAction) -> some View {
+        Button { onChoose(action) } label: {
+            if action.role == .destructive {
+                Text(action.title).dangerCommit()
+            } else {
+                Text(action.title).inkCommit()
+            }
+        }
+        .buttonStyle(PressStyle())
+    }
+
+    private var cancelButton: some View {
+        Button(action: onCancel) {
+            Text("Cancel").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                .frame(maxWidth: .infinity).frame(minHeight: Theme.commitHeight)
+                .background(Theme.fill, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
+    }
+
     private var estimatedHeight: CGFloat {
-        let header: CGFloat = message == nil ? 64 : 100
-        let buttons = CGFloat(actions.count) * 62 + 56
-        return (header + buttons + 40) * typeSize.sheetHeightScale
+        let mark: CGFloat = destructive == nil ? 0 : 66
+        let words: CGFloat = message == nil ? 56 : 124
+        let buttons: CGFloat = actions.count == 1 ? 50 : CGFloat(actions.count) * 60 + 50
+        return (24 + mark + words + 20 + buttons + 36) * typeSize.sheetHeightScale
+    }
+}
+
+/// The reason field of a confirm-with-reason: its label above the well, an example inside it, and
+/// whether the action needs an answer.
+struct ThorbisConfirmReason {
+    var label: String = "Reason"
+    var placeholder: String = ""
+    /// When true the action is still pressable; pressed with no reason it says what is missing
+    /// under the field and does not run.
+    var required = false
+    var missingMessage: String = "Add a reason."
+    var identifier: String = "confirm-reason"
+}
+
+/// The confirm modal with a reason (Paper P4 Confirm plus a field): the mark for a destructive
+/// choice, the 20 Bold question, one 15pt muted line, then a labelled reason field (13 Semibold
+/// label, 50pt well), and Cancel beside the action as two 50pt pills. The words and the field
+/// scroll; the pills stay pinned above the keyboard. The action gets the trimmed reason.
+struct ThorbisReasonConfirmCard: View {
+    let title: String
+    var message: String? = nil
+    var reason = ThorbisConfirmReason()
+    let actionTitle: String
+    var role: ButtonRole? = nil
+    let onChoose: (String) -> Void
+    let onCancel: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @State private var text = ""
+    @State private var showMissing = false
+    @FocusState private var focused: Bool
+
+    private var isDestructive: Bool { role == .destructive }
+    private var markSymbol: String {
+        let word = actionTitle.lowercased()
+        return word.hasPrefix("delete") || word.hasPrefix("remove") ? "trash" : "exclamationmark.triangle"
+    }
+    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    if isDestructive {
+                        Image(systemName: markSymbol)
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(Theme.destructive)
+                            .frame(width: 52, height: 52)
+                            .background(Theme.destructiveSurface, in: Circle())
+                            .padding(.bottom, 4)
+                            .accessibilityHidden(true)
+                    }
+                    Text(title).font(Theme.font(20, weight: .bold)).foregroundStyle(Theme.foreground)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    if let message {
+                        Text(message).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(reason.label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 4)
+                        TextField(reason.label, text: $text, prompt: .placeholder(reason.placeholder))
+                            .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                            .focused($focused)
+                            .submitLabel(.done)
+                            .onSubmit { focused = false }
+                            .fieldWell()
+                            .accessibilityIdentifier(reason.identifier)
+                        if showMissing && trimmed.isEmpty {
+                            FieldProblem(message: reason.missingMessage)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 24)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.interactively)
+
+            if typeSize.isAccessibilitySize {
+                VStack(spacing: 10) {
+                    actionButton
+                    cancelButton
+                }
+            } else {
+                HStack(spacing: 10) {
+                    cancelButton
+                    actionButton
+                }
+            }
+        }
+        .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+        .background(Theme.surface)
+        // Half height leaves room for the field; the system lifts the sheet over the keyboard and
+        // the pills ride above it. Full height at accessibility sizes and in landscape.
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize || verticalSizeClass == .compact
+                                  ? [.large] : [.medium, .large])
+    }
+
+    private var actionButton: some View {
+        Button {
+            if reason.required && trimmed.isEmpty {
+                showMissing = true
+                focused = true
+            } else {
+                onChoose(trimmed)
+            }
+        } label: {
+            if isDestructive {
+                Text(actionTitle).dangerCommit()
+            } else {
+                Text(actionTitle).inkCommit()
+            }
+        }
+        .buttonStyle(PressStyle())
+    }
+
+    private var cancelButton: some View {
+        Button(action: onCancel) {
+            Text("Cancel").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                .frame(maxWidth: .infinity).frame(minHeight: Theme.commitHeight)
+                .background(Theme.fill, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(PressStyle())
     }
 }
 
 extension View {
+    /// Present a confirm sheet that asks for a reason, in place of an alert with a text field. The
+    /// action gets the trimmed reason (empty when none was typed and it is not required).
+    func thorbisConfirm(_ title: String, message: String? = nil, isPresented: Binding<Bool>,
+                        reason: ThorbisConfirmReason, actionTitle: String, role: ButtonRole? = nil,
+                        action: @escaping (String) -> Void) -> some View {
+        sheet(isPresented: isPresented) {
+            ThorbisReasonConfirmCard(title: title, message: message, reason: reason,
+                                     actionTitle: actionTitle, role: role,
+                                     onChoose: { typed in isPresented.wrappedValue = false; action(typed) },
+                                     onCancel: { isPresented.wrappedValue = false })
+        }
+    }
+
+    /// The same, bound to an optional item: shows while `item` is non-nil and clears it on dismiss
+    /// (a swipe-away reads as Cancel).
+    func thorbisConfirm<Item: Identifiable>(item: Binding<Item?>,
+                                            title: @escaping (Item) -> String,
+                                            message: ((Item) -> String)? = nil,
+                                            reason: ThorbisConfirmReason,
+                                            actionTitle: String, role: ButtonRole? = nil,
+                                            action: @escaping (Item, String) -> Void) -> some View {
+        sheet(item: item) { value in
+            ThorbisReasonConfirmCard(title: title(value), message: message?(value), reason: reason,
+                                     actionTitle: actionTitle, role: role,
+                                     onChoose: { typed in item.wrappedValue = nil; action(value, typed) },
+                                     onCancel: { item.wrappedValue = nil })
+        }
+    }
+
     /// Present a custom confirm sheet in place of `.confirmationDialog`. Destructive actions draw
     /// a red button; a Cancel is added for you.
     func thorbisConfirm(_ title: String, message: String? = nil, isPresented: Binding<Bool>,

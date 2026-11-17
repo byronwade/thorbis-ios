@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Searchable customer list for the new-job form. Recent customers come first when the
-/// search is empty, so the common case is one tap.
+/// Paper P3 Pick a record, for customers: a sheet with Cancel, "Choose customer" and New across
+/// the top, one search field, then the records on one card. Recent customers come first when the
+/// search is empty, so the common case is one tap; while typing, the matched letters read bold
+/// and (where the caller allows it) the last row adds what was typed as a new customer.
 struct CustomerPickerSheet: View {
     let selectedID: String
     let canCreate: Bool
@@ -11,10 +13,12 @@ struct CustomerPickerSheet: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @FocusState private var searching: Bool
+
+    private var trimmed: String { query.trimmingCharacters(in: .whitespaces) }
 
     private var matches: [Customer] {
         let active = store.customers.filter { $0.archived != true }
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
             return active.sorted { ($0.createdAt ?? "") > ($1.createdAt ?? "") }
         }
@@ -23,44 +27,147 @@ struct CustomerPickerSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List {
+        VStack(spacing: 14) {
+            header
+            searchField
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(trimmed.isEmpty ? "Recent" : "Results")
+                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4)
+                        .accessibilityAddTraits(.isHeader)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(matches) { customer in
+                            row(customer)
+                            if customer.id != matches.last?.id { WellDivider(leading: 16) }
+                        }
+                        if matches.isEmpty {
+                            Text(trimmed.isEmpty ? "No customers yet." : "No customer matches “\(trimmed)”.")
+                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 16)
+                                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        }
+                        if canCreate && !trimmed.isEmpty {
+                            WellDivider(leading: 16)
+                            addRow
+                        }
+                    }
+                    .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                }
+                .padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Theme.surface)
+        .presentationDetents([.large])
+        .presentationCornerRadius(28)
+    }
+
+    /// Cancel pill, the 17 Semibold title, and New in brand text when the caller can create.
+    private var header: some View {
+        ZStack {
+            Text("Choose customer")
+                .font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                .accessibilityAddTraits(.isHeader)
+            HStack {
+                Button { dismiss() } label: {
+                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 16).frame(minHeight: 44)
+                        .background(Theme.field, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                Spacer(minLength: 8)
                 if canCreate {
                     Button { onNew(query) } label: {
-                        Label(query.isEmpty ? "New customer" : "New customer “\(query)”", systemImage: "person.badge.plus")
-                            .font(Theme.font(15, weight: .medium)).frame(minHeight: 44, alignment: .leading)
+                        Text("New").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .padding(.leading, 18).padding(.trailing, 4).frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("New customer")
                 }
-                Section(query.isEmpty ? "Recently added" : "\(matches.count) found") {
-                    ForEach(matches) { customer in
-                        Button { onPick(customer.id) } label: {
-                            HStack {
-                                Text(customer.name).font(Theme.font(15)).foregroundStyle(Theme.foreground).lineLimit(1)
-                                Spacer()
-                                if customer.id == selectedID {
-                                    Image(systemName: "checkmark").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.brandText)
-                                }
-                            }
-                            .frame(minHeight: 44).contentShape(Rectangle())
-                        }
-                        .accessibilityAddTraits(customer.id == selectedID ? .isSelected : [])
-                    }
-                }
-                if matches.isEmpty {
-                    Text(query.isEmpty ? "No customers yet." : "No customer matches “\(query)”.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                }
-            }
-            .listStyle(.insetGrouped)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search customers")
-            .navigationTitle("Customer")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }
         }
-        .presentationDetents([.large])
-        .presentationCornerRadius(Theme.cardRadius)
+    }
+
+    /// 48pt field, radius 14; the rim turns to the focus colour while typing.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.muted)
+                .accessibilityHidden(true)
+            TextField("Search customers", text: $query, prompt: .placeholder("Search customers"))
+                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                .focused($searching)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 48)
+        .background(Theme.field, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(Theme.brandText, lineWidth: searching ? 1.5 : 0))
+    }
+
+    /// 40pt initials circle, the name in 16 Medium (matched letters bold), a tick on the chosen one.
+    private func row(_ customer: Customer) -> some View {
+        let chosen = customer.id == selectedID
+        return Button { onPick(customer.id) } label: {
+            HStack(spacing: 12) {
+                Text(initials(customer.name))
+                    .font(Theme.font(14, weight: .semibold))
+                    .foregroundStyle(chosen ? Theme.brandText : Theme.subtle)
+                    .frame(width: 40, height: 40)
+                    .background(chosen ? Theme.brandSurface : Theme.selectedSegment, in: Circle())
+                    .accessibilityHidden(true)
+                Text(highlighted(customer.name))
+                    .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                if chosen {
+                    Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(customer.name)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+
+    /// Paper P3's last row: a brand plus and "Add “Pe” as a new customer".
+    private var addRow: some View {
+        Button { onNew(query) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "plus")
+                    .font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .frame(width: 40, height: 40)
+                    .accessibilityHidden(true)
+                Text("Add “\(trimmed)” as a new customer")
+                    .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.brandText)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+    }
+
+    private func highlighted(_ name: String) -> AttributedString {
+        var text = AttributedString(name)
+        if !trimmed.isEmpty, let range = text.range(of: trimmed, options: .caseInsensitive) {
+            text[range].font = Theme.font(16, weight: .bold)
+        }
+        return text
     }
 }
 
@@ -268,7 +375,7 @@ struct CustomerContactSheet: View {
                 }
                 Button { Task { await save() } } label: {
                     Group {
-                        if busy { ProgressView().tint(Theme.onInk) }
+                        if busy { ProgressView().tint(.white) }
                         else { Text(contact == nil ? "Save contact" : "Save changes") }
                     }
                     .inkCommit(enabled: saveBlockedReason == nil)
@@ -391,9 +498,10 @@ struct CustomerContactSheet: View {
 extension LocalWorkspaceSection {
     var moreSymbol: String {
         switch self {
-        case .fleet: "car"
+        // Paper v2 drawer icons: the van, the unit, the plan's shield.
+        case .fleet: "box.truck"
         case .equipment: "wrench.and.screwdriver"
-        case .agreements: "list.bullet.clipboard"
+        case .agreements: "checkmark.shield"
         case .team: "person.badge.plus"
         }
     }
