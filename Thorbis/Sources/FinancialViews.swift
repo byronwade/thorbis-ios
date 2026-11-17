@@ -131,9 +131,9 @@ struct EstimatesView: View {
         }
         switch record.status {
         case "draft": return when(record.updatedAt).map { "Not sent \u{00B7} edited \($0)" } ?? "Not sent"
-        case "approved": return when(record.approvedAt)
-        case "declined": return when(record.declinedAt)
-        default: return when(record.sentAt)
+        case "approved": return when(record.approvedAt).map { "Approved \($0)" }
+        case "declined": return when(record.declinedAt).map { "Declined \($0)" }
+        default: return when(record.sentAt).map { "Sent \($0)" }
         }
     }
 
@@ -253,13 +253,12 @@ struct EstimateDetailView: View {
         let customerName = store.customerName(record.customerId)
         let customer = session.can("customer.view", feature: "core_crm") ? store.customers.first(where: { $0.id == record.customerId }) : nil
         let figure = estimateFigure(record, currency: currency)
-        let revision: String? = (record.currentRevisionNumber ?? 0) > 1 ? "Rev \(record.currentRevisionNumber ?? 0)" : nil
         let name: String? = record.title.isEmpty ? nil : record.title
-        let parts: [String?] = [name, figure, revision]
+        let parts: [String?] = [name, figure]
         let subtitle = parts.compactMap { $0 }.joined(separator: " \u{00B7} ")
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
-                Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.font(14, weight: .semibold))
                     .foregroundStyle(Theme.muted)
                 Text(status.word).font(Theme.font(12, weight: .semibold)).foregroundStyle(status.tone.text)
                     .padding(.horizontal, 8).padding(.vertical, 2)
@@ -275,7 +274,7 @@ struct EstimateDetailView: View {
                 estimateTitle(customerName)
             }
             if !subtitle.isEmpty {
-                Text(subtitle).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -340,7 +339,7 @@ struct EstimateDetailView: View {
         let reached = index <= current
         let isCurrent = index == current && !finished
         let mark: Color = declined && index == count - 1 ? Theme.statusAttention : Theme.statusDone
-        let pending = Theme.muted.opacity(0.5)
+        let pending = Theme.borderStrong
         let leftLine: Color = index == 0 ? .clear : (reached ? Theme.statusDone : pending)
         let rightLine: Color = index == count - 1 ? .clear : (index + 1 <= current ? Theme.statusDone : pending)
         VStack(spacing: 8) {
@@ -361,8 +360,8 @@ struct EstimateDetailView: View {
                 Text(step.label).font(Theme.font(13, weight: .semibold))
                     .foregroundStyle(isCurrent ? Theme.brandText : reached ? Theme.foreground : Theme.muted)
                     .lineLimit(1).minimumScaleFactor(0.8)
-                Text(step.date.map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) } ?? "Not yet")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                Text(step.date.map { documentWeekday($0) } ?? "Not yet")
+                    .font(Theme.font(12)).foregroundStyle(step.date == nil ? Theme.subtleForeground : Theme.muted)
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
         }
@@ -402,7 +401,7 @@ struct EstimateDetailView: View {
                     }
                     if let total, !lines.isEmpty {
                         totalRow(totalLabel, money(total, currency: currency), strong: extraRows.isEmpty)
-                            .overlay(alignment: .top) { Rectangle().fill(Theme.muted.opacity(0.5)).frame(height: 1) }
+                            .overlay(alignment: .top) { Rectangle().fill(Theme.borderStrong).frame(height: 1) }
                         ForEach(Array(extraRows.enumerated()), id: \.offset) { index, row in
                             totalRow(row.0, row.1, strong: index == extraRows.count - 1)
                                 .overlay(alignment: .top) { WellDivider(leading: 0) }
@@ -412,7 +411,7 @@ struct EstimateDetailView: View {
                 .padding(.horizontal, 16)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 if let memberLine {
-                    Text(memberLine).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(memberLine).font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4)
                 }
@@ -429,7 +428,7 @@ struct EstimateDetailView: View {
                     Text(text.name).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
                     if line.quantity != 1 {
-                        Text("\(line.quantity) \u{00D7} \(unit)").font(Theme.font(13)).monospacedDigit()
+                        Text("\(line.quantity) \u{00D7} \(unit)").font(Theme.font(13))
                             .foregroundStyle(Theme.muted)
                     }
                     if let detail = text.detail {
@@ -439,7 +438,7 @@ struct EstimateDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if let amount {
-                    Text(amount).font(Theme.monoFont(15)).foregroundStyle(Theme.foreground)
+                    Text(amount).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                         .lineLimit(1).fixedSize()
                 }
             }
@@ -454,7 +453,7 @@ struct EstimateDetailView: View {
                 Text(label).font(Theme.font(strong ? 16 : 15, weight: strong ? .bold : .regular))
                     .foregroundStyle(strong ? Theme.foreground : Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(value).font(Theme.monoFont(strong ? 16 : 15, weight: strong ? .bold : .regular))
+                Text(value).font(Theme.font(strong ? 16 : 15, weight: strong ? .bold : .regular))
                     .foregroundStyle(strong ? Theme.foreground : Theme.muted)
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
@@ -743,6 +742,17 @@ struct InvoicesView: View {
         activeFilter == nil ? visible.filter { Self.bucket($0.status) == currentTab } : visible
     }
 
+    /// Paper 20F: overdue invoices sit on their own card under a red "Overdue", the rest under
+    /// "Unpaid". Only when the server says some are overdue (there is no due date to work it out
+    /// from); otherwise the tab is one unlabelled card.
+    private var groups: [(label: String?, overdue: Bool, rows: [InvoiceRecord])] {
+        let rows = shown
+        let late = rows.filter { $0.status == "overdue" }
+        guard activeFilter == nil, currentTab == "Unpaid", !late.isEmpty else { return rows.isEmpty ? [] : [(nil, false, rows)] }
+        let rest = rows.filter { $0.status != "overdue" }
+        return [("Overdue", true, late)] + (rest.isEmpty ? [] : [("Unpaid", false, rest)])
+    }
+
     /// "Unpaid · 5", "Paid", "Drafts": only the unpaid tab carries its count, as in Paper.
     private var tabBinding: Binding<String> {
         Binding(get: { tabLabel(currentTab) },
@@ -771,18 +781,27 @@ struct InvoicesView: View {
                 }
                 if loading && records.isEmpty { ListRoomSkeleton(count: 5, threeLines: false) }
                 let rows = shown
-                ForEach(Array(rows.enumerated()), id: \.element.id) { index, record in
-                    PaperSplitDestinationLink(id: record.id, value: PaperRoute.invoice(record.id)) {
-                        InvoiceDetailView(id: record.id).thorbisBackButton()
-                    } label: {
-                        // MF-04: an unpaid invoice's row shows what's owed now, and says so.
-                        DocumentCardRow(title: store.customerName(record.customerId),
-                                        amount: invoiceAmount(record),
-                                        subtitle: invoiceLine(record),
-                                        divider: index > 0)
+                ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+                    if let label = group.label {
+                        Text(label).font(Theme.font(13, weight: .semibold))
+                            .foregroundStyle(group.overdue ? StatusTone.attention.text : Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                            .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 16).padding(.bottom, 8)
                     }
-                    .buttonStyle(RowPressStyle())
-                    .documentCardSlot(first: index == 0, last: index == rows.count - 1)
+                    ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, record in
+                        PaperSplitDestinationLink(id: record.id, value: PaperRoute.invoice(record.id)) {
+                            InvoiceDetailView(id: record.id).thorbisBackButton()
+                        } label: {
+                            // MF-04: an unpaid invoice's row shows what's owed now, and says so.
+                            DocumentCardRow(title: store.customerName(record.customerId),
+                                            amount: invoiceAmount(record),
+                                            subtitle: invoiceLine(record),
+                                            divider: index > 0)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .documentCardSlot(first: index == 0, last: index == group.rows.count - 1,
+                                          topGap: group.label == nil ? 16 : 0)
+                    }
                 }
                 if !records.isEmpty && visible.isEmpty {
                     ListRoomEmpty(title: "No invoices match \u{201C}\(search.trimmingCharacters(in: .whitespaces))\u{201D}.",
@@ -895,6 +914,13 @@ struct InvoiceDetailView: View {
         if record.status != "draft", record.status != "void" {
             items.append(ThorbisMenuItem("Customer view", icon: "iphone", isDisabled: busy) { Task { await presentToCustomer() } })
         }
+        // Paper 40C has no signature row on the page: asking for one lives in this menu.
+        let signed = record.customerAuthorization?.linesRevision == record.linesRevision
+            || outbox.waitingSignature(invoiceID: record.id)?.expectedLinesRevision == record.linesRevision
+        if !signed, invoiceAmounts(record) != nil, record.jobId != nil, record.status != "void",
+           session.can("invoice.edit", feature: "invoicing") {
+            items.append(ThorbisMenuItem("Get customer signature", icon: "signature") { if canSignInvoice(record) { showSignature = true } })
+        }
         // Paper 40C: Edit is the pill under the payments.
         if canDiscountInvoice(record) {
             items.append(ThorbisMenuItem("Add discount or credit", icon: "tag") { if canDiscountInvoice(record) { showDiscount = true } })
@@ -948,14 +974,6 @@ struct InvoiceDetailView: View {
                             WaitingToSyncLabel()
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                    } else if amounts != nil, record.jobId != nil, record.status != "void", session.can("invoice.edit", feature: "invoicing") {
-                        Button { if canSignInvoice(record) { showSignature = true } } label: {
-                            Label("Get customer signature", systemImage: "signature")
-                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
                     }
                     if let paymentModel {
                         InvoicePaymentsSection(
@@ -1119,7 +1137,7 @@ struct InvoiceDetailView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
                 // The reference carries the title's identifier; tests read "Invoice 2209" from it.
-                Text(displayReference(record)).font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                Text(displayReference(record)).font(Theme.font(14, weight: .semibold))
                     .foregroundStyle(Theme.muted)
                     .accessibilityIdentifier("invoice-detail-title")
                 Text(status.word).font(Theme.font(12, weight: .semibold)).foregroundStyle(status.tone.text)
@@ -1165,9 +1183,9 @@ struct InvoiceDetailView: View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 0) {
                 Text(label).font(Theme.font(13, weight: .semibold))
-                    .foregroundStyle(overdue ? Theme.destructive : Theme.muted)
+                    .foregroundStyle(overdue ? StatusTone.attention.text : Theme.muted)
                 Text(cents.map { money($0, currency: record.currency) } ?? "Unavailable")
-                    .font(Theme.heading()).monospacedDigit().tracking(-0.7)
+                    .font(Font.custom("Inter-Regular", size: 30, relativeTo: .largeTitle).weight(.bold)).tracking(-0.75)
                     .accessibilityIdentifier(cents == nil ? "invoice-invalid-total" : "document-figure")
                     .foregroundStyle(cents == 0 ? Theme.muted : Theme.foreground)
                     .lineLimit(1).minimumScaleFactor(0.6)
@@ -1204,7 +1222,7 @@ struct InvoiceDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Financing").font(Theme.font(15)).foregroundStyle(Theme.foreground)
                 Text("\(words) · \(money(application.amount.amount, currency: application.amount.currency))")
-                    .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
@@ -1442,7 +1460,7 @@ struct CommercialLineView: View {
                 Text(line.description).font(Theme.font(15, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
                 Text("\(line.quantity) × \(money(line.unitPrice.amount, currency: line.unitPrice.currency))")
-                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
             }
             if !stacked { Spacer(minLength: 8) }
             let total = line.quantity.multipliedReportingOverflow(by: line.unitPrice.amount)
@@ -1473,7 +1491,7 @@ struct MoneyFigure: View {
             Group {
                 if strong {
                     Text(money(cents, currency: currency))
-                        .font(Font.custom("Inter-Regular", size: 34, relativeTo: .largeTitle).weight(.semibold).monospacedDigit())
+                        .font(Font.custom("Inter-Regular", size: 34, relativeTo: .largeTitle).weight(.semibold))
                         .lineLimit(1).minimumScaleFactor(0.7)
                         .contentTransition(.numericText())
                 } else {
@@ -1502,7 +1520,7 @@ struct DocumentHeader<Chips: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(eyebrow).font(Theme.font(13, weight: .medium)).monospacedDigit().foregroundStyle(Theme.muted)
+            Text(eyebrow).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             Text(title).font(Theme.font(30, weight: .medium)).tracking(-0.6)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1529,6 +1547,11 @@ func documentDate(_ date: Date) -> String {
 }
 
 /// A status's colour, used only for the dot beside its word.
+/// Paper 35C's step date: "Fri Jul 17", no comma.
+func documentWeekday(_ date: Date) -> String {
+    "\(date.formatted(.dateTime.weekday(.abbreviated))) \(date.formatted(.dateTime.month(.abbreviated).day()))"
+}
+
 func documentStatusTint(_ status: String) -> Color {
     switch status {
     case "approved", "paid", "completed": Theme.success
@@ -1619,7 +1642,7 @@ struct DocumentLinesSection: View {
                 }
             }
             if let memberLine {
-                Text(memberLine).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.subtle)
+                Text(memberLine).font(Theme.font(14)).foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4).padding(.top, 8)
             }
@@ -1761,6 +1784,13 @@ func money(_ cents: Int, currency: String) -> String {
     (Decimal(cents) / 100).formatted(.currency(code: currency))
 }
 
+/// A header's figure as Paper writes it ("$21,190", "$8,615"): whole dollars when there are no
+/// cents to show, the full amount otherwise so nothing is rounded away.
+func summaryMoney(_ cents: Int, currency: String) -> String {
+    guard cents % 100 == 0 else { return money(cents, currency: currency) }
+    return (Decimal(cents) / 100).formatted(.currency(code: currency).precision(.fractionLength(0)))
+}
+
 /// The Estimates header's subtitle: what's waiting on customers and how much.
 /// Paper 20E: "4 open · $21,190 waiting on customers".
 func estimatesSummary(_ estimates: [EstimateRecord]) -> String {
@@ -1778,7 +1808,7 @@ func estimatesSummary(_ estimates: [EstimateRecord]) -> String {
         guard !overflow else { return "\(count) · total unavailable" }
         total = next
     }
-    return "\(count) · \(money(total, currency: "USD")) waiting on customers"
+    return "\(count) · \(summaryMoney(total, currency: "USD")) waiting on customers"
 }
 
 /// The Invoices header's subtitle (Paper 20F): "$8,615 unpaid · 5 invoices". Invoices carry no due
@@ -1797,7 +1827,7 @@ func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
         guard !overflow else { return "Balance unavailable · \(count)" }
         owed = next
     }
-    return "\(money(owed, currency: "USD"))\u{00A0}unpaid · \(count)"
+    return "\(summaryMoney(owed, currency: "USD"))\u{00A0}unpaid · \(count)"
 }
 
 /// Paper 20E/20F's search field: a card well 48 tall, radius 14, the magnifier and 16pt words.
@@ -1808,9 +1838,8 @@ struct DocumentSearchField: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField(label, text: $text, prompt: .placeholder("Search"))
+            PaperIcon(.documentSearch, size: 18, color: Theme.muted).accessibilityHidden(true)
+            TextField(label, text: $text, prompt: .placeholder("Search or ask"))
                 .font(Theme.font(16)).foregroundStyle(Theme.foreground)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .submitLabel(.search)
@@ -1826,8 +1855,13 @@ struct DocumentSearchField: View {
         .padding(.leading, 14).padding(.trailing, text.isEmpty ? 14 : 2)
         .frame(minHeight: 48)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 2)
     }
+}
+
+extension PaperGlyph {
+    /// Paper 20E/20F's 18pt magnifier: a 5.5 circle and its handle, 1.6 strokes.
+    static let documentSearch = PaperGlyph(box: 18, [.circle(8, 8, 5.5, 1.6), .stroke("M12.2 12.2L15.5 15.5", 1.6)])
 }
 
 /// Paper 20E/20F's document row on a card: the customer and the amount in 16 Semibold, the
@@ -1872,14 +1906,14 @@ struct DocumentCardRow: View {
                     .foregroundStyle(Theme.foreground)
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             VStack(alignment: stacked ? .leading : .trailing, spacing: 0) {
                 if let amount {
-                    Text(amount).font(Theme.monoFont(16, weight: .semibold)).foregroundStyle(amountTint)
+                    Text(amount).font(Theme.font(16, weight: .semibold)).foregroundStyle(amountTint)
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
                 if let amountNote {
@@ -1896,7 +1930,7 @@ struct DocumentCardRow: View {
     private var documentRow: some View {
         let stacked = typeSize.isAccessibilitySize
         let top = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                          : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                          : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         return VStack(alignment: .leading, spacing: 3) {
             top {
                 Text(title).font(Theme.font(16, weight: .semibold))
@@ -1904,7 +1938,7 @@ struct DocumentCardRow: View {
                     .lineLimit(stacked ? nil : 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let amount {
-                    Text(amount).font(Theme.monoFont(16, weight: .semibold)).foregroundStyle(amountTint)
+                    Text(amount).font(Theme.font(16, weight: .semibold)).foregroundStyle(amountTint)
                         .lineLimit(1).minimumScaleFactor(0.7)
                         .fixedSize(horizontal: !stacked, vertical: false)
                 }
@@ -1920,7 +1954,7 @@ struct DocumentCardRow: View {
                             .background(chip.tone.surface, in: Capsule())
                     }
                     if let note {
-                        Text(note).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        Text(note).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
                             .lineLimit(stacked ? nil : 1)
                     }
                 }
@@ -1987,7 +2021,7 @@ struct InvoiceDiscountSheet: View {
                         Text("Amount off").font(Theme.font(13)).foregroundStyle(Theme.muted)
                             .accessibilityHidden(true)
                         TextField("", text: $amount, prompt: .placeholder("$0.00"))
-                            .font(Theme.font(24, weight: .semibold)).monospacedDigit()
+                            .font(Theme.font(24, weight: .semibold))
                             .keyboardType(.decimalPad)
                             .focused($amountFocused)
                             .onChange(of: amount) { _, _ in amountProblem = nil }
@@ -2034,12 +2068,12 @@ struct InvoiceDiscountSheet: View {
         HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("New total").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.success)
-                Text("Was \(money(total, currency: invoice.currency))").font(Theme.font(14)).monospacedDigit()
+                Text("Was \(money(total, currency: invoice.currency))").font(Theme.font(14))
                     .foregroundStyle(Theme.muted)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(money(total - off, currency: invoice.currency))
-                .font(Theme.font(24, weight: .bold)).monospacedDigit().tracking(-0.4)
+                .font(Theme.font(24, weight: .bold)).tracking(-0.4)
                 .foregroundStyle(Theme.foreground)
                 .lineLimit(1).minimumScaleFactor(0.7)
         }
@@ -2168,7 +2202,7 @@ struct EstimateRevisionsView: View {
                     Text("Revisions").font(Theme.font(34, weight: .bold)).tracking(-0.85)
                         .foregroundStyle(Theme.foreground)
                         .accessibilityAddTraits(.isHeader)
-                    Text("\(reference) \u{00B7} \(customerName)").font(Theme.font(15)).monospacedDigit()
+                    Text("\(reference) \u{00B7} \(customerName)").font(Theme.font(15))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -2234,7 +2268,7 @@ struct EstimateRevisionsView: View {
         return HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("Revision \(revision.revisionNumber) \u{00B7} \(money(revision.totalAmount, currency: revision.currency))")
-                    .font(Theme.font(16, weight: .medium)).monospacedDigit().tracking(-0.16)
+                    .font(Theme.font(16, weight: .medium)).tracking(-0.16)
                     .foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                 if !words.isEmpty {
@@ -2321,7 +2355,7 @@ struct EstimateRevisionsView: View {
                 .foregroundStyle(Theme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("\(sign)\(money(abs(delta), currency: currency))").font(Theme.font(16, weight: .medium)).monospacedDigit()
+            Text("\(sign)\(money(abs(delta), currency: currency))").font(Theme.font(16, weight: .medium))
                 .foregroundStyle(delta > 0 ? Theme.success : Theme.foreground)
                 .lineLimit(1).fixedSize()
         }
@@ -2419,7 +2453,7 @@ struct EstimateRevisionDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(reference) \u{00B7} \(customerName)").font(Theme.font(14, weight: .semibold)).monospacedDigit()
+                    Text("\(reference) \u{00B7} \(customerName)").font(Theme.font(14, weight: .semibold))
                         .foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     Text("Revision \(revision.revisionNumber)").font(Theme.heading()).tracking(-0.56)
@@ -2520,11 +2554,11 @@ struct EstimateRevisionDetailView: View {
                     Text("Rev \(revision.revisionNumber) total").font(Theme.font(16, weight: .bold))
                         .foregroundStyle(Theme.foreground)
                     Text("Current (Rev \(current.revisionNumber)) is \(money(current.totalAmount, currency: current.currency))")
-                        .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.monoFont(16, weight: .bold))
+                Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.font(16, weight: .bold))
                     .foregroundStyle(Theme.foreground)
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
@@ -2573,12 +2607,12 @@ struct EstimateRevisionDetailView: View {
                 Text(change.name).font(Theme.font(15)).strikethrough(struck)
                     .foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(note).font(Theme.font(13, weight: change.kind == .same ? .regular : .medium)).monospacedDigit()
+                Text(note).font(Theme.font(13, weight: change.kind == .same ? .regular : .medium))
                     .foregroundStyle(tone)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(money(change.amount, currency: revision.currency)).font(Theme.monoFont(15)).strikethrough(struck)
+            Text(money(change.amount, currency: revision.currency)).font(Theme.font(15)).strikethrough(struck)
                 .foregroundStyle(quiet ? Theme.muted : Theme.foreground)
                 .lineLimit(1).fixedSize()
         }

@@ -392,65 +392,99 @@ struct InvoicePaymentsSection: View {
     @State private var selectedPayment: FieldPaymentRecord?
     @State private var didOpenRefundPreview = false
 
+    /// Nothing taken, nothing waiting to sync, and nothing loading or failed.
+    private var emptyPayments: Bool {
+        model.loadError == nil && !(model.isLoading && !model.historyComplete)
+            && model.payments.isEmpty && outbox.waitingPayments(invoiceID: invoice.id).isEmpty
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Same header grammar as "Line items" above it (redesign: semibold header and count).
             // Paper 24: a brand plus at the label's trailing edge opens Collect payment, like the bar.
-            SectionHeader(title: "Payments", count: model.payments.isEmpty ? nil : model.payments.count) {
-                if model.canOfferCollection, session.can("invoice.payment.create", feature: "payments") {
-                    Button(action: onCollectPayment) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(Theme.brandText)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
+            // Paper 40C: with nothing taken yet, Payments is one card row ("Payments", where it
+            // stands under it) with Record payment at its trailing edge. Once there are payments,
+            // or something to load or report, the labelled list shows.
+            if emptyPayments {
+                HStack(alignment: .center, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Payments").font(Theme.font(15)).foregroundStyle(Theme.foreground)
+                        Text(invoice.status == "draft" ? "None yet \u{00B7} issue the invoice to take one" : "None yet")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(PressStyle())
-                    .disabled(!model.canRecordPayment)
-                    .padding(.vertical, -6)
-                    .accessibilityLabel("Record payment")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    if model.canOfferCollection, session.can("invoice.payment.create", feature: "payments") {
+                        Button(action: onCollectPayment) {
+                            Text("Record payment").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(!model.canRecordPayment)
+                    }
                 }
-            }
-            .padding(.bottom, 2)
-
-            Well {
-                if let loadError = model.loadError {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ErrorBanner(message: loadError) { await model.load() }
+                .padding(.horizontal, 16).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            } else {
+                SectionHeader(title: "Payments", count: model.payments.isEmpty ? nil : model.payments.count) {
+                    if model.canOfferCollection, session.can("invoice.payment.create", feature: "payments") {
+                        Button(action: onCollectPayment) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(Theme.brandText)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(!model.canRecordPayment)
+                        .padding(.vertical, -6)
+                        .accessibilityLabel("Record payment")
                     }
-                    .padding(15)
-                } else if model.isLoading && !model.historyComplete {
-                    SkeletonRows(count: 2, leading: false, inset: 15)
-                        .padding(.vertical, 8)
-                } else if model.payments.isEmpty && outbox.waitingPayments(invoiceID: invoice.id).isEmpty {
-                    // Empty names the one action (design.thorbis.com States).
-                    Text(invoice.status == "draft" ? "No payments. Issue the invoice to take one."
-                         : invoice.status == "issued" ? "No payments yet"
-                         : "No payments recorded.")
-                        .font(Theme.font(14))
-                        .foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(PaperCardMetrics.inset)
-                } else {
-                    VStack(spacing: 0) {
-                        // OF-08: money taken without signal is a record waiting, never Paid.
-                        ForEach(outbox.waitingPayments(invoiceID: invoice.id), id: \.idempotencyKey) { waiting in
-                            waitingRow(waiting)
+                }
+                .padding(.bottom, 2)
+
+                Well {
+                    if let loadError = model.loadError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ErrorBanner(message: loadError) { await model.load() }
+                        }
+                        .padding(15)
+                    } else if model.isLoading && !model.historyComplete {
+                        SkeletonRows(count: 2, leading: false, inset: 15)
+                            .padding(.vertical, 8)
+                    } else if model.payments.isEmpty && outbox.waitingPayments(invoiceID: invoice.id).isEmpty {
+                        // Empty names the one action (design.thorbis.com States).
+                        Text(invoice.status == "draft" ? "No payments. Issue the invoice to take one."
+                             : invoice.status == "issued" ? "No payments yet"
+                             : "No payments recorded.")
+                            .font(Theme.font(14))
+                            .foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(PaperCardMetrics.inset)
+                    } else {
+                        VStack(spacing: 0) {
+                            // OF-08: money taken without signal is a record waiting, never Paid.
+                            ForEach(outbox.waitingPayments(invoiceID: invoice.id), id: \.idempotencyKey) { waiting in
+                                waitingRow(waiting)
+                                    .padding(.horizontal, PaperCardMetrics.inset)
+                                    .frame(minHeight: 56)
+                            }
+                            ForEach(model.payments) { payment in
+                                Button { selectedPayment = payment } label: {
+                                    paymentRow(payment)
+                                }
+                                .buttonStyle(RowPressStyle())
                                 .padding(.horizontal, PaperCardMetrics.inset)
                                 .frame(minHeight: 56)
-                        }
-                        ForEach(model.payments) { payment in
-                            Button { selectedPayment = payment } label: {
-                                paymentRow(payment)
                             }
-                            .buttonStyle(RowPressStyle())
-                            .padding(.horizontal, PaperCardMetrics.inset)
-                            .frame(minHeight: 56)
                         }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
+
             }
 
             if let modelError = model.paymentError {
