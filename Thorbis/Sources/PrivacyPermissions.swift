@@ -148,23 +148,17 @@ struct PrivacyPermissionsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Settings").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    Text("Privacy and permissions")
-                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Every permission is optional. Thorbis keeps working without them — you only lose the feature described.")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 6)
-                }
-                .padding(.horizontal, 4).padding(.top, 14)
+                AccountPageTitle(eyebrow: "Settings", title: "Privacy and permissions",
+                                 subtitle: "Every permission is optional. Thorbis keeps working without them — you only lose the feature described.")
+                    .padding(.top, 14)
 
-                PaperSection("Device access", count: rows.count) {
+                AccountGroup(title: "Device access", count: rows.isEmpty ? nil : "\(rows.count)") {
                     ForEach(rows) { row in
-                        if row.id != rows.first?.id { WellDivider(leading: 50) }
-                        Button { tapped(row) } label: { rowLabel(row) }
+                        if row.id != rows.first?.id { WellDivider(leading: AccountRow<EmptyView>.dividerInset) }
+                        Button { tapped(row) } label: {
+                            AccountRow(glyph: row.id == "notifications" ? .setBell : nil, symbol: row.symbol,
+                                       title: row.title, subtitle: row.purpose, value: row.state.word)
+                        }
                             .buttonStyle(RowPressStyle())
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("\(row.title), \(row.purpose)")
@@ -178,7 +172,7 @@ struct PrivacyPermissionsView: View {
             .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 44)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.canvas)
+        .background(Theme.background.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task { await read() }
@@ -192,29 +186,6 @@ struct PrivacyPermissionsView: View {
             // Back from the system's Settings: show what the person changed there.
             if phase == .active { Task { await read() } }
         }
-    }
-
-    private func rowLabel(_ row: DevicePermissionRow) -> some View {
-        HStack(spacing: 0) {
-            Image(systemName: row.symbol).font(.system(size: 17)).foregroundStyle(Theme.muted)
-                .frame(width: 34, alignment: .leading).accessibilityHidden(true)
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(row.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    Text(row.purpose).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                Text(row.state.word).font(Theme.font(14)).foregroundStyle(Theme.subtle)
-                    .fixedSize()
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Theme.foreground.opacity(0.4)).accessibilityHidden(true)
-            }
-            .padding(.vertical, 10).padding(.trailing, 16)
-        }
-        .padding(.leading, 16)
-        .frame(minHeight: 64)
-        .contentShape(Rectangle())
     }
 
     private func read() async {

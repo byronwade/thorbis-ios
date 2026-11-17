@@ -33,7 +33,13 @@ enum AppIntroExit: Equatable {
 /// Get started and "Already have an account? Sign in". Marks the intro seen on any exit.
 struct AppIntroView: View {
     let onFinish: (AppIntroExit) -> Void
-    @State private var page = 0
+    @State private var page: Int
+
+    /// `startPage` is for screenshots of the second and third pages.
+    init(startPage: Int = 0, onFinish: @escaping (AppIntroExit) -> Void) {
+        self.onFinish = onFinish
+        _page = State(initialValue: startPage)
+    }
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private static let pageCount = 3

@@ -79,50 +79,31 @@ struct AccountAndDataView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Account and data")
-                    .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-                    .accessibilityAddTraits(.isHeader)
+                AccountPageTitle(title: "Account and data")
+                    .padding(.top, 14)
 
-                group("Your account") {
+                AccountGroup(title: "Your account") {
                     Button { editingProfile = true } label: {
-                    HStack(spacing: 12) {
-                        Text(initials)
-                            .font(Theme.font(13, weight: .semibold)).foregroundStyle(.white)
-                            .frame(width: 40, height: 40).background(Theme.brand, in: Circle())
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text(name).font(Theme.font(16, weight: .semibold))
-                            if let email = session.user?.email {
-                                Text(email).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                                    .lineLimit(1).minimumScaleFactor(0.7).truncationMode(.middle)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-                            .accessibilityHidden(true)
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 64)
-                    .contentShape(Rectangle())
+                        AccountPersonRow(name: name, email: session.user?.name == nil ? nil : session.user?.email)
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityElement(children: .combine)
                     .accessibilityHint("Edit your name")
                     .accessibilityIdentifier("account-edit-profile")
-                    WellDivider(leading: 50)
+                    WellDivider(leading: AccountRow<EmptyView>.dividerInset)
                     Button { changingPassword = true } label: {
-                        row(symbol: "key", title: "Change password", subtitle: nil)
+                        AccountRow(glyph: .acctKey, title: "Change password")
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("account-change-password")
                 }
                 .padding(.top, 20)
 
-                group("Your data") {
+                // Paper 67 also draws Two-step verification and Download my data; the server has
+                // neither yet, so they are left out rather than shown as dead rows.
+                AccountGroup(title: "Your data") {
                     NavigationLink { PrivacyPermissionsView().thorbisBackButton() } label: {
-                        row(symbol: "person.crop.circle", title: "Privacy and permissions", subtitle: "What we collect and why")
+                        AccountRow(glyph: .acctPerson, title: "Privacy and permissions", subtitle: "What we collect and why")
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("account-privacy")
@@ -144,12 +125,12 @@ struct AccountAndDataView: View {
                             .padding(.horizontal, 4).padding(.bottom, 14)
                         Button { confirming = true } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: "trash").font(.system(size: 15)).accessibilityHidden(true)
+                                PaperIcon(.acctTrash, size: 15, color: Theme.destructive)
                                 Text("Delete my account").font(Theme.font(16, weight: .semibold))
                             }
                             .foregroundStyle(Theme.destructive)
                             .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(Theme.destructiveSurface, in: Capsule())
+                            .background(Theme.destructive.opacity(0.14), in: Capsule())
                             .contentShape(Capsule())
                         }
                         .buttonStyle(PressStyle())
@@ -159,9 +140,9 @@ struct AccountAndDataView: View {
                 }
                 .padding(.top, 22)
             }
-            .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 32)
+            .padding(.horizontal, 16).padding(.bottom, 32)
         }
-        .background(Theme.sidebar.ignoresSafeArea())
+        .background(Theme.background.ignoresSafeArea())
         .foregroundStyle(Theme.foreground)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -179,10 +160,6 @@ struct AccountAndDataView: View {
         }
     }
 
-    private var initials: String {
-        name.split(separator: " ").prefix(2).map { String($0.prefix(1)) }.joined().uppercased()
-    }
-
     private func pendingWords(_ request: AccountDeletionStatus.Request) -> String {
         "You asked to delete this account. The request is being processed."
     }
@@ -191,34 +168,6 @@ struct AccountAndDataView: View {
         Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
             .padding(.horizontal, 4).padding(.bottom, 8)
             .accessibilityAddTraits(.isHeader)
-    }
-
-    private func group<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            label(title)
-            VStack(spacing: 0) { content() }
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-    }
-
-    private func row(symbol: String, title: String, subtitle: String?) -> some View {
-        HStack(spacing: 0) {
-            Image(systemName: symbol).font(.system(size: 16)).foregroundStyle(Theme.muted)
-                .frame(width: 34, alignment: .leading).accessibilityHidden(true)
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    if let subtitle { Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted) }
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
-            }
-            .padding(.vertical, 10).padding(.trailing, 16)
-        }
-        .padding(.leading, 16)
-        .frame(minHeight: 64)
-        .contentShape(Rectangle())
     }
 }
 

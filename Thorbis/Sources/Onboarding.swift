@@ -90,8 +90,7 @@ struct SignUpView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Paper 05: the mark, the 34 Bold title and one muted line, 20 from the edge.
                     VStack(alignment: .leading, spacing: 0) {
-                        Image("ThorbisMark").resizable().scaledToFit().frame(width: 44, height: 44)
-                            .accessibilityHidden(true)
+                        AccountBrandTile()
                         Text("Create your account")
                             .font(Theme.font(34, weight: .bold)).tracking(-0.85)
                             .fixedSize(horizontal: false, vertical: true)
@@ -154,6 +153,11 @@ struct SignUpView: View {
                             .accessibilityIdentifier("signup-error")
                     }
 
+                    // Paper 05: the 13 muted terms line, 12 under the password.
+                    Text("By continuing you agree to Thorbis’s Terms and Privacy Policy.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.top, 12)
                     // Paper 05: Create account sits under the fields; only "Log in" stays at the bottom.
                     Button { Task { await create() } } label: {
                         HStack(spacing: 8) {
@@ -1151,7 +1155,7 @@ struct BusinessSetupView: View {
                         Text(session.activeOrganization?.name ?? "Your company")
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
-                    if current && model.unavailable.isEmpty && !steps.isEmpty && (presented || doneCount < steps.count) {
+                    if presented && current && model.unavailable.isEmpty && !steps.isEmpty {
                         HStack(spacing: 4) {
                             ForEach(steps) { step in
                                 Capsule().fill(model.done.contains(step) ? Theme.statusDone : Theme.card).frame(height: 4)
@@ -1170,7 +1174,7 @@ struct BusinessSetupView: View {
                     .padding(.horizontal, -PaperCardMetrics.margin)
                     .padding(.top, 8)
                 }
-                if session.can("organization.settings.edit") && (presented || !current || doneCount < steps.count) {
+                if presented && session.can("organization.settings.edit") {
                     Button { guided = true } label: {
                         RimmedButtonLabel(title: doneCount == 0 ? "Start guided setup" : "Continue guided setup",
                                           symbol: "arrow.right.circle")
@@ -1193,8 +1197,8 @@ struct BusinessSetupView: View {
                         .padding(.horizontal, 4).padding(.top, 16)
                 } else {
                     // Paper 61 / 61N: the places themselves, each row opening its page.
-                    settingsGroups(steps, current: current)
-                        .padding(.top, 20)
+                    settingsGroups(steps, current: current, unfinished: current && doneCount < steps.count)
+                        .padding(.top, 22)
                 }
             }
             .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
@@ -1205,7 +1209,7 @@ struct BusinessSetupView: View {
         .foregroundStyle(Theme.foreground)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Group {
-                if current, let next {
+                if presented, current, let next {
                     Button { open(next) } label: { Text(next.title).inkCommit() }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("setup-next-step")
@@ -1254,118 +1258,120 @@ struct BusinessSetupView: View {
         if step == .team { inviting = true } else { opened = step }
     }
 
-    /// Paper 61N: Company (profile, what customers see), Payments, Operations (price book, hours,
-    /// checklists, notification rules, workflows), Team and access. Every row is a place the app
-    /// has; a setup step that is not finished says "To do" beside its chevron.
+    /// Paper 61 / 61N: Company (profile, what customers see), Operations (price book, hours, tax
+    /// and terms, checklists, notification rules, workflows), Team and access. The company pages
+    /// that used to sit in Settings live here too: customer payments and review requests under
+    /// Operations, importing customers under Company, team goals under Team and access. Every row
+    /// is a place the app has, shown only to people who may open it.
     @ViewBuilder
-    private func settingsGroups(_ steps: [BusinessSetupModel.Step], current: Bool) -> some View {
-        let hasHours = OperatingFacts.offered(profile.profile)
-        let hasNotices = MenuItem.notices.permitted(session)
-        // Each row is gated on what its page reads: company settings, or the jobs closeout policy.
+    private func settingsGroups(_ steps: [BusinessSetupModel.Step], current: Bool, unfinished: Bool) -> some View {
         let editsSettings = session.can("organization.settings.edit")
-        let hasChecklists = session.can("job.view", feature: "jobs")
-        let divider = WellDivider(leading: PaperCardMetrics.inset + 38)
-        VStack(alignment: .leading, spacing: 20) {
-            if steps.contains(.details) || editsSettings {
-                PaperSection("Company") {
-                    if steps.contains(.details) {
-                        Button { open(.details) } label: {
-                            settingsRow(symbol: "building.2", title: "Company profile",
-                                        subtitle: session.activeOrganization?.name,
-                                        todo: needsDoing(.details, current: current))
-                        }
-                        .buttonStyle(RowPressStyle())
-                    }
-                    if editsSettings {
-                        if steps.contains(.details) { divider }
-                        NavigationLink { CustomerDisplaySettingsView().thorbisBackButton() } label: {
-                            settingsRow(symbol: "drop", title: "What customers see", subtitle: nil, todo: false)
-                        }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityIdentifier("settings-customer-display")
-                    }
-                }
-            }
-            if steps.contains(.payments) {
-                PaperSection("Payments") {
-                    Button { open(.payments) } label: {
-                        settingsRow(symbol: "creditcard", title: "Customer payments",
-                                    subtitle: "Card payments from your customers",
-                                    todo: needsDoing(.payments, current: current))
-                    }
-                    .buttonStyle(RowPressStyle())
-                }
-            }
-            if steps.contains(.services) || hasHours || hasChecklists || hasNotices || editsSettings {
-                PaperSection("Operations") {
-                    if steps.contains(.services) {
-                        Button { open(.services) } label: {
-                            settingsRow(symbol: "tag", title: "Price book",
-                                        subtitle: "Services and parts with prices",
-                                        todo: needsDoing(.services, current: current))
-                        }
-                        .buttonStyle(RowPressStyle())
-                    }
-                    if hasHours {
-                        if steps.contains(.services) { divider }
-                        NavigationLink { OperatingDetailsView().thorbisBackButton() } label: {
-                            settingsRow(symbol: "percent", title: "Hours, tax and terms", subtitle: nil, todo: false)
-                        }
-                        .buttonStyle(RowPressStyle())
-                    }
-                    if hasChecklists {
-                        if steps.contains(.services) || hasHours { divider }
-                        NavigationLink { ChecklistTemplatesView().thorbisBackButton() } label: {
-                            settingsRow(symbol: "checklist", title: "Checklists",
-                                        subtitle: "What techs confirm before finishing a job", todo: false)
-                        }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityIdentifier("settings-checklists")
-                    }
-                    if hasNotices {
-                        if steps.contains(.services) || hasHours || hasChecklists { divider }
-                        NavigationLink(value: PaperRoute.notices) {
-                            settingsRow(symbol: "bell", title: "Notification rules",
-                                        subtitle: "Who hears about booked and changed jobs", todo: false)
-                        }
-                        .buttonStyle(RowPressStyle())
-                    }
-                    if editsSettings {
-                        if steps.contains(.services) || hasHours || hasChecklists || hasNotices { divider }
-                        NavigationLink { WorkflowsView().thorbisBackButton() } label: {
-                            settingsRow(symbol: "square.grid.2x2", title: "Workflows", subtitle: nil, todo: false)
-                        }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityIdentifier("settings-workflows")
-                    }
-                }
-            }
-            if steps.contains(.team) {
-                PaperSection("Team and access") {
-                    NavigationLink(value: PaperRoute.team) {
-                        settingsRow(symbol: "person.2", title: "Team and permissions", subtitle: nil,
-                                    todo: needsDoing(.team, current: current))
+        var company: [BusinessPlace] {
+            var rows: [BusinessPlace] = []
+            if steps.contains(.details) { rows.append(.profile) }
+            if editsSettings { rows.append(.customerDisplay) }
+            if session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm") { rows.append(.importCustomers) }
+            return rows
+        }
+        var operations: [BusinessPlace] {
+            var rows: [BusinessPlace] = []
+            if steps.contains(.services) { rows.append(.priceBook) }
+            if OperatingFacts.offered(profile.profile) { rows.append(.hours) }
+            if steps.contains(.payments) { rows.append(.payments) }
+            if session.can("job.view", feature: "jobs") { rows.append(.checklists) }
+            if MenuItem.notices.permitted(session) { rows.append(.notices) }
+            if editsSettings { rows.append(.reviews); rows.append(.workflows) }
+            return rows
+        }
+        var team: [BusinessPlace] {
+            var rows: [BusinessPlace] = []
+            if steps.contains(.team) { rows.append(.team) }
+            if session.can("organization.performance.view") { rows.append(.goals) }
+            return rows
+        }
+        VStack(alignment: .leading, spacing: 22) {
+            placeGroup("Company", company)
+            placeGroup("Operations", operations)
+            placeGroup("Team and access", team)
+            // Paper has no setup strip here; while first-run setup is unfinished it stays one row away.
+            if unfinished && editsSettings {
+                AccountGroup(title: "Setup") {
+                    Button { guided = true } label: {
+                        AccountRow(glyph: .bizChecklist, glyphSize: 22, title: "Finish setting up",
+                                   subtitle: "Pick up the guided setup where you left it", end: .chevronLarge)
                     }
                     .buttonStyle(RowPressStyle())
+                    .accessibilityIdentifier("setup-guided")
                 }
             }
         }
     }
 
-    /// A setup step the server says is not finished. Unknown is never shown as "To do".
-    private func needsDoing(_ step: BusinessSetupModel.Step, current: Bool) -> Bool {
-        current && !model.done.contains(step) && !model.unavailable.contains(step)
+    /// The places Business settings opens.
+    private enum BusinessPlace: Hashable {
+        case profile, customerDisplay, importCustomers, priceBook, hours, payments, checklists, notices, reviews, workflows, team, goals
     }
 
-    /// One Business settings row (Paper 61): a muted glyph, the place in 16 Medium, one muted line,
-    /// and a chevron at the trailing edge.
-    private func settingsRow(symbol: String, title: String, subtitle: String?, todo: Bool) -> some View {
-        PaperListRow(leading: .icon(symbol), title: title, subtitle: subtitle) {
-            HStack(spacing: 8) {
-                if todo { StatusWord(text: String(localized: "To do")) }
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
+    @ViewBuilder
+    private func placeGroup(_ title: String, _ places: [BusinessPlace]) -> some View {
+        if !places.isEmpty {
+            AccountGroup(title: title) {
+                ForEach(Array(places.enumerated()), id: \.element) { index, place in
+                    if index > 0 { WellDivider(leading: AccountRow<EmptyView>.dividerInset) }
+                    placeRow(place)
+                }
             }
+        }
+    }
+
+    private func placeLabel(_ glyph: PaperGlyph, _ title: String, _ subtitle: String? = nil) -> some View {
+        AccountRow(glyph: glyph, glyphSize: 22, title: title, subtitle: subtitle, end: .chevronLarge)
+    }
+
+    @ViewBuilder
+    private func placeRow(_ place: BusinessPlace) -> some View {
+        switch place {
+        case .profile:
+            Button { open(.details) } label: { placeLabel(.bizCompany, "Company profile", session.activeOrganization?.name) }
+                .buttonStyle(RowPressStyle())
+        case .customerDisplay:
+            NavigationLink { CustomerDisplaySettingsView().thorbisBackButton() } label: { placeLabel(.bizDrop, "What customers see") }
+                .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("settings-customer-display")
+        case .importCustomers:
+            NavigationLink(value: PaperRoute.importCustomers) { placeLabel(.bizImport, "Import customers") }
+                .buttonStyle(RowPressStyle())
+        case .priceBook:
+            Button { open(.services) } label: { placeLabel(.bizTag, "Price book", "Services and parts with prices") }
+                .buttonStyle(RowPressStyle())
+        case .hours:
+            NavigationLink { OperatingDetailsView().thorbisBackButton() } label: { placeLabel(.bizPercent, "Hours, tax and terms") }
+                .buttonStyle(RowPressStyle())
+        case .payments:
+            Button { open(.payments) } label: { placeLabel(.bizCard, "Customer payments", "Card payments from your customers") }
+                .buttonStyle(RowPressStyle())
+        case .checklists:
+            NavigationLink { ChecklistTemplatesView().thorbisBackButton() } label: {
+                placeLabel(.bizChecklist, "Checklists", "What techs confirm before finishing a job")
+            }
+            .buttonStyle(RowPressStyle())
+            .accessibilityIdentifier("settings-checklists")
+        case .notices:
+            NavigationLink(value: PaperRoute.notices) { placeLabel(.bizBell, "Notification rules", "Who hears about booked and changed jobs") }
+                .buttonStyle(RowPressStyle())
+        case .reviews:
+            NavigationLink { ReviewRequestsView().thorbisBackButton() } label: { placeLabel(.bizStar, "Review requests") }
+                .buttonStyle(RowPressStyle())
+        case .workflows:
+            NavigationLink { WorkflowsView().thorbisBackButton() } label: { placeLabel(.bizWorkflows, "Workflows") }
+                .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("settings-workflows")
+        case .team:
+            NavigationLink(value: PaperRoute.team) { placeLabel(.bizPeople, "Team and permissions") }
+                .buttonStyle(RowPressStyle())
+        case .goals:
+            NavigationLink(value: PaperRoute.teamGoals) { placeLabel(.bizTarget, "Team goals") }
+                .buttonStyle(RowPressStyle())
         }
     }
 
