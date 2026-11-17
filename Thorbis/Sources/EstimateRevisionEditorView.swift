@@ -115,6 +115,7 @@ struct EstimateRevisionEditorView: View {
             }
             .environment(\.builderDocumentLabel, "EST-\(estimate.id.suffix(4).uppercased())")
             .background(Theme.canvas)
+            .paperPageGround()
             .foregroundStyle(Theme.foreground)
             // Paper 35: the screen's title is the 34 Bold heading in the content.
             .navigationTitle("")

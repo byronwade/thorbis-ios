@@ -1337,9 +1337,9 @@ struct InvoicePaymentCollectionSheet: View {
             // title: the check and the amount lead.
             .navigationBarTitleDisplayMode(paid == nil ? .large : .inline)
             .toolbar {
-                // v2 sheet grammar: the close circle at top right.
-                ThorbisToolbarItem(placement: .topBarTrailing) {
-                    PaperCircleButton(symbol: "xmark", label: "Close", size: 44, fill: Theme.card) { dismiss() }
+                // Paper 39: the 44 back circle on the card tone at top left closes the sheet.
+                ThorbisToolbarItem(placement: .topBarLeading) {
+                    PaperCircleButton(symbol: "chevron.left", label: "Close", size: 44, fill: Theme.card) { dismiss() }
                 }
             }
             .thorbisDestination(isPresented: $showPayLinkShare) {
