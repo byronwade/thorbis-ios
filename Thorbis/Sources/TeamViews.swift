@@ -101,6 +101,7 @@ extension APIClient {
 struct TeamView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var store: Store
     @Environment(\.openURL) private var openURL
     @State private var members: [RoleMember] = []
     @State private var loading = true
@@ -124,18 +125,48 @@ struct TeamView: View {
         session.can("organization.permissions.manage") && session.can("organization.members.manage")
     }
 
-    private var roles: [String] { ["All"] + Array(Set(members.map(\.roleLabel))).sorted() }
+    /// Paper 62: All, then Owner, Office, Technician; any other role follows by name.
+    private var roles: [String] {
+        let rank = ["Owner": 0, "Office": 1, "Technician": 2]
+        let names = Set(members.map(\.roleLabel)).sorted { (rank[$0] ?? 9, $0) < (rank[$1] ?? 9, $1) }
+        return ["All"] + names
+    }
+    /// Paper 55: "Tue, Jul 21 · 5 people". Who is clocked in is not something the app can read
+    /// for the whole team, so that part of Paper's line is left out.
     private var teamSubtitle: String {
         if members.isEmpty { return loading ? "Loading your team…" : "People and what they can do" }
+        let date = Date.now.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
         let pending = canInvite && !invitations.isEmpty ? " · \(invitations.count) invited" : ""
-        return "\(members.count) \(members.count == 1 ? "person" : "people")\(pending)"
+        return "\(date) · \(members.count) \(members.count == 1 ? "person" : "people")\(pending)"
     }
+    /// Paper 62 lists the owner first, then the office, then the field; names within a role.
     private var visible: [RoleMember] {
-        members.filter { member in
+        let rank = ["Owner": 0, "Office": 1, "Technician": 2]
+        return members.filter { member in
             (filter == "All" || member.roleLabel == filter) &&
-            (search.isEmpty || member.member.displayName.localizedCaseInsensitiveContains(search) || member.member.email.localizedCaseInsensitiveContains(search))
+            (search.isEmpty || member.member.displayName.localizedCaseInsensitiveContains(search)
+                || member.member.email.localizedCaseInsensitiveContains(search)
+                || member.roleLabel.localizedCaseInsensitiveContains(search))
         }
-        .sorted { $0.member.displayName.localizedCaseInsensitiveCompare($1.member.displayName) == .orderedAscending }
+        .sorted { left, right in
+            let l = rank[left.roleLabel] ?? 9, r = rank[right.roleLabel] ?? 9
+            if canManage, l != r { return l < r }
+            return left.member.displayName.localizedCaseInsensitiveCompare(right.member.displayName) == .orderedAscending
+        }
+    }
+
+    /// Paper 55's word at the end of a row, for someone on a job right now: "On site", "Driving".
+    /// Anyone else gets no word: the app cannot know they are "In office".
+    private func jobWord(_ member: RoleMember) -> StatusWord? {
+        let priority = ["in_progress": 0, "arrived": 1, "paused": 2, "en_route": 3]
+        guard let job = store.jobs.filter({ $0.assignedToUserId == member.member.userId && priority[$0.status] != nil })
+            .min(by: { (priority[$0.status] ?? 9) < (priority[$1.status] ?? 9) }) else { return nil }
+        switch job.status {
+        case "en_route": return StatusWord(text: "Driving", tint: StatusWord.jobTint("en_route"))
+        case "paused": return StatusWord(text: "Paused", tint: StatusWord.jobTint("paused"))
+        case "arrived": return StatusWord(text: "On site", tint: StatusWord.jobTint("in_progress"))
+        default: return StatusWord(text: "Working", tint: StatusWord.jobTint("in_progress"))
+        }
     }
 
     var body: some View {
@@ -157,9 +188,12 @@ struct TeamView: View {
                     }
                 }
                 .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 14)
-                // Paper 62: the role filter is a segment track 16 from the edges; finding someone is
-                // the bar's Search below.
-                if roles.count > 2 { PaperTabs(options: roles, selection: $filter) }
+                // Paper 55 / 62: the search field under the title; owners then get the role
+                // segments (62). Paper 55's Roster / Payroll segments are not drawn: no payroll.
+                if !members.isEmpty {
+                    DocumentSearchField(text: $search, label: "Search team members")
+                    if canManage && roles.count > 2 { PaperTabs(options: roles, selection: $filter).padding(.top, 12) }
+                }
                 if let error { ErrorBanner(message: error) { await load() }.padding(.top, 12) }
                 if loading && members.isEmpty { ListRoomSkeleton(count: 6, threeLines: false) }
                 if visible.isEmpty && !members.isEmpty {
@@ -168,7 +202,7 @@ struct TeamView: View {
                 }
                 // Paper 62: the members on one card, an avatar column, inset hairlines between rows.
                 if !visible.isEmpty {
-                    PaperSection("Members", count: visible.count) {
+                    PaperSection(canManage ? "Members" : "Full team", count: visible.count) {
                         ForEach(visible) { member in
                             if member.id != visible.first?.id { WellDivider(leading: teamRowTextInset) }
                             memberRow(member)
@@ -185,46 +219,6 @@ struct TeamView: View {
                     }
                     .paperCardMargin().padding(.top, 22)
                 }
-                // Paper 61D: each role with what it is for and how many people have it.
-                if canManage {
-                    PaperSection("Roles", count: customRoles.count) {
-                        ForEach(customRoles) { role in
-                            Button { editingRoleID = role.id } label: {
-                                TeamRoomRow(title: role.revision.name,
-                                            detail: role.revision.description?.isEmpty == false ? role.revision.description : nil,
-                                            trailingInset: PaperCardMetrics.inset) {
-                                    HStack(spacing: 10) {
-                                        Text("\(roleCount(role))").font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
-                                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                                            .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                                    }
-                                }
-                            }
-                            .buttonStyle(RowPressStyle())
-                            .accessibilityElement(children: .combine)
-                            .accessibilityHint("Edit what this role can do")
-                            WellDivider()
-                        }
-                        Button { newRoleName = ""; naming = true } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "plus").font(.system(size: 15, weight: .semibold)).accessibilityHidden(true)
-                                Text("New role").font(Theme.font(16, weight: .medium))
-                                Spacer(minLength: 0)
-                            }
-                            .foregroundStyle(Theme.brandText)
-                            .padding(.horizontal, PaperCardMetrics.inset)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(RowPressStyle())
-                        .accessibilityLabel("New role")
-                    }
-                    .paperCardMargin().padding(.top, 22)
-                    Text("Tap a role to choose exactly what it can see and change. The number is how many people have it.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, Theme.gutter).padding(.top, 12)
-                }
                 // Only when there is truly no one; a search with no match has its own state above.
                 if !loading && members.isEmpty && error == nil {
                     PaperEmptyState(symbol: "person.2", title: "No one on the team",
@@ -232,22 +226,34 @@ struct TeamView: View {
                                     actionTitle: canInvite ? "Invite someone" : nil,
                                     action: canInvite ? { inviting = true } as () -> Void : nil)
                 }
-                Text(canManage ? "Tap a person to change their role or what they can do." : "Ask an owner to change roles.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, Theme.gutter).padding(.top, 12)
             }
             .padding(.bottom, 40)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
-        // Like Invoices and Estimates: the system search field, at the bottom of the screen.
-        .searchable(text: $search, prompt: "Search team members")
+        // Paper 62: the invite circle, then ••• for the roles themselves (each role's editor and
+        // New role), which used to sit on a card under the members.
         .toolbar {
             if canInvite {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
-                    PaperCircleButton(symbol: "person.badge.plus", label: "Invite to team", size: 44, fill: Theme.card) { inviting = true }
+                    if canManage {
+                        // Paper 62: the person-plus circle on the card tone.
+                        PaperCircleButton(symbol: "person.badge.plus", label: "Invite to team", size: 44, fill: Theme.card) { inviting = true }
+                    } else {
+                        // Paper 55: the blue + circle.
+                        Button { inviting = true } label: { CreamCircleLabel(symbol: "plus", ink: true, glyph: .plus) }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel("Invite to team")
+                    }
+                }
+            }
+            if canManage {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    ThorbisMenu(items: roleItems, title: "Roles", accessibilityLabel: "Roles") {
+                        CreamCircleLabel(symbol: "ellipsis", glyph: .more)
+                    }
+                    .accessibilityIdentifier("team-roles-menu")
                 }
             }
         }
@@ -276,6 +282,11 @@ struct TeamView: View {
             if PaperPreview.opensSheet("team-invite") { inviting = true }
             #endif
             await load()
+            #if DEBUG
+            // Screenshots of the pushed screens: the first custom role, the first person who is not the owner.
+            if PaperPreview.enabled, PaperPreview.screen == "role-editor" { editingRoleID = customRoles.first?.id }
+            if PaperPreview.enabled, PaperPreview.screen == "member-access" { opening = members.first { !$0.member.isLegalOwner } }
+            #endif
         }
         .sheet(item: $changing) { member in SheetSurface {
             MemberRoleSheet(member: member) { await load() }
@@ -288,7 +299,7 @@ struct TeamView: View {
             MemberAccessView(member: member) { await load() }
         }
         .thorbisDestination(item: $editingRoleID) { id in
-            RoleEditorView(roleID: id) { await load() }
+            RoleEditorView(roleID: id, memberCount: customRoles.first { $0.id == id }.map(roleCount)) { await load() }
         }
         .alert("New role", isPresented: $naming) {
             TextField("Role name", text: $newRoleName, prompt: .placeholder("Role name"))
@@ -320,30 +331,42 @@ struct TeamView: View {
 extension TeamView {
     /// Paper 62: avatar, name over email, the role word at the trailing edge (the owner in brand
     /// blue), and the row's ••• for the rest.
+    /// Paper 55 (everyone else): the role under the name, and where they are when on a job.
+    /// The row is the control, as in Paper: an owner's tap opens the person (role, permissions,
+    /// email, remove); otherwise it opens the person's actions (MA-12: a Thorbis menu).
     @ViewBuilder fileprivate func memberRow(_ member: RoleMember) -> some View {
         let opens = canManage && !member.member.isLegalOwner
         let owner = member.member.isLegalOwner
-        HStack(alignment: .center, spacing: 0) {
-            Button { if opens { opening = member } } label: {
-                TeamRoomRow(title: member.member.displayName, detail: member.member.email,
-                            avatar: TeamRosterAvatar(text: initials(member.member.displayName), style: owner ? .owner : .member)) {
-                    Text(member.roleLabel)
-                        .font(Theme.font(14, weight: owner ? .semibold : .medium))
-                        .foregroundStyle(owner ? Theme.brandText : Theme.subtle)
-                }
+        let row = TeamRoomRow(title: member.member.displayName, detail: canManage ? member.member.email : member.roleLabel,
+                              avatar: TeamRosterAvatar(text: initials(member.member.displayName), style: owner ? .owner : .member),
+                              trailingInset: PaperCardMetrics.inset) {
+            if canManage {
+                Text(member.roleLabel)
+                    .font(Theme.font(14, weight: owner ? .semibold : .medium))
+                    .foregroundStyle(owner ? Theme.brandText : Theme.subtle)
+            } else if let word = jobWord(member) {
+                Text(word.text).font(Theme.font(14, weight: .medium)).foregroundStyle(word.tint ?? Theme.subtle)
             }
-            .buttonStyle(RowPressStyle())
-            .accessibilityElement(children: .combine)
-            .accessibilityHint(opens ? "Change role" : "")
-            // MA-12: the row's actions behind a Thorbis menu, not the stock long-press menu.
-            ThorbisMenu(items: memberActions(member), title: member.member.displayName,
-                        accessibilityLabel: "Actions for \(member.member.displayName)") {
-                // A fixed-size mark inside its 44pt target, so it stays on screen at the largest text.
-                Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.muted)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-            }
-            .padding(.trailing, 4)
         }
+        if opens {
+            Button { opening = member } label: { row }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Change role")
+        } else {
+            ThorbisMenu(items: memberActions(member), title: member.member.displayName,
+                        accessibilityLabel: "\(member.member.displayName), \(member.roleLabel)") { row }
+                .accessibilityHint("Shows actions")
+        }
+    }
+
+    /// Paper 62's •••: each role's editor, then New role.
+    fileprivate var roleItems: [ThorbisMenuItem] {
+        customRoles.map { role in
+            let count = roleCount(role)
+            return ThorbisMenuItem(role.revision.name, icon: "person.badge.key",
+                                   subtitle: "\(count) \(count == 1 ? "person" : "people") · edit what it can do") { editingRoleID = role.id }
+        } + [ThorbisMenuItem("New role", icon: "plus") { newRoleName = ""; naming = true }]
     }
 
     /// Paper 62 Invited: a dashed initial, the email, when it was sent, and "Pending" in the warning
@@ -352,20 +375,15 @@ extension TeamView {
         HStack(alignment: .center, spacing: 0) {
             Button { openingInvite = invitation } label: {
                 TeamRoomRow(title: invitation.email, detail: TeamInviteCopy.sentLine(invitation),
-                            avatar: TeamRosterAvatar(text: String(invitation.email.prefix(1)).uppercased(), style: .invited)) {
+                            avatar: TeamRosterAvatar(text: String(invitation.email.prefix(1)).uppercased(), style: .invited),
+                            trailingInset: PaperCardMetrics.inset) {
                     Text("Pending").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.warning)
                 }
             }
             .buttonStyle(RowPressStyle())
             .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens the invite")
-            ThorbisMenu(items: [
-                ThorbisMenuItem("Cancel invite", role: .destructive) { Task { await cancel(invitation) } }
-            ], accessibilityLabel: "Invite actions") {
-                Image(systemName: "ellipsis").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.muted)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-            }
-            .padding(.trailing, 4)
+            // Paper 62: the row is the control; cancelling is on the invite it opens (62D).
+            .accessibilityHint("Opens the invite, where it can be cancelled")
         }
     }
 

@@ -6,6 +6,8 @@ import SwiftUI
 struct MoneyOverviewView: View {
     /// Inside Money's Overview tab: the screen's header, scroll and refresh belong to Money.
     var embedded = false
+    /// Paper 54's Money shows only who to get paid by; the figures and aging live in the full report.
+    var chasingOnly = false
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @EnvironmentObject private var session: SessionController
@@ -100,7 +102,9 @@ struct MoneyOverviewView: View {
             if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin) }
             if !loaded && error == nil { SkeletonRows(count: 4, leading: false, inset: 0) }
             if loaded {
-                if tablet {
+                if chasingOnly {
+                    chasingList
+                } else if tablet {
                     tabletOverview
                 } else {
                     figures

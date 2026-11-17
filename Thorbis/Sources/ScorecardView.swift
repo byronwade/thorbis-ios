@@ -60,47 +60,30 @@ struct ScorecardView: View {
     @ViewBuilder private func content(_ card: Scorecard) -> some View {
         let me = card.me
         let sources = card.sources
+        // Paper 91A: "Jobs finished" leads, its count in 44 Bold on its own card. Paper's "2 more
+        // than last week" beside it needs last week's card too, which is not read here.
         let hero = VStack(alignment: .leading, spacing: 4) {
-            Text("Sold").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let sold = me.sold {
-                    // Paper 91A: the hero figure in 44 Bold tabular, on one line (it shrinks before it clips).
-                    Text(money(sold, currency: card.currency)).font(Theme.display()).tracking(Theme.displayTracking())
-                        .minimumScaleFactor(0.5).moneyStyle(.hero)
-                } else {
-                    Text("—").font(Theme.display()).moneyStyle(.hero).accessibilityLabel("Not available for your role")
-                }
-                // TG-08: hitting the goal is one quiet check, nothing more.
-                if let fraction = ScorecardGoal.fraction(sold: me.sold, goal: me.goal), fraction >= 1 {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 20)).foregroundStyle(Theme.success)
-                        .accessibilityLabel("Goal hit")
-                }
-                Spacer(minLength: 0)
-                if sources != nil, me.sold != nil {
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
-                }
+            Text("Jobs finished").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+            Text("\(me.jobsDone)").font(Theme.display()).tracking(Theme.displayTracking())
+                .foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.5)
+            // TG-14: a saved card says which dates it covers and when it was saved.
+            if let asOf {
+                Text(cachedLabel(card, savedAt: asOf)).font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
-            // TG-03: with no goal set, the number stands alone; never an invented target.
-            if let goalLine = ScorecardGoal.line(sold: me.sold, goal: me.goal, currency: card.currency),
-               let fraction = ScorecardGoal.fraction(sold: me.sold, goal: me.goal) {
-                Text(goalLine).font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                GoalBar(fraction: fraction).padding(.vertical, 4)
-            }
-            Text(asOf.map { cachedLabel(card, savedAt: $0) } ?? selected.label(now: Date()))
-                .font(Theme.font(13)).foregroundStyle(Theme.muted)
         }
-        // Paper 91A: the hero figure on its own card.
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .panelBackground()
-        .contentShape(Rectangle())
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .accessibilityElement(children: .combine)
-        // TG-19: Sold opens exactly the invoices it counts.
-        if let sources, me.sold != nil {
-            NavigationLink(value: PaperRoute.filteredInvoices(RecordFilter(ids: sources.invoiceIds, title: "Your invoices · \(selected.filterLabel)"))) {
+        // TG-19: the count opens exactly the jobs it counts.
+        if let sources {
+            NavigationLink(value: PaperRoute.filteredJobs(RecordFilter(ids: sources.jobIds, title: "Your jobs done · \(selected.filterLabel)"))) {
                 hero
-            }.buttonStyle(.plain)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityHint("Lists them")
         } else {
             hero
         }
@@ -115,14 +98,20 @@ struct ScorecardView: View {
         let invoicesRoute = sources.map { PaperRoute.filteredInvoices(RecordFilter(ids: $0.invoiceIds, title: "Your invoices · \(period)")) } ?? .invoices
         // Paper 91A: the rest on one card under the period's name, hairlines between rows.
         PaperSection(sectionTitle, count: nil) {
+            // Paper 91A's "Revenue": what was sold, with the goal under it when one is set
+            // (TG-03: never an invented target).
+            if let sold = me.sold {
+                row("Revenue", money(sold, currency: card.currency),
+                    detail: ScorecardGoal.line(sold: me.sold, goal: me.goal, currency: card.currency), route: invoicesRoute)
+            } else {
+                row("Revenue", "—", route: nil)
+            }
+            WellDivider()
             if let collected = me.collected {
                 row("Collected", money(collected, currency: card.currency), route: invoicesRoute)
             } else {
                 row("Collected", "—", route: nil)
             }
-            WellDivider()
-            row("Jobs done", "\(me.jobsDone)",
-                route: sources.map { PaperRoute.filteredJobs(RecordFilter(ids: $0.jobIds, title: "Your jobs done · \(period)")) })
             WellDivider()
             if let average = me.averageTicket, let invoices = me.invoices {
                 row("Average ticket", invoices == 0 ? "—" : money(average, currency: card.currency), route: invoicesRoute)
@@ -153,7 +142,7 @@ struct ScorecardView: View {
                 .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 10).padding(.horizontal, 4)
         }
 
-        Text("Sold counts invoices issued on your jobs. Collected counts payments recorded on them. Work is credited to whoever the job was assigned to.")
+        Text("Revenue counts invoices issued on your jobs. Collected counts payments recorded on them.")
             .font(Theme.font(13)).foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.top, 16).padding(.horizontal, 4)
