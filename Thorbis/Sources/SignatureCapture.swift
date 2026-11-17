@@ -113,11 +113,12 @@ struct SignatureCaptureSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Theme.canvas)
+            .paperPageGround()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) {
-                    Button { dismiss() } label: { CreamCircleLabel(symbol: "xmark") }
+                    Button { dismiss() } label: { PaperCircleLabel(symbol: "xmark", size: 44, fill: Theme.card) }
                         .buttonStyle(PressStyle())
                         .disabled(busy)
                         .accessibilityLabel("Cancel")
@@ -222,7 +223,7 @@ struct SignatureCaptureSheet: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(line.amount).font(Theme.monoFont(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        Text(line.amount).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                             .fixedSize()
                     }
                     .padding(.vertical, 10)
@@ -234,7 +235,7 @@ struct SignatureCaptureSheet: View {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text("Total").font(Theme.font(16, weight: .semibold))
                         Spacer(minLength: 8)
-                        Text(totalText).font(Theme.heading()).monospacedDigit().tracking(-0.56)
+                        Text(totalText).font(Theme.heading()).tracking(-0.56)
                             .lineLimit(1).minimumScaleFactor(0.7)
                     }
                     .foregroundStyle(Theme.foreground)

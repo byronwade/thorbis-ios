@@ -74,6 +74,7 @@ struct InvoiceLineEditorView: View {
         }
         .environment(\.builderDocumentLabel, "INV-\(invoice.id.suffix(4).uppercased())")
         .background(Theme.canvas)
+        .paperPageGround()
         .foregroundStyle(Theme.foreground)
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)

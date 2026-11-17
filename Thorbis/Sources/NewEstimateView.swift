@@ -97,9 +97,14 @@ struct NewEstimateView: View {
                 // The shared sheet header (Add equipment, New customer): the title and its close, with
                 // the same discard check the toolbar Cancel had.
                 // Paper 35: the screen's title is the 34 Bold heading in the builder; the header keeps Cancel.
-                ThorbisSheetHeader(title: nil,
-                                   closeLabel: created == nil ? "Cancel" : "Close",
-                                   onClose: busy ? nil : { if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true } })
+                HStack {
+                    PaperCircleButton(symbol: "chevron.left", label: created == nil ? "Cancel" : "Close", size: 44, fill: Theme.card) {
+                        if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true }
+                    }
+                    .disabled(busy)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14)
                 ScrollViewReader { proxy in
                     ScrollView { builder }
                     .scrollDismissesKeyboard(.interactively)
@@ -123,6 +128,7 @@ struct NewEstimateView: View {
             .trackKeyboard($keyboardUp)
             .environment(\.builderDocumentLabel, created.map { "EST-\($0.id.suffix(4).uppercased())" } ?? "New estimate")
             .background(Theme.canvas)
+            .paperPageGround()
             .foregroundStyle(Theme.foreground)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -333,7 +339,7 @@ struct NewEstimateView: View {
             }
             .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 22)
         }
-        .padding(.top, 4).padding(.bottom, 28)
+        .padding(.top, 14).padding(.bottom, 28)
     }
 
     /// The customer as Paper 35's pill: their initials on the brand surface and the name; before

@@ -115,6 +115,7 @@ struct AddMaterialsSheet: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(Theme.canvas)
+        .paperPageGround()
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .task(id: MaterialsLoadScope(context: context, apiGeneration: api.requestGeneration)) {

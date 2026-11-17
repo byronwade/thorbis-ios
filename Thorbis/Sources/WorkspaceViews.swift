@@ -467,10 +467,18 @@ struct WorkspacePriceBookView: View {
                                     if collapsedGroups.contains(groupName) { collapsedGroups.remove(groupName) }
                                     else { collapsedGroups.insert(groupName) }
                                 } label: {
-                                    ListGroupLabel(title: groupName, count: grouped.count, first: groupName == firstVisibleGroup) {
-                                        Image(systemName: collapsedGroups.contains(groupName) ? "chevron.right" : "chevron.down")
-                                            .font(.system(size: 10, weight: .medium))
+                                    // Paper 34: the fold chevron leads, the label in 13 Semibold, the count
+                                    // trails; 22 above (16 under the segments) and 8 above the card.
+                                    HStack(alignment: .center, spacing: 6) {
+                                        PaperIcon(.chevronDown, size: 12, color: Theme.muted)
+                                            .rotationEffect(.degrees(collapsedGroups.contains(groupName) ? -90 : 0))
+                                        Text(groupName).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Text("\(grouped.count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                                     }
+                                    .padding(.horizontal, PaperCardMetrics.margin + 4)
+                                    .padding(.top, groupName == firstVisibleGroup ? 16 : 22).padding(.bottom, 8)
+                                    .frame(minHeight: 44, alignment: .bottom)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
@@ -541,8 +549,9 @@ struct WorkspacePriceBookView: View {
                 .onChange(of: localScope) { _, _ in localDetail = nil }
                 .safeAreaInset(edge: .bottom) {
                     if canEdit {
+                        // Paper 34: the brand pill, 50 tall, 16 from the edges.
                         Button { creating = true } label: {
-                            Text("Add price book item").inkCommit()
+                            PaperPillLabel(title: "Add price book item", height: 50)
                         }
                         .buttonStyle(PressStyle()).padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 10)
                         .background(Theme.canvas)
@@ -603,9 +612,8 @@ struct WorkspacePriceBookView: View {
     /// items already on the phone, so it says what it searches.
     private var searchBar: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("Search price book", text: $search, prompt: .placeholder("Search price book"))
+            PaperIcon(.search, size: 18, color: Theme.muted).accessibilityHidden(true)
+            TextField("Search price book", text: $search, prompt: .placeholder("Search or ask"))
                 .font(Theme.font(16)).foregroundStyle(Theme.foreground)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .submitLabel(.search)
@@ -618,8 +626,20 @@ struct WorkspacePriceBookView: View {
                 }
                 .accessibilityLabel("Clear search")
             }
+            // Paper 34: the 40pt filter circle at the field's trailing edge chooses the kind, the
+            // same choice the segments under it make.
+            if categories.count > 1 {
+                ThorbisMenu(items: categories.map { name in
+                    ThorbisMenuItem(name == "All" ? "All items" : name, isSelected: category == name) {
+                        category = name
+                        if name == "All" { collapsedGroups.removeAll() } else { collapsedGroups.remove(name) }
+                    }
+                }, title: "Show", accessibilityLabel: "Filter by kind") {
+                    PaperFilterCircle(active: category != "All")
+                }
+            }
         }
-        .padding(.leading, 12).padding(.trailing, 6)
+        .padding(.leading, 12).padding(.trailing, 4)
         .frame(minHeight: 46)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(.horizontal, PaperCardMetrics.margin)
@@ -974,6 +994,7 @@ struct PriceBookItemEditor: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .background(Theme.canvas)
+        .paperPageGround()
         .onChange(of: content.description) { _, _ in nameProblem = nil }
         .onChange(of: priceText) { _, _ in priceProblem = nil }
         .onChange(of: content.unit) { _, _ in unitProblem = nil }

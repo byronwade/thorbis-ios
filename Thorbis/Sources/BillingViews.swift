@@ -427,6 +427,7 @@ struct JobDepositSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .foregroundStyle(Theme.foreground)
             .background(Theme.canvas)
+            .paperPageGround()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
             .safeAreaInset(edge: .bottom) {

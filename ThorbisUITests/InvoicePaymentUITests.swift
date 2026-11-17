@@ -8,8 +8,10 @@ final class InvoicePaymentUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-collection-authorized"]
         app.launch()
         XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.buttons["Get customer signature"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
+        // Paper 40C: asking for a signature lives in the invoice's menu.
+        app.buttons["Customer view, edit or open the PDF"].tap()
+        XCTAssertTrue(app.buttons["Get customer signature"].waitForExistence(timeout: 10))
     }
     func testValidInvoiceDetailOpensItsCollectionSheet() {
         continueAfterFailure = false
