@@ -609,6 +609,8 @@ struct JobFieldSteps: View {
     static let titles = ["Driving", "Arrived", "Working", "Wrap up", "Paid"]
     /// The step the visit is on: 0 Driving, 1 Arrived, 2 Working.
     let current: Int
+    /// Paper F6 "Paid": the last step is behind too, so every bar is green.
+    var allDone = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     /// The step for a job status; nil when the job is not out on its visit.
@@ -624,7 +626,7 @@ struct JobFieldSteps: View {
     private var shown: Int { min(max(current, 0), Self.titles.count - 1) }
 
     private func tint(_ index: Int) -> Color {
-        if index < shown { return Theme.statusDone }
+        if index < shown || allDone { return Theme.statusDone }
         return index == shown ? Theme.brand : Theme.fill
     }
 

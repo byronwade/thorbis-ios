@@ -189,6 +189,9 @@ struct JobDetailView: View {
     @State private var showAtAddress = false
     /// Paper F5: the tech moved on from Working to Wrap up without an estimate to approve first.
     @State private var wrapUpStageOpen = false
+    /// The visit was under way on this screen, so a job paid and completed here stays on Paper F6
+    /// "Paid" instead of dropping back to Job details.
+    @State private var visitSeen = false
 
     /// Retire a mounted sheet on material authority or job changes. A routine
     /// authority revision alone does not discard a technician's entered amount.
@@ -439,6 +442,9 @@ struct JobDetailView: View {
             try? await Task.sleep(for: .seconds(1.5))
             if opensAssign { showAssign = true } else { showPause = true }
             #endif
+        }
+        .task(id: job?.status) {
+            if let job, JobFieldSteps.step(for: job.status) != nil { visitSeen = true }
         }
         .thorbisDestination(isPresented: $showAtAddress) {
             if let job { atAddressScreen(job) }
@@ -869,8 +875,44 @@ struct JobDetailView: View {
     }
 
     /// The visit is under way (driving, arrived or working): the statuses field mode has a step for.
-    private func onVisit(_ job: JobRecord) -> Bool {
-        JobFieldSteps.step(for: shownStatus(job)) != nil
+    private func onVisit(_ job: JobRecord) -> Bool { fieldStep(job) != nil }
+
+    /// Where the job is on field mode's five steps: Driving (also a dispatched job of this
+    /// person's, today, before the drive starts), Arrived, Working, Wrap up, Paid. Nil when the
+    /// job isn't this person's visit to run.
+    private func fieldStep(_ job: JobRecord) -> Int? {
+        let status = shownStatus(job)
+        if let step = JobFieldSteps.step(for: status) {
+            guard step == 2 else { return step }
+            return fieldPaid ? 4 : fieldWrapsUp ? 3 : 2
+        }
+        if status == "completed", visitSeen, fieldPaid { return 4 }
+        return startsVisit(job) ? 0 : nil
+    }
+
+    /// A dispatched job assigned to this person for today, with the drive as its next move: field
+    /// mode opens on its first step, the commit reading "On my way".
+    private func startsVisit(_ job: JobRecord) -> Bool {
+        guard shownStatus(job) == "dispatched", let me = session.user?.id, job.assignedToUserId == me,
+              let scheduled = JobFiltering.date(job.scheduledFor), Calendar.current.isDateInToday(scheduled) else { return false }
+        return nextStep == .transition("en_route")
+    }
+
+    /// Paper F6 "Paid": the job's invoice has been issued and nothing is left owing on it.
+    private var fieldPaid: Bool {
+        guard session.can("invoice.view", feature: "invoicing"), invoicesLoaded, !invoicesFailed,
+              let bill = WrapUpList.billingInvoice(invoices), bill.status != "draft", bill.status != "void",
+              bill.amountPaid > 0, let due = TechJobFlow.due(bill) else { return false }
+        return due == 0
+    }
+
+    /// The job's next stop for this person today: the earliest booked job that isn't this one.
+    private var nextStopJob: Job? {
+        guard let me = session.user?.id else { return nil }
+        return PaperWorkGroups.scheduled(store.jobs)
+            .filter { $0.id != jobId && $0.assignedToUserId == me }
+            .filter { JobFiltering.date($0.scheduledFor).map(Calendar.current.isDateInToday) == true }
+            .min { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
     }
 
     /// Paper F2 to F4: on the visit the job's title lives in the bar. At accessibility sizes a bar
@@ -1174,8 +1216,8 @@ struct JobDetailView: View {
         return VStack(alignment: .leading, spacing: 0) {
             // Paper F2 to F4: out on the visit, the five steps lead the screen (Overview only;
             // Paper 23, 24 and 21B draw Money and Activity without them).
-            if showsSteps, let step = JobFieldSteps.step(for: shownStatus(job)) {
-                JobFieldSteps(current: step == 2 && fieldWrapsUp ? 3 : step)
+            if showsSteps, let step = fieldStep(job) {
+                JobFieldSteps(current: step, allDone: step == 4)
                     .padding(.horizontal, 16 - Theme.gutter)
                     .padding(.bottom, barTitle ? 0 : 16)
             }
@@ -1705,14 +1747,17 @@ struct JobDetailView: View {
             // Paper F2 and F3 (driving, arrived): the bar is the moment's second action over one
             // full-width 60pt commit. Call, Text and Directions are the screen's own rows there
             // ("Call Danielle", "Open in Maps", the job menu), so the circles are left out.
-            let fieldBar = inField(job) && ["en_route", "arrived"].contains(shownStatus(job)) && !typeSize.isAccessibilitySize
+            let fieldBar = inField(job) && ["dispatched", "en_route", "arrived"].contains(shownStatus(job)) && !typeSize.isAccessibilitySize
             // Paper F4 (working): the same bar, no circles. The camera is the Photo tile; Call and
             // Text are in the job menu, Directions on the Address row.
             let workingBar = inField(job) && shownStatus(job) == "in_progress" && !typeSize.isAccessibilitySize
+            let paidBar = inField(job) && fieldStep(job) == 4
             VStack(spacing: 10) {
                 // Paper F2 to F4: the moment's second action sits over the commit.
-                if inField(job) { fieldSecondary(job) }
-                if workingBar {
+                if inField(job), !paidBar { fieldSecondary(job) }
+                if paidBar {
+                    fieldPaidCommit
+                } else if workingBar {
                     if let step {
                         if onSiteWrapsUp { workingCommitButton } else { fieldCommitButton(step) }
                     }
@@ -1748,7 +1793,7 @@ struct JobDetailView: View {
     /// that may edit the job).
     @ViewBuilder private func fieldSecondary(_ job: JobRecord) -> some View {
         let status = shownStatus(job)
-        if status == "en_route" {
+        if status == "en_route" || status == "dispatched" {
             openInMaps
         } else if status == "arrived", session.can("job.edit", feature: "jobs") {
             Button { showCantStart = true } label: { secondaryPill("Can't start \u{2014} tell dispatch") }
@@ -2077,7 +2122,9 @@ struct JobDetailView: View {
     /// details is one tap away in More › Full job details.
     private func fieldModeContent(_ job: JobRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if shownStatus(job) == "in_progress" {
+            if fieldStep(job) == 4 {
+                fieldPaidContent(job)
+            } else if shownStatus(job) == "in_progress" {
                 if fieldWrapsUp { fieldWrapUp(job) } else { workingLead(job) }
             } else {
                 fieldLead(job)
@@ -2230,11 +2277,120 @@ struct JobDetailView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Paper F6 "Paid": the amount on a green check, what closing the job left to do (the invoice,
+    /// a follow-up to book), then this person's next stop today. Paper's card line and "Review
+    /// request" row are left out: the job doesn't hold how it was paid or when a review is asked for.
+    @ViewBuilder private func fieldPaidContent(_ job: JobRecord) -> some View {
+        if let bill = WrapUpList.billingInvoice(invoices) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(spacing: 4) {
+                    PaperIcon(.jobPaidCheck, size: 34, color: Theme.success)
+                        .frame(width: 72, height: 72)
+                        .background(Theme.statusDone.opacity(0.22), in: Circle())
+                    Text("Paid \(money(bill.amountPaid, currency: bill.currency))")
+                        .font(Theme.font(28, weight: .bold)).tracking(-0.56)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 12)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 6)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(shownStatus(job) == "completed" ? "Job closed" : "Paid in full")
+                        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+                    VStack(spacing: 0) {
+                        Button { reviewInvoiceID = bill.id } label: {
+                            HStack(spacing: 12) {
+                                Text("Invoice \(jobInvoiceReference(bill.id))").font(Theme.font(16, weight: .medium))
+                                    .foregroundStyle(Theme.foreground)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("Paid").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.success)
+                            }
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .frame(minHeight: 60)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Opens the invoice")
+                        .accessibilityIdentifier("job-paid-invoice")
+                        if let book = paidBookNextVisit {
+                            Button(action: book) {
+                                HStack(spacing: 12) {
+                                    Text("Follow-up").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text("Book").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                        .padding(.horizontal, 20).frame(minHeight: 48)
+                                        .background(Theme.brandTint, in: Capsule())
+                                }
+                                .padding(.trailing, 12).padding(.vertical, 8)
+                                .frame(minHeight: 64)
+                                .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+                                .padding(.leading, 16)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityLabel("Book a follow-up")
+                            .accessibilityIdentifier("job-paid-follow-up")
+                        }
+                    }
+                    .panelBackground(cornerRadius: Theme.cardRadius)
+                }
+                if let next = nextStopJob {
+                    NavigationLink(value: next) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(["Next stop", JobFiltering.date(next.scheduledFor)?.tradeTime].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                                .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                            Text(next.title).font(Theme.font(22, weight: .bold)).tracking(-0.44).foregroundStyle(Theme.foreground)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let customerID = next.customerId, store.customerName(customerID) != "Customer" {
+                                Text(store.customerName(customerID)).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .panelBackground(cornerRadius: Theme.cardRadius)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityHint("Opens your next stop")
+                    .accessibilityIdentifier("job-paid-next-stop")
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    /// Paper F6's commit. It opens the next stop, where "On my way" starts the drive (Paper's "On
+    /// my way to Larch Ave" would start it from here, and the job list has no street to name).
+    /// With no stop left today it closes field mode onto Job details.
+    @ViewBuilder private var fieldPaidCommit: some View {
+        if let next = nextStopJob {
+            NavigationLink(value: next) {
+                HStack(spacing: 10) {
+                    PaperIcon(.navigate, size: 18, color: .white)
+                    Text("Go to next stop").font(Theme.font(18, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                }
+                .inkCommit(height: 60)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityIdentifier("job-paid-next")
+        } else {
+            Button { withMotion(.snappy) { fieldModeOpen = false } } label: {
+                Text("Done").font(Theme.font(18, weight: .semibold)).inkCommit(height: 60)
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityHint("Closes field mode and shows the job's details")
+            .accessibilityIdentifier("job-paid-done")
+        }
+    }
+
     /// Paper 21 "Field mode · Working": where the visit is on field mode's five steps, and the
     /// way back into it.
     @ViewBuilder private func fieldModeCard(_ job: JobRecord) -> some View {
-        if onVisit(job), let step = JobFieldSteps.step(for: shownStatus(job)) {
-            let shown = shownStatus(job) == "in_progress" && fieldWrapsUp ? 3 : step
+        if let shown = fieldStep(job) {
             Button { withMotion(.snappy) { fieldModeOpen = true; selectedTab = "Overview" } } label: {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -2243,13 +2399,13 @@ struct JobDetailView: View {
                             .fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 4) {
                             ForEach(0..<JobFieldSteps.titles.count, id: \.self) { index in
-                                Capsule().fill(index < shown ? Theme.statusDone : index == shown ? Theme.brand : Theme.foreground.opacity(0.12))
+                                Capsule().fill(index < shown || shown == 4 ? Theme.statusDone : index == shown ? Theme.brand : Theme.foreground.opacity(0.12))
                                     .frame(height: 4)
                             }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Resume")
+                    Text(shownStatus(job) == "dispatched" ? "Open" : "Resume")
                         .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
                         .padding(.horizontal, 16)
                         .frame(minHeight: 44)
@@ -2391,7 +2547,8 @@ struct JobDetailView: View {
     /// "You're here" and the before photos. Through the whole visit: what to know before going in.
     @ViewBuilder private func fieldLead(_ job: JobRecord) -> some View {
         let status = shownStatus(job)
-        if status == "en_route" {
+        // A dispatched job about to be driven to shows the same cards as the drive (Paper F2).
+        if status == "en_route" || status == "dispatched" {
             mapStrip(job, driving: true)
             arrivalCard(job)
             drivingCallCard(job)
