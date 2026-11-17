@@ -38,7 +38,7 @@ final class CommsInboxScreenshotUITests: XCTestCase {
         for section in ["calls", "voicemail", "texts", "email", "notices"] {
             capture("\(prefix)-\(section)", base + ["--paper-preview-inbox-section", section], wait: "inbox-section-menu")
         }
-        capture("\(prefix)-drafts", base + ["--paper-preview-inbox-folder", "drafts"], wait: "inbox-folder-menu")
+        capture("\(prefix)-drafts", base + ["--paper-preview-inbox-folder", "drafts"], wait: "inbox-section-menu")
         capture("\(prefix)-call-thread", base + ["--paper-preview-inbox-thread", "calls"], text: "Incoming call")
         capture("\(prefix)-text-thread", base + ["--paper-preview-inbox-thread", "text"], wait: "inbox-text-field")
         capture("\(prefix)-email-thread", base + ["--paper-preview-inbox-thread", "email"], wait: "inbox-email-reply")
