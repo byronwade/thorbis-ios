@@ -63,10 +63,7 @@ struct LoginView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 04: the 44pt mark, then the 34 Bold title 20 under it, 20 from the edge.
                 VStack(alignment: .leading, spacing: 0) {
-                    Image("ThorbisMark")
-                        .resizable().scaledToFit()
-                        .frame(width: 44, height: 44)
-                        .accessibilityLabel("Thorbis")
+                    AccountBrandTile()
 
                     Text("Welcome back")
                         .font(Theme.font(34, weight: .bold))
@@ -272,22 +269,27 @@ private extension View {
 }
 
 @MainActor
-private struct PasswordResetRequestView: View {
+struct PasswordResetRequestView: View {
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @State private var email: String
     @State private var busy = false
     /// A refusal or failure, said under the field.
     @State private var outcome: String?
     /// The request went through: the screen becomes "Check your email" (Paper 07).
-    @State private var sent = false
+    @State private var sent: Bool
     /// A second link went out from the sent state, so Resend visibly did something.
     @State private var resent = false
     /// Said under the email when Send link is pressed without one; clears as they type.
     @State private var emailProblem: String?
     @FocusState private var emailFocused: Bool
 
-    init(initialEmail: String) { _email = State(initialValue: initialEmail) }
+    /// `sent` starts true only for screenshot fixtures of Paper 07.
+    init(initialEmail: String, sent: Bool = false) {
+        _email = State(initialValue: initialEmail)
+        _sent = State(initialValue: sent)
+    }
 
     private var trimmedEmail: String { email.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -394,6 +396,11 @@ private struct PasswordResetRequestView: View {
             Text("Sent again.").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .padding(.horizontal, 4).padding(.top, 10)
         }
+        // Paper 07: the one blue pill opens the phone's mail app, 24 under the address.
+        Button { openURL(URL(string: "message://")!) } label: { Text("Open mail app").inkCommit() }
+            .buttonStyle(PressStyle())
+            .padding(.top, 24)
+            .accessibilityIdentifier("reset-open-mail")
         Button { Task { await requestReset() } } label: {
             HStack(spacing: 5) {
                 Text("Didn’t get it?").font(Theme.font(14)).foregroundStyle(Theme.muted)
@@ -408,7 +415,7 @@ private struct PasswordResetRequestView: View {
         }
         .buttonStyle(.plain)
         .disabled(busy)
-        .padding(.top, 18)
+        .padding(.top, 8)
     }
 
     private var footer: some View {

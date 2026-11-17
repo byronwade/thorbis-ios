@@ -59,7 +59,9 @@ enum PaperPreview {
         guard let index = args.firstIndex(of: "--paper-preview-screen"), args.indices.contains(index + 1),
               ["state-login", "state-login-error", "state-session-expired", "state-restore-failed", "state-opening",
                "state-signing-out", "state-workspaces", "state-empty", "state-errors", "state-loading", "state-customer",
-               "state-sheets", "state-toasts"].contains(args[index + 1]) else { return nil }
+               "state-sheets", "state-toasts",
+               "acct-intro", "acct-intro-2", "acct-intro-3", "acct-signup", "acct-forgot", "acct-forgot-sent", "acct-profile",
+               "acct-account", "acct-privacy", "acct-notifications", "acct-menu", "acct-help"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
     /// `--paper-preview-sheet team-invite | price-book-new | saved-work`: opens that sheet over its

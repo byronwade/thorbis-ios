@@ -22,6 +22,8 @@ struct StatesPreview: View {
             case "state-toasts": NavigationStack { ToastStatesGallery() }
             case "state-workspaces":
                 if forced { WorkspaceGateView() } else { SessionLoadingView(message: "Opening your workspace…") }
+            case let name where name.hasPrefix("acct-"):
+                if forced { AccountPreview(screen: name) } else { SessionLoadingView(message: "Opening your workspace…") }
             default:
                 if forced { LoginView(attempted: screen == "state-login-error") } else { SessionLoadingView(message: "Opening your workspace…") }
             }

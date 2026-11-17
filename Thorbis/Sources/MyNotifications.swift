@@ -53,18 +53,17 @@ struct MyNotificationsView: View {
 
                 card {
                     Button { Task { await permissionTapped() } } label: {
-                        HStack(spacing: 12) {
+                        HStack(spacing: 8) {
                             VStack(alignment: .leading, spacing: 0) {
-                                Text("Notifications").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                                Text("Notifications").font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
                                 Text("New jobs and schedule changes").font(Theme.font(14)).foregroundStyle(Theme.muted)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             if let value = NotificationPermissionWords.value(permission) {
-                                Text(value).font(Theme.font(16)).foregroundStyle(Theme.muted)
+                                Text(value).font(Theme.font(14)).foregroundStyle(Theme.muted)
                             }
-                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.subtle).accessibilityHidden(true)
+                            PaperIcon(.acctChevron, size: 14, color: Theme.muted)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)
                         .frame(minHeight: 64).contentShape(Rectangle())
@@ -81,7 +80,7 @@ struct MyNotificationsView: View {
                             PushNotifications.shared.setMorningDigest(next)
                         })) {
                             VStack(alignment: .leading, spacing: 0) {
-                                Text("Morning digest").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                                Text("Morning digest").font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
                                 Text("At 6:30: yesterday's collections, today's jobs and overdue invoices")
                                     .font(Theme.font(14)).foregroundStyle(Theme.muted)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -110,7 +109,7 @@ struct MyNotificationsView: View {
             .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 32)
         }
         .foregroundStyle(Theme.foreground)
-        .background(Theme.canvas)
+        .background(Theme.background.ignoresSafeArea())
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task { await readPermission() }
