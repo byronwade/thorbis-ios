@@ -253,6 +253,10 @@ struct NewJobSheet: View {
             .thorbisDestination(for: Job.self) { JobDetailView(jobId: $0.id) }
             .thorbisDestination(for: PaperRoute.self) { PaperRouteView(route: $0) }
         }
+        // Paper 75 draws New job on the canvas, so its card chips and pills stand off the ground
+        // (on a sheet's panel they are the same grey and disappear).
+        .environment(\.thorbisSheetCanvas, false)
+        .presentationBackground(Theme.background)
         // A swipe never throws away what was typed (MA-16).
         .interactiveDismissDisabled(busy || (savedJob == nil && hasTypedAnything))
     }
@@ -360,9 +364,8 @@ struct NewJobSheet: View {
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(isSet ? Theme.brandText : Theme.muted)
-                    .accessibilityHidden(true)
+                PaperIcon(symbol == "clock" ? .newJobClock : symbol == "person" ? .newJobPerson : .newJobAssignee,
+                          size: 14, color: isSet ? Theme.brandText : Theme.muted)
                 Text(title).font(Theme.font(14, weight: isSet ? .semibold : .medium))
                     .foregroundStyle(isSet ? Theme.brandText : Theme.subtle)
                     .lineLimit(1)

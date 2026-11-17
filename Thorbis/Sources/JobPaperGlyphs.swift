@@ -34,4 +34,9 @@ extension PaperGlyph {
     static let jobDownload = PaperGlyph(box: 15, [.stroke("M7.5 2.5V9.5M7.5 9.5L4.5 6.5M7.5 9.5L10.5 6.5M3 12.5H12", 1.3)])
     static let jobCheck = PaperGlyph(box: 12, [.stroke("M3.85 6.15 5.3 7.6 8.15 4.5", 1.3)])
     static let jobSignature = PaperGlyph(box: 28, [.stroke("M4 19c3-7 6-11 8-10s-2 9 0 10 4-5 6-5 1 4 3 4 2-1 3-2M4 24h20", 1.6)])
+    // Paper 75 New job: the chips' 14pt glyphs.
+    static let newJobPerson = PaperGlyph(box: 12, [.circle(6, 4, 2.2, 1.3), .stroke("M1.8 10.5C2.4 8.5 4 7.3 6 7.3C8 7.3 9.6 8.5 10.2 10.5", 1.3)])
+    static let newJobClock = PaperGlyph(box: 12, [.circle(6, 6, 4.5, 1.3), .stroke("M6 3.6V6L7.6 7.2", 1.3)])
+    static let newJobAssignee = PaperGlyph(box: 12, [.circle(6, 4, 2.2, 1.3), .stroke("M1.8 10.5C2.4 8.5 4 7.3 6 7.3C8 7.3 9.6 8.5 10.2 10.5", 1.3),
+                                                     .stroke("M9.5 3.5H12M10.75 2.25V4.75", 1.1)])
 }
