@@ -18,7 +18,7 @@ final class JobListSearchUITests: XCTestCase {
         // sheet has its own field. Both are `search-field` and take the typing straight away.
         let field = app.searchField
         XCTAssertTrue(field.waitForExistence(timeout: 10))
-        if !app.usesTabletLayout { XCTAssertEqual(field.placeholderValue, "Street, name, phone or number") }
+        if !app.usesTabletLayout { XCTAssertEqual(field.placeholderValue, "Search or ask") }
         field.typeText("Kitchen")
         // Each result is one button whose label combines street, title, customer, number and status.
         let kitchen = NSPredicate(format: "label CONTAINS %@", "Kitchen sink backup")

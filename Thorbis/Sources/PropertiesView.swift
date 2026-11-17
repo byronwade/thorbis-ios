@@ -85,53 +85,39 @@ struct PropertiesView: View {
         return "no notes"
     }
 
-    /// The address search on the card (46 tall, radius 14); it narrows this list.
+    /// Paper 87A: "Search or ask" on the card with the filter circle inside it. The words hand
+    /// over to Search (which finds a street, a place or its customer); the circle holds the same
+    /// three choices as the segments.
     private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("", text: $query, prompt: .placeholder("Address, place or customer"))
-                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .frame(minHeight: 46)
-                .accessibilityLabel("Search properties")
-                .accessibilityIdentifier("properties-search")
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
-                        .frame(width: 32, height: 44).contentShape(Rectangle())
-                }
-                .accessibilityLabel("Clear search")
+        PaperSearchBar(placeholder: "Search or ask") {
+            ThorbisMenu(items: [PropertiesView.allFilter, PropertiesView.openFilter, PropertiesView.commercialFilter].map { name in
+                ThorbisMenuItem(name, isSelected: name == filter) { filter = name }
+            }, title: "Show", accessibilityLabel: "Filter properties") {
+                PaperFilterCircle(active: filter != PropertiesView.allFilter)
             }
+            .accessibilityValue(filter)
+            .accessibilityIdentifier("properties-filter")
         }
-        .padding(.horizontal, 12)
-        .frame(minHeight: 46)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, PaperCardMetrics.margin)
+        .paperCardMargin()
     }
 
-    /// One card of addresses: the address (16 Medium) over whose it is (14 muted), "Open job" in
-    /// the warning ink trailing when work is open there.
-    private func addressSection(_ title: String, _ list: [PropertyRow], open: Set<String>) -> some View {
-        PaperSection(title, count: list.count) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(list) { row in
-                    if row.id != list.first?.id { WellDivider() }
-                    // Web parity: a property opens its own page (property-detail.tsx), not the customer.
-                    Button { opened = row } label: {
-                        PaperListRow(title: row.location.address, subtitle: subtitle(row), subtitleLines: 2) {
-                            if open.contains(row.location.id) {
-                                Text("Open job").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.warning).fixedSize()
-                            }
-                        }
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint("Opens the property")
+    /// Paper 87A: a 13 Semibold label with its count over one card of addresses: the address
+    /// (16 Medium) with "Open job" in the warning ink trailing it, over whose it is (14 muted).
+    @ViewBuilder private func addressSection(_ title: String, _ list: [PropertyRow], open: Set<String>) -> some View {
+        PaperCardLabel(title: title, count: list.count).padding(.top, 20)
+        PaperRowsCard {
+            ForEach(list) { row in
+                if row.id != list.first?.id { WellDivider(leading: 16) }
+                // Web parity: a property opens its own page (property-detail.tsx), not the customer.
+                Button { opened = row } label: {
+                    PaperRecordRow(title: row.location.address, subtitle: subtitle(row),
+                                   status: open.contains(row.location.id) ? "Open job" : nil, statusColor: Theme.warning)
                 }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Opens the property")
             }
         }
-        .paperCardMargin().padding(.top, 8)
     }
 
     var body: some View {
@@ -145,12 +131,10 @@ struct PropertiesView: View {
                 PaperHeader(title: "Properties",
                             subtitle: loaded ? (rows.count == 1 ? "1 address" : "\(rows.count) addresses") : "Every service address, across customers")
                 // Paper 87A: the search on the card, then All / With open work / Commercial.
-                searchField.padding(.top, 14)
-                ThorbisSegmented(options: [(PropertiesView.allFilter, PropertiesView.allFilter),
-                                           (PropertiesView.openFilter, PropertiesView.openFilter),
-                                           (PropertiesView.commercialFilter, PropertiesView.commercialFilter)],
-                                 selection: $filter)
-                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
+                searchField
+                PaperTabs(options: [PropertiesView.allFilter, PropertiesView.openFilter, PropertiesView.commercialFilter],
+                          selection: $filter)
+                    .padding(.top, 16)
                 if let error { ErrorBanner(message: error) { await load() } }
                 if !loaded && error == nil && rows.isEmpty { SkeletonRows(count: 6, leading: true) }
                 if loaded && rows.isEmpty && error == nil {
@@ -170,7 +154,7 @@ struct PropertiesView: View {
                 }
                 // Paper 87A: the addresses on a card, commercial places on their own under them.
                 if !others.isEmpty {
-                    addressSection(query.isEmpty ? "Addresses" : "Matches", others, open: open)
+                    addressSection("Addresses", others, open: open)
                 }
                 if !commercial.isEmpty {
                     addressSection("Commercial", commercial, open: open)

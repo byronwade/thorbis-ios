@@ -31,16 +31,26 @@ struct NotificationsFeedView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("notifications-title")
-                    Text(subtitle).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("notifications-subtitle")
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 4)
+                .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 14)
                 if !available {
                     // Permission names what is missing (design.thorbis.com States).
                     ListRoomEmpty(title: "Your role can\u{2019}t see notices.", message: "Ask your office for access to job notices.")
                 } else {
-                    PaperTabs(options: NotificationsFilter.allCases.map(\.rawValue), selection: $filter).padding(.top, 12)
+                    // Paper 77: "Search or ask" with the filter circle, then the segments 16 under it.
+                    PaperSearchBar(placeholder: "Search or ask") {
+                        ThorbisMenu(items: NotificationsFilter.allCases.map { item in
+                            ThorbisMenuItem(item.rawValue, isSelected: item == chosen) { filter = item.rawValue }
+                        }, title: "Show", accessibilityLabel: "Filter notifications") {
+                            PaperFilterCircle(active: chosen != .all)
+                        }
+                        .accessibilityValue(filter)
+                    }
+                    .paperCardMargin()
+                    PaperTabs(options: NotificationsFilter.allCases.map(\.rawValue), selection: $filter).padding(.top, 16)
                     if let error { ErrorBanner(message: notices.isEmpty ? "Notices did not load. \(error)" : error) { await refresh() } }
                     if !loaded && notices.isEmpty && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
                     ForEach(groups) { group in
@@ -52,7 +62,7 @@ struct NotificationsFeedView: View {
                             }
                         }
                         // Paper: the first card sits 16 under the segments (the card's own top is 20).
-                        .padding(.top, group.id == groups.first?.id && group.title.isEmpty ? -4 : 0)
+                        .padding(.top, group.id == groups.first?.id && group.title.isEmpty ? 0 : 4)
                     }
                     if nextCursor != nil {
                         Button { Task { await loadMore() } } label: {

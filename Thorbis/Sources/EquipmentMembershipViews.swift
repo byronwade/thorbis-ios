@@ -615,18 +615,24 @@ struct EquipmentUnitRow: View {
         let placed = [place ?? "", installed ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
         let subtitle = place == nil ? made : placed
         let serial: String? = place == nil ? unit.serialNumber.flatMap { $0.isEmpty ? nil : "SN \($0)" } : nil
-        PaperListRow(title: unit.name, subtitle: subtitle.isEmpty ? nil : subtitle,
-                     meta: serial, subtitleLines: 2) {
-            HStack(spacing: 12) {
-                if let year {
-                    Text(expired ? "Out of warranty" : "Warranty to \(year)")
-                        .font(Theme.font(14, weight: .medium))
-                        .foregroundStyle(expired ? Theme.muted : Theme.success)
-                        .lineLimit(1).fixedSize()
-                }
-                if chevron {
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+        let word: String? = year.map { expired ? "Out of warranty" : "Warranty to \($0)" }
+        if place != nil || serial == nil {
+            // Paper 86 / 87: the unit over one muted line, the warranty word trailing the name.
+            PaperRecordRow(title: unit.name, subtitle: subtitle.isEmpty ? nil : subtitle,
+                           status: word, statusColor: expired ? Theme.muted : Theme.success) {
+                if chevron { PaperRowChevron() }
+            }
+        } else {
+            PaperListRow(title: unit.name, subtitle: subtitle.isEmpty ? nil : subtitle,
+                         meta: serial, subtitleLines: 2) {
+                HStack(spacing: 12) {
+                    if let word {
+                        Text(word)
+                            .font(Theme.font(14, weight: .medium))
+                            .foregroundStyle(expired ? Theme.muted : Theme.success)
+                            .lineLimit(1).fixedSize()
+                    }
+                    if chevron { PaperRowChevron() }
                 }
             }
         }
@@ -829,32 +835,49 @@ struct CompanyEquipmentBook: View {
         return [customer, street].filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
     }
 
+    /// Paper 86 groups by what is due; the server keeps no service-due date, so the groups are
+    /// the warranty: still covered, then the rest.
+    private func group(_ title: String, _ list: [EquipmentRecord]) -> some View {
+        Group {
+            if !list.isEmpty {
+                PaperCardLabel(title: title, count: list.count).padding(.top, 20)
+                PaperRowsCard {
+                    ForEach(list) { unit in
+                        if unit.id != list.first?.id { WellDivider(leading: 16) }
+                        Button { opened = unit } label: {
+                            EquipmentUnitRow(unit: unit, place: place(unit))
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Opens the unit")
+                    }
+                }
+            }
+        }
+    }
+
     var body: some View {
         let units = shown
-        VStack(alignment: .leading, spacing: 20) {
-            Color.clear.frame(width: 0, height: 0)
+        VStack(alignment: .leading, spacing: 0) {
             if let items, !items.isEmpty {
-                // Paper 86: the segments, then the units on one card. Each row is the unit over
-                // whose it is, where, and when it went in, with the warranty word trailing.
-                ThorbisSegmented(options: [(CompanyEquipmentBook.allFilter, CompanyEquipmentBook.allFilter),
-                                           (CompanyEquipmentBook.warrantyFilter, CompanyEquipmentBook.warrantyFilter)],
-                                 selection: $filter)
+                // Paper 86: "Search or ask" with the filter circle, the segments, then the units
+                // grouped on cards: the unit over whose it is, where, and when it went in.
+                PaperSearchBar(placeholder: "Search or ask") {
+                    ThorbisMenu(items: [CompanyEquipmentBook.allFilter, CompanyEquipmentBook.warrantyFilter].map { name in
+                        ThorbisMenuItem(name, isSelected: name == filter) { filter = name }
+                    }, title: "Show", accessibilityLabel: "Filter equipment") {
+                        PaperFilterCircle(active: filter != CompanyEquipmentBook.allFilter)
+                    }
+                    .accessibilityValue(filter)
+                }
+                .paperCardMargin()
+                PaperTabs(options: [CompanyEquipmentBook.allFilter, CompanyEquipmentBook.warrantyFilter], selection: $filter)
+                    .padding(.top, 16)
                 if units.isEmpty {
                     Text("No units under warranty.").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                        .padding(.horizontal, Theme.gutter).padding(.top, 20)
                 } else {
-                    PaperSection(filter == CompanyEquipmentBook.warrantyFilter ? "Under warranty" : "All units", count: units.count) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(units) { unit in
-                                if unit.id != units.first?.id { WellDivider() }
-                                Button { opened = unit } label: {
-                                    EquipmentUnitRow(unit: unit, place: place(unit))
-                                }
-                                .buttonStyle(RowPressStyle())
-                                .accessibilityHint("Opens the unit")
-                            }
-                        }
-                    }
+                    group("Under warranty", units.filter { underWarranty($0) })
+                    group("Out of warranty", units.filter { !underWarranty($0) })
                 }
             }
         }
@@ -916,7 +939,9 @@ struct CompanyAgreementsBook: View {
     private func planLine(_ plan: MembershipPlan) -> String {
         var parts: [String] = []
         if let price = plan.price {
-            let amount = money(price, currency: "USD")
+            // Paper 85C: "$29 a month", no cents on a whole price.
+            let full = money(price, currency: "USD")
+            let amount = full.hasSuffix(".00") ? String(full.dropLast(3)) : full
             let frequency = plan.billingFrequency ?? ""
             if frequency == "monthly" {
                 parts.append("\(amount) a month")
@@ -944,11 +969,11 @@ struct CompanyAgreementsBook: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(plan.name).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(planLine(plan)).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text(planLine(plan)).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text("\(count)").font(Theme.font(16, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.foreground)
+            Text("\(count)").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
         }
         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
@@ -972,35 +997,31 @@ struct CompanyAgreementsBook: View {
     private func customer(_ row: MembershipRecord) -> String { row.customerName ?? store.customerName(row.customerId) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Color.clear.frame(width: 0, height: 0)
+        VStack(alignment: .leading, spacing: 0) {
+            // Paper 85C: the plans on the first card, straight under the title.
             if !plans.isEmpty {
-                PaperCard {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(plans) { plan in
-                            if plan.id != plans.first?.id { WellDivider() }
-                            planRow(plan)
-                        }
+                PaperRowsCard {
+                    ForEach(plans) { plan in
+                        if plan.id != plans.first?.id { WellDivider(leading: 16) }
+                        planRow(plan)
                     }
                 }
             }
+            // Then who holds one: the member over their plan and what it gives, the state trailing.
             ForEach(groups, id: \.title) { group in
-                PaperSection(group.title, count: group.rows.count) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(group.rows) { row in
-                            if row.id != group.rows.first?.id { WellDivider() }
-                            Button { openCustomer = store.customers.first { $0.id == row.customerId } } label: {
-                                PaperListRow(title: customer(row), subtitle: "\(row.planName ?? row.name) \u{00B7} \(row.detail)",
-                                             subtitleLines: 2, dimmed: row.status == "cancelled") {
-                                    StatusWord(text: row.status == "cancelled" ? "Cancelled" : "Active",
-                                               tint: row.status == "cancelled" ? nil : Theme.success)
-                                }
-                            }
-                            .buttonStyle(RowPressStyle())
-                            .accessibilityHint("Opens the customer")
+                PaperCardLabel(title: group.title, count: group.rows.count).padding(.top, 20)
+                PaperRowsCard {
+                    ForEach(group.rows) { row in
+                        if row.id != group.rows.first?.id { WellDivider(leading: 16) }
+                        Button { openCustomer = store.customers.first { $0.id == row.customerId } } label: {
+                            PaperRecordRow(title: customer(row), subtitle: "\(row.planName ?? row.name) \u{00B7} \(row.detail)",
+                                           status: row.status == "cancelled" ? "Cancelled" : "Active",
+                                           statusColor: row.status == "cancelled" ? Theme.muted : Theme.success,
+                                           dimmed: row.status == "cancelled")
                         }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Opens the customer")
                     }
-                    .padding(.vertical, PaperCardMetrics.edge)
                 }
             }
         }

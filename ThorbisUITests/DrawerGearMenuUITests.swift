@@ -33,13 +33,20 @@ final class DrawerGearMenuUITests: XCTestCase {
         let id = "00000000-0000-4000-8000-000000000412"
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-role", "office"]
         app.launch()
-        let star = app.buttons["record-favorite-customer-\(id)"]
-        XCTAssertTrue(star.waitForExistence(timeout: 30))
-        if star.label == "Remove from favorites" { star.tap() }
-        XCTAssertEqual(star.label, "Add to favorites")
-        XCTAssertGreaterThanOrEqual(star.frame.height, 43.99)
-        star.tap(); XCTAssertEqual(star.label, "Remove from favorites")
-        star.tap(); XCTAssertEqual(star.label, "Add to favorites")
+        _ = id
+        // Paper 48N: the customer's bar is back and ⋯ only; the favorite is a row of Customer actions.
+        let actions = app.buttons["Customer actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 30))
+        XCTAssertGreaterThanOrEqual(actions.frame.height, 43.99)
+        let add = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Add to favorites")).firstMatch
+        let remove = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Remove from favorites")).firstMatch
+        actions.tap()
+        if remove.waitForExistence(timeout: 3) { remove.tap(); actions.tap() }
+        XCTAssertTrue(add.waitForExistence(timeout: 5)); add.tap()
+        actions.tap()
+        XCTAssertTrue(remove.waitForExistence(timeout: 5)); remove.tap()
+        actions.tap()
+        XCTAssertTrue(add.waitForExistence(timeout: 5))
     }
 
     func testTabletFavoriteJobCanBeOpenedAndRemoved() throws {

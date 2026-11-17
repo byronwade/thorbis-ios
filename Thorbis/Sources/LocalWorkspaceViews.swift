@@ -322,39 +322,37 @@ struct LocalWorkspaceView: View {
             }
             return "Shared with your team"
         }
-        guard bound else { return "On this phone \u{00B7} Not synced" }
-        return "\(section.countLabel(rows.count)) \u{00B7} On this phone, not synced"
+        guard bound else { return "On this phone" }
+        return section.countLabel(rows.count)
     }
 
-    /// One record: the row opens it; its ••• edits or removes it.
+    /// One record (Paper 88's row): the name over one muted line, its status word trailing. A
+    /// truck opens its own page (88A), which edits and removes it; the other books keep their •••.
     private func rowView(_ row: LocalWorkspaceRow) -> some View {
         HStack(spacing: 0) {
             Button {
-                // Paper 88A: a truck opens its own page; the other books open their editor.
                 if section == .fleet {
                     openedVehicle = row
                 } else if let draft = model.draft(section, id: row.id) {
                     present(draft)
                 }
             } label: {
-                PaperListRow(title: row.title, subtitle: row.subtitle.isEmpty ? nil : row.subtitle, subtitleLines: 2) {
-                    if let status = row.status {
-                        Text(status).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.muted).fixedSize()
-                    }
-                }
+                PaperRecordRow(title: row.title, subtitle: row.subtitle.isEmpty ? nil : row.subtitle, status: row.status)
             }
             .buttonStyle(RowPressStyle())
-            ThorbisMenu(items: [
-                ThorbisMenuItem("Edit", icon: "pencil") { if let draft = model.draft(section, id: row.id) { present(draft) } },
-                ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
-                    do { try model.remove(row.id, section: section); actionError = nil }
-                    catch { actionError = error.localizedDescription }
-                },
-            ], accessibilityLabel: "Options for \(row.title)") {
-                Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            if section != .fleet {
+                ThorbisMenu(items: [
+                    ThorbisMenuItem("Edit", icon: "pencil") { if let draft = model.draft(section, id: row.id) { present(draft) } },
+                    ThorbisMenuItem("Remove", icon: "trash", role: .destructive) {
+                        do { try model.remove(row.id, section: section); actionError = nil }
+                        catch { actionError = error.localizedDescription }
+                    },
+                ], accessibilityLabel: "Options for \(row.title)") {
+                    PaperIcon(.more, size: 16, color: Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .padding(.trailing, 4)
             }
-            .padding(.trailing, 4)
         }
     }
 
@@ -372,10 +370,10 @@ struct LocalWorkspaceView: View {
                     .environment(\.paperCreate, !sharedEquipment && bound
                                  ? PaperCreateAction(label: section.addTitle, run: { present(LocalWorkspaceDraft()) })
                                  : nil)
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 0) {
                     if let error = actionError ?? model.error {
                         Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
-                            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                            .padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                     }
                     if section == .equipment {
                         CompanyEquipmentBook(onLoaded: { hasServerEquipment = $0 }, onCount: { serverEquipmentCount = $0 })
@@ -390,30 +388,31 @@ struct LocalWorkspaceView: View {
                         } else if rows.isEmpty {
                             ListRoomEmpty(title: "Nothing here yet.",
                                           message: "\(section.addTitle) with the + above.")
-                                .padding(.horizontal, -PaperCardMetrics.margin)
                         } else {
-                            PaperSection(sharedEquipment ? "Notes on this phone" : "On this phone", count: rows.count) {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    ForEach(rows) { row in
-                                        if row.id != rows.first?.id { WellDivider() }
-                                        rowView(row)
-                                    }
+                            // Paper 88: a 13 Semibold label and its count over one card of rows.
+                            PaperCardLabel(title: sharedEquipment ? "Notes on this phone" : (section == .fleet ? "Trucks" : "On this phone"),
+                                           count: rows.count)
+                                .padding(.top, sharedEquipment ? 20 : 6)
+                            PaperRowsCard {
+                                ForEach(rows) { row in
+                                    if row.id != rows.first?.id { WellDivider(leading: 16) }
+                                    rowView(row)
                                 }
                             }
                             .id(model.revision)
                         }
                     } else if model.error == nil {
-                        SkeletonRows(count: 3, leading: false, inset: 0)
+                        SkeletonRows(count: 3, leading: false, inset: 0).paperCardMargin()
                     }
                     // With the shared book showing, units are added where they belong: on the customer.
                     Text(sharedEquipment ? (section == .equipment ? "Add or edit a unit on its customer\u{2019}s page; it shows here for the whole team."
                                                                   : "Add or cancel a plan on its customer\u{2019}s page; it shows here for the whole team.")
                                          : "These notes stay in this account’s local workspace book. They are not shared with the office or used by dispatch.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                        .padding(.horizontal, 24).padding(.top, 12)
                 }
-                .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+                .padding(.bottom, 24)
             }
         }
         .background(Theme.background)

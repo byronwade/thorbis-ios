@@ -837,7 +837,7 @@ private struct SearchScreen: View {
                     .accessibilityAddTraits(.isHeader)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let count, count > 0 {
-                    Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text("\(count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
                 trailing()
             }
@@ -864,6 +864,7 @@ private struct SearchScreen: View {
     /// 16 to the row's edge, then its leading mark (40 or 22) and the 12 after it.
     private func dividerInset(_ hit: SearchHit) -> CGFloat {
         if typeSize.isAccessibilitySize { return 16 }
+        if hit.jobStatus != nil { return 46 }
         if case .customer = hit.glyph { return 68 }
         if case .icon = hit.glyph { return 50 }
         if case .icon = hit.leading { return 50 }
@@ -924,18 +925,16 @@ private struct SearchScreen: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if hit.amount != nil || hit.status != nil || hit.jobStatus != nil {
+            if hit.amount != nil || hit.status != nil {
                 VStack(alignment: stacked ? .leading : .trailing, spacing: 3) {
                     if let amount = hit.amount {
                         Text(amount).font(Theme.font(14, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
                     }
                     if let status = hit.status { status }
-                    // v2: a job's status is a word with its mark, never a coloured glyph alone.
-                    if let job = hit.jobStatus { StatusLabel(jobStatus: job.status, hasTime: job.hasTime, emphasis: .quiet) }
                 }
                 .fixedSize(horizontal: !stacked, vertical: true)
             }
-            if opensCustomer && !stacked { PaperDisclosure() }
+            if opensCustomer && !stacked { PaperRowChevron() }
         }
         .padding(.leading, 16).padding(.trailing, removeSearch == nil ? 16 : 2).padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: record ? 64 : 56, alignment: .leading)
@@ -968,12 +967,15 @@ private struct SearchScreen: View {
     /// Paper 76's leading lane: a customer's initials on a 40pt circle; a recent search or an
     /// action keeps its small symbol in a 22pt column. Records otherwise lead with their words.
     @ViewBuilder private func leadingMark(_ hit: SearchHit) -> some View {
-        if case .customer(let name) = hit.glyph {
+        if let job = hit.jobStatus {
+            // Paper 76: a job leads with its status mark (18); VoiceOver hears the word.
+            StatusGlyph(tone: StatusTone(jobStatus: job.status, hasTime: job.hasTime), label: job.status.statusLabel, size: 18)
+        } else if case .customer(let name) = hit.glyph {
             Text(Self.initials(name)).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.foreground)
                 .lineLimit(1).minimumScaleFactor(0.7)
                 .dynamicTypeSize(...DynamicTypeSize.large)
                 .frame(width: 40, height: 40)
-                .background(Theme.fill, in: Circle())
+                .background(Theme.quietFill, in: Circle())
                 .accessibilityHidden(true)
         } else if case .icon(let symbol) = hit.glyph {
             Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
