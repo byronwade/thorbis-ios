@@ -1113,7 +1113,7 @@ struct CustomerDetailView: View {
     private var customerMenuItems: [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
         if let mail = MailDraft(recipient: primaryEmail) {
-            items.append(ThorbisMenuItem("Email", icon: "envelope") { handoff = .mail(mail) })
+            items.append(ThorbisMenuItem("Email", icon: "envelope") { inboxEmail(mail, context: "customer:\(customer.id)") })
         }
         if let directionsURL {
             items.append(ThorbisMenuItem("Directions", icon: "arrow.triangle.turn.up.right.diamond") { openURL(directionsURL) })

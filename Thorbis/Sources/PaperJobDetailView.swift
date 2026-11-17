@@ -3452,7 +3452,7 @@ struct JobDetailView: View {
     /// A quiet text button: the screen's one commit stays the bar at the bottom.
     private var showCustomerEstimatesButton: some View {
         Button { openCustomerView(.estimates) } label: {
-            Label("Show customer", systemImage: "iphone")
+            Label("Customer view · Estimates", systemImage: "iphone")
                 .font(Theme.font(15, weight: .medium))
                 .foregroundStyle(Theme.foreground)
                 .padding(.horizontal, 4)
