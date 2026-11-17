@@ -11,27 +11,15 @@ final class JobDocumentsUITests: XCTestCase {
     func testOverviewPaymentShortcutAtLargestText() {
         continueAfterFailure = false
         let app = preview(extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        let collect = app.buttons["job-overview-collect"]
-        findOverviewElement(collect, in: app)
-        XCTAssertTrue(collect.exists)
-        let chooser = app.buttons["job-section-chooser"]
-        XCTAssertTrue(chooser.waitForExistence(timeout: 10))
-        let scroll = app.scrollViews.firstMatch
-        for _ in 0..<20 {
-            let top = chooser.frame.maxY, bottom = app.frame.maxY - 12
-            if collect.frame.minY >= top && collect.frame.maxY <= bottom { break }
-            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: collect.frame.minY < top ? 0.72 : 0.48))
-            start.press(forDuration: 0.05, thenDragTo: end)
-        }
+        // Paper 24: the one payable invoice is collected from its card on Money.
+        XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 30))
+        thorbisSection(app, "Money").tap()
+        let collect = app.buttons["job-invoice-collect-\(invoiceA)"]
+        for _ in 0..<10 where !collect.exists { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(collect.waitForExistence(timeout: 15))
+        app.scrollClearOfFoot(collect)
         XCTAssertTrue(collect.isHittable)
-        XCTAssertGreaterThanOrEqual(collect.frame.minY, chooser.frame.maxY,
-                                    "The full action must be clear of the pinned section chooser")
-        XCTAssertLessThanOrEqual(collect.frame.maxY, app.frame.maxY - 12,
-                                 "The full action must fit inside the viewport")
         XCTAssertGreaterThanOrEqual(collect.frame.height, 44)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Job payment shortcut largest text"; screenshot.lifetime = .keepAlways; add(screenshot)
         collect.tap()
         XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 15))
         let identity = app.descendants(matching: .any)["collect-payment-invoice"]
@@ -39,7 +27,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(identity.label.contains("2209"), identity.label)
     }
 
-    func testOverviewPaymentShortcutPrecedesJobDetails() {
+    func testOverviewPaymentShortcutPrecedesJobDetails() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview()
         let collect = app.buttons["job-overview-collect"]
@@ -58,12 +47,15 @@ final class JobDocumentsUITests: XCTestCase {
     func testOverviewCollectsTheOnlyPayableInvoiceWithoutOpeningMoney() {
         continueAfterFailure = false
         let app = preview()
-        let collect = app.buttons["job-overview-collect"]
-        findOverviewElement(collect, in: app)
-        XCTAssertTrue(collect.exists)
+        // Paper 24: the one payable invoice is collected from its card on Money.
+        XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 30))
+        thorbisSection(app, "Money").tap()
+        let collect = app.buttons["job-invoice-collect-\(invoiceA)"]
+        for _ in 0..<10 where !collect.exists { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(collect.waitForExistence(timeout: 15))
         app.scrollClearOfFoot(collect)
         XCTAssertTrue(collect.isHittable)
-        XCTAssertTrue(collect.label.contains("2209"), collect.label)
+        XCTAssertGreaterThanOrEqual(collect.frame.height, 44)
         collect.tap()
         XCTAssertTrue(app.navigationBars["Collect payment"].waitForExistence(timeout: 15))
         let identity = app.descendants(matching: .any)["collect-payment-invoice"]
@@ -71,7 +63,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(identity.label.contains("2209"), identity.label)
     }
 
-    func testLeavingOverviewCancelsDelayedCollectionShortcut() {
+    func testLeavingOverviewCancelsDelayedCollectionShortcut() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-overview-collect-delayed"])
         let collect = app.buttons["job-overview-collect"]
@@ -89,7 +82,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(sheet.exists)
     }
 
-    func testLeavingOverviewDuringPaymentLoadDoesNotOpenCollection() {
+    func testLeavingOverviewDuringPaymentLoadDoesNotOpenCollection() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-overview-payment-hold"])
         let collect = app.buttons["job-overview-collect"]
@@ -107,7 +101,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(sheet.exists)
     }
 
-    func testOverviewRequiresSelectionForMultiplePayableInvoices() {
+    func testOverviewRequiresSelectionForMultiplePayableInvoices() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
         let invoice = app.buttons["job-overview-invoice-\(invoiceA)"]
         findOverviewElement(invoice, in: app)
@@ -116,7 +111,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["job-money-open"].exists)
     }
 
-    func testOverviewInvoiceOpensTheExactDocumentInOneTap() {
+    func testOverviewInvoiceOpensTheExactDocumentInOneTap() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-job-invoices-equal-balances"])
         let row = app.buttons["job-overview-invoice-\(invoiceA)"]
@@ -135,7 +131,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(selected.label.contains("2209"), selected.label)
     }
 
-    func testOverviewEstimateOpensTheExactDocumentInOneTap() {
+    func testOverviewEstimateOpensTheExactDocumentInOneTap() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview()
         let row = app.buttons["job-overview-estimate-\(estimateA)"]
@@ -146,7 +143,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["EST-2218"].waitForExistence(timeout: 10))
     }
 
-    func testOverviewInvoiceRetiresWhenSessionIsReplaced() {
+    func testOverviewInvoiceRetiresWhenSessionIsReplaced() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-overview-retire", "--paper-preview-description-replace-session"])
         let row = app.buttons["job-overview-invoice-\(invoiceA)"]
@@ -163,7 +161,8 @@ final class JobDocumentsUITests: XCTestCase {
         }
     }
 
-    func testOverviewInvoiceRetiresWhenAuthorityIsRevalidated() {
+    func testOverviewInvoiceRetiresWhenAuthorityIsRevalidated() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-overview-revalidate"])
         let row = app.buttons["job-overview-invoice-\(invoiceA)"]
@@ -175,7 +174,8 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["invoice-detail-title"].exists)
     }
 
-    func testOverviewInvoiceCannotOpenFromOldReadDuringAuthorityReload() {
+    func testOverviewInvoiceCannotOpenFromOldReadDuringAuthorityReload() throws {
+        try XCTSkipIf(true, "Paper 21: Overview has no money panel or collect shortcut; Money's rows and Collect payment are covered by the Money tests in this file.")
         continueAfterFailure = false
         let app = preview(extra: ["--paper-preview-overview-hold-reload"])
         let row = app.buttons["job-overview-invoice-\(invoiceA)"]
@@ -398,15 +398,10 @@ final class JobDocumentsUITests: XCTestCase {
         XCTAssertTrue(first.label.contains("EST-2218"))
         XCTAssertTrue(second.label.contains("EST-2238"))
         XCTAssertFalse(app.buttons["job-estimate-00000000-0000-4000-8000-000000002239"].exists, "Other jobs' estimates must not appear")
-        // The $340 owed takes Money's bar; the estimates' Customer view stays beneath them, quieter.
+        // Paper 24: the $340 owed is collected from the invoice's own card.
         let collect = app.buttons["Collect payment"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
-        let present = app.buttons["job-money-customer-view"]
-        XCTAssertTrue(present.waitForExistence(timeout: 5))
-        XCTAssertEqual(present.label, "Show customer")
-        XCTAssertTrue(present.isHittable)
-        XCTAssertLessThanOrEqual(second.frame.maxY, present.frame.minY, "Both estimates should be visible above the presentation action")
-        XCTAssertLessThanOrEqual(present.frame.maxY, collect.frame.minY, "The estimates' door must not sit under the bar")
+        // Paper 23: the estimates' customer door is More › Show estimates (checked in JobEstimateHandoffUITests).
         for _ in 0..<5 where !first.isHittable { app.swipeUp() }
         XCTAssertTrue(first.isHittable)
         capture(app, "Job estimate cards")
@@ -463,8 +458,9 @@ final class JobDocumentsUITests: XCTestCase {
         second.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EST-2238")).firstMatch.waitForExistence(timeout: 10))
         app.navigationBars.buttons["Back"].firstMatch.tap()
-        let present = app.buttons["job-money-customer-view"]
-        revealJobItem(present, in: app)
+        // Back on Money, the estimates' customer door is still one menu away (More › Show estimates).
+        let present = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(present.waitForExistence(timeout: 10))
         XCTAssertTrue(present.isHittable)
     }
 
@@ -847,7 +843,8 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5)); revalidate.tap()
         // Verify that the job screen is usable and payment controls are no longer reachable
         // after revalidation, independently of the sheet navigation-bar query.
-        let handoff = app.buttons["Show customer"]
+        // The job's own controls (its More circle) are back in reach.
+        let handoff = app.buttons["Job actions"]
         let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: handoff)], timeout: 20)
         if result != .completed {
             let hierarchy = XCTAttachment(string: app.debugDescription)

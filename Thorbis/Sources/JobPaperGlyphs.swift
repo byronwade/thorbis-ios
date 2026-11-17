@@ -39,4 +39,5 @@ extension PaperGlyph {
     static let newJobClock = PaperGlyph(box: 12, [.circle(6, 6, 4.5, 1.3), .stroke("M6 3.6V6L7.6 7.2", 1.3)])
     static let newJobAssignee = PaperGlyph(box: 12, [.circle(6, 4, 2.2, 1.3), .stroke("M1.8 10.5C2.4 8.5 4 7.3 6 7.3C8 7.3 9.6 8.5 10.2 10.5", 1.3),
                                                      .stroke("M9.5 3.5H12M10.75 2.25V4.75", 1.1)])
+    static let jobPaidCheck = PaperGlyph(box: 34, [.stroke("M8 17.5l6 6L26 10.5", 3)])
 }

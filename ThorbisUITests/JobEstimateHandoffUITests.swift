@@ -1,15 +1,45 @@
 import XCTest
 
+/// The job's More sheet (Paper 21K, F8), opened when it isn't already. Paper 21 keeps the job's
+/// customer doors in More, so the helpers below open it before they look for their row.
 @MainActor
-/// The job's ••• door to Customer view. The header or bar door has the same name, so this picks the menu row.
-func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "label == %@ AND identifier != %@ AND identifier != %@ AND identifier != %@",
-                                     "Customer view", "job-customer-view", "job-customer-view-bar", "job-money-customer-view")).firstMatch
+func thorbisOpenJobMore(_ app: XCUIApplication, unless row: XCUIElement) {
+    guard !row.exists else { return }
+    let more = app.buttons["Job actions"]
+    guard more.waitForExistence(timeout: 30), more.isHittable else { return }
+    more.tap()
+    _ = row.waitForExistence(timeout: 5)
 }
 
-/// The Money door opens the estimates section of Customer view.
+/// More › Customer view: the menu's row, found once the menu is open.
+@MainActor
+func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
+    app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Customer view")).firstMatch
+}
+
+/// More › Customer view, opening More first when it is closed.
+@MainActor
+func thorbisCustomerViewDoor(_ app: XCUIApplication) -> XCUIElement {
+    let row = thorbisCustomerViewMenuItem(app)
+    thorbisOpenJobMore(app, unless: row)
+    return row
+}
+
+/// More › Show estimates opens the estimates section of Customer view (it was Money's "Show
+/// customer" door). Opens More first when it is closed.
+@MainActor
 func thorbisShowCustomerDoor(_ app: XCUIApplication) -> XCUIElement {
-    app.buttons.matching(NSPredicate(format: "identifier == %@ OR identifier == %@", "job-customer-view-bar", "job-money-customer-view")).firstMatch
+    let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show estimates")).firstMatch
+    thorbisOpenJobMore(app, unless: row)
+    return row
+}
+
+/// More › Add to favorites / Remove from favorites (it was the bar's star).
+@MainActor
+func thorbisJobFavoriteRow(_ app: XCUIApplication) -> XCUIElement {
+    let row = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Add to favorites", "Remove from favorites")).firstMatch
+    thorbisOpenJobMore(app, unless: row)
+    return row
 }
 
 /// A job section in the segmented row. #163 added the balance/count to its spoken label
@@ -1145,21 +1175,20 @@ final class JobEstimateHandoffUITests: XCTestCase {
     func testLargestTextCanReturnToCustomerPresentationFromInvoices() {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         // Paper's Money is one page with no jump chips: scroll down to the invoices and back.
-        let present = app.buttons["job-money-customer-view"]
-        XCTAssertTrue(present.waitForExistence(timeout: 30), "The estimate presentation action must remain in the estimates section at large text")
+        XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 30))
         for _ in 0..<6 { app.swipeUp() }
-        for _ in 0..<16 where !present.isHittable { app.swipeDown(velocity: .slow) }
-        XCTAssertTrue(present.isHittable)
+        // Paper 23: the estimates' customer door is More › Show estimates, wherever Money is scrolled to.
+        let present = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(present.waitForExistence(timeout: 30), "The estimate presentation action must stay reachable at large text")
         present.tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 15))
     }
 
     func testAllEstimatesUseOnePrimaryEntryAndKeepAddVisible() {
         let app = open(["--paper-preview-handoff-hide-controls"])
-        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 30), "Existing estimates need one obvious customer presentation action")
-        let present = thorbisStableButton(app, "job-customer-view-bar")
+        XCTAssertTrue(app.buttons["Add estimate"].waitForExistence(timeout: 30))
         capture(app, "Job estimates before entering customer handoff")
-        XCTAssertTrue(app.buttons["Add estimate"].exists)
+        let present = thorbisShowCustomerDoor(app)
         present.tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         // The rows replace the opening skeleton once the job's estimates load, like the tests above.
