@@ -111,6 +111,8 @@ final class RowSwipeUITests: XCTestCase {
     /// Rows sit below Today's stop-card pager: the pager still pages, a row still swipes, and a drag
     /// from the screen's edge level with a row opens the drawer instead of the row.
     func testSwipesLeaveThePagerAndTheDrawerEdgeAlone() throws {
+        // Paper 18: the Schedule has no stop-card pager any more; it returns with Field mode (Paper F1).
+        throw XCTSkip("The stop-card pager left the Schedule (Paper 18); row swipes are covered by testTodayRowSwipeOffersOnMyWay.")
         try skipOnTablet(because: "the stop-card pager is the phone's Today; iPad Schedule rows swipe in testTodayRowSwipeOffersOnMyWay and the sidebar's edge swipe is in DrawerGearMenuUITests.")
         let app = launch("next-stop", ["--paper-preview-role", "tech", "--paper-preview-today-cards"])
         let pager = any(app, "today-stop-cards")

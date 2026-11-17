@@ -198,7 +198,8 @@ enum Theme {
     /// Red as a fill under white type or a white glyph (a badge, a destructive commit): 4.5:1 or better.
     static let destructiveFill = adaptive(light: 0xDC2626, dark: 0xC81E1E)
     /// The chosen segment's raised pill. In dark it sits lighter than the panel so the choice shows.
-    static let selectedSegment = adaptive(light: 0xE9E9E9, dark: 0x363636)
+    /// Paper: ink at 16% over the card track (#434343 dark, #DADADA light), with a short shadow.
+    static let selectedSegment = adaptive(light: 0xDADADA, dark: 0x434343)
     /// Paper's AI accent: the AI help button, suggestions and drafts. Never for status.
     static let ai = adaptive(light: 0x7757BA, dark: 0x9D7FD1)
     static let aiSurface = adaptive(light: 0xEEE8FA, dark: 0x241B33)
@@ -527,13 +528,13 @@ struct RowPressStyle: ButtonStyle {
 }
 
 extension Date {
-    /// One way to say when a visit is, used on every list and header: "Today 4:00 p.m.",
-    /// "Tomorrow 9:00 a.m.", otherwise "Thu, Oct 30, 9:00 a.m.".
+    /// One way to say when a visit is, used on every list and header (Paper 20): "Today, 4:00 PM",
+    /// "Tomorrow, 9:00 AM", otherwise "Thu, Oct 30, 9:00 AM".
     func visitLabel(now: Date = .now, calendar: Calendar = .current) -> String {
         let time = tradeTime
-        if calendar.isDate(self, inSameDayAs: now) { return "Today \(time)" }
+        if calendar.isDate(self, inSameDayAs: now) { return "Today, \(time)" }
         if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(self, inSameDayAs: tomorrow) {
-            return "Tomorrow \(time)"
+            return "Tomorrow, \(time)"
         }
         return weekdayStampLabel
     }

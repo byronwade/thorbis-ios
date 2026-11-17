@@ -4,7 +4,7 @@ import XCTest
 final class JobMediaQueueUITests: XCTestCase {
     // Since #184 the Photos screen has one selector (All · Before · After · Documents) with the
     // counts on each date heading ("Oct 27, 2026 · 1"), Import holds library photos and PDFs, and a
-    // photo's stage is changed in the viewer. Since #221 stamps read "Nov 14, 2023, 5:13 p.m.".
+    // photo's stage is changed in the viewer. Since #221 stamps read "Nov 14, 2023, 5:13 PM".
 
     /// One of the count chips (every chip carries `job-media-selector`; its label is the stage alone).
     private func selector(_ title: String, in app: XCUIApplication) -> XCUIElement {
@@ -20,11 +20,11 @@ final class JobMediaQueueUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "job-media-photo-"))
     }
 
-    /// The app's stamp (#221): "Nov 14, 2023, 5:13 p.m." (the time never reads "5:13 PM").
+    /// The app's stamp (#221): "Nov 14, 2023, 5:13 PM" (Paper's format).
     private func stamp(_ date: Date) -> String {
         let hour = Calendar.current.component(.hour, from: date)
         let minute = Calendar.current.component(.minute, from: date)
-        let clock = "\(hour % 12 == 0 ? 12 : hour % 12):\(String(format: "%02d", minute)) \(hour < 12 ? "a.m." : "p.m.")"
+        let clock = "\(hour % 12 == 0 ? 12 : hour % 12):\(String(format: "%02d", minute)) \(hour < 12 ? "AM" : "PM")"
         return "\(date.formatted(.dateTime.month(.abbreviated).day().year())), \(clock)"
     }
 

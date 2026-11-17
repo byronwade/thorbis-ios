@@ -25,6 +25,8 @@ struct DispatchBoardView: View {
     /// iPad only (Paper T12C): the Schedule's range. When set, the board draws its own title, the
     /// range segments and the day's numbers, and scrolls by itself; nil is the phone's Board tab.
     var tabletRange: Binding<String>? = nil
+    /// The day the board shows (Paper 53's Today | Tomorrow); the name `today` is kept for callers.
+    var day: Date = .now
 
     private enum Pending { case open(Job), schedule(Job), assign(Job) }
 
@@ -39,7 +41,7 @@ struct DispatchBoardView: View {
     /// Today's visits, finished ones included (dimmed) so each tech's day reads whole.
     var today: [Job] {
         store.jobs.filter { job in
-            job.status != "canceled" && (JobFiltering.date(job.scheduledFor).map { Calendar.current.isDateInToday($0) } ?? false)
+            job.status != "canceled" && (JobFiltering.date(job.scheduledFor).map { Calendar.current.isDate($0, inSameDayAs: day) } ?? false)
         }
         .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
     }

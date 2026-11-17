@@ -54,20 +54,26 @@ struct PaperHeader: View {
     private var showsMenuButton: Bool { menuButtonSetting || drawer != nil }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        // Paper 18 / 20: the 44pt circles 16 from the screen's edges; 14 under them the title
+        // (34/40 Bold, -0.025em) 20 in, then 2 and the subtitle (15/20 muted); 14 to what follows.
+        VStack(alignment: .leading, spacing: 0) {
             // The menu circle sits top left with the header's circles on the right of the same row.
             if showsMenuButton {
                 HStack(alignment: .center, spacing: 8) {
                     if let drawer {
                         DrawerMenuCircle(control: drawer)
                     } else {
-                        PaperCircleButton(symbol: "line.3.horizontal", label: "Menu", action: openAccount)
+                        Button(action: openAccount) { CreamCircleLabel(symbol: "line.3.horizontal", glyph: .menu) }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel("Menu")
                     }
                     Spacer(minLength: 0)
                     filterButton
                     createButton
                 }
                 .frame(minHeight: 44)
+                .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
+                .padding(.bottom, 14)
             }
             HStack(alignment: .center, spacing: 8) {
                 Text(title)
@@ -93,17 +99,17 @@ struct PaperHeader: View {
             }
             .font(Theme.font(15)).foregroundStyle(Theme.muted)
             .frame(minHeight: 20, alignment: .leading)
+            .padding(.top, 2)
         }
         .foregroundStyle(Theme.foreground)
-        // Paper v2: circles 16 from the edges, the title 20 in and 14 under them.
-        .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 12)
+        .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 14)
     }
 
     /// The tab root's +. Several creates open the create menu; a long press lists them directly.
     @ViewBuilder private var createButton: some View {
         if showsCreate, let create {
             // One create button app-wide: the cream sheet's ink circle (Today, Board, Map and every list).
-            Button(action: create.run) { CreamCircleLabel(symbol: "plus", ink: true) }
+            Button(action: create.run) { CreamCircleLabel(symbol: "plus", ink: true, glyph: .plus) }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(create.label)
                 .contextMenu {
@@ -160,9 +166,17 @@ struct PaperCircleLabel: View {
     var bordered = false
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(Theme.foreground)
+        Group {
+            // Paper's own mark where it draws one (back, "…", share, call, message, filter): 20pt
+            // in a 44pt circle, scaled down with a smaller one.
+            if let glyph = PaperGlyph.chrome(symbol: symbol) {
+                PaperIcon(glyph, size: size >= 44 ? 20 : (size >= 40 ? 18 : 16))
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Theme.foreground)
+            }
+        }
             .frame(width: size, height: size)
             .background(fill, in: Circle())
             .overlay { if bordered { Circle().strokeBorder(Theme.border.opacity(0.6), lineWidth: 1) } }
@@ -181,6 +195,8 @@ struct PaperTabs: View {
     /// Linear text tabs (redesign 2026-10-31): plain words on the ground, the chosen one on a light
     /// well pill, left-aligned under the large title. Used by Today; other screens keep the segments.
     var textTabs = false
+    /// The segment's type size: 14 on a place root (Paper 18 / 20), 13 on a record (Paper 21).
+    var labelSize: CGFloat = 14
     /// True while tabs remain past the trailing edge; the fade shows only then, so the
     /// last tab is never left dimmed once you've scrolled to it.
     @State private var moreTrailing = true
@@ -211,7 +227,7 @@ struct PaperTabs: View {
         return candidates.first { candidate in
             let tabs = options.reduce(CGFloat(0)) { $0 + max(44, (labelWidths[$1] ?? 0) + candidate.padding * 2) }
             // The segmented track adds 3 on each side.
-            return tabs + CGFloat(max(0, options.count - 1)) * 2 + 6 + candidate.inset * 2 <= available + 0.5
+            return tabs + 4 + candidate.inset * 2 <= available + 0.5
         }
     }
 
@@ -242,7 +258,7 @@ struct PaperTabs: View {
                 // track, the chosen segment raised as a white pill, every segment the same width.
                 // Segments are 44 tall (golden rule 13); the white pill is inset 3 inside them.
                 row(padding: fit.padding, tracked: true)
-                    .padding(.horizontal, 2)
+                    .padding(2)
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
                     .padding(.horizontal, fit.inset)
             } else if wrapOverflow {
@@ -292,7 +308,6 @@ struct PaperTabs: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { available = $0 }
         .background(alignment: .topLeading) { labelMeasurement }
-        .padding(.bottom, 4)
         .sensoryFeedback(.selection, trigger: selection)
     }
 
@@ -333,7 +348,7 @@ struct PaperTabs: View {
     }
 
     private func row(padding: CGFloat, tracked: Bool = false) -> some View {
-        HStack(spacing: 2) {
+        HStack(spacing: tracked ? 0 : 2) {
             ForEach(options, id: \.self) { option in
                 tab(option, padding: padding, tracked: tracked)
             }
@@ -351,20 +366,19 @@ struct PaperTabs: View {
                 // never get here (they use `accessibleChooser`).
                 // Paper v2 segment: 14 Semibold in ink when chosen, 14 Medium in the body grey
                 // otherwise; the chosen one on a raised pill (radius 9) inside the card track.
-                Text(option).font(Theme.font(14, weight: on ? .semibold : .medium)).lineLimit(1).fixedSize()
+                Text(option).font(Theme.font(labelSize, weight: on ? .semibold : .medium)).lineLimit(1).fixedSize()
                     .foregroundStyle(on ? Theme.foreground : Theme.subtle)
                     .padding(.horizontal, padding)
-                    // 44 to tap (HIG-004); the raised pill draws Paper's 36 inside it.
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    // Paper's 36-tall segment in a 40-tall track; the touch target reaches 44 (HIG-004).
+                    .frame(maxWidth: .infinity, minHeight: 36)
                     .background {
                         if on {
                             RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedSegment)
                                 .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
-                                .padding(.vertical, 4)
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }
-                    .contentShape(Rectangle())
+                    .contentShape(Rectangle().inset(by: -4))
             } else {
                 Text(option).font(Theme.font(15, weight: .medium)).lineLimit(1).fixedSize()
                     .foregroundStyle(on ? Theme.foreground : Theme.muted)
@@ -1760,19 +1774,19 @@ struct PaperChoiceWell: View {
 
 extension Date {
     /// The app's one standalone time (design.thorbis.com "Time is 7:40"): hours and minutes always,
-    /// the period once, lowercase — "7:40 a.m.", "1:00 p.m." — or "13:00" on a 24-hour clock. The
-    /// same clock as Today's column (`clockTime`), so a screen never mixes "1 p.m." with "2:30".
+    /// the period as Paper prints it — "7:40 AM", "1:00 PM" — or "13:00" on a 24-hour clock. The
+    /// same clock as Today's column (`clockTime`), so a screen never mixes "1 PM" with "2:30".
     var tradeTime: String { clockTime }
 
     /// A date and time on one line, for stamps (captured, signed, saved, expires):
-    /// "Oct 31, 2026, 10:30 a.m.". The time is `tradeTime`, never the system's "10:30 AM".
+    /// "Oct 31, 2026, 10:30 AM". The time is `tradeTime`.
     func stampLabel(year: Bool = true) -> String {
         let day = year ? formatted(.dateTime.month(.abbreviated).day().year())
                        : formatted(.dateTime.month(.abbreviated).day())
         return "\(day), \(tradeTime)"
     }
 
-    /// "Thu, Oct 30, 9:00 a.m.": a weekday, the date and the time, for a booked visit.
+    /// "Thu, Oct 30, 9:00 AM": a weekday, the date and the time, for a booked visit.
     var weekdayStampLabel: String {
         "\(formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(tradeTime)"
     }

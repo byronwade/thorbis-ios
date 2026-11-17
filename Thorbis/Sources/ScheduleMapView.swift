@@ -178,8 +178,7 @@ struct ScheduleMapView: View {
                 HStack(spacing: 8) {
                     if let route {
                         Button { openURL(route) } label: {
-                            Label("Start route", systemImage: "location.north.line")
-                                .inkCommit(height: 48)
+                            PaperPillLabel(title: "Start route", glyph: .navigate)
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityLabel("Start route")
@@ -218,12 +217,7 @@ struct ScheduleMapView: View {
 
     /// A 48pt circle on the field fill (Paper 80's Call and +).
     private func cardCircle(_ symbol: String) -> some View {
-        Image(systemName: symbol)
-            .font(.system(size: 16, weight: .medium))
-            .foregroundStyle(Theme.foreground)
-            .frame(width: 48, height: 48)
-            .background(Theme.fill, in: Circle())
-            .contentShape(Circle())
+        PaperRoundLabel(glyph: symbol == "phone" ? .phone : .plusLight)
     }
 
     private func callURL(_ stop: Stop) -> URL? {

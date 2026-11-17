@@ -246,7 +246,7 @@ struct PlaceCountLabel: View {
             case .success:
                 Text(text).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.success).lineLimit(1).fixedSize()
             case .plain:
-                Text(text).font(Theme.monoFont(14)).foregroundStyle(count.accent ? Theme.brandText : Theme.muted)
+                Text(text).font(Theme.monoFont(14)).foregroundStyle(count.accent ? Theme.brandText : Theme.subtleForeground)
                     .lineLimit(1).fixedSize()
             }
         } else if count.accent {
@@ -517,13 +517,13 @@ struct PlacesList: View {
         .accessibilityIdentifier("\(idPrefix)-\(id)-disclosure")
     }
 
-    /// Paper v2: 13 Medium in the marker grey, 12 above and 4 below.
+    /// Paper 29N: 13/18 Medium in `subtle-foreground`, 14 above and 6 below.
     private func heading(_ text: String) -> some View {
         Text(text)
             .font(Theme.font(13, weight: .medium))
-            .foregroundStyle(Theme.muted)
+            .foregroundStyle(Theme.subtleForeground)
             .padding(.horizontal, 12)
-            .padding(.top, 12).padding(.bottom, 4)
+            .padding(.top, 14).padding(.bottom, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityAddTraits(.isHeader)
     }
@@ -571,11 +571,16 @@ struct PlaceRowIcon: View {
     @ScaledMetric(relativeTo: .body) private var size: CGFloat = 18
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size - 1, weight: .regular))
-            .foregroundStyle(tint)
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
+        // Paper's own drawer glyph where it draws one (29N / 57N / 58N); the symbol otherwise.
+        if let glyph = PaperGlyph.place(symbol: symbol) {
+            PaperIcon(glyph, size: 18, color: tint, scales: true)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: size - 1, weight: .regular))
+                .foregroundStyle(tint)
+                .frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -604,8 +609,8 @@ struct PlaceRow: View {
                 if let count { PlaceCountLabel(count: count) }
             }
             .padding(.horizontal, 12)
-            // Paper draws 40; the app keeps the 44pt tap target (golden rules, HIG-004).
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            // Paper 29N draws 46 (57N / 58N draw 40; the app keeps the 44pt tap target there too).
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
             .background {
                 if here { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.sidebarAccent) }
             }
@@ -628,11 +633,20 @@ struct CreamCircleLabel: View {
     let symbol: String
     var size: CGFloat = 44
     var ink = false
+    /// Paper's own glyph for this circle (the two-line menu, the +); wins over `symbol`.
+    var glyph: PaperGlyph? = nil
+    var glyphSize: CGFloat = 20
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 17, weight: ink ? .semibold : .medium))
-            .foregroundStyle(ink ? Color.white : Theme.foreground)
+        Group {
+            if let glyph {
+                PaperIcon(glyph, size: glyphSize, color: ink ? .white : Theme.foreground)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 17, weight: ink ? .semibold : .medium))
+                    .foregroundStyle(ink ? Color.white : Theme.foreground)
+            }
+        }
             .frame(width: size, height: size)
             .background(ink ? Theme.brand : Theme.card, in: Circle())
             .frame(width: max(44, size), height: max(44, size))
