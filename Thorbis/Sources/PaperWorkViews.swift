@@ -298,6 +298,9 @@ struct ScheduleView: View {
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if let problem = swipes.problem { ErrorBanner(message: problem) }
+                // Paper 57F: follow-ups the field asked for that the office has to book. A different
+                // queue from the jobs below (those have no time; these are the server's office reviews).
+                if tab == "Unscheduled" { OfficeSlotQueueSection(roster: roster) }
                 if store.loading && store.jobs.isEmpty {
                     SkeletonList(count: 4, leading: true).paperCardMargin()
                 } else if tab == "Board" && canSchedule {
@@ -1274,6 +1277,14 @@ struct JobsView: View {
     @State private var dateTo = Calendar.current.startOfDay(for: .now)
     private var activeDates: (from: Date, to: Date)? { pickedDates ? (from: dateFrom, to: dateTo) : nil }
 
+    /// Paper 20B / 20C: the person's saved views for jobs, from the server.
+    @StateObject private var savedViews = JobSavedViewsBook()
+    @State private var showSaveView = false
+    @State private var showSavedViews = false
+    /// "View saved as …", shown for a moment after a save.
+    @State private var savedViewToast: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     /// Whose jobs the board shows: the Assigned tab is always mine.
     private var activeWho: JobBoardFilter.Who { tab == "Assigned" ? .anyone : who }
     /// A filter is on when the sheet narrows the board past its defaults.
@@ -1353,11 +1364,22 @@ struct JobsView: View {
                     .accessibilityIdentifier("header-filter")
                 }
                 .paperCardMargin()
+                // Paper 20B: saved views as chips under the field, then "Save this view".
+                if canUseViews && (!viewEntries.isEmpty || canSaveView) {
+                    JobSavedViewChips(entries: viewEntries, favorites: savedViews.favorites,
+                                      selectedID: selectedViewID, showsSave: canSaveView,
+                                      onPick: { pick($0) }, onSave: { showSaveView = true },
+                                      onManage: { showSavedViews = true })
+                        .padding(.top, 16)
+                }
                 PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                     .padding(.top, 16)
                 OfflineBanner()
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let problem = swipes.problem { ErrorBanner(message: problem) }
+                if canUseViews, !session.isOffline, let problem = savedViews.problem {
+                    ErrorBanner(message: problem, action: .init(title: "Try again") { await loadSavedViews() })
+                }
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if store.loading && store.jobs.isEmpty {
                         ListRoomSkeleton(count: 6)
@@ -1407,6 +1429,36 @@ struct JobsView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
         }
+        // Paper 20C: name the filters on screen and keep them as a view.
+        .sheet(isPresented: $showSaveView) {
+            SheetSurface {
+                JobSavedViewSaveSheet(book: savedViews, choices: currentChoices, roster: roster) { view in
+                    withMotion { savedViewToast = "View saved as \u{201C}\(view.label)\u{201D}" }
+                }
+            }
+        }
+        .sheet(isPresented: $showSavedViews) {
+            SheetSurface {
+                JobSavedViewsSheet(book: savedViews, entries: viewEntries, roster: roster, canSaveCurrent: canSaveView,
+                                   onApply: { if let choices = $0.choices { apply(choices) } },
+                                   onSaveCurrent: { showSaveView = true })
+            }
+        }
+        // Paper 20B: "View saved as …" rises over the list and leaves on its own.
+        .overlay(alignment: .bottom) {
+            if let savedViewToast {
+                ThorbisToast(symbol: "checkmark", message: savedViewToast)
+                    .padding(.horizontal, Theme.gutter).padding(.bottom, 84)
+                    .transition(ThorbisToast.transition(reduceMotion: reduceMotion))
+                    .accessibilityIdentifier("jobviews-toast")
+                    .task(id: savedViewToast) {
+                        try? await Task.sleep(for: .seconds(3))
+                        guard !Task.isCancelled else { return }
+                        withMotion { self.savedViewToast = nil }
+                    }
+            }
+        }
+        .task(id: "views|\(JobSavedViewsBook.identity(session))|\(session.isOffline)|\(canUseViews)") { await loadSavedViews() }
         .task(id: "roster|\(session.generation)|\(session.isOffline)") {
             guard session.can("job.view", feature: "jobs"), !session.isOffline,
                   let people = try? await api.fieldAssignees() else { return }
@@ -1427,6 +1479,93 @@ struct JobsView: View {
     }
 
     private var groups: [(title: String, jobs: [Job])] { JobsListGroups.groups(jobs) }
+
+    // MARK: Saved views (Paper 20B / 20C)
+
+    /// A view is a list of jobs, so it needs the right to see jobs (the server's `jobs` resource).
+    private var canUseViews: Bool { session.can("job.view", feature: "jobs") }
+
+    /// The filters on screen as one value: whose jobs (the Assigned tab is mine), then the sheet's.
+    private var currentChoices: JobBoardChoices {
+        var choices = JobBoardChoices()
+        if tab == "Assigned" {
+            if let me = session.user?.id { choices.assignee = .user(me) }
+        } else {
+            switch who {
+            case .anyone: choices.assignee = .anyone
+            case .unassigned: choices.assignee = .unassigned
+            case .tech(let userID): choices.assignee = .user(userID)
+            }
+        }
+        choices.statuses = statusFilter
+        choices.hidesDone = !display.showCompleted
+        choices.ordering = display.ordering
+        choices.days = pickedDates ? JobBoardChoices.Days(from: dateFrom, to: dateTo) : nil
+        choices.when = pickedDates ? .any : when
+        return choices
+    }
+
+    /// Each saved view with how it reads on this phone, favourites first.
+    private var viewEntries: [JobSavedViewEntry] {
+        savedViews.ordered.map { JobSavedViewEntry(view: $0, reading: JobSavedViewMapping.read($0)) }
+    }
+
+    /// The view whose filters are the ones on screen, if any.
+    private var selectedViewID: String? {
+        let current = currentChoices.canonical
+        return viewEntries.first { $0.choices?.canonical == current }?.id
+    }
+
+    /// "Save this view" shows once the sheet narrows the board and no view holds these filters yet.
+    private var canSaveView: Bool {
+        canUseViews && !session.isOffline && savedViews.loaded && filterActive && selectedViewID == nil
+    }
+
+    private func loadSavedViews() async {
+        guard canUseViews, !session.isOffline else { return }
+        await savedViews.load(api: api, identity: JobSavedViewsBook.identity(session))
+    }
+
+    /// A chip: show the view, or clear it when it is the one showing. A view this phone cannot
+    /// filter by opens the list of views, where its row says why; it is never applied.
+    private func pick(_ entry: JobSavedViewEntry) {
+        guard let choices = entry.choices else { showSavedViews = true; return }
+        if entry.id == selectedViewID {
+            withMotion { resetFilters() }
+        } else {
+            apply(choices)
+        }
+    }
+
+    /// Puts a view's filters on the board.
+    private func apply(_ choices: JobBoardChoices) {
+        withMotion {
+            switch choices.assignee {
+            case .user(let id) where id == session.user?.id: tab = "Assigned"; who = .anyone
+            case .user(let id): tab = "All jobs"; who = .tech(id)
+            case .unassigned: tab = "All jobs"; who = .unassigned
+            case .anyone: tab = "All jobs"; who = .anyone
+            }
+            // The sheet's chips stand for groups that can hold a status the server does not have
+            // ("on_hold" beside "paused"); tick the whole group when the view names all of its own.
+            var statuses = choices.statuses
+            for group in JobBoardFilter.statusGroups {
+                let known = group.statuses.intersection(JobSavedViewMapping.serverStatuses)
+                if !known.isEmpty && known.isSubset(of: statuses) { statuses.formUnion(group.statuses) }
+            }
+            statusFilter = statuses
+            display.showCompleted = !choices.hidesDone
+            display.ordering = choices.ordering
+            when = .any
+            if let days = choices.days {
+                dateFrom = days.from
+                dateTo = days.to
+                pickedDates = true
+            } else {
+                pickedDates = false
+            }
+        }
+    }
 
     /// Paper 20A: Assigned to, Status, Date and Sort by, as chips on the sheet; Reset clears them
     /// and the commit shows the narrowed board. Job type is left out: a job carries no type.
