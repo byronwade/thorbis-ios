@@ -56,8 +56,10 @@ final class CustomerViewUITests: XCTestCase {
         let exit = app.buttons.matching(identifier: "customer-mode-owner-exit").firstMatch
         XCTAssertTrue(exit.waitForExistence(timeout: 5))
         exit.tap()
-        XCTAssertTrue(door.waitForExistence(timeout: 15))
+        // Back on the staff job: its More circle answers and the door is in More again.
+        XCTAssertTrue(thorbisWaitForStaffJob(app), "The staff job must answer again after the hand-back")
         XCTAssertFalse(app.staticTexts["customer-view-title"].exists)
+        XCTAssertTrue(thorbisCustomerViewDoor(app).waitForExistence(timeout: 15))
     }
 
     func testEstimateDetailOpensCustomerViewOnThatEstimateAndHandsBackToTheEstimate() {
