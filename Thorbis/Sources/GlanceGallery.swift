@@ -8,27 +8,43 @@ import WidgetKit
 struct GlanceGallery: View {
     let screen: String
 
-    private static let items = [
+    /// `--paper-preview-long-job-title`: a real book's long title, business name and street, to see
+    /// that every surface cuts them and the Lock Screen card stays inside its 160pt.
+    private static var long: Bool { ProcessInfo.processInfo.arguments.contains("--paper-preview-long-job-title") }
+    /// `--paper-preview-old-visit`: the visit's last tap was 20 days ago (a job left on site).
+    private static var old: Bool { ProcessInfo.processInfo.arguments.contains("--paper-preview-old-visit") }
+    private static var firstTitle: String {
+        long ? "DEMO visit 2 - Gas tank water heater replacement labor - 75 gal, tight access" : "AC not cooling"
+    }
+    private static var firstCustomer: String { long ? "DEMO Birch Community Hall and Neighborhood Services Center 300" : "Danielle Marlowe" }
+    private static var firstStreet: String { long ? "4127 Birchwood Lane, Building C, Suite 300" : "412 Birchwood Ln" }
+
+    private static var items: [TodaySnapshot.Item] { [
         TodaySnapshot.Item(id: "1", at: Calendar.current.date(bySettingHour: 10, minute: 30, second: 0, of: .now),
-                           title: "AC not cooling", customer: "Danielle Marlowe", status: "dispatched", street: "412 Birchwood Ln"),
+                           title: firstTitle, customer: firstCustomer, status: "dispatched", street: firstStreet),
         TodaySnapshot.Item(id: "2", at: Calendar.current.date(bySettingHour: 12, minute: 15, second: 0, of: .now),
                            title: "Kitchen sink backup", customer: "Alex Petrov", status: "scheduled", street: "88 Pine St"),
         TodaySnapshot.Item(id: "3", at: Calendar.current.date(bySettingHour: 14, minute: 30, second: 0, of: .now),
                            title: "Outlet replacement", customer: "Elena Alvarez", status: "scheduled"),
         TodaySnapshot.Item(id: "4", at: Calendar.current.date(bySettingHour: 16, minute: 0, second: 0, of: .now),
                            title: "AC recheck", customer: "Mei Nakamura", status: "scheduled", street: "1907 Larkspur Ct"),
-    ]
-    private static let entry = TodayEntry(date: .now, items: items, signedOut: false, progress: .visit(3, of: 6))
-    private static let working = TodayEntry(date: .now, items: [TodaySnapshot.Item(id: "9", at: nil, title: "Water heater leak",
-                                                                                   customer: "David Chen", status: "in_progress",
-                                                                                   street: "27 Orchard Way")] + items.dropFirst(),
-                                            signedOut: false, progress: .visit(2, of: 6))
-    private static let attributes = JobActivityAttributes(jobID: "1", jobNumber: "JOB-2214", title: "AC not cooling",
-                                                          customer: "Danielle Marlowe", address: "412 Birchwood Ln",
-                                                          access: "Gate code · Dog on site",
-                                                          scheduledFor: Calendar.current.date(bySettingHour: 10, minute: 30, second: 0, of: .now))
+    ] }
+    private static var entry: TodayEntry { TodayEntry(date: .now, items: items, signedOut: false, progress: .visit(3, of: 6)) }
+    private static var working: TodayEntry {
+        TodayEntry(date: .now, items: [TodaySnapshot.Item(id: "9", at: nil, title: long ? firstTitle : "Water heater leak",
+                                                          customer: long ? firstCustomer : "David Chen", status: "in_progress",
+                                                          street: long ? firstStreet : "27 Orchard Way")] + items.dropFirst(),
+                   signedOut: false, progress: .visit(2, of: 6))
+    }
+    private static var attributes: JobActivityAttributes {
+        JobActivityAttributes(jobID: "1", jobNumber: "JOB-2214", title: firstTitle,
+                              customer: firstCustomer, address: firstStreet,
+                              access: long ? "Gate code 4821# · Dog on site · Park on the street, not the drive" : "Gate code · Dog on site",
+                              scheduledFor: Calendar.current.date(bySettingHour: 10, minute: 30, second: 0, of: .now)?
+                                .addingTimeInterval(old ? -20 * 86_400 : 0))
+    }
     private static func state(_ status: String, minutes: Double, waiting: Bool = false) -> JobActivityAttributes.ContentState {
-        .init(status: status, since: .now.addingTimeInterval(-minutes * 60), waitingToSync: waiting)
+        .init(status: status, since: .now.addingTimeInterval(-minutes * 60 - (old ? 20 * 86_400 : 0)), waitingToSync: waiting)
     }
 
     var body: some View {
@@ -103,6 +119,13 @@ struct GlanceGallery: View {
     private func activity(_ state: JobActivityAttributes.ContentState) -> some View {
         JobLockScreenView(attributes: Self.attributes, state: state)
             .frame(width: 358)
+            // The system cuts a Lock Screen card past 160pt: print the height to check it.
+            .overlay(alignment: .bottomTrailing) {
+                GeometryReader { proxy in
+                    Text("\(Int(proxy.size.height))pt").font(.system(size: 9)).foregroundStyle(proxy.size.height > 160 ? .red : .gray)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing).padding(4)
+                }
+            }
             .background(WidgetInk.panel.opacity(0.88))
             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
     }

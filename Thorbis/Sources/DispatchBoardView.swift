@@ -140,7 +140,7 @@ struct DispatchBoardView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 PaperPageTitle(title: "Waiting for a slot",
-                               subtitle: all.count == 1 ? "1 job needs a time" : "\(all.count) jobs need a time")
+                               subtitle: all.count == 1 ? "1 job needs a time" : "\(PaperCount.text(all.count)) jobs need a time")
                 PaperSearchInput(text: $waitingSearch, label: "Search waiting jobs", placeholder: "Search") { EmptyView() }
                     .paperCardMargin().padding(.top, 16).padding(.bottom, 16)
                 if let error { ErrorBanner(message: error) }
@@ -210,18 +210,7 @@ struct DispatchBoardView: View {
                 }
                 if all.count > waiting.count {
                     WellDivider()
-                    Button { showsAllWaiting = true } label: {
-                        HStack(spacing: 8) {
-                            Text("See all \(all.count)").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.brandText)
-                            Spacer(minLength: 8)
-                            PaperChevron()
-                        }
-                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityLabel("See all \(all.count) waiting jobs")
-                    .accessibilityIdentifier("board-waiting-all")
+                    PaperSeeAllRow(count: all.count, label: "See all \(all.count) waiting jobs", identifier: "board-waiting-all") { showsAllWaiting = true }
                 }
             }
         }
@@ -536,9 +525,10 @@ struct DispatchBoardView: View {
         }
     }
 
-    /// The brand chip Paper uses for a row's one action (Assign, Schedule), 44 tall.
+    /// The brand chip Paper uses for a row's one action (Assign, Schedule): the compact 36pt pill,
+    /// the same as the waiting rows' Schedule, so a long title keeps the row's width.
     private func brandChip(_ title: String) -> some View {
-        Text(title).paperButton(.secondary, tone: .tinted)
+        Text(title).paperButton(.compact, tone: .tinted)
     }
 
     private func menuTitle(_ job: Job) -> String {

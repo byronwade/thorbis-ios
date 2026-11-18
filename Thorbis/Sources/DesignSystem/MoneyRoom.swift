@@ -225,7 +225,9 @@ struct MoneyListRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(status.tone == .cancelled ? Theme.muted : Theme.foreground)
-                    .lineLimit(stacked ? nil : 2)
+                    // One line beside the amount: a long business name cuts at the end, so a list of
+                    // hundreds stays one row per record (the whole name opens with the record).
+                    .lineLimit(stacked ? nil : 1)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle, !subtitle.isEmpty { subtitleLines(subtitle, stacked: stacked) }
             }
@@ -254,7 +256,7 @@ struct MoneyListRow: View {
             ViewThatFits(in: .horizontal) {
                 subtitleText(subtitle, lines: 1).fixedSize(horizontal: true, vertical: false)
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(parts.enumerated()), id: \.offset) { subtitleText($0.element, lines: 2) }
+                    ForEach(Array(parts.enumerated()), id: \.offset) { subtitleText($0.element, lines: 1) }
                 }
             }
         } else if parts.count > 1 {

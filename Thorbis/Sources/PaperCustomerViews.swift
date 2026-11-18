@@ -84,7 +84,7 @@ struct CustomersView: View {
         let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading…" : "\(active.count) \(active.count == 1 ? "customer" : "customers") · \(activeJobs) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading…" : "\(PaperCount.text(active.count)) \(active.count == 1 ? "customer" : "customers") · \(PaperCount.text(activeJobs)) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
                 // Paper 47: "Search or ask" on the card, the book's filter circle inside it.
                 searchBar
                 if let error = error ?? store.error {
@@ -1231,7 +1231,7 @@ struct CustomerDetailView: View {
                         // The jobs row grammar: the street, the problem, when and who; the status word trails.
                         JobRoomRow(job: job, street: street(for: job.locationId),
                                    when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
-                                   who: tech(job.assignedToUserId), late: late, titleLines: 3, inset: PaperCardMetrics.inset)
+                                   who: tech(job.assignedToUserId), late: late, titleLines: 2, inset: PaperCardMetrics.inset)
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("customer-next-visit")

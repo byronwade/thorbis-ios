@@ -326,6 +326,8 @@ enum TimeClockMath {
     static func clockLabel(_ seconds: TimeInterval, short: Bool = false) -> String {
         let total = max(0, Int(seconds.rounded(.down)))
         let hours = total / 3600, minutes = (total % 3600) / 60, secs = total % 60
+        // A clock left running for days (never clocked out) reads in days, not "471:13:58".
+        if hours >= 24 { return "\(hours / 24)d \(hours % 24)h" }
         if short && hours == 0 { return String(format: "%d:%02d", minutes, secs) }
         return String(format: "%d:%02d:%02d", hours, minutes, secs)
     }

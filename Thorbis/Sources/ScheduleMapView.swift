@@ -8,6 +8,7 @@ struct ScheduleMapView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var places: [String: ServiceLocationRecord] = [:]
     @State private var loaded = false
     /// iPad passes its sidebar selection so a row tap selects and centers the pin.
@@ -140,6 +141,7 @@ struct ScheduleMapView: View {
                         Text("\(stop.job.title) \u{2014} \(customer)".dashKeptWithWordBefore)
                             .font(Theme.font(17, weight: .semibold)).tracking(-0.17)
                             .foregroundStyle(Theme.foreground)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
                         Text([street(stop), time].compactMap { $0 }.joined(separator: " · "))
                             .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)

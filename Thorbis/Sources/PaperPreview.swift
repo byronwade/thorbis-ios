@@ -1675,12 +1675,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             return ["items": [["id": "00000000-0000-4000-8000-000000006301", "organizationId": PaperPreview.organizationID, "name": "Comfort Club",
                                "kind": "membership", "visitsPerYear": 2, "price": 1900, "billingFrequency": "monthly", "discountPercent": 15,
                                "archived": false, "createdAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-01-01T00:00:00Z"]]]
-        case "/v1/invoices": return ["items": [PaperPreview.issuedInvoice, PaperPreview.invoice].compactMap { jsonObject($0) }]
+        case "/v1/invoices": return ["items": scaledDocuments([PaperPreview.issuedInvoice, PaperPreview.invoice].compactMap { jsonObject($0) as? [String: Any] })]
         case "/v1/estimates":
             // Sent ten days ago, so it shows under Needs attention.
             var waiting = (jsonObject(PaperPreview.estimate) as? [String: Any]) ?? [:]
             waiting["sentAt"] = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-10 * 86_400))
-            return ["items": matchingCustomer([waiting], queryItems: queryItems)]
+            return ["items": matchingCustomer(scaledDocuments([waiting]), queryItems: queryItems)]
         case "/v1/query":
             if PaperPreview.screen == "price-book", ProcessInfo.processInfo.arguments.contains("--paper-preview-pricebook-long"),
                queryItems.first(where: { $0.name == "resourceId" })?.value == "price_book_items" {
@@ -1980,7 +1980,9 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
             if path == "/v1/customers/\(id)/contacts" {
                 return ["items": [
                     ["id": "00000000-0000-4000-8000-000000008001", "organizationId": org, "customerId": id,
-                     "name": name, "role": "Homeowner", "email": "danielle@example.invalid", "phone": "(415) 555-0142",
+                     "name": name, "role": "Homeowner",
+                     "email": longContact ? "danielle.marlowe.household@birchcommunityhall.example" : "danielle@example.invalid",
+                     "phone": longContact ? "(415) 555-0142 ext. 2201" : "(415) 555-0142",
                      "primary": true, "createdAt": now, "updatedAt": now] as [String: Any],
                     ["id": "00000000-0000-4000-8000-000000008002", "organizationId": org, "customerId": id,
                      "name": "Taylor Marlowe", "role": "Spouse", "phone": "(415) 555-0177",
@@ -2192,6 +2194,16 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 listed[index]["status"] = step == "driving" ? "en_route" : step == "arrived" ? "arrived" : "in_progress"
                 listed[index]["allowedTransitions"] = step == "driving" ? ["arrived", "paused"] : step == "arrived" ? ["in_progress", "paused"] : ["paused"]
             }
+            // `--paper-preview-old-visit`: the visit's taps happened 20 days ago (a job left on site
+            // and never wrapped up), so timers and step times show how they read past a day.
+            if arguments.contains("--paper-preview-old-visit") {
+                let formatter = ISO8601DateFormatter()
+                for key in ["dispatchedAt", "enRouteAt", "arrivedAt", "startedAt", "scheduledFor"] {
+                    if let raw = listed[index][key] as? String, let date = formatter.date(from: raw) {
+                        listed[index][key] = formatter.string(from: date.addingTimeInterval(-20 * 86_400))
+                    }
+                }
+            }
         }
         if PaperPreview.screen == "customer-jobs" { listed += propertyHistoryJobs() }
         if PaperPreview.screen == "dispatch-board" {
@@ -2348,11 +2360,57 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         }
     }
 
+    /// `--paper-preview-scale N` for estimates and invoices: up to 300 copies with the scaled
+    /// customers' ids, long titles and line names, dates going back a day per copy, and every
+    /// seventh copy a seven-figure amount ($1,284,930.55), so lists and totals show their overflow.
+    private static func scaledDocuments(_ rows: [[String: Any]]) -> [[String: Any]] {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--paper-preview-scale"), args.indices.contains(index + 1),
+              let copies = Int(args[index + 1]), copies > 1 else { return rows }
+        let stamp = ISO8601DateFormatter()
+        return (0..<min(copies, 300)).flatMap { copy -> [[String: Any]] in
+            guard copy > 0 else { return rows }
+            let prefix = String(format: "%08x-", copy)
+            let when = stamp.string(from: Date().addingTimeInterval(-Double(copy) * 86_400))
+            return rows.map { row in
+                var next = row
+                for key in ["id", "customerId", "jobId"] {
+                    if let value = next[key] as? String, value.hasPrefix("00000000-") { next[key] = prefix + value.dropFirst(9) }
+                }
+                if let title = next["title"] as? String {
+                    next["title"] = "DEMO \(title) - full system replacement with permit, haul-away and follow-up visit \(copy)"
+                }
+                if var lines = next["lines"] as? [[String: Any]] {
+                    for i in lines.indices {
+                        if let text = lines[i]["description"] as? String {
+                            lines[i]["description"] = "\(text) - Gas tank water heater replacement labor - 75 gal, tight access"
+                        }
+                    }
+                    if copy % 7 == 0, !lines.isEmpty, var price = lines[0]["unitPrice"] as? [String: Any] {
+                        price["amount"] = 128_493_055
+                        lines[0]["unitPrice"] = price
+                    }
+                    next["lines"] = lines
+                }
+                for key in ["createdAt", "updatedAt", "issuedAt", "sentAt"] where next[key] is String { next[key] = when }
+                return next
+            }
+        }
+    }
+
+    /// `--paper-preview-long-contact` (and `--paper-preview-scale`): a 50-character email, a phone
+    /// with an extension and a three-part address, as real books carry them.
+    private static var longContact: Bool {
+        let args = ProcessInfo.processInfo.arguments
+        return args.contains("--paper-preview-long-contact") || args.contains("--paper-preview-scale")
+    }
+
     private static func customers() -> [[String: Any]] {
         let shortName = ProcessInfo.processInfo.arguments.contains("--paper-preview-short-customer-name")
         let longName = ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-name-long")
         let firstName = shortName ? "I" : (longName ? "Birch Community Hall and Neighborhood Services Center" : "Danielle Marlowe")
-        let rows = [("0412", firstName, "412 Birchwood Ln"), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
+        let firstAddress = longContact ? "4127 Birchwood Lane, Building C, Suite 300, Rancho Cordova, CA 95670-4412" : "412 Birchwood Ln"
+        let rows = [("0412", firstName, firstAddress), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
         // 48H's capture lists archived customers; 49D's (New message) needs numbers to text.
         let archived = PaperPreview.opensSheet("customers-archived")
             ? [("0421", "Tom Becker", "17 Larkspur Way"), ("0422", "Linda Park", "6 Fern Ct"), ("0423", "Kessler Dental", "200 Main St"), ("0424", "Greg Ostrowski", "9 Alder Creek Dr")] : []

@@ -528,7 +528,7 @@ struct OwnerHomeView: View {
             if !unpaid.isEmpty {
                 let owed = unpaid.reduce(into: HomeAmounts()) { $0.add($1.1, $1.0.currency) }
                 rows.append(NeedItem(id: "unpaid", glyph: .alertClock, tint: Theme.warning,
-                                     title: "\(unpaid.count) invoice\(unpaid.count == 1 ? "" : "s") unpaid",
+                                     title: "\(PaperCount.text(unpaid.count)) invoice\(unpaid.count == 1 ? "" : "s") unpaid",
                                      subtitle: "\(owed.wholeText)\(oldest(unpaid.first?.0.issuedAt))",
                                      action: "Review", route: .homeList(.unpaid)))
             }
@@ -540,7 +540,7 @@ struct OwnerHomeView: View {
             }
             if !unscheduled.isEmpty {
                 rows.append(NeedItem(id: "unscheduled", glyph: .alertCalendar, tint: Theme.muted,
-                                     title: "\(unscheduled.count) job\(unscheduled.count == 1 ? "" : "s") without a time",
+                                     title: "\(PaperCount.text(unscheduled.count)) job\(unscheduled.count == 1 ? "" : "s") without a time",
                                      subtitle: "Booked, not on the schedule yet",
                                      action: session.can("job.assign", feature: "jobs") ? "Schedule" : "Review",
                                      route: .homeList(.unscheduled)))
@@ -582,8 +582,8 @@ struct OwnerHomeView: View {
     /// " · oldest 21 days" (Paper 52/58).
     private func oldest(_ raw: String?) -> String {
         guard let date = JobFiltering.date(raw) else { return "" }
-        let days = Calendar.current.dateComponents([.day], from: date, to: .now).day ?? 0
-        return days <= 0 ? " · oldest today" : " · oldest \(days) day\(days == 1 ? "" : "s")"
+        let days = PaperAge.days(from: date)
+        return days <= 0 ? " · oldest today" : " · oldest \(PaperAge.span(days: days))"
     }
 
     // MARK: Loading
@@ -650,15 +650,24 @@ struct OwnerHomeListView: View {
         switch list {
         case .jobs(let state): OwnerDay.today(store.jobs).filter { HomeJobState(status: $0.status) == state }
         case .tech(let userID, _):
-            // Their day, plus a job they are on that was booked for another day.
-            OwnerDay.today(store.jobs).filter { $0.assignedToUserId == userID }
-                + (userID == nil ? [] : store.jobs.filter {
-                    $0.assignedToUserId == userID && OwnerDay.activeStatuses.contains($0.status)
-                        && !OwnerDay.today(store.jobs).contains($0)
-                })
+            // Their day, plus a job they are on that was booked for another day. Today's ids are read
+            // once: asking for today inside the filter re-scans the whole book for every job.
+            {
+                let today = OwnerDay.today(store.jobs)
+                let todayIDs = Set(today.map(\.id))
+                return today.filter { $0.assignedToUserId == userID }
+                    + (userID == nil ? [] : store.jobs.filter {
+                        $0.assignedToUserId == userID && OwnerDay.activeStatuses.contains($0.status) && !todayIDs.contains($0.id)
+                    })
+            }()
         case .unscheduled: NeedsAttention.unscheduled(store.jobs)
         // The techs list reads addresses for the jobs people are on or heading to.
-        case .techs: OwnerDay.today(store.jobs) + store.jobs.filter { OwnerDay.activeStatuses.contains($0.status) && !OwnerDay.today(store.jobs).contains($0) }
+        case .techs:
+            {
+                let today = OwnerDay.today(store.jobs)
+                let todayIDs = Set(today.map(\.id))
+                return today + store.jobs.filter { OwnerDay.activeStatuses.contains($0.status) && !todayIDs.contains($0.id) }
+            }()
         default: []
         }
     }

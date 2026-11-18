@@ -111,7 +111,9 @@ struct DocumentListRowContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(status.tone == .cancelled ? Theme.muted : Theme.foreground)
-                        .lineLimit(stacked ? nil : 2)
+                        // One line for the name beside the amount (a list of hundreds stays one row
+                        // per record); the reference and title may take two.
+                        .lineLimit(stacked ? nil : 1)
                         .fixedSize(horizontal: false, vertical: true)
                     if let subtitle, !subtitle.isEmpty {
                         Text(subtitle).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
@@ -123,7 +125,7 @@ struct DocumentListRowContent: View {
                         StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet)
                         if let meta, !meta.isEmpty {
                             Text("· \(meta)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                                .lineLimit(stacked ? nil : 2)
+                                .lineLimit(stacked ? nil : 1)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
