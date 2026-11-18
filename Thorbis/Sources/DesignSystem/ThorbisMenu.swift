@@ -434,6 +434,8 @@ struct ThorbisMenuRows: View {
     var customerFacing = false
     var carded = false
     var fieldMode = false
+    /// A row's press beginning and ending (see `MenuPressTravel`); nil where nothing scrolls under it.
+    var pressChanged: ((Bool) -> Void)? = nil
     let onSelect: (ThorbisMenuItem) -> Void
     @ScaledMetric(relativeTo: .body) private var glyphColumn: CGFloat = 24
     @ScaledMetric(relativeTo: .body) private var fieldGlyphColumn: CGFloat = 28
@@ -486,7 +488,7 @@ struct ThorbisMenuRows: View {
         return VStack(spacing: 0) {
             ForEach(rows) { item in
                 Button { onSelect(item) } label: { row(item, divided: item.id != firstID) }
-                    .buttonStyle(MenuRowPressStyle())
+                    .buttonStyle(MenuRowPressStyle(pressChanged: pressChanged))
                     .disabled(item.isDisabled)
                     .opacity(item.isDisabled ? 0.4 : 1)
             }
@@ -583,8 +585,15 @@ struct ThorbisMenuCard: View {
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.dismiss) private var dismiss
+    @State private var travel = MenuPressTravel()
 
     private var hasHeaderRow: Bool { title != nil || subtitle != nil || closeCircle }
+
+    /// A row's tap, unless the menu was scrolled under the finger (see `MenuPressTravel`).
+    private func choose(_ item: ThorbisMenuItem) {
+        guard !travel.scrolled else { return }
+        onSelect(item)
+    }
 
     /// A touch over the real height on purpose: a short estimate would make a menu that fits scroll.
     private var estimatedHeight: CGFloat {
@@ -647,7 +656,7 @@ struct ThorbisMenuCard: View {
             if let sheetHeader { sheetHeader }
             if let lead { leadCard(lead) }
             ThorbisMenuRows(items: items, customerFacing: customerFacing, carded: true, fieldMode: fieldMode,
-                            onSelect: onSelect)
+                            pressChanged: { travel.pressChanged($0) }, onSelect: choose)
             if !closeCircle {
                 Button { dismiss() } label: {
                     Text("Close").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
@@ -662,6 +671,7 @@ struct ThorbisMenuCard: View {
         // Paper: 20 from the edges under a title and a Close pill (21K), 16 with the close circle (F8).
         .padding(.horizontal, closeCircle ? PaperCardMetrics.margin : Theme.gutter)
         .padding(.top, regularWidth ? 20 : 24).padding(.bottom, 12)
+        .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { travel.position = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title ?? "Menu")
         .accessibilityAction(.escape) { dismiss() }
@@ -725,11 +735,41 @@ struct ThorbisMenuCard: View {
 /// where the row floats inside a padded card).
 struct MenuRowPressStyle: ButtonStyle {
     var radius: CGFloat = 0
+    var pressChanged: ((Bool) -> Void)? = nil
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(configuration.isPressed ? Theme.foreground.opacity(0.08) : Color.clear,
                         in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .onChange(of: configuration.isPressed) { _, pressed in pressChanged?(pressed) }
+    }
+}
+
+/// How far a sheet menu's rows have moved since a press began. A press that rests on a row and
+/// then scrolls the menu (or drags the sheet taller) is not cancelled: the row stays pressed, moves
+/// with the finger, and would be chosen when the finger lifts. The sheet compares where its rows
+/// were when the press began with where they are when the row reports its tap, and lets a tap
+/// through only when they have not moved. A plain class: it changes on every scrolled point and
+/// nothing draws from it.
+@MainActor final class MenuPressTravel {
+    /// The rows' top edge on screen, now.
+    var position: CGFloat = 0
+    /// The same edge when the current press began; nil with no press (a VoiceOver activation).
+    private var pressedAt: CGFloat?
+
+    func pressChanged(_ pressed: Bool) {
+        if pressed {
+            pressedAt = position
+        } else {
+            // The tap, when there is one, is reported in this same turn; forget the press after it.
+            Task { @MainActor [weak self] in self?.pressedAt = nil }
+        }
+    }
+
+    /// The rows moved under the finger: this was a scroll, not a choice.
+    var scrolled: Bool {
+        guard let pressedAt else { return false }
+        return abs(position - pressedAt) > 10
     }
 }
 
