@@ -60,7 +60,7 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         }
     }
 
-    /// The invite's Role select sits in the upper half: its menu opens downward, fully on screen.
+    /// The invite's Role row opens the role sheet (Paper 14B), fully on screen.
     func testInviteRoleSelectStaysOnScreen() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -73,14 +73,15 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         let up = Date().addingTimeInterval(5)
         while !app.keyboardShowing && Date() < up { usleep(200_000) }
         select.tap()
-        let row = app.buttons["Office manager"]
+        // Paper 14B: the roles open as their own sheet ("Office" is the office manager).
+        let row = app.buttons["role-picker-office_manager"]
         XCTAssertTrue(row.waitForExistence(timeout: 5), app.debugDescription)
         expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: row)
         waitForExpectations(timeout: 5)
         XCTAssertTrue(app.windows.firstMatch.frame.contains(row.frame), "\(row.frame)")
         // The email field has focus on appear; opening the select puts the keyboard away so the
         // menu's last rows aren't hidden behind it.
-        XCTAssertTrue(app.waitForKeyboardToHide(timeout: 5), "The keyboard goes away when a menu opens")
+        XCTAssertTrue(app.waitForKeyboardToHide(timeout: 5), "The keyboard goes away when the role sheet opens")
         attach(app, "Role menu open")
     }
 

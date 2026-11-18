@@ -889,6 +889,7 @@ struct RootView: View {
         case "estimate-detail", "estimate-draft-detail": previewPlace(.estimates, then: .estimate(PaperPreview.estimate.id))
         case "reports": previewPlace(.reports)
         case "scorecard": previewPlace(.scorecard)
+        case "team-goals": previewPlace(.team, then: .teamGoals)
         case "billing": previewPlace(.billing)
         case "notices", "notice-log": previewPlace(.notices)
         case "time-clock": previewPlace(.timeClock)

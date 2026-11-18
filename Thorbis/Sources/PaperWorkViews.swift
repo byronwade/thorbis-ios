@@ -1061,15 +1061,22 @@ struct JobsView: View {
                 }
                 .paperCardMargin()
                 // Paper 20B: saved views as chips under the field, then "Save this view".
+                // Paper shows one or the other: the view chips (leading with "My jobs", then All jobs
+                // and Recent so both stay a tap away) or, with no saved views, the segments.
                 if canUseViews && (!viewEntries.isEmpty || canSaveView) {
                     JobSavedViewChips(entries: viewEntries, favorites: savedViews.favorites,
                                       selectedID: selectedViewID, showsSave: canSaveView,
                                       onPick: { pick($0) }, onSave: { showSaveView = true },
-                                      onManage: { showSavedViews = true })
+                                      onManage: { showSavedViews = true },
+                                      builtIn: [(id: "Assigned", title: "My jobs"), (id: "All jobs", title: "All jobs"),
+                                                (id: "Recent", title: "Recent")],
+                                      selectedBuiltIn: tab,
+                                      onBuiltIn: { choice in withMotion { tab = choice } })
+                        .padding(.top, 16)
+                } else {
+                    PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                         .padding(.top, 16)
                 }
-                PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
-                    .padding(.top, 16)
                 OfflineBanner()
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let problem = swipes.problem { ErrorBanner(message: problem) }
