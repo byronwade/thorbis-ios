@@ -115,28 +115,41 @@ struct CantStartSheet: View {
     @State private var photos: [UIImage] = []
     @State private var showCamera = false
 
+    /// Paper F3A sets its tiles and note one step off the sheet. On the app's sheet panel that
+    /// step is ink at 6%, the tone Paper's own sheets give their cards (25 Schedule, 26A New contact).
+    private static let cardTone = Theme.foreground.opacity(0.06)
+
     private var canSend: Bool { session.can("job.edit", feature: "jobs") }
     private var canPhoto: Bool { JobPhotoAttach.canAttach(session) && UIImagePickerController.isSourceTypeAvailable(.camera) }
 
     var body: some View {
         // Paper F3A: Cancel is the pill beside the centred title; only Tell dispatch sits at the bottom.
         ThorbisModalSheet(title: "Can\u{2019}t start", closeLabel: "Cancel", onClose: busy ? nil : { onDone(nil) },
-                          closeStyle: .headerPill, detents: [.large], commitTitle: "Tell dispatch", busy: busy,
+                          closeStyle: .headerPill, detents: [.height(640), .large], commitTitle: "Tell dispatch", busy: busy,
                           commitDisabledReason: canSend ? nil : "Your role can\u{2019}t send this to dispatch. Call your office.",
                           commitIdentifier: "cant-start-commit", commit: { attemptSend() }) {
             ThorbisSheetField(label: "What\u{2019}s stopping you?", error: reasonProblem) {
                 reasonGrid
             }
             if canPhoto || !photos.isEmpty { photoRow }
-            ThorbisSheetField(label: "Note", error: noteProblem ?? error) {
-                TextField("Note", text: $note,
-                          prompt: .placeholder("Knocked and called twice. Gate code worked, no answer at the door."),
-                          axis: .vertical)
-                    .font(Theme.font(16)).lineLimit(2...6)
-                    .fieldWell()
-                    .onChange(of: note) { _, _ in noteProblem = nil }
-                    .accessibilityLabel("Note")
-                    .accessibilityIdentifier("cant-start-note")
+            // Paper F3A: the note is one card, its label in 13 muted over the words in 16.
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Note").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .accessibilityHidden(true)
+                    TextField("Note", text: $note,
+                              prompt: .placeholder("Knocked and called twice. Gate code worked, no answer at the door."),
+                              axis: .vertical)
+                        .font(Theme.font(16)).lineLimit(2...6)
+                        .tint(Theme.brand)
+                        .onChange(of: note) { _, _ in noteProblem = nil }
+                        .accessibilityLabel("Note")
+                        .accessibilityIdentifier("cant-start-note")
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Self.cardTone, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                if let problem = noteProblem ?? error { FieldProblem(message: problem) }
             }
             footer
         }
@@ -173,11 +186,7 @@ struct CantStartSheet: View {
             reasonProblem = nil
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: reason.symbol)
-                    .font(.system(size: 16, weight: .regular))
-                    .foregroundStyle(isOn ? Theme.brandText : Theme.muted)
-                    .frame(width: 20, height: 20)
-                    .accessibilityHidden(true)
+                PaperIcon(glyph(reason), size: 20, color: isOn ? Theme.brandText : Theme.muted)
                 Text(reason.label)
                     .font(Theme.font(15, weight: isOn ? .semibold : .medium))
                     .foregroundStyle(isOn ? Theme.brandText : Theme.foreground)
@@ -187,7 +196,7 @@ struct CantStartSheet: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .background(isOn ? Theme.brandSurface : Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(isOn ? Theme.brandSurface : Self.cardTone, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay {
                 if isOn {
                     RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.brand, lineWidth: 1.5)
@@ -199,6 +208,16 @@ struct CantStartSheet: View {
         .disabled(busy)
         .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("cant-start-reason-\(reason.rawValue)")
+    }
+
+    /// Paper F3A's own 20pt glyph for each reason.
+    private func glyph(_ reason: CantStartReason) -> PaperGlyph {
+        switch reason {
+        case .noOneHome: .cantStartHome
+        case .wrongPart: .cantStartPart
+        case .unsafe: .cantStartUnsafe
+        case .needsApproval: .cantStartApproval
+        }
     }
 
     // MARK: Photos
@@ -216,13 +235,13 @@ struct CantStartSheet: View {
                 if canPhoto {
                     Button { showCamera = true } label: {
                         VStack(spacing: 4) {
-                            Image(systemName: "plus").font(.system(size: 18, weight: .medium)).accessibilityHidden(true)
+                            PaperIcon(.cantStartPlus, size: 22, color: Theme.foreground)
                             Text("Photo").font(Theme.font(13, weight: .semibold))
                         }
                         .foregroundStyle(Theme.foreground)
                         .frame(width: 96, height: 96)
                         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .strokeBorder(Theme.border, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
+                            .strokeBorder(Theme.borderStrong, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])))
                         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     }
                     .buttonStyle(PressStyle())

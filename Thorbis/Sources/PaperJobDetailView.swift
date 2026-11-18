@@ -444,9 +444,19 @@ struct JobDetailView: View {
                 showAtAddress = true
                 return
             }
-            guard opensAssign || opensPause else { return }
+            // The job's other sheets, each by its own preview name.
+            let sheetNames = ["job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule"]
+            guard opensAssign || opensPause || sheetNames.contains(PaperPreview.screen) else { return }
             try? await Task.sleep(for: .seconds(1.5))
-            if opensAssign { showAssign = true } else { showPause = true }
+            switch PaperPreview.screen {
+            case "job-add-contact": showAddContact = true
+            case "job-running-late": showRunningLate = true
+            case "job-cant-start": showCantStart = true
+            case "job-checklist": showChecklist = true
+            case "job-scan": showScan = true
+            case "job-reschedule": showSchedule = true
+            default: if opensAssign { showAssign = true } else { showPause = true }
+            }
             #endif
         }
         .task(id: job?.status) {
@@ -639,7 +649,7 @@ struct JobDetailView: View {
         } }
         .sheet(isPresented: $showSchedule, onDismiss: { Task { await load() } }) { SheetSurface {
             if let job {
-                JobScheduleView(job: job) { updatedJob in
+                JobScheduleView(job: job, compact: true) { updatedJob in
                     self.job = updatedJob
                 }
             }
@@ -843,6 +853,7 @@ struct JobDetailView: View {
                 // "Full job details" card, a close circle and field mode's larger rows.
                 ThorbisMenu(items: moreMenuItems(job),
                             title: inField(job) ? menuTitle(job) : "More", accessibilityLabel: "Job actions",
+                            opensOnAppear: Self.previewOpensMoreMenu,
                             presentation: .sheet,
                             subtitle: menuSubtitle(job),
                             lead: fullDetailsLead(job),
@@ -1472,6 +1483,15 @@ struct JobDetailView: View {
                 .accessibilityLabel("Directions, no address on file")
                 .accessibilityIdentifier("job-directions")
         }
+    }
+
+    /// Screenshot-only (`--paper-preview-screen job-more`): Paper 21K opens over the job.
+    private static var previewOpensMoreMenu: Bool {
+        #if DEBUG
+        PaperPreview.enabled && PaperPreview.screen == "job-more"
+        #else
+        false
+        #endif
     }
 
     /// Screenshot-only (`--paper-preview-status-menu`): the status popover opens on its chip.

@@ -121,19 +121,25 @@ struct JobChecklistSheet: View {
                             .padding(.horizontal, 4).padding(.top, 8)
                     }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
-            .background(Theme.canvas)
+            .background(Theme.background)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                // Paper 21F: the bar is the 44pt back circle alone. "Start over" is behind More.
                 ThorbisToolbarItem(placement: .topBarLeading) {
-                    Button(finished ? "Done" : "Close", action: onDone)
+                    PaperCircleButton(symbol: "chevron.left", label: finished ? "Done" : "Close", size: 44, fill: Theme.card, action: onDone)
                         .accessibilityHint(finished ? "" : "Progress stays on this phone.")
                         .accessibilityIdentifier("checklist-close")
                 }
                 if run != nil, !finished {
-                    ThorbisToolbarItem(placement: .topBarTrailing) { Button("Start over") { confirmRestart = true } }
+                    ThorbisToolbarItem(placement: .topBarTrailing) {
+                        ThorbisMenu(items: [ThorbisMenuItem("Start over", icon: "arrow.counterclockwise", role: .destructive) { confirmRestart = true }],
+                                    accessibilityLabel: "Checklist actions") {
+                            PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                        }
+                    }
                 }
                 ThorbisKeyboardDoneBar { focused = nil }
             }
@@ -177,6 +183,8 @@ struct JobChecklistSheet: View {
                 run = previewRun ?? JobChecklistStore.run(jobID: jobID, session: session)
             }
         }
+        // Paper 21F is a page: cards on the page's ground, not on the sheet's panel.
+        .paperPageGround()
     }
 
     /// "AC repair · 5 of 8 done" while a run is open; what to do otherwise.
@@ -241,7 +249,7 @@ struct JobChecklistSheet: View {
                             .symbolRenderingMode(.palette)
                             .foregroundStyle(Theme.background, Theme.statusDone)
                     } else {
-                        Circle().strokeBorder(Theme.foreground.opacity(0.4), lineWidth: 1.5).frame(width: 28, height: 28)
+                        Circle().strokeBorder(Theme.borderStrong, lineWidth: 1.5).frame(width: 28, height: 28)
                     }
                 }
                 .frame(width: 44, height: 44).contentShape(Rectangle())

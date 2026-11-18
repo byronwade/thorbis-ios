@@ -219,6 +219,7 @@ struct CustomerContactSheet: View {
     let onSaved: (CustomerContactRecord) -> Void
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
+    @EnvironmentObject var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var role = ""
@@ -280,27 +281,23 @@ struct CustomerContactSheet: View {
         return contact == nil ? draft.makeRequest() != nil : draft.makeUpdateRequest() != nil
     }
 
+    /// Paper 26A "New contact": a back circle and the 22 Bold title, Name and Phone on quiet
+    /// 50pt fields (the one being typed in ringed in brand), the role as 40pt chips, "Add email"
+    /// on its own card, then the commit and where the contact lands.
     var body: some View {
-        VStack(spacing: 14) {
-            Capsule().fill(Theme.border)
-                .frame(width: 36, height: 4)
-                .padding(.top, 10)
-
-            ZStack {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                PaperCircleButton(symbol: "chevron.left",
+                                  label: contact == nil ? "Cancel new contact" : "Cancel contact changes",
+                                  size: 44, fill: Theme.quietFill) { dismiss() }
+                    .disabled(busy)
                 Text(contact == nil ? "New contact" : "Edit contact")
-                    .font(Theme.font(17, weight: .medium))
-                // MA-16: Cancel leading; the one commit is the ink button at the bottom.
-                HStack {
-                    Button("Cancel") { dismiss() }
-                        .font(Theme.font(15))
-                        .foregroundStyle(Theme.foreground)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityLabel(contact == nil ? "Cancel new contact" : "Cancel contact changes")
-                        .disabled(busy)
-                    Spacer()
-                }
+                    .font(Theme.font(22, weight: .bold)).tracking(-0.44)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityAddTraits(.isHeader)
             }
-            .frame(height: 40)
+            .padding(.top, 14).padding(.bottom, 4)
             .onChange(of: name) { _, _ in nameProblem = nil }
 
             ScrollView {
@@ -309,118 +306,129 @@ struct CustomerContactSheet: View {
                     if let nameProblem { FieldProblem(message: nameProblem).padding(.top, -8) }
                     contactField("Phone", placeholder: "(555) 555-5555", text: $phone, field: .phone)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Role")
-                            .font(Theme.font(13, weight: .medium))
-                            .foregroundStyle(Theme.muted)
-                        FlowRow(spacing: 6, lineSpacing: 0) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        fieldLabel("Role")
+                        FlowRow(spacing: 8, lineSpacing: 4) {
                             ForEach(Self.roles, id: \.self) { option in
                                 roleChip(option, selected: !usesCustomRole && role == option) {
-                                    role = option
+                                    // A second tap takes the role off again.
+                                    role = role == option && !usesCustomRole ? "" : option
                                     customRole = ""
                                     usesCustomRole = false
                                 }
                             }
-                        }
-                        if usesCustomRole {
-                            contactField("Custom role", placeholder: "Service manager", text: $customRole, field: .customRole)
-                                .padding(.top, 2)
-                        } else {
-                            Button("Enter custom role") {
+                            // Any other role ("Service manager") is typed in.
+                            roleChip("Other", selected: usesCustomRole) {
                                 role = ""
-                                usesCustomRole = true
+                                usesCustomRole.toggle()
+                                if usesCustomRole { focusedField = .customRole } else { customRole = "" }
                             }
-                            .font(Theme.font(12, weight: .medium))
-                            .foregroundStyle(Theme.brandText)
+                        }
+                        .padding(.vertical, -2)
+                        if usesCustomRole {
+                            contactField(nil, placeholder: "Service manager", text: $customRole, field: .customRole)
                         }
                     }
 
                     if showsEmail {
-                        HStack(alignment: .center, spacing: 8) {
+                        HStack(alignment: .bottom, spacing: 8) {
                             contactField("Email", placeholder: "name@example.com", text: $email, field: .email)
-                            Button {
+                            PaperCircleButton(symbol: "xmark", label: "Remove email", size: 44, fill: Theme.quietFill) {
                                 email = ""
                                 showsEmail = false
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(Theme.font(12, weight: .medium))
-                                    .foregroundStyle(Theme.muted)
-                                    .frame(width: 44, height: 46)
                             }
-                            .accessibilityLabel("Remove email")
-                            .padding(.top, 20)
+                            .padding(.bottom, 3)
                         }
                     } else {
                         Button {
                             showsEmail = true
                             focusedField = .email
                         } label: {
-                            Text("+ Add email")
-                                .font(Theme.font(15, weight: .medium))
-                                .foregroundStyle(Theme.brandText)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            HStack(spacing: 10) {
+                                PaperIcon(.jobPlus, size: 18, color: Theme.brandText)
+                                Text("Add email").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.brandText)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.leading, 16).padding(.trailing, 14)
+                            .frame(maxWidth: .infinity, minHeight: 56)
+                            .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressStyle())
+                        .padding(.top, 2)
                     }
                 }
-                .padding(.bottom, 4)
+                .padding(.top, 14).padding(.bottom, 4)
             }
+            .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
             .disabled(busy)
 
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 if let error {
                     Text(error)
                         .font(Theme.font(13))
                         .foregroundStyle(Theme.destructive)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Button { Task { await save() } } label: {
-                    Group {
+                    HStack(spacing: 8) {
                         if busy { ProgressView().tint(.white) }
-                        else { Text(contact == nil ? "Save contact" : "Save changes") }
+                        Text(contact == nil ? "Save contact" : "Save changes").font(Theme.font(16, weight: .semibold))
                     }
-                    .inkCommit(enabled: saveBlockedReason == nil)
+                    .foregroundStyle(Color.white)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Theme.brand.opacity(saveBlockedReason == nil ? 1 : 0.5), in: Capsule())
+                    .contentShape(Capsule())
                 }
                 .buttonStyle(PressStyle())
                 // Never pre-disabled for a blank name (pressing says so under it); off only while
                 // saving or when this role can't change contacts, which the sentence below says.
                 .disabled(busy || saveBlockedReason != nil)
+                .accessibilityIdentifier("contact-save")
                 // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
                 if !busy, let reason = saveBlockedReason {
                     Text(reason).font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if contact == nil {
-                    Text("The first contact is set as primary automatically.")
-                        .font(Theme.font(12))
+                } else if contact == nil, let account = accountName {
+                    // Paper 26A: "Added to Marlowe residence".
+                    Text("Added to \(account)")
+                        .font(Theme.font(13))
                         .foregroundStyle(Theme.muted)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.horizontal, 4).padding(.top, 12)
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 16)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
-        .presentationDetents([.height(600), .large])
-        .presentationDragIndicator(.hidden)
-        .presentationCornerRadius(Theme.cardRadius)
-        .thorbisSheetSurface()
+        .thorbisSheetPresentation([.height(showsEmail || usesCustomRole ? 640 : 560), .large])
         .interactiveDismissDisabled(busy)
     }
 
-    private func contactField(_ title: String, placeholder: String, text: Binding<String>, field: ContactField) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.muted)
-            TextField(placeholder, text: text, prompt: .placeholder(placeholder))
+    /// The account the contact joins, when this phone knows its name.
+    private var accountName: String? {
+        let name = store.customerName(customerID)
+        return name == "Customer" ? nil : name
+    }
+
+    /// Paper 26A's field label: 13 Semibold muted, 4 in from the field's edge.
+    private func fieldLabel(_ title: String) -> some View {
+        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, 4)
+    }
+
+    private func contactField(_ title: String?, placeholder: String, text: Binding<String>, field: ContactField) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title { fieldLabel(title) }
+            TextField(title ?? "Custom role", text: text, prompt: .placeholder(placeholder))
                 // design.thorbis.com mobile: input type is at least 16.
-                .font(field == .phone ? Theme.monoFont(16) : Theme.font(16))
+                .font(Theme.font(16))
                 .keyboardType(field == .phone ? .phonePad : field == .email ? .emailAddress : .default)
                 .textInputAutocapitalization(field == .email || field == .phone ? .never : .words)
                 .autocorrectionDisabled()
@@ -431,13 +439,14 @@ struct CustomerContactSheet: View {
                 .onSubmit {
                     if let next = nextField(after: field) { focusedField = next } else { Task { await save() } }
                 }
+                .tint(Theme.brand)
                 .padding(.horizontal, 14)
-                .frame(minHeight: 48)
-                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+                .frame(minHeight: 50)
+                .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .stroke(focusedField == field ? Theme.foreground : Theme.border,
-                                lineWidth: focusedField == field ? 1.5 : 1)
+                    if focusedField == field {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.brand, lineWidth: 1.5)
+                    }
                 }
         }
     }
@@ -451,19 +460,23 @@ struct CustomerContactSheet: View {
         }
     }
 
+    /// Paper 26A's role chip: the sheet chip (40 tall, 14 Medium on ink at 9%); chosen, a 12pt
+    /// tick and 14 Semibold brand text on brand at 24%.
     private func roleChip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                if selected { Image(systemName: "checkmark").font(.system(size: 12, weight: .medium)) }
-                Text(title).font(Theme.font(13, weight: .medium))
+            HStack(spacing: 6) {
+                if selected { PaperIcon(.contactTick, size: 12, color: Theme.brandText) }
+                Text(title).font(Theme.font(14, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
+                    .lineLimit(1)
             }
-            .foregroundStyle(selected ? Theme.onInk : Theme.muted)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(selected ? Theme.ink : Theme.fill, in: Capsule())
+            .padding(.leading, selected ? 12 : 14).padding(.trailing, 14)
+            .frame(minHeight: 40)
+            .background(selected ? Theme.brandTint : Theme.quietFill, in: Capsule())
             .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
