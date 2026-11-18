@@ -712,32 +712,9 @@ private struct LocalWorkspaceEditor: View {
     }
 
     private var header: some View {
-        ZStack {
-            Text(isNew ? section.addTitle : section.editTitle).font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 100)
-            HStack {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                Spacer(minLength: 8)
-                // Never pre-disabled: pressed with a required field empty, it says which under it.
-                Button { save() } label: {
-                    Text("Save").font(Theme.font(16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        // Never pre-disabled: pressed with a required field empty, it says which under it.
+        PaperTaskBar(title: isNew ? section.addTitle : section.editTitle,
+                     commit: ThorbisSheetHeaderAction(title: "Save") { save() }) { dismiss() }
     }
 
     private func save() {

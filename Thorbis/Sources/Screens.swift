@@ -75,7 +75,7 @@ struct CustomerPickerSheet: View {
                 Button { dismiss() } label: {
                     Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.field, in: Capsule())
+                        .background(Theme.card, in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(PressStyle())

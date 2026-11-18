@@ -242,49 +242,17 @@ struct EquipmentEditor: View {
 
     /// Paper's title row: Cancel on a card pill, the title, Save on the brand pill.
     private var header: some View {
-        ZStack {
-            Text(existing == nil ? "Add equipment" : (existing?.name ?? "Equipment")).font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 100)
-            HStack {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy)
-                Spacer(minLength: 8)
-                Button {
-                    // Pressed without a name, it says so under the field.
-                    if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        nameProblem = Self.nameMissing
-                        nameFocused = true
-                    } else {
-                        Task { await save() }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        if busy { ProgressView().tint(.white) }
-                        Text("Save").font(Theme.font(16, weight: .semibold)).lineLimit(1).fixedSize()
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18).frame(minHeight: 44)
-                    .background(Theme.brand, in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy)
-                .accessibilityLabel(existing == nil ? "Add equipment" : "Save equipment")
-                .accessibilityIdentifier("equipment-commit")
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
-        // A title row is a bar: it stops growing at xLarge so the pills never break mid-word and
-        // the title keeps its room. The form under it follows the reader's text size in full.
-        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        PaperTaskBar(title: existing == nil ? "Add equipment" : (existing?.name ?? "Equipment"), cancelDisabled: busy,
+                     commit: ThorbisSheetHeaderAction(title: "Save", busy: busy, identifier: "equipment-commit",
+                                                      accessibilityLabel: existing == nil ? "Add equipment" : "Save equipment") {
+                         // Pressed without a name, it says so under the field.
+                         if input.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                             nameProblem = Self.nameMissing
+                             nameFocused = true
+                         } else {
+                             Task { await save() }
+                         }
+                     }) { dismiss() }
     }
 
     /// One Paper card: the card tone, radius 20, rows separated by an inset hairline.

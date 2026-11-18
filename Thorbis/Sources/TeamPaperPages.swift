@@ -168,20 +168,7 @@ struct MemberOffboardSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack {
-                Text("Offboard").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .accessibilityAddTraits(.isHeader)
-                HStack {
-                    Button { dismiss() } label: {
-                        Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 16).frame(minHeight: 44)
-                            .background(Theme.card, in: Capsule())
-                    }
-                    .buttonStyle(PressStyle())
-                    Spacer(minLength: 0)
-                }
-            }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14)
+            PaperTaskBar(title: "Offboard") { dismiss() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .center, spacing: 12) {

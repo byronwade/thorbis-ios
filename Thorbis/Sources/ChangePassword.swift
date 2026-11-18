@@ -141,38 +141,10 @@ struct ChangePasswordSheet: View {
     // MARK: Header
 
     private var header: some View {
-        ZStack {
-            Text("Change password").font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 96)
-            HStack {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(saving)
-                .accessibilityIdentifier("change-password-cancel")
-                Spacer(minLength: 8)
-                Button { Task { await save() } } label: {
-                    HStack(spacing: 6) {
-                        if saving { ProgressView().tint(.white) }
-                        Text("Save").font(Theme.font(16, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18).frame(minHeight: 44)
-                    .background(Theme.brand, in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(saving)
-                .accessibilityIdentifier("change-password-save")
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        PaperTaskBar(title: "Change password", cancelDisabled: saving, cancelIdentifier: "change-password-cancel",
+                     commit: ThorbisSheetHeaderAction(title: "Save", busy: saving, identifier: "change-password-save") {
+                         Task { await save() }
+                     }) { dismiss() }
     }
 
     // MARK: Cards

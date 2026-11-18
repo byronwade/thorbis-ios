@@ -1211,22 +1211,7 @@ private struct CommsNewMessageSheet: View {
 
     /// Paper's task bar: Cancel on a card pill, the title centred, nothing trailing.
     private var taskBar: some View {
-        ZStack {
-            Text("New message").font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).accessibilityAddTraits(.isHeader)
-            HStack {
-                Button(action: onClose) {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
-        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        PaperTaskBar(title: "New message", onCancel: onClose)
     }
 
     /// "To" in the muted ink (16, 44 wide) and the name or number at 17 Medium, 54 tall.

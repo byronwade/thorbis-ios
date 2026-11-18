@@ -45,29 +45,9 @@ struct RolePickerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 8) {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.foreground.opacity(0.08), in: Capsule())
-                }
-                .buttonStyle(PressStyle())
-                Spacer(minLength: 0)
-                Button { onDone(picked); dismiss() } label: {
-                    Text("Done").font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("role-picker-done")
-            }
-            .overlay {
-                Text("Choose a role").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, 96)
-            }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 18).padding(.bottom, 12)
+            PaperTaskBar(title: "Choose a role",
+                         commit: ThorbisSheetHeaderAction(title: "Done", identifier: "role-picker-done") { onDone(picked); dismiss() }) { dismiss() }
+                .padding(.bottom, 10)
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(Self.roles.enumerated()), id: \.element.id) { index, role in

@@ -103,32 +103,10 @@ struct InviteMemberSheet: View {
     /// the role with what it can do and how the invite is sent. The commit is never pre-disabled.
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 8) {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy)
-                Spacer(minLength: 4)
-                Text("Invite member").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 4)
-                Button { Task { await press() } } label: {
-                    HStack(spacing: 6) {
-                        if busy { ProgressView().tint(.white) }
-                        Text("Send invite").font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
-                    }
-                    .padding(.horizontal, 18).frame(minHeight: 44)
-                    .background(Theme.brand, in: Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy)
-                .accessibilityIdentifier("team-invite-send")
-            }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 18)
+            PaperTaskBar(title: "Invite member", cancelDisabled: busy,
+                         commit: ThorbisSheetHeaderAction(title: "Send invite", busy: busy, identifier: "team-invite-send") {
+                             Task { await press() }
+                         }) { dismiss() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     TeamCard {
