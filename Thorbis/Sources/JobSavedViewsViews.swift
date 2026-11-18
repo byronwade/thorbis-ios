@@ -162,7 +162,7 @@ struct JobSavedViewSaveSheet: View {
                 FlowRow(spacing: 6, lineSpacing: 6) {
                     ForEach(JobSavedViewMapping.summary(choices, me: session.user?.id, techName: { roster[$0] }), id: \.self) { word in
                         Text(word).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.subtle)
-                            .padding(.horizontal, 10).frame(minHeight: 30)
+                            .padding(.horizontal, 10).frame(minHeight: PaperControl.statusHeight)
                             .background(Theme.fill, in: Capsule())
                     }
                 }

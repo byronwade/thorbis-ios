@@ -131,7 +131,7 @@ struct WorkflowsView: View {
                     StatusWord(text: state, tint: item.isOn ? Theme.statusDone : nil)
                 }
                 if item.destination != nil {
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    PaperChevron()
                         .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 }
             }

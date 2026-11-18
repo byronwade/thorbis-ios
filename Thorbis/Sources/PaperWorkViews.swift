@@ -1665,7 +1665,7 @@ private struct FinishSetupCard: View {
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+            PaperChevron()
                 .foregroundStyle(Theme.muted).accessibilityHidden(true)
         }
         .padding(.horizontal, 16).padding(.vertical, 8)

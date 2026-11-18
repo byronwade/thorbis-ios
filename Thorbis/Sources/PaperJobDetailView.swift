@@ -2723,7 +2723,7 @@ struct JobDetailView: View {
                             Text("Call \(customerCallName(job))").font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 8)
-                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                            PaperChevron()
                                 .accessibilityHidden(true)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 10)

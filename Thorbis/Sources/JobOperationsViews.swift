@@ -1502,7 +1502,7 @@ struct JobScheduleView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text(assigneeWords).font(Theme.font(16)).foregroundStyle(Theme.muted)
                     .lineLimit(1)
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                PaperChevron()
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, PaperCardMetrics.inset)

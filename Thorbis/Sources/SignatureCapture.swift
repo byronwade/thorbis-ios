@@ -156,10 +156,10 @@ struct SignatureCaptureSheet: View {
                 .focused($nameFocused)
                 .textContentType(.name)
                 .submitLabel(.done)
-                .font(Theme.font(17))
-                .padding(.horizontal, 14)
-                .frame(minHeight: 48)
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .font(Theme.font(16))
+                .padding(.horizontal, 16)
+                .frame(minHeight: PaperControl.fieldHeight)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: PaperControl.fieldRadius, style: .continuous))
         }
         .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 22)
         HStack(alignment: .center) {

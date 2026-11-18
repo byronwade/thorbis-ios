@@ -1761,10 +1761,10 @@ struct PaperLabeledCircle: View {
 /// the card on the canvas; inside a sheet (already the card) it is the field fill.
 struct FieldWell: ViewModifier {
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: PaperControl.fieldRadius, style: .continuous)
         content
             .padding(.horizontal, 16).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: PaperControl.fieldHeight, alignment: .leading)
             .background(ThorbisPanelStyle(), in: shape)
     }
 }

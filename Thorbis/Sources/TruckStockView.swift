@@ -403,7 +403,7 @@ private struct TruckStockItemView: View {
                 HStack(spacing: 8) {
                     if low {
                         Text("Low").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.warning)
-                            .padding(.horizontal, 10).frame(minHeight: 24)
+                            .padding(.horizontal, 10).frame(minHeight: PaperControl.statusHeight)
                             .background(Theme.warningSurface, in: Capsule())
                     }
                     Text("My truck \u{00B7} on this phone").font(Theme.font(15)).foregroundStyle(Theme.muted)

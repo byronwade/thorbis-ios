@@ -346,7 +346,7 @@ struct MaterialReviewRow: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
+                PaperChevron()
                     .foregroundStyle(Theme.muted).accessibilityHidden(true)
             }
             .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 16).padding(.vertical, 11)

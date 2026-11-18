@@ -381,7 +381,7 @@ struct MoneyOverviewView: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+            PaperChevron()
                 .foregroundStyle(Theme.muted).accessibilityHidden(true)
         }
         .padding(.horizontal, 12).padding(.vertical, 11)

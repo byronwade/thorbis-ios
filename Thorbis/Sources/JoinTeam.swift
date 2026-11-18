@@ -811,10 +811,7 @@ struct JoinWorkspaceView: View {
             Button {
                 if let pasted = UIPasteboard.general.string { link = pasted }
             } label: {
-                Text("Paste").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 14).frame(height: 40)
-                    .background(Theme.fill, in: Capsule())
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                Text("Paste").paperButton(.compact, tone: .quiet)
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("join-workspace-paste")
@@ -1177,10 +1174,7 @@ private struct JoinNotificationsRow: View {
     @ViewBuilder private var trailing: some View {
         if status == .notDetermined {
             Button { Task { await turnOn() } } label: {
-                Text("Turn on").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 14).frame(height: 36)
-                    .background(Theme.fill, in: Capsule())
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                Text("Turn on").paperButton(.compact, tone: .quiet)
             }
             .buttonStyle(PressStyle())
             .accessibilityLabel("Turn on notifications")

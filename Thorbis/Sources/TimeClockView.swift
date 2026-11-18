@@ -271,7 +271,8 @@ struct TimeClockStatusChip: View {
     }
 }
 
-/// A commit pill, 50 tall: the brand fill for the one main action, the card for the other.
+/// A commit pill from the ramp (50 tall, 16 Semibold): brand for the one main action, quiet for
+/// the other. `height` and `size` are kept so older call sites compile; the ramp decides.
 struct TimeClockPill: View {
     let title: String
     var primary = false
@@ -279,13 +280,7 @@ struct TimeClockPill: View {
     var size: CGFloat = 16
 
     var body: some View {
-        Text(title).font(Theme.font(size, weight: .semibold))
-            .foregroundStyle(primary ? Color.white : Theme.foreground)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: height)
-            .background(primary ? Theme.brand : Theme.card, in: Capsule())
-            .contentShape(Rectangle())
+        Text(title).paperButton(.commit, tone: primary ? .brand : .quiet, fills: true)
     }
 }
 
@@ -688,10 +683,10 @@ struct TimeClockView: View {
                         .accessibilityIdentifier("timeclock-fix-clock-out")
                 } else if active.openBreak != nil {
                     // Paper 27C: 56-tall pills in 17 Semibold.
-                    Button { model.perform { try $0.clockOut() } } label: { TimeClockPill(title: "Clock out", height: 56, size: 17) }
+                    Button { model.perform { try $0.clockOut() } } label: { TimeClockPill(title: "Clock out") }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("timeclock-clock-out")
-                    Button { model.perform { try $0.endBreak() } } label: { TimeClockPill(title: "End break", primary: true, height: 56, size: 17) }
+                    Button { model.perform { try $0.endBreak() } } label: { TimeClockPill(title: "End break", primary: true) }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("timeclock-end-break")
                 } else {

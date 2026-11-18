@@ -91,6 +91,8 @@ carry Paper's own values; build screens from them before writing a one-off.
 | Group label with count | `PaperCardLabel(title:count:)` or `countText: "4 jobs"` | `PaperPrimitives.swift` |
 | One card of rows | `PaperRowsCard { rows }` with `WellDivider(leading:)` between rows | `PaperPrimitives.swift` |
 | The blue pill / its tinted twin | `PaperPillLabel(title:glyph:height:tinted:)` | `PaperPrimitives.swift` |
+| Any other pill button (ramp: field 60 / commit 50 / card 48 / secondary 44 / compact 36; tones brand, tinted, quiet, danger, dangerQuiet) | `PaperButtonLabel(title:glyph:symbol:size:tone:fills:busy:)` or `.paperButton(_:tone:fills:)` on a custom label | `PaperPrimitives.swift` |
+| A status word (26 tall, 13 Semibold) / a row's chevron | `PaperStatusPill(text:ink:surface:)` / `PaperChevron()` | `PaperPrimitives.swift` |
 | Quiet 48pt round button (call, message) | `PaperRoundButton(glyph:label:action:)`, `PaperRoundLabel` | `PaperPrimitives.swift` |
 | Avatar chip (initials) | `PaperInitials(name:size:)` / `InitialsAvatar` | `PaperPrimitives.swift`, `StatusGlyph.swift` |
 | Status glyph (ring, half, check) | `StatusGlyph(tone:label:pending:size:)` | `StatusGlyph.swift` |

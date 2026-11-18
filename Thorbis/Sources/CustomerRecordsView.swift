@@ -360,7 +360,7 @@ struct CustomerRecordsView: View {
                         }
                     }
                     Spacer(minLength: 8)
-                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .medium))
+                    PaperChevron()
                         .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())

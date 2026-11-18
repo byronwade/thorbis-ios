@@ -154,13 +154,9 @@ struct EquipmentEditor: View {
                                 HStack(spacing: 6) {
                                     Image(systemName: "viewfinder").font(.system(size: 14, weight: .semibold))
                                         .accessibilityHidden(true)
-                                    Text("Scan data plate").font(Theme.font(14, weight: .semibold)).lineLimit(1)
+                                    Text("Scan data plate").lineLimit(1)
                                 }
-                                .foregroundStyle(Theme.brandText)
-                                .padding(.horizontal, 12).frame(height: 36)
-                                .background(Theme.fill, in: Capsule())
-                                .frame(minHeight: 44)
-                                .contentShape(Rectangle())
+                                .paperButton(.compact, tone: .tinted)
                             }
                             .buttonStyle(PressStyle())
                             .disabled(busy)

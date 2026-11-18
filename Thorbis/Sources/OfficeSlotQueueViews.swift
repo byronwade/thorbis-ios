@@ -176,11 +176,8 @@ struct OfficeSlotQueueList: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             Button { scheduling = review } label: {
-                Text("Schedule").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                    .lineLimit(1).fixedSize()
-                    .padding(.horizontal, 14).frame(minHeight: 40)
-                    .background(Theme.brandSurface, in: Capsule())
-                    .frame(minHeight: 44).contentShape(Rectangle())
+                // The same row action as the dispatch board's Assign / Schedule.
+                Text("Schedule").lineLimit(1).fixedSize().paperButton(.secondary, tone: .tinted)
             }
             .buttonStyle(PressStyle())
             .disabled(session.isOffline)

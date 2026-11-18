@@ -360,7 +360,7 @@ struct ChecklistTemplatesView: View {
             Button { editor = CloseoutCheckEditorRequest(check: check) } label: {
                 HStack(spacing: 8) {
                     label
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    PaperChevron()
                         .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 }
                 .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 14).padding(.vertical, 12)
@@ -468,7 +468,7 @@ struct ChecklistTemplatesView: View {
                     Button { openedTemplate = template } label: {
                         PaperListRow(title: template.title,
                                      subtitle: "\(template.items.count) step\(template.items.count == 1 ? "" : "s")") {
-                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                            PaperChevron()
                                 .foregroundStyle(Theme.muted).accessibilityHidden(true)
                         }
                     }

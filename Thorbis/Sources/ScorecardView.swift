@@ -212,7 +212,7 @@ struct ScorecardView: View {
             Text(value).font(Theme.monoFont(16, weight: .semibold)).moneyStyle(.row)
             if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted) }
         }
-        let chevron = Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+        let chevron = PaperChevron()
             .accessibilityHidden(true)
         // At accessibility sizes the label sits over its figure so neither breaks mid-word.
         let line = Group {
@@ -320,7 +320,7 @@ struct ScorecardTodayRow: View {
                             Text(ScorecardGoal.todayRow(sold: sold, goal: card.me.goal, currency: card.currency))
                                 .font(Theme.font(15, weight: .medium)).monospacedDigit()
                             Spacer()
-                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                            PaperChevron()
                                 .accessibilityHidden(true)
                         }
                         if let fraction = ScorecardGoal.fraction(sold: sold, goal: card.me.goal) {

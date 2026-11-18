@@ -48,7 +48,7 @@ struct SavedSignatureView: View {
                             Text(signature == nil ? "Draw signature" : "Redraw").font(Theme.font(16, weight: .semibold))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                            PaperChevron()
                                 .foregroundStyle(Theme.muted).accessibilityHidden(true)
                         }
                         .foregroundStyle(Theme.brandText)

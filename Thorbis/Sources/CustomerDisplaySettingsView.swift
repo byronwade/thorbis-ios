@@ -137,7 +137,7 @@ struct CustomerDisplaySettingsView: View {
 
     private func row(_ symbol: String, _ title: String, _ subtitle: String) -> some View {
         PaperListRow(leading: .icon(symbol), title: title, subtitle: subtitle, subtitleLines: 2) {
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+            PaperChevron()
                 .foregroundStyle(Theme.muted).accessibilityHidden(true)
         }
     }

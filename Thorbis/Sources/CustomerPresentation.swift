@@ -998,7 +998,7 @@ struct CustomerInvoicePresentation: View {
                             CustomerFinancingLine(example: example, type: type)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
+                        PaperChevron()
                             .foregroundStyle(Theme.muted).accessibilityHidden(true)
                     }
                     .foregroundStyle(Theme.foreground)

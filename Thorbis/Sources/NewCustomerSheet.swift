@@ -210,7 +210,7 @@ struct NewCustomerSheet: View {
                 Spacer(minLength: 8)
                 Text(source.isEmpty ? "Add" : source).font(Theme.font(16)).foregroundStyle(Theme.muted)
                     .lineLimit(1)
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                PaperChevron()
                     .foregroundStyle(Theme.muted).accessibilityHidden(true)
             }
             .padding(.horizontal, 16).frame(minHeight: 56).contentShape(Rectangle())

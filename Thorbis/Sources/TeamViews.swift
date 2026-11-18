@@ -559,7 +559,7 @@ private struct TeamInviteDetailView: View {
                 TeamDetailTitle(title: invitation.email) {
                     HStack(spacing: 8) {
                         Text("Invite pending").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.warning)
-                            .padding(.horizontal, 10).frame(minHeight: 24)
+                            .padding(.horizontal, 10).frame(minHeight: PaperControl.statusHeight)
                             .background(Theme.warningSurface, in: Capsule())
                         if let sent = TeamInviteCopy.sentShort(invitation) {
                             Text(sent).font(Theme.font(15)).foregroundStyle(Theme.muted)

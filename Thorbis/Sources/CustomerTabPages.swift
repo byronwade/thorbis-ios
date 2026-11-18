@@ -124,7 +124,7 @@ struct CustomerOpenJobCard: View {
             Text(tone == .inProgress && job.status != "paused" ? "Working" : job.status.statusLabel)
                 .font(Theme.font(13, weight: .semibold)).foregroundStyle(tone.text)
         }
-        .padding(.horizontal, 10).frame(minHeight: 30)
+        .padding(.horizontal, 10).frame(minHeight: PaperControl.statusHeight)
         .background(tone.surface, in: Capsule())
         let words = VStack(alignment: .leading, spacing: 0) {
             Text(job.title).font(Theme.font(17, weight: .semibold)).tracking(-0.17).foregroundStyle(Theme.foreground)

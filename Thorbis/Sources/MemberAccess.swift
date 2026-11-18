@@ -114,11 +114,9 @@ struct MemberAccessView: View {
                     Button { openURL(mail) } label: {
                         HStack(spacing: 8) {
                             PaperIcon(.teamEnvelope, size: 18, color: Theme.foreground)
-                            Text("Email").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            Text("Email")
                         }
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
+                        .paperButton(.card, tone: .quiet, fills: true)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Email \(member.member.displayName)")

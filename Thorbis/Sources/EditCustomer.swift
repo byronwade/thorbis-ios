@@ -515,7 +515,7 @@ struct EditCustomerSheet: View {
                     let source = EditCustomerDraft.clean(value.referralSource)
                     Text(source.isEmpty ? "Add" : source).font(Theme.font(16)).foregroundStyle(Theme.muted)
                         .lineLimit(1)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                    PaperChevron()
                         .foregroundStyle(Theme.subtle).accessibilityHidden(true)
                 }
                 .padding(.horizontal, 16).frame(minHeight: 56).contentShape(Rectangle())
@@ -960,11 +960,9 @@ struct ArchivedCustomersView: View {
                 Button { Task { await restore(customer) } } label: {
                     HStack(spacing: 6) {
                         if busy { ProgressView() }
-                        Text("Restore").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        Text("Restore")
                     }
-                    .padding(.horizontal, 16).frame(minHeight: 44)
-                    .background(Theme.fill, in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.secondary, tone: .quiet)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(restoring != nil)

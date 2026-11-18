@@ -701,7 +701,7 @@ private struct CustomerHomeDocumentRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             if !stacked, let amount { amountText(amount).fixedSize() }
             if chevron {
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
+                PaperChevron()
                     .foregroundStyle(Theme.muted).accessibilityHidden(true)
             }
         }
@@ -753,7 +753,7 @@ private struct CustomerHomeDetailsCard: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
+                    PaperChevron()
                         .foregroundStyle(Theme.muted).accessibilityHidden(true)
                 }
                 .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 12)

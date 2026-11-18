@@ -432,29 +432,14 @@ struct ThorbisSheetToggleRow: View {
 
 // MARK: - Chips
 
-/// A selectable capsule chip: a word on the well, filled with the ink when on. The reference
-/// sheet's "Row properties" grid.
+/// A selectable chip. Paper has one chip (20A: 40 tall, 14 Medium, brand tint when chosen), so
+/// this is `PaperChoiceChip` under its older name; kept so existing call sites read the same.
 struct ThorbisChipToggle: View {
     let label: String
     let isOn: Bool
     let action: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(isOn ? Theme.onInk : Theme.foreground)
-                .lineLimit(1).fixedSize()
-                .padding(.horizontal, 12).frame(minHeight: Theme.chipHeight)
-                .background(isOn ? Theme.ink : Theme.fill, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-                // 44pt to the finger, 28 to the eye.
-                .padding(.vertical, 8).contentShape(Rectangle()).padding(.vertical, -8)
-        }
-        .buttonStyle(PressStyle())
-        // A small spring as the chip fills (phase 4); a plain fade under Reduce Motion.
-        .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: isOn)
-        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+        PaperChoiceChip(title: label, isOn: isOn, action: action)
     }
 }
 

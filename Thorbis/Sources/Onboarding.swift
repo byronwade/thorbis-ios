@@ -861,7 +861,7 @@ struct CompanyDetailsForm: View {
                                 if OperatingFacts.offered(profile) {
                                     NavigationLink { OperatingDetailsView().thorbisBackButton() } label: {
                                         PaperListRow(leading: .icon("percent"), title: "Hours, tax and terms") {
-                                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium))
+                                            PaperChevron()
                                                 .foregroundStyle(Theme.muted).accessibilityHidden(true)
                                         }
                                     }
@@ -870,7 +870,7 @@ struct CompanyDetailsForm: View {
                                 }
                                 NavigationLink { CompanyFeaturesView().thorbisBackButton() } label: {
                                     PaperListRow(leading: .icon("square.grid.2x2"), title: "Plan and features") {
-                                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium))
+                                        PaperChevron()
                                             .foregroundStyle(Theme.muted).accessibilityHidden(true)
                                     }
                                 }

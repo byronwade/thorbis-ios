@@ -155,7 +155,7 @@ struct JobDocumentRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold))
+            PaperChevron()
                 .foregroundStyle(Theme.muted).accessibilityHidden(true)
         }
         .frame(minHeight: 48)

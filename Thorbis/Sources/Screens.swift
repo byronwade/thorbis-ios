@@ -105,9 +105,9 @@ struct CustomerPickerSheet: View {
                 .submitLabel(.search)
                 .autocorrectionDisabled()
         }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 48)
-        .background(Theme.field, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 16)
+        .frame(minHeight: PaperControl.fieldHeight)
+        .background(Theme.field, in: RoundedRectangle(cornerRadius: PaperControl.fieldRadius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .strokeBorder(Theme.brandText, lineWidth: searching ? 1.5 : 0))
     }

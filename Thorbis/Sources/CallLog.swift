@@ -132,7 +132,7 @@ struct CallLogList: View {
                 Text(CallLogRules.detail(call)).font(Theme.font(14)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+            PaperChevron()
                 .foregroundStyle(Theme.muted).padding(.top, 4).accessibilityHidden(true)
         }
         .padding(.horizontal, 16).padding(.vertical, 11)

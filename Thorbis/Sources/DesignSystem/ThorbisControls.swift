@@ -58,10 +58,8 @@ struct ThorbisSelect<Value: Hashable>: View {
                     Spacer(minLength: 8)
                     chevron
                 }
-                .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
-                // v2: a select is a well, the same sink as a text field.
-                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.border, lineWidth: 1))
+                // A select is a well with the text field's own measures (Paper "Picker": 50 tall, radius 14).
+                .fieldWell().contentShape(Rectangle())
             }
         }
     }
@@ -74,9 +72,10 @@ struct ThorbisSelect<Value: Hashable>: View {
 
 // MARK: - ThorbisSegmented (replaces a `.pickerStyle(.segmented)` `Picker`)
 
-/// A segmented control (Paper P3 / P6): a 14pt-radius track, 3pt inside it the chosen segment
-/// raised on an 11pt-radius tile; 14 Semibold when chosen, 14 Medium muted otherwise. For a small,
-/// fixed set of choices (two to four) shown side by side.
+/// A segmented control with Paper's one track (DS board, 20A "Sort by"; the same as `PaperTabs` and
+/// `PaperSheetSegments`): radius 11, 2 inside it the chosen segment raised on a 36-tall, 9-radius
+/// tile; 14 Semibold when chosen, 14 Medium otherwise. 44 to the finger. For a small, fixed set of
+/// choices (two to four) shown side by side.
 struct ThorbisSegmented<Value: Hashable>: View {
     let options: [(value: Value, label: String)]
     @Binding var selection: Value
@@ -90,19 +89,19 @@ struct ThorbisSegmented<Value: Hashable>: View {
                 verticalChoices
             } else {
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 3) { choices(horizontal: true) }
+                    HStack(spacing: 0) { choices(horizontal: true) }
                     verticalChoices
                 }
             }
         }
-        .padding(3)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(2)
+        .background(Theme.quietFill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
     }
 
     private var verticalChoices: some View {
-        VStack(spacing: 3) { choices(horizontal: false) }
+        VStack(spacing: 2) { choices(horizontal: false) }
     }
 
     @ViewBuilder private func choices(horizontal: Bool) -> some View {
@@ -113,16 +112,17 @@ struct ThorbisSegmented<Value: Hashable>: View {
                     .font(Theme.font(14, weight: isOn ? .semibold : .medium))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: horizontal, vertical: !horizontal)
-                    .foregroundStyle(isOn ? Theme.foreground : Theme.muted)
-                    .padding(.horizontal, 12).padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .foregroundStyle(isOn ? Theme.foreground : Theme.subtle)
+                    .padding(.horizontal, 8).padding(.vertical, 6)
+                    .frame(maxWidth: .infinity, minHeight: 36)
                     .background {
                         if isOn {
-                            RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Theme.selectedSegment)
+                            RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedSegment)
+                                .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }
-                    .contentShape(Rectangle())
+                    .contentShape(Rectangle().inset(by: -4))
             }
             .buttonStyle(PressStyle())
             .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
@@ -232,10 +232,7 @@ struct ThorbisConfirmCard: View {
 
     private var cancelButton: some View {
         Button(action: onCancel) {
-            Text("Cancel").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                .frame(maxWidth: .infinity).frame(minHeight: Theme.commitHeight)
-                .background(Theme.fill, in: Capsule())
-                .contentShape(Capsule())
+            Text("Cancel").paperButton(.commit, tone: .quiet, fills: true)
         }
         .buttonStyle(PressStyle())
     }
@@ -370,10 +367,7 @@ struct ThorbisReasonConfirmCard: View {
 
     private var cancelButton: some View {
         Button(action: onCancel) {
-            Text("Cancel").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                .frame(maxWidth: .infinity).frame(minHeight: Theme.commitHeight)
-                .background(Theme.fill, in: Capsule())
-                .contentShape(Capsule())
+            Text("Cancel").paperButton(.commit, tone: .quiet, fills: true)
         }
         .buttonStyle(PressStyle())
     }

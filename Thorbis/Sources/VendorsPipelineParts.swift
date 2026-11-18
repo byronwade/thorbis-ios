@@ -182,9 +182,9 @@ struct SalesStatusChip: View {
     var surface: Color = Theme.fill
 
     var body: some View {
-        Text(text).font(Theme.font(13, weight: .medium)).foregroundStyle(ink)
+        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(ink)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 8).frame(minHeight: 24)
+            .padding(.horizontal, 10).frame(minHeight: PaperControl.statusHeight)
             .background(surface, in: Capsule())
     }
 }

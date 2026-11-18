@@ -107,7 +107,7 @@ struct NoticeSettingsView: View {
                             HStack(spacing: 8) {
                                 Text("Delivery log").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                                 Spacer(minLength: 8)
-                                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                                PaperChevron()
                                     .foregroundStyle(Theme.muted).accessibilityHidden(true)
                             }
                             .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 14).padding(.vertical, 9)
