@@ -13,6 +13,22 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-team-and-company",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "person.badge.key", title: "Roles and Ownership pages",
+                      detail: "Team's menu opens Roles and Ownership. Role editors moved from the menu to the Roles page."),
+                .init(symbol: "envelope", title: "Invites redrawn",
+                      detail: "Invite member is a full page with email and role. A pending invite opens its own page."),
+                .init(symbol: "person.crop.rectangle", title: "Team member page",
+                      detail: "A member shows this week's jobs. Permissions, Make owner and Remove are in the page's menu."),
+                .init(symbol: "building.2", title: "Company profile in rows",
+                      detail: "Company profile is a page of rows. Tap a row to edit that field. Hours, tax and plan are rows too."),
+                .init(symbol: "bell", title: "iPad bell opens Notifications",
+                      detail: "The bell in the iPad sidebar opens Notifications instead of Messages."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-people-sheets",
             date: "2026-11-18",
             highlights: [
