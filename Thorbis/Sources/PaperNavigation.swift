@@ -642,6 +642,10 @@ struct RootView: View {
         if session.can("customer.create", feature: "core_crm") {
             create.append(.init(title: "New customer", symbol: "person.badge.plus") { newCustomer = true })
         }
+        // Paper 18B's fourth row. It opens Receipts, where "Add receipt" starts the camera.
+        if MenuItem.receipts.permitted(session) {
+            create.append(.init(title: "Scan a receipt", symbol: "doc.viewfinder") { open(.receipts) })
+        }
         return create
     }
 

@@ -253,6 +253,11 @@ struct AccountPreview: View {
         case "acct-forgot": PasswordResetRequestView(initialEmail: "ramon@example.invalid")
         case "acct-forgot-sent": PasswordResetRequestView(initialEmail: "ramon@example.invalid", sent: true)
         case "acct-profile": EditProfileSheet(name: "Ramon Marlowe")
+        case "acct-delete": DeleteAccountSheet(name: "Ramon Marlowe", company: "Wade’s Plumbing") { _ in }
+        case "acct-primer-location": PermissionPrimerView(primer: .location, done: {})
+        case "acct-primer-notifications": PermissionPrimerView(primer: .notifications, done: {})
+        case "acct-password": ChangePasswordSheet()
+        case "acct-saved-work": SavedWorkPreviewHost()
         default:
             NavigationStack {
                 Color.clear.navigationDestination(isPresented: .constant(true)) {
@@ -262,12 +267,29 @@ struct AccountPreview: View {
                         case "acct-notifications": MyNotificationsView()
                         case "acct-menu": CustomizeMenuView()
                         case "acct-help": HelpView()
+                        case "acct-hours": OperatingDetailsView()
+                        case "acct-company": CompanyDetailsView()
+                        case "acct-join": JoinWorkspaceView()
+                        case "acct-whats-new": WhatsNewHistoryView()
                         default: AccountAndDataView()
                         }
                     }
                     .thorbisBackButton()
                 }
             }
+        }
+    }
+}
+
+/// The saved-work review (Paper 73A / 73B) for the signed-in preview person.
+private struct SavedWorkPreviewHost: View {
+    @EnvironmentObject private var session: SessionController
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var media: PendingMediaStore
+    @EnvironmentObject private var outbox: FieldOutbox
+    var body: some View {
+        if let scope = SavedWorkScope.capture(session: session, api: api, media: media, outbox: outbox) {
+            SavedWorkReviewView(scope: scope)
         }
     }
 }

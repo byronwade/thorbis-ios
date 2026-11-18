@@ -1,8 +1,9 @@
 import SwiftUI
 
-// Help (Paper 98): the title, search, "Take a tour", "Common questions", then every article by
-// topic. Paper's "Talk to us" (support chat, 98B, and a phone number) is not drawn: the app
-// defines no support address or number, and there is no help desk to chat with.
+// Help (Paper 98): the title, search, "Take a tour" and "Common questions". Every other answer is
+// found by searching, as Paper draws no topic lists. Paper's "Talk to us" (support chat, 98B, and
+// a phone number) is not drawn: the app defines no support address or number, and there is no
+// help desk to chat with.
 
 struct HelpView: View {
     @State private var query = ""
@@ -17,19 +18,14 @@ struct HelpView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 PaperHeader(title: "Help", subtitle: "Answers and tours for this app")
-                LearnSearchField(query: $query, prompt: "Search help", label: "Search help", identifier: "help-search")
-                    .paperCardMargin().padding(.top, 16)
+                searchField.paperCardMargin().padding(.top, 16)
                 VStack(alignment: .leading, spacing: 22) {
                     if !needle.isEmpty {
                         searchResults(results, needle: needle)
                     } else {
                         tours
                         questions
-                        ForEach(HelpCatalog.categories, id: \.self) { category in
-                            topic(category)
-                        }
                     }
-                    LearnFootnote(text: "These answers are part of the app, so they open with no signal.")
                 }
                 .paperCardMargin().padding(.top, 22).padding(.bottom, 32)
             }
@@ -66,8 +62,7 @@ struct HelpView: View {
                 if item.name != HelpTours.all.first?.name { WellDivider(leading: 50) }
                 Button { tour = item } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "play.circle").font(.system(size: 21, weight: .regular))
-                            .foregroundStyle(Theme.brandText).frame(width: 22).accessibilityHidden(true)
+                        PaperIcon(.helpPlay, size: 22, color: Theme.brandText).accessibilityHidden(true)
                         Text(HelpTours.title(item)).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -109,16 +104,30 @@ struct HelpView: View {
         }
     }
 
-    @ViewBuilder private func topic(_ category: String) -> some View {
-        let articles = HelpCatalog.articles.filter { $0.category == category }
-        if !articles.isEmpty {
-            PaperSection(category) {
-                ForEach(articles) { article in
-                    if article.id != articles.first?.id { WellDivider() }
-                    articleRow(article, showsCategory: false)
+    /// Paper 98's search: an 18 magnifier and 16pt words on a 50pt quiet well, radius 14.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            PaperIcon(.search, size: 18, color: Theme.muted).accessibilityHidden(true)
+            TextField("", text: $query, prompt: .placeholder("Search help"))
+                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .submitLabel(.search)
+                .frame(minHeight: 50)
+                .accessibilityLabel("Search help")
+                .accessibilityIdentifier("help-search")
+            if !query.isEmpty {
+                Button { query = "" } label: {
+                    PaperIcon(.close, size: 12, color: Theme.muted)
+                        .frame(width: 22, height: 22).background(Theme.quietFill, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Clear search")
             }
         }
+        .padding(.leading, 14).padding(.trailing, query.isEmpty ? 14 : 2)
+        .frame(minHeight: 50)
+        .background(Theme.quietFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func articleRow(_ article: HelpArticle, showsCategory: Bool) -> some View {
@@ -133,9 +142,13 @@ struct HelpView: View {
     }
 
     private var chevron: some View {
-        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Theme.muted).accessibilityHidden(true)
+        PaperIcon(.chevronRight, size: 16, color: Theme.muted).accessibilityHidden(true)
     }
+}
+
+extension PaperGlyph {
+    /// Paper 98's tour mark: a 9 circle and an open play triangle, 1.6 strokes on a 22 box.
+    static let helpPlay = PaperGlyph(box: 22, [.circle(11, 11, 9, 1.6), .stroke("M9.2 7.6L14.4 11L9.2 14.4Z", 1.6)])
 }
 
 /// Paper 98A: the topic in the brand ink, the title in 28 Bold, one muted line, the steps on one
