@@ -1100,10 +1100,10 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1)
         toggleSampleControls(app); app.buttons["Allow sample unlock"].tap(); toggleSampleControls(app)
         ownerExit(app).tap(); waitForStaffDoor(app)
-        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 0, "Nothing is approved before the customer commits")
         thorbisShowCustomerDoor(app).tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 2)
+        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 0, "Nothing is approved before the customer commits")
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
