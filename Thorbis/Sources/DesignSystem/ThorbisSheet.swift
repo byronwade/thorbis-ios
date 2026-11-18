@@ -377,8 +377,10 @@ struct ThorbisModalSheet<Content: View>: View {
                                 .accessibilityHidden(true)
                         }
                     }
-                    // Paper v2: the commit and Cancel sit 20 from the sheet's edges.
-                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, keyboardShown && onKeyboardDone != nil ? 4 : 12)
+                    // Paper v2: the commit and Cancel sit 20 from the sheet's edges; above and below them, the
+                    // same room as every pinned bar (PaperActionBarMetrics).
+                    .padding(.horizontal, Theme.gutter).padding(.top, PaperActionBarMetrics.top)
+                    .padding(.bottom, keyboardShown && onKeyboardDone != nil ? 4 : PaperActionBarMetrics.bottom)
                 }
                 if onKeyboardDone != nil, keyboardShown {
                     HStack {

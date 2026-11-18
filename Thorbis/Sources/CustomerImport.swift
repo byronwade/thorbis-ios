@@ -704,8 +704,7 @@ struct CustomerImportView: View {
                 CustomerImportCommit(model: model, prominent: true)
                     .frame(maxWidth: 560)
                     .frame(maxWidth: .infinity)
-                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16).padding(.bottom, 8)
-                    .background(Theme.background)
+                    .paperActionBarGround()
             }
         }
         .background(Theme.background)

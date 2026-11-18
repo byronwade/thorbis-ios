@@ -185,9 +185,7 @@ struct SavedWorkReviewView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if pinsActions {
                 actionButtons
-                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16).padding(.bottom, 8)
-                    .frame(maxWidth: 720).frame(maxWidth: .infinity)
-                    .background(Theme.canvas)
+                    .paperActionBarGround(Theme.canvas, maxWidth: 720)
             }
         }
         .background(Theme.canvas).foregroundStyle(Theme.foreground)

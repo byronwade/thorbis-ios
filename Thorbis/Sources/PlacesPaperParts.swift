@@ -185,11 +185,7 @@ struct PlaceBottomBar<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        content
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 28).padding(.bottom, 8)
-            .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0),
-                                               .init(color: Theme.background, location: 0.34)],
-                                       startPoint: .top, endPoint: .bottom).allowsHitTesting(false))
+        content.paperActionBarFade()
     }
 }
 

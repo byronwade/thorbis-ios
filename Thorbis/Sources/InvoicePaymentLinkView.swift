@@ -170,11 +170,7 @@ struct InvoicePaymentLinkView: View {
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("share-invoice-payment-link")
-            .frame(maxWidth: 520)
-            .padding(.horizontal, PaperCardMetrics.margin)
-            .padding(.top, 8).padding(.bottom, 8)
-            .frame(maxWidth: .infinity)
-            .background(Theme.background)
+            .paperActionBarGround(maxWidth: 520)
         }
     }
 

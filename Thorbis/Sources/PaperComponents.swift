@@ -638,8 +638,50 @@ struct PaperActionBar<Secondary: View>: View {
                     .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, hint == nil ? 10 : 12).padding(.bottom, 8)
-        .background(ground)
+        .paperActionBarGround(ground, top: hint == nil ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
+    }
+}
+
+/// Where every pinned bottom bar stands (Paper 39 "Charge $340.00", 40 "Save draft / Send to
+/// customer", 97): 16 from the sides, 16 above the pill, 8 above the home indicator's room, on the
+/// page's ground with no hairline. Paper draws the pill 28 above the screen's edge with the home
+/// indicator under it; here the bar keeps inside the safe area so it clears the keyboard too.
+enum PaperActionBarMetrics {
+    static let top: CGFloat = 16
+    /// A hint line over the pill (Paper 35C / 35E) sits 12 under the content.
+    static let topUnderHint: CGFloat = 12
+    static let bottom: CGFloat = 8
+    /// Paper's fading bar (job detail "Wrap up job", 83 time clock "Clock out", 42A "New PO"):
+    /// 28 above the pill on a ground that fades in from clear to the page by 34%.
+    static let topOverFade: CGFloat = 28
+}
+
+extension View {
+    /// The one frame for a pinned bottom bar whose content is not `PaperActionBar`'s single commit
+    /// (two pills, a selection bar, a commit with a note): the same sides, top, bottom and ground.
+    ///
+    ///     .safeAreaInset(edge: .bottom, spacing: 0) { twoButtons.paperActionBarGround() }
+    /// `maxWidth` keeps the pill a readable width on an iPad; the ground still spans the screen.
+    func paperActionBarGround<Ground: ShapeStyle>(_ ground: Ground = Theme.background,
+                                                  top: CGFloat = PaperActionBarMetrics.top,
+                                                  maxWidth: CGFloat = .infinity) -> some View {
+        self.frame(maxWidth: .infinity)
+            .padding(.horizontal, PaperCardMetrics.margin)
+            .padding(.top, top).padding(.bottom, PaperActionBarMetrics.bottom)
+            .frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
+            .background(ground)
+    }
+
+    /// The same bar where Paper lets the list scroll under it: 28 above the pill, the page fading in.
+    func paperActionBarFade(maxWidth: CGFloat = .infinity) -> some View {
+        self.frame(maxWidth: .infinity)
+            .padding(.horizontal, PaperCardMetrics.margin)
+            .padding(.top, PaperActionBarMetrics.topOverFade).padding(.bottom, PaperActionBarMetrics.bottom)
+            .frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
+            .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0),
+                                               .init(color: Theme.background, location: 0.34)],
+                                       startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
     }
 }
 

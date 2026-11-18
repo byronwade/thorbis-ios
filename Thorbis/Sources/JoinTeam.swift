@@ -572,10 +572,7 @@ struct JoinTeamFlow: View {
                 commit("See today's jobs", id: "join-done") { onFinished() }
             }
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 4)
-        .frame(maxWidth: 470)
-        .frame(maxWidth: .infinity)
-        .background(Theme.canvas)
+        .paperActionBarGround(Theme.canvas, maxWidth: 470)
     }
 
     private func commit(_ title: String, id: String, action: @escaping () -> Void) -> some View {
@@ -1049,10 +1046,7 @@ struct InvitationLinkEntry: View {
             Button { submit() } label: { Text("Continue").inkCommit() }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("invite-link-continue")
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 4)
-                .frame(maxWidth: 470)
-                .frame(maxWidth: .infinity)
-                .background(Theme.canvas)
+                .paperActionBarGround(Theme.canvas, maxWidth: 470)
         }
     }
 

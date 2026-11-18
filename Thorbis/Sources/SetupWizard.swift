@@ -369,10 +369,7 @@ struct SetupWizardView: View {
                 .disabled(busy)
             }
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12).padding(.bottom, 6)
-        .frame(maxWidth: 600)
-        .frame(maxWidth: .infinity)
-        .background(Theme.background)
+        .paperActionBarGround(maxWidth: 600)
     }
 
     // MARK: Steps

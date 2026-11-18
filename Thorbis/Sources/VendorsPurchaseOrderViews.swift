@@ -435,9 +435,7 @@ struct PurchaseOrderDetailView: View {
                     .accessibilityIdentifier("vendors-order-call")
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 28).padding(.bottom, 8)
-            .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0), .init(color: Theme.background, location: 0.34)],
-                                       startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
+            .paperActionBarFade()
         }
     }
 

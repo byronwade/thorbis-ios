@@ -545,8 +545,8 @@ struct WorkspacePriceBookView: View {
                         Button { creating = true } label: {
                             PaperPillLabel(title: "Add price book item", height: 50)
                         }
-                        .buttonStyle(PressStyle()).padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 10)
-                        .background(Theme.canvas)
+                        .buttonStyle(PressStyle())
+                        .paperActionBarGround(Theme.canvas)
                     }
                 }
                 #if DEBUG

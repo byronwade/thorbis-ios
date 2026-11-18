@@ -822,10 +822,7 @@ struct ArchiveCustomerView: View {
             .disabled(busy || !canArchive)
             .accessibilityIdentifier("archive-customer-commit")
         }
-        .padding(.horizontal, PaperCardMetrics.margin)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(Theme.canvas)
+        .paperActionBarGround(Theme.canvas, top: canArchive ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
     }
 
     private func archive() async {
