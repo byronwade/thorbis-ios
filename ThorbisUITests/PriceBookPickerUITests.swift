@@ -90,8 +90,21 @@ final class PriceBookPickerUITests: XCTestCase {
         search.typeText(sentinel)
         let item = app.buttons["price-book-item-\(sentinelID)"]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
+        // Paper 33: the sheet's title, its Scan / Paste / Price book tabs and the preview's refresh
+        // row sit above the results, so with the keyboard up the match starts under the Done bar
+        // that rides it; a tap there lands on Done. Drag the results up until the row is clear.
+        let done = app.buttons["price-book-done"]
+        func clearOfDone() {
+            for _ in 0..<6 where item.frame.maxY > done.frame.minY - 4 {
+                let start = done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -0.6))
+                start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)))
+            }
+            XCTAssertLessThanOrEqual(item.frame.maxY, done.frame.minY, "The match must be reachable above the Done bar")
+        }
+        clearOfDone()
         item.tap()
-        XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
+        XCTAssertTrue(done.waitForExistence(timeout: 5), "Adding keeps the picker open")
+        XCTAssertTrue(done.label.contains("1 item"))
         let revalidate = app.buttons["price-book-preview-revalidate"]
         XCTAssertTrue(revalidate.waitForExistence(timeout: 5))
         revalidate.tap()
@@ -99,14 +112,8 @@ final class PriceBookPickerUITests: XCTestCase {
         XCTAssertEqual(search.value as? String, sentinel)
         XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
         XCTAssertTrue(item.waitForExistence(timeout: 10), "Catalog items must return after authority refresh")
-        // The refreshed notice pushes the match under the Done bar that rides the keyboard; a tap
-        // there lands on Done. Drag the results up until the row is clear of it.
-        let done = app.buttons["price-book-done"]
-        for _ in 0..<6 where item.frame.maxY > done.frame.minY - 4 {
-            let start = done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -0.6))
-            start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)))
-        }
-        XCTAssertLessThanOrEqual(item.frame.maxY, done.frame.minY, "The match must be reachable above the Done bar")
+        // The refreshed notice pushes the match down again.
+        clearOfDone()
         item.tap()
         XCTAssertTrue(app.buttons["price-book-done"].label.contains("2 items"))
         app.buttons["price-book-done"].tap()
