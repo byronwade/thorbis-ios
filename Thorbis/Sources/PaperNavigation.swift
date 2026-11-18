@@ -863,7 +863,7 @@ struct RootView: View {
         case "local-fleet", "vehicle-detail": openLocal(.fleet)
         case "local-equipment", "equipment-detail": openLocal(.equipment)
         case "local-agreements": openLocal(.agreements)
-        case "team", "role-editor", "member-access": previewPlace(.team)
+        case "team", "role-editor", "member-access", "team-roles", "team-ownership", "team-invite-detail", "member-offboard": previewPlace(.team)
         case "payouts": previewPlace(.money, then: .payments)
         case "customize-menu": schedulePath.append(PaperRoute.customizeMenu)
         // Paper 87A / 77: top-level places, so they open as roots with the menu circle.
@@ -891,7 +891,7 @@ struct RootView: View {
             layout.tabs = [.home, .schedule, .money, .customers]
             selectedTab = MenuItem.home.rawValue
         case "estimate-detail", "estimate-draft-detail", "estimate-revisions": previewPlace(.estimates, then: .estimate(PaperPreview.estimate.id))
-        case "reports": previewPlace(.reports)
+        case "reports", "export-report": previewPlace(.reports)
         case "scorecard": previewPlace(.scorecard)
         case "team-goals": previewPlace(.team, then: .teamGoals)
         case "billing": previewPlace(.billing)

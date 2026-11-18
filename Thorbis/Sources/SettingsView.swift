@@ -132,11 +132,17 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
             .paperDestinations()
-            .thorbisConfirm("Sign out of Thorbis?",
-                            message: signOutWarning,
-                            isPresented: $confirmSignOut,
-                            actions: [ThorbisConfirmAction("Sign out", role: .destructive) { Task { dismiss(); await session.signOut() } }])
-            .task { notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus }
+            .sheet(isPresented: $confirmSignOut) {
+                SignOutSheet(company: session.activeOrganization?.name, warning: signOutWarning) {
+                    Task { dismiss(); await session.signOut() }
+                }
+            }
+            .task {
+                #if DEBUG
+                if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-sign-out") { confirmSignOut = true }
+                #endif
+                notifications = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+            }
         }
         // Paper 65 is a page, not a panel: the page ground with cards on it.
         .paperPageGround()
@@ -159,6 +165,70 @@ struct SettingsView: View {
         default: nil
         }
     }
+}
+
+/// Paper 65E "Sign out": the question in 22 Bold with one muted line, what is still on this phone
+/// on the warning surface, then Cancel beside the red Sign out. Unsynced work is deleted by
+/// signing out (it does not "sync first" as Paper's sample says), so the card says that.
+struct SignOutSheet: View {
+    let company: String?
+    let warning: String
+    let signOut: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var height: CGFloat = 320
+
+    private var unsynced: Bool { warning.contains("Signing out deletes") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sign out of \(company ?? "Thorbis")?")
+                    .font(Theme.font(22, weight: .bold)).tracking(-0.22).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text(unsynced ? "You'll need your password to get back in." : warning)
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 4)
+            if unsynced {
+                HStack(alignment: .top, spacing: 10) {
+                    PaperIcon(.signOutSync, size: 20, color: Theme.warning).accessibilityHidden(true)
+                    Text(warning).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .background(Theme.warningSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
+            HStack(spacing: 10) {
+                Button { dismiss() } label: {
+                    Text("Cancel").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(Theme.fill, in: Capsule()).contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                Button { dismiss(); signOut() } label: {
+                    Text("Sign out").font(Theme.font(17, weight: .semibold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(Theme.destructiveFill, in: Capsule()).contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("sign-out-confirm")
+            }
+        }
+        .padding(.horizontal, 20).padding(.top, 26).padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .presentationDetents([.height(height)])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+    }
+}
+
+extension PaperGlyph {
+    /// Paper 65E's "still saving" mark: an open ring with its arrow head.
+    static let signOutSync = PaperGlyph(box: 20, [.stroke("M16 10A6 6 0 1 1 13.5 5.1", 1.8), .stroke("M13.5 2.5V5.5H16.5", 1.8)])
 }
 
 /// Paper 65G: how Thorbis looks on this device. Three theme cards (Light, Dark, Match device) bound to

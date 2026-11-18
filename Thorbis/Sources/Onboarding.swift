@@ -721,11 +721,13 @@ final class CompanyDetailsModel: ObservableObject {
 /// Settings › Company: the facts customers and payment providers read, typed once.
 /// One column on the cream ground: each label above its field, the field's problem in place of
 /// its help, and one ink Save pinned above the keyboard (it used to sit in the bar).
-struct CompanyDetailsView: View {
+struct CompanyDetailsForm: View {
     /// Inside setup the screen pops itself after a save.
     var onSaved: (() -> Void)? = nil
     /// "Step 3 of 3" when opened from the first-run setup.
     var step: (Int, Int)? = nil
+    /// The field the keyboard opens on, when a row of Company profile (Paper 61B) led here.
+    var focus: String? = nil
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
@@ -793,7 +795,10 @@ struct CompanyDetailsView: View {
             }
         }
         .sensoryFeedback(.success, trigger: saved)
-        .task { await model.load(api: api) }
+        .task {
+            await model.load(api: api)
+            if let focus, canEdit { focused = focus }
+        }
     }
 
     private func form(_ profile: OrganizationProfile) -> some View {
@@ -849,28 +854,31 @@ struct CompanyDetailsView: View {
                                 .padding(.horizontal, 4).padding(.top, 8)
                         }
                     }
-                    PaperCard {
-                        VStack(spacing: 0) {
-                            if OperatingFacts.offered(profile) {
-                                NavigationLink { OperatingDetailsView().thorbisBackButton() } label: {
-                                    PaperListRow(leading: .icon("percent"), title: "Hours, tax and terms") {
+                    // Setup keeps the way on to hours; Company profile (61B) has its own rows for these.
+                    if step != nil || onSaved != nil {
+                        PaperCard {
+                            VStack(spacing: 0) {
+                                if OperatingFacts.offered(profile) {
+                                    NavigationLink { OperatingDetailsView().thorbisBackButton() } label: {
+                                        PaperListRow(leading: .icon("percent"), title: "Hours, tax and terms") {
+                                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium))
+                                                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                                        }
+                                    }
+                                    .buttonStyle(RowPressStyle())
+                                    WellDivider(leading: PaperCardMetrics.inset + 38)
+                                }
+                                NavigationLink { CompanyFeaturesView().thorbisBackButton() } label: {
+                                    PaperListRow(leading: .icon("square.grid.2x2"), title: "Plan and features") {
                                         Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium))
                                             .foregroundStyle(Theme.muted).accessibilityHidden(true)
                                     }
                                 }
                                 .buttonStyle(RowPressStyle())
-                                WellDivider(leading: PaperCardMetrics.inset + 38)
                             }
-                            NavigationLink { CompanyFeaturesView().thorbisBackButton() } label: {
-                                PaperListRow(leading: .icon("square.grid.2x2"), title: "Plan and features") {
-                                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
-                                }
-                            }
-                            .buttonStyle(RowPressStyle())
                         }
+                        .padding(.top, 22)
                     }
-                    .padding(.top, 22)
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
@@ -1232,7 +1240,7 @@ struct BusinessSetupView: View {
         }
         .navigationDestination(item: $opened) { step in
             switch step {
-            case .details: CompanyDetailsView(step: presented ? (3, 3) : nil).thorbisBackButton()
+            case .details: CompanyDetailsForm(step: presented ? (3, 3) : nil).thorbisBackButton()
             case .payments: PaymentsSetupView().thorbisBackButton()
             case .services:
                 WorkspacePriceBookView(api: api, canList: true,
@@ -1240,9 +1248,9 @@ struct BusinessSetupView: View {
             case .team: EmptyView()
             }
         }
-        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) { SheetSurface {
-            InviteMemberSheet { _ in }
-        } }
+        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
+            InviteMemberSheet { _ in }.paperPageGround()
+        }
         .onChange(of: opened) { old, new in
             // Back from a step: read it again, so its word changes to Done.
             if old != nil, new == nil { Task { await model.refresh(api: api, session: session) } }
@@ -1441,7 +1449,7 @@ struct OnboardingPreview: View {
         default:
             if session.phase == .ready {
                 NavigationStack {
-                    if screen == "onboard-details" { CompanyDetailsView() }
+                    if screen == "onboard-details" { CompanyDetailsForm() }
                     else if screen == "onboard-wizard" { SetupWizardView(start: SetupStep.previewStart ?? .company) }
                     else if screen == "onboard-trade" { SetupWizardView(start: .trade) }
                     else { BusinessSetupView(presented: true) }

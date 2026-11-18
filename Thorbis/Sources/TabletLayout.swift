@@ -581,6 +581,11 @@ struct TabletRoot: View {
             create: { createMenuOpen = true },
             workspace: { workspace = true },
             settings: { settings = true },
+            notifications: CommsInboxAccess(session).notices ? {
+                withAnimation(motion) { sidebarOpen = false }
+                // Paper 77: the bell opens Notifications, over the place showing.
+                path.append(PaperRoute.notifications)
+            } : nil,
             reviewSavedWork: {
                 withAnimation(motion) { sidebarOpen = false }
                 reviewScope = savedWorkScope
@@ -844,6 +849,8 @@ struct TabletSidebar: View {
     let create: () -> Void
     let workspace: () -> Void
     let settings: () -> Void
+    /// Paper 77: opens Notifications. Nil without access to job notices; the bell then opens Messages.
+    var notifications: (() -> Void)? = nil
     var reviewSavedWork: () -> Void = {}
     var fold: (() -> Void)? = nil
 
@@ -899,7 +906,7 @@ struct TabletSidebar: View {
 
     private var personName: String { session.user?.name ?? session.user?.email ?? "You" }
 
-    /// Paper v2: a hairline, the person (initials, name, role), the bell (Messages) and the gear.
+    /// Paper v2: a hairline, the person (initials, name, role), the bell (Notifications, Paper 77) and the gear.
     private var footer: some View {
         HStack(spacing: 10) {
             Button(action: settings) {
@@ -919,8 +926,10 @@ struct TabletSidebar: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Settings, \(personName)")
             .accessibilityAddTraits(.isButton)
-            if sections.places.contains(.inbox) {
-                Button { select(section(.inbox)) } label: {
+            if notifications != nil || sections.places.contains(.inbox) {
+                Button {
+                    if let notifications { notifications() } else { select(section(.inbox)) }
+                } label: {
                     Image(systemName: "bell").font(.system(size: 17)).foregroundStyle(Theme.muted)
                         .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
