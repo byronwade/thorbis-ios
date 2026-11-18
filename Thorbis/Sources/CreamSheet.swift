@@ -237,11 +237,11 @@ struct PlaceCount: Equatable {
     var tone: Tone = .plain
 
     static func number(_ value: Int, spoken: String) -> PlaceCount? {
-        value > 0 ? PlaceCount(text: "\(value)", spoken: spoken) : nil
+        value > 0 ? PlaceCount(text: PaperCount.text(value), spoken: spoken) : nil
     }
     /// Unread messages: Paper's filled brand badge with the number.
     static func badge(_ value: Int, spoken: String) -> PlaceCount? {
-        value > 0 ? PlaceCount(text: "\(value)", accent: true, spoken: spoken, tone: .badge) : nil
+        value > 0 ? PlaceCount(text: PaperCount.badge(value), accent: true, spoken: spoken, tone: .badge) : nil
     }
     static let unread = PlaceCount(text: nil, accent: true, spoken: "Unread")
 }
