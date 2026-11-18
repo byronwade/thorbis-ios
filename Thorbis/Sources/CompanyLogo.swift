@@ -39,10 +39,86 @@ struct CompanyLogoPicker: View {
     @State private var draft: LogoCropDraft?
     /// "Choose a different file" closes the crop step and opens Photos again.
     @State private var reopenPicker = false
+    /// Paper 61B: the logo as the head of Company profile (a 56pt tile, the company's name and
+    /// trade, and a "Change logo" pill). Nil draws setup's row (Paper 09).
+    var profile: (name: String, detail: String?)? = nil
+    var canEdit = true
+
+    var body: some View {
+        Group {
+            if let profile { card(profile.name, profile.detail) } else { setupRow }
+        }
+        .sensoryFeedback(.success, trigger: uploaded)
+        .photosPicker(isPresented: $showPicker, selection: $selection, matching: .images)
+        .task { if let data = try? await api.logoData() { logo = UIImage(data: data) } }
+        .onChange(of: selection) { _, item in
+            guard let item else { return }
+            Task { await load(item) }
+        }
+        .fullScreenCover(item: $draft, onDismiss: reopenIfAsked) { picked in
+            LogoCropEditor(
+                image: picked.image,
+                use: { cropped in
+                    draft = nil
+                    Task { await upload(cropped) }
+                },
+                chooseAnother: {
+                    reopenPicker = true
+                    draft = nil
+                },
+                cancel: { draft = nil }
+            )
+        }
+    }
+
+    private func card(_ name: String, _ detail: String?) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 14) {
+                Group {
+                    if uploading {
+                        ProgressView().frame(width: 56, height: 56).background(Theme.fill, in: shape)
+                    } else if let logo {
+                        Image(uiImage: logo).resizable().scaledToFit().padding(4)
+                            .frame(width: 56, height: 56).background(Theme.fill, in: shape).clipShape(shape)
+                    } else {
+                        Text(String(name.prefix(1)).uppercased()).font(Theme.font(26, weight: .bold)).foregroundStyle(.white)
+                            .frame(width: 56, height: 56).background(Theme.brand, in: shape)
+                            .dynamicTypeSize(...DynamicTypeSize.large)
+                    }
+                }
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail, !detail.isEmpty {
+                        Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if canEdit {
+                    Button { showPicker = true } label: {
+                        Text(uploading ? "Uploading…" : logo == nil ? "Add logo" : "Change logo")
+                            .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .padding(.horizontal, 14).frame(minHeight: 36)
+                            .background(Theme.fill, in: Capsule())
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(uploading)
+                    .accessibilityIdentifier("company-profile-logo")
+                }
+            }
+            if let error { InlineProblem(message: error).font(Theme.font(13)) }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
 
     /// Paper 09: a 50pt tile (the logo, or a dashed + on the card) beside "Upload logo" and one
     /// muted line; the whole row opens Photos, and the picked image goes to the crop step (09B).
-    var body: some View {
+    private var setupRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button { showPicker = true } label: {
                 HStack(spacing: 12) {
@@ -66,27 +142,6 @@ struct CompanyLogoPicker: View {
             if let error {
                 InlineProblem(message: error).font(Theme.font(13))
             }
-        }
-        .sensoryFeedback(.success, trigger: uploaded)
-        .photosPicker(isPresented: $showPicker, selection: $selection, matching: .images)
-        .task { if let data = try? await api.logoData() { logo = UIImage(data: data) } }
-        .onChange(of: selection) { _, item in
-            guard let item else { return }
-            Task { await load(item) }
-        }
-        .fullScreenCover(item: $draft, onDismiss: reopenIfAsked) { picked in
-            LogoCropEditor(
-                image: picked.image,
-                use: { cropped in
-                    draft = nil
-                    Task { await upload(cropped) }
-                },
-                chooseAnother: {
-                    reopenPicker = true
-                    draft = nil
-                },
-                cancel: { draft = nil }
-            )
         }
     }
 
