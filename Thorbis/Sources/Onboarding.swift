@@ -1200,7 +1200,7 @@ struct BusinessSetupView: View {
                         stepGroup("Team and access", steps.filter { $0 == .team })
                     }
                     .padding(.top, 14)
-                    Text("You can come back any time from More.")
+                    Text("You can come back any time from Business settings.")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 4).padding(.top, 16)
                 } else {
@@ -1266,50 +1266,56 @@ struct BusinessSetupView: View {
         if step == .team { inviting = true } else { opened = step }
     }
 
-    /// Paper 61 / 61N: Company (profile, what customers see), Operations (price book, hours, tax
-    /// and terms, checklists, notification rules, workflows), Team and access. The company pages
-    /// that used to sit in Settings live here too: customer payments and review requests under
-    /// Operations, importing customers under Company, team goals under Team and access. Every row
-    /// is a place the app has, shown only to people who may open it.
+    /// Paper 61N: Company (profile, what customers see), Operations (price book, hours, tax and
+    /// terms, checklists, notification rules, workflows), then Team and access as on 61. Review
+    /// requests are a workflow (Workflows owns them); customer payments open from What customers
+    /// see and from Money; team goals open from Team. Importing customers is setup, so it sits
+    /// with the guided setup. Every row is a place the app has, shown only to people who may open it.
     @ViewBuilder
     private func settingsGroups(_ steps: [BusinessSetupModel.Step], current: Bool, unfinished: Bool) -> some View {
         let editsSettings = session.can("organization.settings.edit")
+        let canImport = session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm")
         var company: [BusinessPlace] {
             var rows: [BusinessPlace] = []
             if steps.contains(.details) { rows.append(.profile) }
             if editsSettings { rows.append(.customerDisplay) }
-            if session.can("customer.create", feature: "core_crm") && session.can("customer.edit", feature: "core_crm") { rows.append(.importCustomers) }
             return rows
         }
         var operations: [BusinessPlace] {
             var rows: [BusinessPlace] = []
             if steps.contains(.services) { rows.append(.priceBook) }
             if OperatingFacts.offered(profile.profile) { rows.append(.hours) }
-            if steps.contains(.payments) { rows.append(.payments) }
             if session.can("job.view", feature: "jobs") { rows.append(.checklists) }
             if MenuItem.notices.permitted(session) { rows.append(.notices) }
-            if editsSettings { rows.append(.reviews); rows.append(.workflows) }
+            if editsSettings { rows.append(.workflows) }
             return rows
         }
         var team: [BusinessPlace] {
             var rows: [BusinessPlace] = []
-            if steps.contains(.team) { rows.append(.team) }
-            if session.can("organization.performance.view") { rows.append(.goals) }
+            if steps.contains(.team) || MenuItem.team.permitted(session) { rows.append(.team) }
+            // Team goals open from Team; someone who sets goals but cannot open Team keeps the row.
+            if session.can("organization.performance.view"), !MenuItem.team.permitted(session) { rows.append(.goals) }
             return rows
         }
         VStack(alignment: .leading, spacing: 22) {
             placeGroup("Company", company)
             placeGroup("Operations", operations)
             placeGroup("Team and access", team)
-            // Paper has no setup strip here; while first-run setup is unfinished it stays one row away.
-            if unfinished && editsSettings {
+            // Paper has no setup strip here; setup's own steps stay one row away.
+            if canImport || (unfinished && editsSettings) {
                 AccountGroup(title: "Setup") {
-                    Button { guided = true } label: {
-                        AccountRow(glyph: .bizChecklist, glyphSize: 22, title: "Finish setting up",
-                                   subtitle: "Pick up the guided setup where you left it", end: .chevronLarge)
+                    if canImport {
+                        placeRow(.importCustomers)
                     }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityIdentifier("setup-guided")
+                    if unfinished && editsSettings {
+                        if canImport { WellDivider(leading: AccountRow<EmptyView>.dividerInset) }
+                        Button { guided = true } label: {
+                            AccountRow(glyph: .bizChecklist, glyphSize: 22, title: "Finish setting up",
+                                       subtitle: "Pick up the guided setup where you left it", end: .chevronLarge)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("setup-guided")
+                    }
                 }
             }
         }
@@ -1317,7 +1323,7 @@ struct BusinessSetupView: View {
 
     /// The places Business settings opens.
     private enum BusinessPlace: Hashable {
-        case profile, customerDisplay, importCustomers, priceBook, hours, payments, checklists, notices, reviews, workflows, team, goals
+        case profile, customerDisplay, importCustomers, priceBook, hours, checklists, notices, workflows, team, goals
     }
 
     @ViewBuilder
@@ -1355,9 +1361,6 @@ struct BusinessSetupView: View {
         case .hours:
             NavigationLink { OperatingDetailsView().thorbisBackButton() } label: { placeLabel(.bizPercent, "Hours, tax and terms") }
                 .buttonStyle(RowPressStyle())
-        case .payments:
-            Button { open(.payments) } label: { placeLabel(.bizCard, "Customer payments", "Card payments from your customers") }
-                .buttonStyle(RowPressStyle())
         case .checklists:
             NavigationLink { ChecklistTemplatesView().thorbisBackButton() } label: {
                 placeLabel(.bizChecklist, "Checklists", "What techs confirm before finishing a job")
@@ -1366,9 +1369,6 @@ struct BusinessSetupView: View {
             .accessibilityIdentifier("settings-checklists")
         case .notices:
             NavigationLink(value: PaperRoute.notices) { placeLabel(.bizBell, "Notification rules", "Who hears about booked and changed jobs") }
-                .buttonStyle(RowPressStyle())
-        case .reviews:
-            NavigationLink { ReviewRequestsView().thorbisBackButton() } label: { placeLabel(.bizStar, "Review requests") }
                 .buttonStyle(RowPressStyle())
         case .workflows:
             NavigationLink { WorkflowsView().thorbisBackButton() } label: { placeLabel(.bizWorkflows, "Workflows") }
