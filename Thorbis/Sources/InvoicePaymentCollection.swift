@@ -1099,12 +1099,9 @@ private struct InvoicePaymentRefundForm: View {
     private var refundIssued: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(spacing: 6) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(Theme.success)
+                PaperIcon(.check, size: 30, color: Theme.success)
                     .frame(width: 72, height: 72)
                     .background(Theme.successSurface, in: Circle())
-                    .accessibilityHidden(true)
                 Text(amountText)
                     .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
                     .lineLimit(1).minimumScaleFactor(0.5)
@@ -1229,6 +1226,8 @@ struct InvoicePaymentCollectionSheet: View {
     @State private var payLinkBalanceCents: Int?
     @State private var payLinkError: String?
     @State private var showPayLinkShare = false
+    /// Which of Paper 39's two pay-link rows is marked chosen ("Show a code" or "Text a pay link"); both open the same link.
+    @State private var linkByText = false
     @State private var receiptDestination: String?
     @State private var receiptDestinationLoaded = false
     @State private var amountError: String?
@@ -1543,9 +1542,11 @@ struct InvoicePaymentCollectionSheet: View {
             amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
         } label: {
             VStack(spacing: 6) {
-                Image(systemName: paid ? "checkmark" : "wave.3.right")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(paid ? Theme.statusDone : Theme.brand)
+                Group {
+                    // Paper 39: the three waves in brand, 26pt; the check once it is paid (39A).
+                    if paid { PaperIcon(.check, size: 26, color: Theme.statusDone) }
+                    else { PaperIcon(.contactless, size: 26, color: Theme.brand) }
+                }
                     .frame(width: 64, height: 64)
                     .background(Theme.card, in: Circle())
                     .overlay(Circle().strokeBorder(paid ? Theme.statusDone : Theme.brand, lineWidth: 1.5))
@@ -1592,30 +1593,51 @@ struct InvoicePaymentCollectionSheet: View {
         let linkOff = needsSignalOff || paymentWaiting
         return VStack(alignment: .leading, spacing: 8) {
             PaperSection(showsTapToPayCard ? "Or take it another way" : "Choose how to take it") {
-                methodRow("Show a code to scan", symbol: "qrcode", value: "or text a link",
-                          selected: option == .paymentLink, busy: isCreatingPayLink, off: linkOff, divider: false) {
+                // Paper 39 lists the code and the texted link as two rows; both are the one pay link,
+                // which opens with its code and its Text and Email buttons.
+                methodRow("Show a code to scan", glyph: .payCode,
+                          selected: option == .paymentLink && !linkByText, busy: isCreatingPayLink && !linkByText, off: linkOff, divider: false) {
+                    linkByText = false
                     option = .paymentLink
                     amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
                 }
                 .accessibilityLabel("Card · send payment link")
-                methodRow("Check", symbol: "doc.text", selected: option == .check, off: off, divider: true) { option = .check }
-                methodRow("Cash", symbol: "banknote", selected: option == .cash, off: off, divider: true) { option = .cash }
+                methodRow("Text a pay link", glyph: .payLink,
+                          selected: option == .paymentLink && linkByText, busy: isCreatingPayLink && linkByText, off: linkOff, divider: true) {
+                    linkByText = true
+                    option = .paymentLink
+                    amountText = paymentAmountText(min(model.collectableCents ?? 0, 1_000_000_000_000))
+                }
+                methodRow("Check", glyph: .payCheck, selected: option == .check, off: off, divider: true) { option = .check }
+                methodRow("Cash", glyph: .payCash, selected: option == .cash, off: off, divider: true) { option = .cash }
                 ThorbisMenu(items: [
                     ThorbisMenuItem("Bank transfer (ACH) received", icon: "building.columns", isSelected: option == .bankTransfer) { option = .bankTransfer },
                     ThorbisMenuItem("Card collected elsewhere", icon: "creditcard", isSelected: option == .externalCard) { option = .externalCard }
                 ], title: "Payment received", accessibilityLabel: "Other payment received") {
                     methodRowLabel(option.isExternalReceipt ? (option.recordedMethod?.displayName ?? "Other") : "Bank transfer or other",
-                                   symbol: "building.columns", selected: option.isExternalReceipt,
-                                   trailingSymbol: "chevron.up.chevron.down", divider: true)
+                                   glyph: .payCard, selected: option.isExternalReceipt, divider: true)
                         .opacity(needsSignalOff ? 0.4 : 1)
                 }
                 .disabled(needsSignalOff)
                 .accessibilityIdentifier("received-payment-methods")
             }
-            Text(methodHelp)
-                .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 4)
+            // Paper 39 draws no line under the card. One stays only when it says why a way is
+            // unavailable or what recording does (no charge is made).
+            if let methodNotice {
+                Text(methodNotice)
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+            }
+        }
+    }
+
+    private var methodNotice: String? {
+        switch option {
+        case .tapToPay: return tapToPayHeadline == "Tap to Pay on iPhone" ? nil : tapToPayHeadline
+        case .paymentLink: return offline || paymentWaiting ? methodHelp : nil
+        case .check, .cash: return offline ? methodHelp : nil
+        case .bankTransfer, .externalCard: return methodHelp
         }
     }
 
@@ -1640,10 +1662,10 @@ struct InvoicePaymentCollectionSheet: View {
     /// whole balance, so they wait until it lands rather than charge money already taken (OF-08).
     private var paymentWaiting: Bool { model.waitingCents > 0 }
 
-    private func methodRow(_ title: String, symbol: String, value: String? = nil, selected: Bool, busy: Bool = false,
+    private func methodRow(_ title: String, glyph: PaperGlyph, value: String? = nil, selected: Bool, busy: Bool = false,
                            off: Bool, divider: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            methodRowLabel(title, symbol: symbol, value: value, selected: selected, busy: busy, divider: divider)
+            methodRowLabel(title, glyph: glyph, value: value, selected: selected, busy: busy, divider: divider)
                 .opacity(off ? 0.4 : 1)
         }
         .buttonStyle(RowPressStyle())
@@ -1653,14 +1675,11 @@ struct InvoicePaymentCollectionSheet: View {
 
     /// A Paper 39 method row: a 24pt glyph slot, the 16 Medium name, an optional 15 value, and a
     /// brand check on the chosen row. A hairline above every row but the first.
-    private func methodRowLabel(_ title: String, symbol: String, value: String? = nil, selected: Bool,
-                                busy: Bool = false, trailingSymbol: String? = nil, divider: Bool) -> some View {
+    private func methodRowLabel(_ title: String, glyph: PaperGlyph, value: String? = nil, selected: Bool,
+                                busy: Bool = false, divider: Bool) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(Theme.foreground)
+            PaperIcon(glyph, size: 19, color: Theme.foreground)
                 .frame(width: 24, height: 24)
-                .accessibilityHidden(true)
             HStack(spacing: 12) {
                 Text(title)
                     .font(Theme.font(16, weight: .medium)).tracking(-0.16)
@@ -1673,15 +1692,10 @@ struct InvoicePaymentCollectionSheet: View {
                 if busy {
                     ProgressView().controlSize(.small)
                 } else if selected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.brandText)
-                        .accessibilityHidden(true)
-                } else if let trailingSymbol {
-                    Image(systemName: trailingSymbol)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
+                    // The chosen way wears the brand check where Paper's row has its chevron.
+                    PaperIcon(.check, size: 16, color: Theme.brandText)
+                } else {
+                    PaperIcon(.chevronRight, size: 16, color: Theme.muted)
                 }
             }
             .padding(.trailing, PaperCardMetrics.inset)
@@ -1710,7 +1724,7 @@ struct InvoicePaymentCollectionSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Text(receiptDestination ?? (receiptDestinationLoaded ? "No email on file" : "Loading contact…"))
-                .font(Theme.font(16)).foregroundStyle(Theme.subtle)
+                .font(Theme.font(16)).monospacedDigit().foregroundStyle(Theme.subtle)
                 .lineLimit(1).truncationMode(.middle)
         }
         .padding(.horizontal, PaperCardMetrics.inset)
@@ -1922,12 +1936,9 @@ struct InvoicePaymentCollectionSheet: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(spacing: 4) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(Theme.success)
+                    PaperIcon(.check, size: 30, color: Theme.success)
                         .frame(width: 72, height: 72)
                         .background(Theme.statusDone.opacity(0.22), in: Circle())
-                        .accessibilityHidden(true)
                     Text(money(paid.amountCents, currency: invoice.currency))
                         .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
                         .foregroundStyle(Theme.foreground)
@@ -1948,7 +1959,9 @@ struct InvoicePaymentCollectionSheet: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 4)
-                PaperSection(jobDone ? "Job closed" : "Invoice") {
+                // Paper 39A has no invoice card: the line above names the invoice. One stays only while
+                // a balance is still due, so a part payment never reads as settled.
+                if !settled { PaperSection(jobDone ? "Job closed" : "Invoice") {
                     HStack(spacing: 12) {
                         Text("Invoice \(invoiceReference)")
                             .font(Theme.font(16, weight: .medium)).monospacedDigit()
@@ -1965,7 +1978,7 @@ struct InvoicePaymentCollectionSheet: View {
                     .padding(.horizontal, PaperCardMetrics.inset)
                     .frame(minHeight: 60)
                     .accessibilityElement(children: .combine)
-                }
+                } }
                 // Paper 39A: where the receipt goes, when the customer has an email on file.
                 if let receiptDestination { paidReceiptCard(receiptDestination) }
                 // Paper 39A "While you are here": what the job screen can open next.
@@ -2014,9 +2027,7 @@ struct InvoicePaymentCollectionSheet: View {
                         .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
+                    PaperIcon(.chevronRight, size: 16, color: Theme.muted)
                 }
                 .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 13)
                 .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)

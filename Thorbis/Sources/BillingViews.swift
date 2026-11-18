@@ -166,16 +166,24 @@ struct BillingScheduleDetailView: View {
                         Text("Billing schedule").font(Theme.font(34, weight: .bold)).tracking(-0.85)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.isHeader)
-                        Text("\(scheduleName(progress.schedule)) \u{00B7} \(money(progress.schedule.total, currency: "USD"))")
-                            .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                        // The schedule's number and whether it is open ride the same quiet line.
+                        Text("\(scheduleName(progress.schedule)) \u{00B7} \(money(progress.schedule.total, currency: "USD")) \u{00B7} SOV-\(progress.schedule.id.suffix(4).uppercased())\(progress.schedule.status == "open" ? "" : " \u{00B7} Closed")")
+                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
-                        StatusWord(text: "SOV-\(progress.schedule.id.suffix(4).uppercased()) \u{00B7} \(progress.schedule.status == "open" ? "Open" : "Closed")",
-                                   tint: progress.schedule.status == "open" ? Theme.warning : nil)
-                            .padding(.top, 6)
                     }
                     .padding(.top, 14).padding(.bottom, 20)
                     VStack(alignment: .leading, spacing: 20) {
                         billedCard(progress)
+                        PaperSection("Stages") {
+                            VStack(spacing: 0) {
+                                let lines = progress.schedule.lines.sorted { $0.position < $1.position }
+                                ForEach(lines) { line in
+                                    stageRow(line, progress: progress, divider: line.id != lines.first?.id)
+                                }
+                            }
+                        }
+                        // Paper 89A shows the progress and the stages; what was taken up front or held back
+                        // follows them.
                         if progress.depositsBilled > 0 || progress.retainedToDate > 0 {
                             PaperSection("Deposits and retainage") {
                                 VStack(spacing: 0) {
@@ -189,14 +197,6 @@ struct BillingScheduleDetailView: View {
                                     }
                                 }
                                 .padding(.vertical, PaperCardMetrics.edge)
-                            }
-                        }
-                        PaperSection("Stages") {
-                            VStack(spacing: 0) {
-                                let lines = progress.schedule.lines.sorted { $0.position < $1.position }
-                                ForEach(lines) { line in
-                                    stageRow(line, progress: progress, divider: line.id != lines.first?.id)
-                                }
                             }
                         }
                     }
@@ -429,7 +429,13 @@ struct JobDepositSheet: View {
             .background(Theme.canvas)
             .paperPageGround()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            // Paper 89: the 44 back circle on the card tone at top left closes the sheet.
+            .toolbar {
+                ThorbisToolbarItem(placement: .topBarLeading) {
+                    PaperCircleButton(symbol: "chevron.left", label: "Cancel", size: 44, fill: Theme.card) { dismiss() }
+                        .disabled(busy)
+                }
+            }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 2) {
                     Text("The deposit is taken off the final invoice.")

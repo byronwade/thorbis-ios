@@ -765,7 +765,7 @@ struct BuilderLineRow: View {
 
     private var removeLineButton: some View {
         Button(role: .destructive, action: remove) {
-            Text("Remove").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+            Text("Remove").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.destructive)
                 .frame(minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -774,9 +774,9 @@ struct BuilderLineRow: View {
     private var closeLineButton: some View {
         Button(action: toggle) {
             // Paper 35A: Done on the brand surface.
-            Text("Done").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                .padding(.horizontal, 18).frame(minHeight: 44)
-                .background(Theme.brandSurface, in: Capsule())
+            Text("Done").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                .padding(.horizontal, 16).frame(minHeight: 44)
+                .background(Theme.brandTint, in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
@@ -851,29 +851,40 @@ struct BuilderLineRow: View {
             Button {
                 if atOne { remove() } else { quantity = String(quantityValue - 1) }
             } label: {
-                Image(systemName: atOne ? "trash" : "minus").font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(atOne ? Theme.destructive : Theme.foreground)
+                PaperIcon(atOne ? .trash : .stepMinus, size: atOne ? 16 : 14, color: atOne ? Theme.destructive : Theme.foreground)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
             .accessibilityLabel(atOne ? "Remove line" : "Decrease quantity")
-            Text("\(quantityValue)").font(Theme.font(15, weight: .semibold)).monospacedDigit()
-                .foregroundStyle(Theme.foreground)
-                .frame(minWidth: 18)
-                .accessibilityHidden(true)
+            if expanded {
+                // Open, the count is typed here (250 ft of pipe is not 250 taps).
+                TextField("1", text: $quantity, prompt: .placeholder("1"))
+                    .keyboardType(.numberPad)
+                    .font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                    .multilineTextAlignment(.center)
+                    .focused(focus, equals: .quantity(lineID))
+                    .frame(minWidth: 24, maxWidth: 64, minHeight: 44)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .accessibilityLabel("Quantity")
+                    .modifier(OptionalIdentifier(identifier: quantityIdentifier))
+            } else {
+                Text("\(quantityValue)").font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                    .foregroundStyle(Theme.foreground)
+                    .frame(minWidth: 18)
+                    .accessibilityHidden(true)
+            }
             Button {
                 quantity = String(min(100_000, quantityValue + 1))
             } label: {
-                Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(quantityValue < 100_000 && isEnabled ? Theme.foreground : Theme.muted)
+                PaperIcon(.stepPlus, size: 14, color: quantityValue < 100_000 && isEnabled ? Theme.foreground : Theme.muted)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
             .disabled(quantityValue >= 100_000)
-            .accessibilityLabel("Increase quantity")
+            .accessibilityLabel(expanded ? "One more" : "Increase quantity")
             .accessibilityValue("\(quantityValue)")
         }
-        .background(Theme.fill, in: Capsule())
+        .background(Theme.quietFill, in: Capsule())
         .fixedSize()
         .sensoryFeedback(.selection, trigger: quantity)
     }
@@ -901,105 +912,110 @@ struct BuilderLineRow: View {
 
     // MARK: Expanded
 
+    /// Paper 35A's open line: the row stays as it reads closed (name, where it came from and its
+    /// price, the quantity pill), and an inline panel on the 6% fill opens under it with the Name
+    /// and Price wells side by side, then the row's quiet actions and "Done" on the brand tint.
     private var editor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 0) {
-                // The customer reads this line in full, so it's edited in full: it grows with the text.
-                TextField("", text: $description, prompt: .placeholder("Run capacitor, 45/5 µF"), axis: .vertical)
-                    .font(Theme.font(16, weight: .medium)).lineLimit(1...8)
-                    .focused(focus, equals: .description(lineID))
-                    .padding(.horizontal, 12).padding(.vertical, 12)
-                    .frame(minHeight: 48)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                    .accessibilityLabel("Line description")
-                    .modifier(OptionalIdentifier(identifier: descriptionIdentifier))
-                // Paper TE1: long wording opens in the full editor.
-                Button {
-                    focus.wrappedValue = nil
-                    fullEditor = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 0) {
+            summary
+            VStack(alignment: .leading, spacing: 8) {
+                let wells = stacked || typeSize >= .xxLarge ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                                            : AnyLayout(HStackLayout(alignment: .top, spacing: 8))
+                wells {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Name").font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        HStack(alignment: .top, spacing: 0) {
+                            // The customer reads this line in full, so it's edited in full: it grows with the text.
+                            TextField("", text: $description, prompt: .placeholder("Run capacitor, 45/5 µF"), axis: .vertical)
+                                .font(Theme.font(15, weight: .medium)).lineLimit(1...8)
+                                .focused(focus, equals: .description(lineID))
+                                .frame(minHeight: 20)
+                                .accessibilityLabel("Line description")
+                                .modifier(OptionalIdentifier(identifier: descriptionIdentifier))
+                            // Paper TE1: long wording opens in the full editor.
+                            Button {
+                                focus.wrappedValue = nil
+                                fullEditor = true
+                            } label: {
+                                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                    .font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                                    .frame(width: 44, height: 44).contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle())
+                            .padding(.vertical, -12).padding(.trailing, -12).padding(.leading, -8)
+                            .accessibilityLabel("Open full editor")
+                            .accessibilityIdentifier("line-description-expand")
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Theme.brand, lineWidth: focus.wrappedValue == .description(lineID) ? 1.5 : 0))
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Price").font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        HStack(spacing: 1) {
+                            Text("$").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .accessibilityHidden(true)
+                            TextField("0.00", text: $unitPrice, prompt: .placeholder("0.00"))
+                                .keyboardType(.decimalPad)
+                                .font(Theme.font(15, weight: .medium)).monospacedDigit()
+                                .focused(focus, equals: .price(lineID))
+                                .frame(minHeight: 20)
+                                .accessibilityLabel(unitLabel.flatMap { $0.isEmpty ? nil : "Price per \($0) in dollars" } ?? "Price each in dollars")
+                                .modifier(OptionalIdentifier(identifier: priceIdentifier))
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .frame(width: stacked || typeSize >= .xxLarge ? nil : 104, alignment: .leading)
+                    .frame(maxWidth: stacked || typeSize >= .xxLarge ? .infinity : nil, minHeight: 50, alignment: .leading)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Theme.brand, lineWidth: focus.wrappedValue == .price(lineID) ? 1.5 : 0))
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Open full editor")
-                .accessibilityIdentifier("line-description-expand")
-                menu.padding(.trailing, -10)
+                if let note {
+                    HStack(spacing: 8) {
+                        Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let noteAction {
+                            Button(noteAction.title, action: noteAction.action)
+                                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                .frame(minHeight: 44)
+                                .accessibilityHint(noteAction.hint)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+                if lineActionsLeading {
+                    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                         : AnyLayout(HStackLayout(spacing: 16))
+                    layout {
+                        closeLineButton
+                        removeLineButton
+                        menu
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4).padding(.top, 2)
+                } else {
+                    HStack(spacing: 4) {
+                        removeLineButton
+                        menu
+                        Spacer(minLength: 8)
+                        closeLineButton
+                    }
+                    .padding(.leading, 4).padding(.top, 2)
+                }
             }
+            .padding(10)
+            .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.bottom, 12)
             .fullScreenCover(isPresented: $fullEditor) {
                 LineDescriptionEditor(text: $description, subtitle: editorSubtitle,
                                       totalText: lineTotal == nil ? nil : totalText,
                                       note: note, resetTitle: noteAction?.title, resetHint: noteAction?.hint,
                                       reset: noteAction?.action)
             }
-            let layout = stacked || typeSize >= .xxLarge ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
-                                                         : AnyLayout(HStackLayout(spacing: 10))
-            layout {
-                HStack(spacing: 6) {
-                    stepButton("minus", label: "One fewer", enabled: quantityValue > 1) { quantity = String(max(1, quantityValue - 1)) }
-                    TextField("1", text: $quantity, prompt: .placeholder("1"))
-                        .keyboardType(.numberPad)
-                        .font(Theme.monoFont(17, weight: .medium))
-                        .multilineTextAlignment(.center)
-                        .focused(focus, equals: .quantity(lineID))
-                        .frame(width: 58, height: 52)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                        .accessibilityLabel("Quantity")
-                        .modifier(OptionalIdentifier(identifier: quantityIdentifier))
-                    stepButton("plus", label: "One more", enabled: quantityValue < 100_000) { quantity = String(min(100_000, quantityValue + 1)) }
-                }
-                HStack(spacing: 4) {
-                    Text("$").font(Theme.monoFont(17)).foregroundStyle(Theme.muted)
-                    TextField("0.00", text: $unitPrice, prompt: .placeholder("0.00"))
-                        .keyboardType(.decimalPad)
-                        .font(Theme.monoFont(17, weight: .medium))
-                        .multilineTextAlignment(.trailing)
-                        .focused(focus, equals: .price(lineID))
-                        .accessibilityLabel(unitLabel.flatMap { $0.isEmpty ? nil : "Price per \($0) in dollars" } ?? "Price each in dollars")
-                        .modifier(OptionalIdentifier(identifier: priceIdentifier))
-                }
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-            }
-            HStack(alignment: .firstTextBaseline) {
-                Text(unitLabel.flatMap { $0.isEmpty ? nil : "Line total · per \($0)" } ?? "Line total")
-                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                Spacer(minLength: 8)
-                Text(totalText).font(Theme.monoFont(17, weight: .medium))
-                    .contentTransition(.numericText())
-                    .lineLimit(1).minimumScaleFactor(0.7)
-            }
-            if let note {
-                HStack(spacing: 8) {
-                    Text(note).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let noteAction {
-                        Button(noteAction.title, action: noteAction.action)
-                            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .frame(minHeight: 44)
-                            .accessibilityHint(noteAction.hint)
-                    }
-                }
-            }
-            if lineActionsLeading {
-                let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
-                                     : AnyLayout(HStackLayout(spacing: 24))
-                layout {
-                    closeLineButton
-                    removeLineButton
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                HStack {
-                    removeLineButton
-                    Spacer()
-                    closeLineButton
-                }
-            }
         }
-        .padding(.vertical, 12)
         .onChange(of: focus.wrappedValue) { old, _ in
             // Currency format once the person leaves the price ("12.5" → "12.50").
             if old == .price(lineID), let cents = EstimateRevisionEditorState.parsePrice(unitPrice) {
@@ -1016,19 +1032,6 @@ struct BuilderLineRow: View {
                 .font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
-    }
-
-    private func stepButton(_ symbol: String, label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 18, weight: .medium))
-                .foregroundStyle(enabled && isEnabled ? Theme.foreground : Theme.muted)
-                .frame(width: 52, height: 52)
-                .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-        }
-        .buttonStyle(PressStyle())
-        .disabled(!enabled)
-        .accessibilityLabel(label)
-        .sensoryFeedback(.selection, trigger: quantity)
     }
 }
 
@@ -1290,7 +1293,7 @@ struct EstimateBuilderSection<Header: View>: View {
     private var addItemField: some View {
         Button(action: addItem) {
             HStack(spacing: 8) {
-                Image(systemName: "plus").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.brandText)
+                PaperIcon(.plusLight, size: 18, color: Theme.brandText)
                 Text("Add item").font(Theme.font(16)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 8)
                 if let addItemNote {

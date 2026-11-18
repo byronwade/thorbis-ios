@@ -107,10 +107,13 @@ final class CustomerPresentationTests: XCTestCase {
     }
 
     func testCustomerTypeStepsUpOnIPad() {
-        XCTAssertEqual(CustomerType(.compact).body, 20)
+        // The phone wears Paper's sizes (37, 38, 38A); iPad keeps the step up.
+        XCTAssertEqual(CustomerType(.compact).body, 16)
         XCTAssertEqual(CustomerType(.regular).body, 22)
         XCTAssertEqual(CustomerType(.compact).total, 34)
-        XCTAssertEqual(CustomerType(nil).small, 17)
+        XCTAssertEqual(CustomerType(nil).small, 15)
+        XCTAssertEqual(CustomerType(.regular).small, 17)
+        XCTAssertEqual(CustomerType(.compact).target, 50)
         XCTAssertEqual(CustomerType(.regular).target, 56)
     }
 

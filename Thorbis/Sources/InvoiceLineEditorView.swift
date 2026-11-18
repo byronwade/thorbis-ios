@@ -76,13 +76,11 @@ struct InvoiceLineEditorView: View {
         .background(Theme.canvas)
         .paperPageGround()
         .foregroundStyle(Theme.foreground)
+        // Paper 40: the page draws its own circle row and 34 Bold title; no bar.
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ThorbisToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) { editorTopBar }
         .keyboardDoneButton()
         .trackKeyboard($keyboardUp)
         .task(id: catalogContext) { await refreshCatalog() }
@@ -173,6 +171,7 @@ struct InvoiceLineEditorView: View {
             }
 
             invoiceEditorHeading
+                .padding(.bottom, 4)
 
             detailsCard
 
@@ -180,7 +179,7 @@ struct InvoiceLineEditorView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Button { showPriceBook = true } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "plus").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.brandText)
+                        PaperIcon(.plusLight, size: 18, color: Theme.brandText)
                         Text("Add item").font(Theme.font(16)).foregroundStyle(Theme.muted)
                         Spacer(minLength: 8)
                         Text(canUsePriceBook ? "Price book or custom" : "Custom item").font(Theme.font(13))
@@ -195,27 +194,21 @@ struct InvoiceLineEditorView: View {
                 .accessibilityLabel("Add item")
                 .accessibilityHint(canUsePriceBook ? "Opens the price book" : "Adds a custom line item")
                 .accessibilityIdentifier("invoice-add-item")
-                // Paper 30 / 32: scan part codes or paste a parts list, matched to the price book.
-                if canUsePriceBook {
-                    Button { materialsMode = .scan; showMaterials = true } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "barcode.viewfinder").font(.system(size: 15, weight: .medium))
-                            Text("Scan or paste materials").font(Theme.font(14, weight: .semibold))
-                        }
-                        .foregroundStyle(Theme.brandText)
-                        .frame(minHeight: 44).padding(.horizontal, 4)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .disabled(linesDisabled || editor.lines.count >= 500)
-                    .accessibilityIdentifier("invoice-add-materials")
-                }
                 // Tests read the count after the "·", so the label keeps "Line items · N".
-                Text(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
-                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("invoice-line-count")
-                    .padding(.horizontal, 4)
+                // Paper 40: "Line items" with the count on the trailing side; spoken (and read by tests) as one.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Line items").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                    if !editor.lines.isEmpty {
+                        Text("\(editor.lines.count) item\(editor.lines.count == 1 ? "" : "s")").font(Theme.font(13))
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
+                .accessibilityAddTraits([.isHeader, .isStaticText])
+                .accessibilityIdentifier("invoice-line-count")
+                .padding(.horizontal, 4)
                 if !editor.lines.isEmpty {
                     PaperCard {
                         VStack(alignment: .leading, spacing: 0) {
@@ -230,7 +223,7 @@ struct InvoiceLineEditorView: View {
                     Text("Tap an item to edit its name or price. At quantity 1, minus becomes remove.")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4).padding(.top, 2)
+                        .padding(.horizontal, 4).padding(.top, 8)
                     totalsCard
                 }
             }
@@ -324,7 +317,7 @@ struct InvoiceLineEditorView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("Total").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                 Spacer(minLength: 8)
-                Text(value).font(Theme.font(34, weight: .bold)).monospacedDigit().tracking(-0.6)
+                Text(value).font(Theme.font(28, weight: .bold)).monospacedDigit().tracking(-0.56)
                     .foregroundStyle(Theme.foreground)
                     .contentTransition(.numericText())
                     .lineLimit(1).minimumScaleFactor(0.6)
@@ -357,9 +350,9 @@ struct InvoiceLineEditorView: View {
 
     private func detailRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label).font(Theme.font(16)).foregroundStyle(Theme.subtle)
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.subtle)
             Spacer(minLength: 12)
-            Text(value).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+            Text(value).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -413,25 +406,25 @@ struct InvoiceLineEditorView: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.canvas)
+        .background(Theme.background)
     }
 
     private var invoiceCommitButtons: some View {
         let accessible = dynamicTypeSize.isAccessibilitySize
-        let layout = accessible ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        let layout = accessible ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 8))
         return layout {
             if canIssue {
                 Button { Task { await save() } } label: {
                     // Paper 40: Save draft is the quiet pill beside the commit.
                     Text("Save draft")
-                    .font(Theme.font(16, weight: .semibold))
+                    .font(Theme.font(15, weight: .semibold))
                     .foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, accessible ? 16 : 0)
+                    .padding(.horizontal, accessible ? 16 : 22)
                     .padding(.vertical, accessible ? 12 : 0)
-                    .frame(width: accessible ? nil : 118, height: accessible ? nil : Theme.commitHeight)
-                    .frame(maxWidth: accessible ? .infinity : nil, minHeight: Theme.commitHeight)
-                    .background(Theme.card, in: Capsule())
+                    .frame(height: accessible ? nil : 50)
+                    .frame(maxWidth: accessible ? .infinity : nil, minHeight: 50)
+                    .background(Theme.quietFill, in: Capsule())
                     .contentShape(Capsule())
                 }
                     .buttonStyle(PressStyle())
@@ -534,11 +527,16 @@ struct InvoiceLineEditorView: View {
         let pieces: [String?] = ["INV-\(invoice.id.suffix(4).uppercased())", source,
                                  "Revision \(editor.invoice.linesRevision)"]
         let parts = pieces.compactMap { $0 }
-        return VStack(alignment: .leading, spacing: 14) {
-            Text(parts.joined(separator: " \u{00B7} "))
-                .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 4)
+        return VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Edit invoice").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+                Text(parts.joined(separator: " \u{00B7} "))
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 4)
             FlowRow(spacing: 8, lineSpacing: 8) {
                 headingPill(symbol: status.word == "Draft" ? "circle.dashed" : "circle", text: status.word)
                     .accessibilityLabel("Status, \(status.word)")
@@ -548,7 +546,7 @@ struct InvoiceLineEditorView: View {
                         .background(Theme.brandSurface, in: Circle())
                         .dynamicTypeSize(...DynamicTypeSize.large)
                         .accessibilityHidden(true)
-                    Text(customer).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                    Text(shortCustomer(customer)).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
                 }
                 .padding(.leading, 6).padding(.trailing, 12).frame(minHeight: 40)
                 .background(Theme.card, in: Capsule())
@@ -559,6 +557,46 @@ struct InvoiceLineEditorView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Paper 40's pill names the customer "Danielle M.": the first name and the last initial.
+    private func shortCustomer(_ name: String) -> String {
+        let words = name.split(separator: " ")
+        guard words.count > 1, let last = words.last?.first else { return name }
+        return "\(words[0]) \(last)."
+    }
+
+    /// Paper 40's top row: the 44 back circle on the card tone, and "…" for what Paper keeps off the
+    /// page (scan or paste a parts list, discard). Back asks before dropping edits, as Cancel did.
+    private var editorTopBar: some View {
+        HStack(spacing: 8) {
+            PaperCircleButton(symbol: "chevron.left", label: "Cancel", size: 44, fill: Theme.card) {
+                if editor.hasChanges { confirmDiscard = true } else { dismiss() }
+            }
+            .disabled(busy)
+            Spacer(minLength: 0)
+            if !moreItems.isEmpty {
+                ThorbisMenu(items: moreItems, title: "Edit invoice", accessibilityLabel: "More") {
+                    PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                }
+                .disabled(busy)
+                .accessibilityIdentifier("invoice-more")
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 2)
+        .background(Theme.background)
+    }
+
+    private var moreItems: [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if canUsePriceBook, !linesDisabled, editor.lines.count < 500 {
+            items.append(ThorbisMenuItem("Scan materials", icon: "barcode.viewfinder") { materialsMode = .scan; showMaterials = true })
+            items.append(ThorbisMenuItem("Paste a parts list", icon: "doc.on.clipboard") { materialsMode = .paste; showMaterials = true })
+        }
+        if editor.hasChanges {
+            items.append(ThorbisMenuItem("Discard changes", icon: "trash", role: .destructive) { confirmDiscard = true })
+        }
+        return items
     }
 
     private func headingPill(symbol: String?, text: String) -> some View {
