@@ -17,6 +17,19 @@ final class TabBarUITests: XCTestCase {
         return app
     }
 
+    /// The list builds rows as they scroll in: swipe until the row is there and tappable.
+    private func reveal(_ element: XCUIElement, in app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
+        for _ in 0..<6 where !(element.exists && element.isHittable) { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(element.waitForExistence(timeout: 5), "Found \(element)", file: file, line: line)
+    }
+
+    private func attach(_ app: XCUIApplication, _ name: String) {
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     private func tab(_ app: XCUIApplication, _ id: String) -> XCUIElement { app.buttons["tabbar-\(id)"] }
 
     private func assertTabs(_ app: XCUIApplication, _ ids: [String], file: StaticString = #filePath, line: UInt = #line) {
@@ -51,6 +64,7 @@ final class TabBarUITests: XCTestCase {
         XCTAssertTrue(tab(app, "more").waitForExistence(timeout: 30))
         tab(app, "more").tap()
         XCTAssertTrue(app.buttons["drawer-search"].waitForExistence(timeout: 5), "More opens the full menu")
+        attach(app, "drawer-from-more")
         XCTAssertTrue(app.buttons["drawer-timeClock"].exists)
         // A place from the drawer that is not a tab lights More.
         app.drawerRow("timeClock").tap()
@@ -87,25 +101,31 @@ final class TabBarUITests: XCTestCase {
     func testSettingSwitchesToTheSidebarAndBack() {
         let app = launch("customize-menu")
         let row = app.buttons["menu-navigation"]
-        XCTAssertTrue(row.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons["start-automatic"].waitForExistence(timeout: 30))
+        reveal(row, in: app)
         XCTAssertEqual(row.value as? String, "Bottom bar")
+        attach(app, "menu-and-start-screen-navigation-row")
         row.tap()
         let sidebar = app.buttons["navigation-sidebar"]
         XCTAssertTrue(sidebar.waitForExistence(timeout: 5))
+        attach(app, "navigation-choice")
         sidebar.tap()
         XCTAssertTrue(sidebar.isSelected)
         // Back to the place: the menu circle returns and the bar is gone.
         let back = app.buttons.matching(NSPredicate(format: "label == 'Back'")).firstMatch
         back.tap()
-        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        reveal(row, in: app)
         XCTAssertEqual(row.value as? String, "Sidebar")
         app.buttons.matching(NSPredicate(format: "label == 'Back'")).firstMatch.tap()
         XCTAssertTrue(app.drawerMenu.waitForExistence(timeout: 10), "Sidebar: the menu circle is back")
         XCTAssertFalse(tab(app, "more").exists)
         // And back to the bar from Settings › Menu and start screen.
         app.openSettingsFromDrawer()
-        app.buttons["settings-menu"].tap()
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let menu = app.buttons["settings-menu"]
+        reveal(menu, in: app)
+        menu.tap()
+        XCTAssertTrue(app.buttons["start-automatic"].waitForExistence(timeout: 10))
+        reveal(row, in: app)
         row.tap()
         app.buttons["navigation-bottomBar"].tap()
         XCTAssertTrue(app.buttons["navigation-bottomBar"].isSelected)
@@ -120,6 +140,7 @@ final class TabBarUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(item.frame.height, 44)
             XCTAssertGreaterThanOrEqual(item.frame.width, 44)
         }
+        attach(app, "largest-text")
         let bar = tab(app, "more").frame
         XCTAssertLessThanOrEqual(bar.maxX, app.windows.firstMatch.frame.maxX, "The bar fits the screen")
         tab(app, "customers").tap()

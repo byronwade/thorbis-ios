@@ -165,9 +165,10 @@ struct PhoneTabBar: View {
                         Text(title)
                             .font(Theme.font(11, weight: .medium))
                             .foregroundStyle(active ? Theme.foreground : Theme.muted)
-                            .lineLimit(1).minimumScaleFactor(0.6)
-                            // iOS tab bars cap their words; the large content viewer shows them bigger.
-                            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                            // iOS tab bars cap their words, every item at one size; the large
+                            // content viewer (a long press) shows them bigger.
+                            .dynamicTypeSize(...DynamicTypeSize.xLarge)
                     }
                     .padding(.horizontal, 4).padding(.vertical, 6)
                     .frame(maxWidth: .infinity, minHeight: 52)
