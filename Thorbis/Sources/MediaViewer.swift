@@ -139,11 +139,15 @@ struct MediaPhotoViewer: View {
             Spacer(minLength: 0)
             VStack(spacing: 0) {
                 if let index {
+                    // Paper 21S: 17 Semibold, proportional digits.
                     Text("\(index + 1) of \(records.count)")
-                        .font(Theme.font(16, weight: .semibold)).monospacedDigit().foregroundStyle(.white)
+                        .font(Theme.font(17, weight: .semibold)).foregroundStyle(.white)
                 }
-                if let record, let day = dayWord(record) {
-                    Text(day).font(Theme.font(13)).foregroundStyle(.white.opacity(0.65))
+                if let record {
+                    // Paper 21S: "JOB-2214 · Today"; the job alone when the capture time wasn't recorded.
+                    let number = "JOB-\(record.jobId.suffix(4).uppercased())"
+                    Text(dayWord(record).map { "\(number) \u{00B7} \($0)" } ?? number)
+                        .font(Theme.font(13)).foregroundStyle(.white.opacity(0.65))
                 }
             }
             .accessibilityElement(children: .combine)
