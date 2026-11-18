@@ -305,14 +305,14 @@ struct WorkspaceGateView: View {
                             }
                             .buttonStyle(RowPressStyle())
                             .accessibilityIdentifier("workspace-join")
-                            if session.phase != .ready {
-                                Button { confirmSignOut = true } label: {
-                                    WorkspaceActionRow(symbol: "rectangle.portrait.and.arrow.right",
-                                                       title: "Sign out of this device", destructive: true)
-                                }
-                                .buttonStyle(RowPressStyle())
-                                .accessibilityIdentifier("workspace-sign-out")
+                            // Paper 29A: signing out is the menu's last row, signed in or choosing.
+                            WellDivider()
+                            Button { confirmSignOut = true } label: {
+                                WorkspaceActionRow(symbol: "rectangle.portrait.and.arrow.right",
+                                                   title: "Sign out of this device", destructive: true)
                             }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityIdentifier("workspace-sign-out")
                         }
                         Text("You’ll own a company you create. Your other companies stay as they are.")
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)

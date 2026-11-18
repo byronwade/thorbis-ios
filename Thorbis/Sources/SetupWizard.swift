@@ -451,7 +451,7 @@ struct SetupWizardView: View {
             }
         case .hours:
             VStack(alignment: .leading, spacing: 12) {
-                OperatingFactsFields(model: facts, week: $week)
+                OperatingFactsFields(model: facts, week: $week, setup: true)
                 if !facts.queued.isEmpty {
                     Label("Saved on this phone. It syncs when you're back online.", systemImage: "icloud.and.arrow.up")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)

@@ -70,6 +70,40 @@ struct SetupWeek: Equatable {
         return nil
     }
 
+    /// One line of the week as Paper 61A writes it: "Mon–Fri", "8:00 AM – 5:00 PM".
+    struct Span: Equatable {
+        let name: String
+        let hours: String
+    }
+
+    private static let fullNames = ["mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
+                                    "fri": "Friday", "sat": "Saturday", "sun": "Sunday"]
+
+    /// Neighbouring days with the same hours read as one line ("Mon–Fri"); a day on its own takes
+    /// its full name ("Saturday").
+    var spans: [Span] {
+        var runs: [(first: String, last: String, day: Day)] = []
+        for key in Self.days {
+            guard let day = days[key] else { continue }
+            if let last = runs.last, last.day.open == day.open, !day.open || (last.day.from == day.from && last.day.to == day.to) {
+                runs[runs.count - 1].last = key
+            } else {
+                runs.append((key, key, day))
+            }
+        }
+        return runs.map { run in
+            let name = run.first == run.last ? (Self.fullNames[run.first] ?? run.first)
+                                             : "\(Self.names[run.first] ?? run.first)–\(Self.names[run.last] ?? run.last)"
+            return Span(name: name, hours: run.day.open ? "\(Self.time(run.day.from)) – \(Self.time(run.day.to))" : "Closed")
+        }
+    }
+
+    /// "8:00 AM", through the app's shared clock words.
+    static func time(_ minutes: Int) -> String {
+        let date = Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: Date()) ?? Date()
+        return date.tradeTime
+    }
+
     static func clock(_ minutes: Int) -> String { String(format: "%02d:%02d", minutes / 60, minutes % 60) }
 
     static func minutes(_ clock: String) -> Int? {
@@ -114,18 +148,53 @@ enum PaymentTermsChoice {
 struct OperatingFactsFields: View {
     @ObservedObject var model: CompanyDetailsModel
     @Binding var week: SetupWeek
+    /// Guided setup (Paper 16): "Business hours" with an "Edit" link and a clock on each row.
+    var setup = false
+    @State private var editingHours = false
 
     /// Paper 61A: three grouped cards, Hours, Tax and Terms, each row 56 tall with its value trailing.
+    /// The week reads as Paper writes it ("Mon–Fri  8:00 AM – 5:00 PM", "Sunday  Closed"); a row
+    /// opens the days and the time zone to change.
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
-                PaperSection("Hours") {
-                    choiceRow("Time zone", key: "timezone",
-                              options: SetupTimeZones.choices(current: model.drafts["timezone"] ?? ""),
-                              label: SetupTimeZones.label)
-                    ForEach(SetupWeek.days, id: \.self) { day in
-                        WellDivider()
-                        dayRow(day)
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack {
+                        Text(setup ? "Business hours" : "Hours").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                            .accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 8)
+                        if setup {
+                            Button { editingHours = true } label: {
+                                Text("Edit").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                    .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel("Edit business hours")
+                            .padding(.vertical, -13)
+                        }
+                    }
+                    .padding(.horizontal, 4).padding(.bottom, 8)
+                    PaperCard {
+                        let spans = week.spans
+                        ForEach(Array(spans.enumerated()), id: \.offset) { index, span in
+                            if index > 0 { WellDivider(leading: setup ? PaperCardMetrics.inset + 36 : PaperCardMetrics.inset) }
+                            Button { editingHours = true } label: {
+                                HStack(spacing: 12) {
+                                    if setup {
+                                        PaperIcon(.setupClock, size: 20, color: Theme.subtle).frame(width: 24).accessibilityHidden(true)
+                                    }
+                                    Text(span.name).font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Text(span.hours).font(Theme.font(15)).foregroundStyle(setup ? Theme.subtle : Theme.muted)
+                                        .multilineTextAlignment(.trailing)
+                                }
+                                .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+                                .frame(minHeight: 56)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityHint("Opens the hours to change")
+                        }
                     }
                 }
                 if let error = model.fieldErrors["timezone"] { InlineProblem(message: error).padding(.horizontal, 4) }
@@ -150,6 +219,47 @@ struct OperatingFactsFields: View {
                 if let error = model.fieldErrors["default_payment_terms"] { InlineProblem(message: error).padding(.horizontal, 4) }
             }
         }
+        .sheet(isPresented: $editingHours) { SheetSurface { hoursEditor } }
+    }
+
+    /// The days and the time zone, a day a row (the open switch, opens and closes).
+    private var hoursEditor: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Business hours").font(Theme.font(22, weight: .bold)).tracking(-0.4)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Button { editingHours = false } label: {
+                    Text("Done").font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, 18).frame(minHeight: 44)
+                        .background(Theme.brand, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("hours-editor-done")
+            }
+            .padding(.horizontal, Theme.gutter).padding(.top, 22).padding(.bottom, 14)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    PaperCard {
+                        choiceRow("Time zone", key: "timezone",
+                                  options: SetupTimeZones.choices(current: model.drafts["timezone"] ?? ""),
+                                  label: SetupTimeZones.label)
+                        ForEach(SetupWeek.days, id: \.self) { day in
+                            WellDivider()
+                            dayRow(day)
+                        }
+                    }
+                    if let error = model.fieldErrors["business_hours"] ?? week.problem {
+                        InlineProblem(message: error).padding(.horizontal, 4)
+                    }
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
+            }
+        }
+        .foregroundStyle(Theme.foreground)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
     }
 
     /// A row that opens a menu of choices: the name, the chosen value trailing in muted type.
@@ -167,8 +277,6 @@ struct OperatingFactsFields: View {
                 Text(current.isEmpty ? "Choose" : label(current)).font(Theme.font(15))
                     .foregroundStyle(Theme.muted)
                     .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
             }
             .padding(.horizontal, PaperCardMetrics.inset)
             .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
@@ -215,7 +323,7 @@ struct OperatingFactsFields: View {
 
     /// "Default rate" with the percent typed in place, trailing like the other rows' values.
     private var taxRow: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 0) {
             Text("Default rate").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                 .accessibilityHidden(true)
             Spacer(minLength: 8)
@@ -224,8 +332,8 @@ struct OperatingFactsFields: View {
                       prompt: .placeholder("0"))
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
-                .font(Theme.font(15)).monospacedDigit()
-                .foregroundStyle(model.fieldErrors["sales_tax_rate"] == nil ? Theme.foreground : Theme.destructive)
+                .font(Theme.font(15))
+                .foregroundStyle(model.fieldErrors["sales_tax_rate"] == nil ? Theme.muted : Theme.destructive)
                 .frame(maxWidth: 96)
                 .accessibilityLabel("Sales tax rate, percent")
             Text("%").font(Theme.font(15)).foregroundStyle(Theme.muted).accessibilityHidden(true)

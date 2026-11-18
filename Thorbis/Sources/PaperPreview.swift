@@ -61,7 +61,9 @@ enum PaperPreview {
                "state-signing-out", "state-workspaces", "state-empty", "state-errors", "state-loading", "state-customer",
                "state-sheets", "state-toasts",
                "acct-intro", "acct-intro-2", "acct-intro-3", "acct-signup", "acct-forgot", "acct-forgot-sent", "acct-profile",
-               "acct-account", "acct-privacy", "acct-notifications", "acct-menu", "acct-help"].contains(args[index + 1]) else { return nil }
+               "acct-account", "acct-privacy", "acct-notifications", "acct-menu", "acct-help",
+               "acct-delete", "acct-primer-location", "acct-primer-notifications", "acct-password", "acct-saved-work",
+               "acct-hours", "acct-company", "acct-join", "acct-whats-new"].contains(args[index + 1]) else { return nil }
         return args[index + 1]
     }
     /// `--paper-preview-sheet team-invite | price-book-new | saved-work`: opens that sheet over its

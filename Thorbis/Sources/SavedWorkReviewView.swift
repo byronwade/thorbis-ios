@@ -67,8 +67,10 @@ struct SavedWorkReviewView: View {
                             ThorbisToolbarItem(placement: .principal) {
                                 Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
                             }
-                            ThorbisToolbarItem(placement: .confirmationAction, prominent: true) {
-                                Button("Done") { close() }.accessibilityIdentifier("saved-work-done")
+                            // Paper 73A/73B: the back circle alone at the leading edge; "Keep working"
+                            // under the list is the other way out.
+                            ThorbisToolbarItem(placement: .topBarLeading) {
+                                ThorbisBackButton(action: { close() }).accessibilityIdentifier("saved-work-done")
                             }
                         }
                 }
