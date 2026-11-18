@@ -47,6 +47,33 @@ final class MenuLayoutTests: XCTestCase {
         XCTAssertFalse(layout.hidden.contains(.inbox))
     }
 
+    /// A layout saved by an older build (pins, hidden places, a menu order naming every place and
+    /// ids this build never had) still decodes, and the menu it makes is Paper's rows.
+    func testLayoutSavedByAnOlderBuildStillDecodes() throws {
+        let store = defaults()
+        let saved: [String: [String]] = ["tabs": ["estimates", "invoices", "drafts", "dispatchBoard"],
+                                         "hidden": ["reports", "favorites", "priceBook"],
+                                         "menu": ["attention", "inbox", "moreMenu", "scorecard", "schedule", "billing"]]
+        store.set(try JSONEncoder().encode(saved), forKey: "thorbis.menuLayout.v1")
+        let layout = MenuLayout(defaults: store)
+        XCTAssertEqual(layout.tabs, [.estimates, .invoices, .drafts])
+        XCTAssertEqual(layout.hidden, [.reports, .priceBook])
+        XCTAssertEqual(layout.menuOrder, [.attention, .inbox, .scorecard, .schedule, .billing])
+        XCTAssertFalse(layout.isDefault, "Reset is offered")
+        let menu = DrawerSections.make(order: layout.menuOrder, local: LocalWorkspaceSection.allCases, role: .technician, opens: { _ in true })
+        XCTAssertEqual(menu.sections[0].places, [.inbox, .schedule, .jobs, .customers, .timeClock],
+                       "Only the main rows move; the hidden Price book and the old pins change nothing")
+        XCTAssertTrue(menu.sections[1].places.contains(.priceBook))
+        XCTAssertEqual(MenuArrangement.rows(role: .technician, order: layout.menuOrder, opens: { _ in true }),
+                       [.inbox, .schedule, .jobs, .customers, .timeClock])
+        // A layout from before the menu could be reordered has no "menu" key at all.
+        let older = defaults()
+        older.set(try JSONEncoder().encode(["tabs": ["schedule", "jobs"], "hidden": []]), forKey: "thorbis.menuLayout.v1")
+        XCTAssertEqual(MenuLayout(defaults: older).menuOrder, [])
+        layout.reset()
+        XCTAssertTrue(layout.isDefault)
+    }
+
     func testUnknownIdsFromAnotherVersionAreIgnored() throws {
         let store = defaults()
         store.set(try JSONEncoder().encode(["tabs": ["jobs", "dispatchBoard", "jobs"], "hidden": ["nope", "team"]]),

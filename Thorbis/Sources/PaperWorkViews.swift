@@ -1120,7 +1120,8 @@ struct JobsView: View {
         .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom) {
-            if session.can("job.create", feature: "jobs") && !jobs.isEmpty {
+            // Paper 20: on a phone New job is the header's +, so no pill floats over the list.
+            if UIDevice.current.userInterfaceIdiom == .pad, session.can("job.create", feature: "jobs"), !jobs.isEmpty {
                 FloatingCreateButton(title: "New job") { showNew = true }
             }
         }

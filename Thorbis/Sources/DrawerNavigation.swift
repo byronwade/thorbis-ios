@@ -77,15 +77,18 @@ struct AppDrawer: View {
     let sections: DrawerSections
     let count: (MenuItem) -> PlaceCount?
     let recents: [DrawerRecent]
-    /// Saved work on this phone: its row under On this phone, its words on the gear, its dot when it needs the person.
+    /// Saved work on this phone: the gear says it and wears its dot when it needs the person; its
+    /// review is a row in Settings.
     var savedWork: AppBottomBar.Sync?
     var create: PaperCreateAction?
-    /// The gear circle's menu: businesses, saved work, Add a business, Settings, Edit menu.
-    let settingsItems: [ThorbisMenuItem]
+    /// Paper 29A, from the workspace name: every business (the open one checked) and Add a business.
+    let workspaceItems: [ThorbisMenuItem]
+    /// Paper 65: the gear opens Settings.
+    let openSettings: () -> Void
     /// At accessibility sizes the drawer is full width, so it carries its own close circle.
     let showsClose: Bool
     /// False while the drawer sits closed under the card (and from the moment it starts closing). The
-    /// commit's context menu and the gear's popover are UIKit-hosted and stay in the accessibility
+    /// commit's context menu and the workspace menu's popover are UIKit-hosted and stay in the accessibility
     /// tree even when the drawer is hidden, so they are only built while the drawer can be seen.
     var showsControls = true
     /// False once the drawer has slid shut: its scroll view (UIKit-hosted too) would otherwise sit
@@ -128,9 +131,8 @@ struct AppDrawer: View {
             VStack(alignment: .leading, spacing: 0) {
                 PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: role) },
                            isCurrent: { current == $0.rawValue }, isCurrentLocal: { current == "local-\($0.rawValue)" },
-                           count: count, idPrefix: "drawer", compactRows: role != .technician, savedWork: savedWork,
-                           openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork,
-                           openFavorite: openFavorite)
+                           count: count, idPrefix: "drawer", compactRows: role != .technician, showsFavorites: false,
+                           openPlace: openPlace, openLocal: openLocal)
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 24)
@@ -153,7 +155,7 @@ struct AppDrawer: View {
     /// menu), and the + circle (New) at the trailing edge.
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
-            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Workspace, \(title)") {
+            ThorbisMenu(items: workspaceItems, title: "Switch workspace", accessibilityLabel: "Workspace, \(title)") {
                 HStack(spacing: 10) {
                     Text(String(title.prefix(1)).uppercased())
                         .font(Theme.font(14, weight: .bold)).foregroundStyle(.white)
@@ -220,15 +222,6 @@ struct AppDrawer: View {
 
     // MARK: Bottom
 
-    /// Screenshot only: `--paper-preview-gear-open` (with `--paper-preview-drawer-open`) opens the gear's menu.
-    private var gearOpensForPreview: Bool {
-        #if DEBUG
-        PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-gear-open")
-        #else
-        false
-        #endif
-    }
-
     private var personName: String { session.user?.name ?? session.user?.email ?? "You" }
     private var personInitials: String {
         let words = personName.split(separator: " ").prefix(2)
@@ -243,8 +236,8 @@ struct AppDrawer: View {
     }
 
     /// Paper v2: a hairline, then the person (initials on brand surface, name 15 Semibold, role 13),
-    /// the bell (Notifications, Paper 77; Messages without access to notices) and the gear (Settings and businesses). The gear wears saved work's dot when
-    /// it needs the person; its menu grows up, clear of the home indicator.
+    /// the bell (Notifications, Paper 77; Messages without access to notices) and the gear, which
+    /// opens Settings (Paper 65) and wears saved work's dot when it needs the person.
     private var footer: some View {
         HStack(alignment: .center, spacing: 10) {
             Text(personInitials)
@@ -269,14 +262,15 @@ struct AppDrawer: View {
                 .accessibilityLabel("Notifications")
                 .accessibilityIdentifier("drawer-notifications")
             }
-            ThorbisMenu(items: settingsItems, title: title, accessibilityLabel: "Settings and businesses",
-                        opensOnAppear: gearOpensForPreview, arrowEdge: .bottom) {
+            Button(action: openSettings) {
                 PaperIcon(.gear, size: 18, color: Theme.muted)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
                     .overlay(alignment: .topTrailing) {
                         if savedWork?.needsPerson == true { DrawerDot().offset(x: -6, y: 6) }
                     }
             }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Settings")
             .accessibilityValue(savedWork?.words ?? "")
             .accessibilityIdentifier("drawer-settings")
         }

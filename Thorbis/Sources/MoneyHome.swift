@@ -88,6 +88,27 @@ struct MoneyHomeView: View {
         .paperCardMargin()
         .padding(.top, 16)
         .accessibilityIdentifier("money-reports")
+        moneyDoors
+    }
+
+    /// Paper's Map: Estimates and Invoices open "from Money", and so do the payouts. The billing
+    /// schedules and what needs attention are money's too, so they are listed here, not in the menu.
+    @ViewBuilder private var moneyDoors: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            PlaceDoorRows(door: .money, title: "Documents")
+            if session.can("organization.settings.edit") {
+                AccountGroup(title: "Getting paid") {
+                    NavigationLink(value: PaperRoute.payments) {
+                        AccountRow(glyph: .bizCard, glyphSize: 22, title: "Payouts and card payments",
+                                   subtitle: "Where customer payments land", end: .chevronLarge)
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityIdentifier("money-payouts")
+                }
+            }
+        }
+        .paperCardMargin()
+        .padding(.top, 22)
     }
 
     private var ownerSubtitle: String {
@@ -188,6 +209,7 @@ struct MoneyHomeView: View {
         MoneyOverviewView(embedded: true, chasingOnly: true).id(refreshes)
             .paperCardMargin()
             .padding(.top, 18)
+        moneyDoors
     }
 
     private var officeSubtitle: String {
@@ -322,6 +344,10 @@ struct ReportsSummaryView: View {
                 .paperCardMargin()
                 .padding(.top, 16)
                 .accessibilityIdentifier("reports-full")
+                // My scorecard is a report; it opens from here, not from the menu.
+                PlaceDoorRows(door: .reports, showsSubtitles: true)
+                    .paperCardMargin()
+                    .padding(.top, 16)
             }
             .padding(.bottom, 40)
         }

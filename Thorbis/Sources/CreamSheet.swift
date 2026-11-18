@@ -65,7 +65,7 @@ extension MenuItem {
 /// reachable place, each exactly once) is unit-tested per role.
 struct DrawerSections: Equatable {
     /// One row of a Paper-ordered section: a place, or a record kept with the company's books.
-    enum Entry: Equatable, Identifiable {
+    enum Entry: Hashable, Identifiable {
         case place(MenuItem), local(LocalWorkspaceSection)
         var id: String {
             switch self {
@@ -101,7 +101,8 @@ struct DrawerSections: Equatable {
                     secondary: [.place(.team), .place(.vendors), .place(.properties), .local(.equipment), .local(.agreements),
                                 .place(.reports)])
         case .owner:
-            return (primary: [.place(.home), .place(.money), .place(.reports), .place(.schedule), .place(.inbox)],
+            // Paper 58N draws no Jobs row; it stays with the first group until the owner decides.
+            return (primary: [.place(.home), .place(.money), .place(.reports), .place(.schedule), .place(.jobs), .place(.inbox)],
                     heading: PlaceSection.business,
                     secondary: [.place(.customers), .place(.pipeline), .place(.marketing), .local(.agreements), .place(.properties),
                                 .local(.equipment), .local(.fleet), .place(.vendors), .place(.businessSettings)])
@@ -113,36 +114,34 @@ struct DrawerSections: Equatable {
     /// The places in the order they are listed, pinned ones first.
     var places: [MenuItem] { sections.flatMap(\.places) }
 
+    /// Paper's rows for the role, and nothing else: the main places with no heading, then the
+    /// role's second group. A place Paper reaches from inside another screen (Estimates from Money,
+    /// My scorecard from Reports…) is not listed here; `PlaceDoors` says where each one opens, and
+    /// Search lists every place.
+    ///
     /// - Parameters:
-    ///   - pins: the layout's pinned places (company or this phone), from Edit menu.
-    ///   - explicitPins: true when the person or company chose pins; the role's own defaults never
-    ///     count, so a role that never edited its menu sees no Pinned section.
-    ///   - hidden: places the person or company turned off in Customize menu (none by default).
-    ///   - order: Edit menu's global order; customized menus keep this order across groups.
-    ///   - local: records kept on this phone (Fleet, Equipment, Agreements) this role may open.
+    ///   - pins: the places starred in Settings › Menu and start screen. They lead the main group.
+    ///   - explicitPins: true when the person or company chose pins; a role's defaults never move rows.
+    ///   - hidden: places a company layout turned off.
+    ///   - order: the person's order for the main group (Menu and start screen's drag handles).
+    ///   - local: records (Fleet, Equipment, Maintenance plans) this role may open.
     ///   - opens: whether this role can open the place.
-    ///   - role: Paper v2's per-role order (primary places, then Tools / Manage / Business, then More).
-    ///     Nil keeps the older grouping by kind.
+    ///   - role: whose menu it is. Nil lists every place grouped by kind (no screen uses it now).
     static func make(pins: [MenuItem] = [], explicitPins: Bool = false, roleDefaults: [MenuItem] = [],
                      hidden: Set<MenuItem> = [], order: [MenuItem] = [], local: [LocalWorkspaceSection] = [],
                      role: WorkRole? = nil, opens: (MenuItem) -> Bool) -> DrawerSections {
         func reachable(_ item: MenuItem) -> Bool { opens(item) && !hidden.contains(item) }
-        let pinned = explicitPins ? unique(pins.filter { reachable($0) && !roleDefaults.contains($0) }) : []
-        var sections: [Section] = []
-        if !pinned.isEmpty { sections.append(Section(kind: .pinned, places: pinned)) }
-        let available = PlaceSection.canonical.filter { reachable($0) && !pinned.contains($0) }
-        if order.isEmpty, let role {
+        if let role {
             let layout = paperLayout(role)
             func keep(_ entries: [Entry]) -> [Entry] {
                 entries.filter { entry -> Bool in
                     switch entry {
-                    case .place(let item): return available.contains(item)
+                    case .place(let item): return reachable(item)
                     case .local(let section): return local.contains(section)
                     }
                 }
             }
-            func split(_ kind: PlaceSection, _ entries: [Entry]) -> Section? {
-                let rows = keep(entries)
+            func section(_ kind: PlaceSection, _ rows: [Entry]) -> Section? {
                 guard !rows.isEmpty else { return nil }
                 let places = rows.compactMap { entry -> MenuItem? in
                     if case .place(let item) = entry { return item }
@@ -154,16 +153,16 @@ struct DrawerSections: Equatable {
                 }
                 return Section(kind: kind, places: places, local: records, entries: rows)
             }
-            if let primary = split(.primary, layout.primary) { sections.append(primary) }
-            if let second = split(layout.heading, layout.secondary) { sections.append(second) }
-            let listed = Set(sections.flatMap(\.places))
-            let rest = available.filter { !listed.contains($0) }
-            if !rest.isEmpty { sections.append(Section(kind: .more, places: rest)) }
-            let placedLocal = Set(sections.flatMap(\.local))
-            let restLocal = local.filter { !placedLocal.contains($0) }
-            if !restLocal.isEmpty { sections.append(Section(kind: .phone, places: [], local: restLocal)) }
+            let primary = arranged(keep(layout.primary), pins: explicitPins ? pins : [], order: order)
+            var sections: [Section] = []
+            if let first = section(.primary, primary) { sections.append(first) }
+            if let second = section(layout.heading, keep(layout.secondary)) { sections.append(second) }
             return DrawerSections(sections: sections)
         }
+        let pinned = explicitPins ? unique(pins.filter { reachable($0) && !roleDefaults.contains($0) }) : []
+        var sections: [Section] = []
+        if !pinned.isEmpty { sections.append(Section(kind: .pinned, places: pinned)) }
+        let available = PlaceSection.canonical.filter { reachable($0) && !pinned.contains($0) }
         if !order.isEmpty {
             let items = unique(order.filter(available.contains) + available)
             if !items.isEmpty { sections.append(Section(kind: .customized, places: items)) }
@@ -175,6 +174,24 @@ struct DrawerSections: Equatable {
         }
         if !local.isEmpty { sections.append(Section(kind: .phone, places: [], local: local)) }
         return DrawerSections(sections: sections)
+    }
+
+    /// The main group in the person's order: starred places first (in star order), then the rows
+    /// they dragged, then the rest as Paper lists them. A saved order or star naming a place that
+    /// is not one of this role's main rows (older builds listed every place) is ignored.
+    static func arranged(_ rows: [Entry], pins: [MenuItem], order: [MenuItem]) -> [Entry] {
+        var left = rows
+        var result: [Entry] = []
+        for item in pins + order {
+            if let index = left.firstIndex(of: .place(item)) { result.append(left.remove(at: index)) }
+        }
+        return result + left
+    }
+
+    /// Every row Paper lists for the role, before permissions: what Menu and start screen arranges.
+    static func paperRows(_ role: WorkRole) -> [Entry] {
+        let layout = paperLayout(role)
+        return layout.primary + layout.secondary
     }
 
     private static func unique(_ items: [MenuItem]) -> [MenuItem] {
@@ -385,6 +402,9 @@ struct PlacesList: View {
     /// technician's (29N) draws 46 under 38. The iPad sidebar keeps the taller rows.
     var compactRows = false
     var savedWork: AppBottomBar.Sync? = nil
+    /// The iPad sidebar lists starred jobs and customers under the main places. The phone drawer is
+    /// Paper's rows alone (29N / 57N / 58N): starred records are in Search there.
+    var showsFavorites = true
     var savedWorkTitle = "Saved on this phone"
     let openPlace: (MenuItem) -> Void
     let openLocal: (LocalWorkspaceSection) -> Void
@@ -419,9 +439,9 @@ struct PlacesList: View {
                     case .local(let local): localRows([local])
                     }
                 }
-                if index == 0 { favorites }
+                if index == 0, showsFavorites { favorites }
             }
-            if listed.isEmpty { favorites }
+            if listed.isEmpty, showsFavorites { favorites }
             if let custom = sections.sections.first(where: { $0.kind == .customized }), !custom.places.isEmpty {
                 disclosureHeading("Your places", collapsed: $customCollapsed, id: "custom")
                 if !customCollapsed {

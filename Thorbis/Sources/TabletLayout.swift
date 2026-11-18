@@ -550,9 +550,10 @@ struct TabletRoot: View {
 
     private func sidebar(fold: @escaping () -> Void) -> some View {
         TabletSidebar(
-            sections: DrawerSections.make(pins: layout.visibleTabs(session),
-                                          explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
-                                          roleDefaults: layout.roleDefaultTabs, hidden: layout.hidden, order: layout.menuOrder,
+            // The same rows as the phone drawer: Paper's for the role. A company layout only hides
+            // places; the order from Menu and start screen is this device's own.
+            sections: DrawerSections.make(hidden: layout.source == .phone ? [] : layout.hidden,
+                                          order: layout.source == .phone ? layout.menuOrder : [],
                                           local: localSections, role: WorkRole(session), opens: { $0.permitted(session) }),
             current: tab,
             section: section(for:),
@@ -713,8 +714,11 @@ struct TabletRoot: View {
     private var searchActions: [SearchAction] {
         let later: (@escaping () -> Void) -> () -> Void = { run in { afterSearch = run; search = false } }
         let creates = createChoices.map { item in (item.title, item.icon ?? "plus", later(item.action)) }
-        return SearchAction.standard(creates: creates, settings: later { settings = true }, places: menuPlaces,
-                                     openPlace: { place in afterSearch = nil; search = false; show(section(for: place)) })
+        return SearchAction.standard(creates: creates, settings: later { settings = true },
+                                     places: SearchAction.everyPlace(permitted: { $0.permitted(session) }),
+                                     openPlace: { place in afterSearch = nil; search = false; show(section(for: place)) },
+                                     records: localSections,
+                                     openRecord: { record in afterSearch = nil; search = false; show(.local(record)) })
     }
 
     // MARK: Deep links

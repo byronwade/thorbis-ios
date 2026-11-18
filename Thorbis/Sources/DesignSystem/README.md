@@ -59,9 +59,13 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   left — `PaperHeader` draws it when the shell sets `\.paperDrawer` (roots only); roots without a
   Paper header or with a visible bar get it in the bar (`DrawerCircleInBar`). Pushed screens keep
   `ThorbisBackButton` alone (`.thorbisBackButton()` / `thorbisDestination`), as C-Job shows. Edge swipe opens the drawer on roots; on pushed screens it is Back.
-  Which places it lists comes from `DrawerSections.make` (`../CreamSheet.swift`): every place the
-  role can open, grouped under Work, Money, Shop and On this phone (Fleet, Equipment, Agreements,
-  saved work), with explicit Edit-menu pins leading in a Pinned section; nothing is folded away.
+  Which places it lists comes from `DrawerSections.make` (`../CreamSheet.swift`): exactly Paper's
+  rows for the role (Navigation 29N / 57N / 58N) — the main places, then one headed group. Every
+  other place opens from the screen Paper's Map gives it (`PlaceDoors`, `../PlaceDoors.swift`:
+  Estimates and Invoices from Money, My scorecard from Reports, Team additions from Team, the
+  rest under Settings › Other places) and from Search, which lists every place. The gear opens
+  Settings; the workspace name opens Switch workspace; the menu's order is set in Settings ›
+  Menu and start screen.
   Cream sheet (C-Nav.dc.html): the drawer sits on the canvas; 18pt business name + search circle;
   `PlacesList` rows (18pt mark in the place's quiet hue, filled when here, 15pt word, a tabular
   count at the trailing edge, the selected place on `Theme.fill`), 12pt section headings, Recent
