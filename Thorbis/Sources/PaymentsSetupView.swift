@@ -209,8 +209,7 @@ struct PaymentsSetupView: View {
                     Text("Opens Stripe in a secure browser. Tap Done there to come back.")
                         .font(Theme.font(12)).foregroundStyle(Theme.muted)
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 8)
-                .background(Theme.canvas)
+                .paperActionBarGround(Theme.canvas)
             }
         }
         .refreshable { await load() }

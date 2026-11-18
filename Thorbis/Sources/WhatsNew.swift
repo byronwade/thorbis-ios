@@ -135,8 +135,7 @@ struct WhatsNewSheet: View {
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaInset(edge: .bottom) {
             PrimaryButton(title: "Got it", action: onContinue)
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 8)
-                .background(Theme.canvas)
+                .paperActionBarGround(Theme.canvas)
         }
         .background(Theme.canvas)
         .presentationDetents([.medium, .large], selection: $detent)

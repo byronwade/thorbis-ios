@@ -27,6 +27,8 @@ struct ThorbisSheetHeaderAction {
     var identifier: String? = nil
     /// Read by VoiceOver while the commit is off ("Your role can't add customers.").
     var hint: String? = nil
+    /// What VoiceOver reads when it says more than the pill ("Save" reads "Save equipment").
+    var accessibilityLabel: String? = nil
     var action: () -> Void
 }
 
@@ -149,6 +151,10 @@ struct PaperTaskBar: View {
     let title: String
     var cancelTitle = "Cancel"
     var cancelDisabled = false
+    /// The way out's identifier where UI tests find it ("edit-customer-cancel").
+    var cancelIdentifier: String? = nil
+    /// What VoiceOver reads for the way out when "Cancel" alone is unclear.
+    var cancelAccessibilityLabel: String? = nil
     /// The brand pill; nil where the commit sits at the bottom of the sheet (or there is none).
     var commit: ThorbisSheetHeaderAction? = nil
     let onCancel: () -> Void
@@ -180,6 +186,8 @@ struct PaperTaskBar: View {
             }
             .buttonStyle(PressStyle())
             .disabled(cancelDisabled)
+            .accessibilityLabel(cancelAccessibilityLabel ?? cancelTitle)
+            .modifier(OptionalIdentifier(identifier: cancelIdentifier))
             Spacer(minLength: 8)
             if titleInRow { titleText.lineLimit(1).fixedSize(); Spacer(minLength: 8) }
             if let commit {
@@ -195,7 +203,7 @@ struct PaperTaskBar: View {
                 }
                 .buttonStyle(PressStyle())
                 .disabled(commit.busy || !commit.enabled)
-                .accessibilityLabel(commit.title)
+                .accessibilityLabel(commit.accessibilityLabel ?? commit.title)
                 .accessibilityHint(commit.hint ?? "")
                 .accessibilityIdentifier(commit.identifier ?? "sheet-commit")
             } else if titleInRow {
@@ -377,8 +385,10 @@ struct ThorbisModalSheet<Content: View>: View {
                                 .accessibilityHidden(true)
                         }
                     }
-                    // Paper v2: the commit and Cancel sit 20 from the sheet's edges.
-                    .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, keyboardShown && onKeyboardDone != nil ? 4 : 12)
+                    // Paper v2: the commit and Cancel sit 20 from the sheet's edges; above and below them, the
+                    // same room as every pinned bar (PaperActionBarMetrics).
+                    .padding(.horizontal, Theme.gutter).padding(.top, PaperActionBarMetrics.top)
+                    .padding(.bottom, keyboardShown && onKeyboardDone != nil ? 4 : PaperActionBarMetrics.bottom)
                 }
                 if onKeyboardDone != nil, keyboardShown {
                     HStack {

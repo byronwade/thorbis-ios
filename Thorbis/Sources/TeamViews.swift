@@ -698,9 +698,11 @@ struct MemberRoleSheet: View {
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
             .overlay(alignment: .top) { if !loaded { SkeletonRows(count: 4, leading: false).background(Theme.canvas) } }
-            .navigationTitle("Change role")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { dismiss() }.disabled(busy) } }
+            // Paper 27A: a sheet that is a form leads with the task bar, not a system bar title.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaperTaskBar(title: "Change role", cancelDisabled: busy) { dismiss() }.background(Theme.canvas)
+            }
+            .toolbar(.hidden, for: .navigationBar)
             .task {
                 do { roles = try await api.organizationRoles() } catch { self.error = error.localizedDescription }
                 loaded = true

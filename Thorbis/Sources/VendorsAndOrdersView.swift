@@ -511,9 +511,7 @@ struct VendorDetailView: View {
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("New purchase order")
                     .accessibilityIdentifier("vendors-detail-new-order")
-                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 28).padding(.bottom, 8)
-                    .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0), .init(color: Theme.background, location: 0.34)],
-                                               startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
+                    .paperActionBarFade()
             }
         }
         .toolbar {
@@ -597,7 +595,7 @@ struct VendorDetailView: View {
                 PlaceSheetValueRow(label: "Account number", value: vendor.maskedAccount ?? "Not set", minHeight: 52)
             }
         }
-        PaperSection(title: open > 0 ? "Purchase orders \u{00B7} \(open) open" : "Purchase orders") {
+        PaperSection(title: "Purchase orders") {
             if orders.isEmpty {
                 Text("No purchase orders for this vendor yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -613,7 +611,10 @@ struct VendorDetailView: View {
                     }
                 }
             }
-        } accessory: { EmptyView() }
+        } accessory: {
+            // Like every section label, the count sits at the trailing edge.
+            if open > 0 { Text("\(open) open").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted) }
+        }
         if let notes = vendor.notes, !notes.isEmpty {
             PaperSection("Notes") {
                 Text(notes).font(Theme.font(15)).foregroundStyle(Theme.foreground)

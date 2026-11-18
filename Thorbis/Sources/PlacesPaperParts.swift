@@ -48,7 +48,7 @@ struct PlacePhoneLine: View {
 /// the words are typed here and narrow this list.
 struct PlaceSearchField<Filter: View>: View {
     @Binding var query: String
-    var placeholder = "Search"
+    var placeholder = "Search or ask"
     var chips: [PaperFilterChip] = []
     var identifier: String? = nil
     @ViewBuilder var filter: Filter
@@ -84,7 +84,7 @@ struct PlaceSearchField<Filter: View>: View {
 }
 
 extension PlaceSearchField where Filter == EmptyView {
-    init(query: Binding<String>, placeholder: String = "Search", chips: [PaperFilterChip] = [], identifier: String? = nil) {
+    init(query: Binding<String>, placeholder: String = "Search or ask", chips: [PaperFilterChip] = [], identifier: String? = nil) {
         self.init(query: query, placeholder: placeholder, chips: chips, identifier: identifier) { EmptyView() }
     }
 }
@@ -185,11 +185,7 @@ struct PlaceBottomBar<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        content
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 28).padding(.bottom, 8)
-            .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0),
-                                               .init(color: Theme.background, location: 0.34)],
-                                       startPoint: .top, endPoint: .bottom).allowsHitTesting(false))
+        content.paperActionBarFade()
     }
 }
 

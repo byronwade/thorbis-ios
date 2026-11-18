@@ -133,10 +133,7 @@ struct CancelMembershipView: View {
             .disabled(busy || blocked != nil)
             .accessibilityIdentifier("membership-cancel-commit")
         }
-        .padding(.horizontal, PaperCardMetrics.margin)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(Theme.canvas)
+        .paperActionBarGround(Theme.canvas, top: blocked == nil ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
     }
 
     private func cancel() async {

@@ -268,11 +268,11 @@ private struct InboxLocalComposerView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.canvas)
-            .navigationTitle("Compose")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            // Paper 27A: a sheet that is a form leads with the task bar, not a system bar title.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaperTaskBar(title: "Compose") { dismiss() }.background(Theme.canvas)
             }
+            .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
                     PaperActionBar(title: "Save draft") { save(.draft) }

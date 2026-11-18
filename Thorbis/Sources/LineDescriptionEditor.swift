@@ -60,7 +60,7 @@ struct LineDescriptionEditor: View {
                 if loaded { text = original }
                 dismiss()
             } label: {
-                Text("Cancel").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     .padding(.horizontal, 16).frame(minHeight: 44)
                     .background(Theme.card, in: Capsule())
                     .contentShape(Capsule())
@@ -68,7 +68,7 @@ struct LineDescriptionEditor: View {
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("description-editor-cancel")
             VStack(spacing: 0) {
-                Text("Description").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                Text("Description").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
                     .accessibilityAddTraits(.isHeader)
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle).font(Theme.font(12)).foregroundStyle(Theme.subtleForeground).lineLimit(1)
@@ -78,7 +78,7 @@ struct LineDescriptionEditor: View {
             Button {
                 dismiss()
             } label: {
-                Text("Done").font(Theme.font(15, weight: .semibold)).foregroundStyle(Color.white)
+                Text("Done").font(Theme.font(16, weight: .semibold)).foregroundStyle(Color.white)
                     .padding(.horizontal, 18).frame(minHeight: 44)
                     .background(Theme.brand, in: Capsule())
                     .contentShape(Capsule())

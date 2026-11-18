@@ -17,9 +17,10 @@ extension PaperGlyph {
                                                  .stroke("M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12.5h4", 1.8)])
 }
 
-/// A row's trailing chevron as Paper draws it.
+/// A row's trailing chevron: the one `PaperChevron` (16, muted), which Paper draws on most rows
+/// (21 / 52 / 65); record lists (86 / 87A) no longer keep a 14pt copy.
 struct PaperRowChevron: View {
-    var body: some View { PaperIcon(.rowChevron14, size: 14, color: Theme.subtleForeground) }
+    var body: some View { PaperChevron() }
 }
 
 /// A record list's row (Paper 85C / 86 / 87A / 88): the name (16/22 Medium, -0.01em) over one

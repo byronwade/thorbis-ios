@@ -1096,8 +1096,7 @@ struct InvoiceDetailView: View {
                 )
             } else if let record, record.status == "draft", invoiceAmounts(record) != nil, session.can("invoice.issue", feature: "invoicing") {
                 PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
-                    .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 8)
-                    .background(Theme.canvas)
+                    .paperActionBarGround(Theme.canvas)
             }
         }
         .sensoryFeedback(.success, trigger: issued)
@@ -2502,8 +2501,7 @@ struct EstimateRevisionDetailView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity)
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
-                .background(Theme.canvas)
+                .paperActionBarGround(Theme.canvas, top: PaperActionBarMetrics.topUnderHint)
         } else if restoreTarget != nil, let current {
             VStack(spacing: 10) {
                 Text("Restoring makes this the Rev \(current.revisionNumber + 1) draft. Rev \(current.revisionNumber) stays in history.")
@@ -2517,8 +2515,7 @@ struct EstimateRevisionDetailView: View {
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("estimate-revision-restore")
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 8)
-            .background(Theme.canvas)
+            .paperActionBarGround(Theme.canvas, top: PaperActionBarMetrics.topUnderHint)
         }
     }
 

@@ -601,33 +601,9 @@ private struct TruckStockEditor: View {
     }
 
     private var header: some View {
-        ZStack {
-            Text(existing == nil ? "Add stock item" : "Edit stock item").font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 100)
-            HStack {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                Spacer(minLength: 8)
-                // Never pre-disabled: pressed without a name, it says so under the field.
-                Button { save() } label: {
-                    Text("Save").font(Theme.font(16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("truckstock-save")
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        // Never pre-disabled: pressed without a name, it says so under the field.
+        PaperTaskBar(title: existing == nil ? "Add stock item" : "Edit stock item",
+                     commit: ThorbisSheetHeaderAction(title: "Save", identifier: "truckstock-save") { save() }) { dismiss() }
     }
 
     private func stacked(_ label: String, prompt: String, text: Binding<String>, field: Field,

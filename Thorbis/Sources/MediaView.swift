@@ -1491,20 +1491,8 @@ struct MediaAddDocumentSheet: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                ZStack {
-                    Text("Add document").font(Theme.font(17, weight: .semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    HStack {
-                        Button { dismiss() } label: {
-                            Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .padding(.horizontal, 16).frame(minHeight: 44)
-                                .background(Theme.quietFill, in: Capsule())
-                        }
-                        .buttonStyle(PressStyle())
-                        .accessibilityIdentifier("media-add-document-cancel")
-                        Spacer()
-                    }
-                }
+                PaperTaskBar(title: "Add document", cancelIdentifier: "media-add-document-cancel") { dismiss() }
+                VStack(spacing: 0) {
                 Text("Goes in Documents on \(jobNumber)").font(Theme.font(14)).foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
                     .padding(.top, 2).padding(.bottom, 14)
@@ -1524,8 +1512,9 @@ struct MediaAddDocumentSheet: View {
                 Text("Up to 8 MB. Scans are saved as PDF.").font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4).padding(.top, 12)
+                }
+                .padding(.horizontal, 16).padding(.top, 2).padding(.bottom, 12)
             }
-            .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 12)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         }
         .scrollBounceBehavior(.basedOnSize)

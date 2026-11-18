@@ -410,8 +410,7 @@ struct InvoiceLineEditorView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.background)
+        .paperActionBarGround(top: commitBlockedReason == nil ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
     }
 
     private var invoiceCommitButtons: some View {

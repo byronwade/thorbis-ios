@@ -104,38 +104,10 @@ struct EditProfileSheet: View {
     // MARK: Header (Paper: Cancel pill, the 17 Semibold title, the brand Save pill)
 
     private var header: some View {
-        ZStack {
-            Text("Edit profile").font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 100)
-            HStack {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(saving)
-                .accessibilityIdentifier("edit-profile-cancel")
-                Spacer(minLength: 8)
-                Button { Task { await save() } } label: {
-                    HStack(spacing: 6) {
-                        if saving { ProgressView().tint(.white) }
-                        Text("Save").font(Theme.font(16, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18).frame(minHeight: 44)
-                    .background(Theme.brand, in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(saving)
-                .accessibilityIdentifier("edit-profile-save")
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        PaperTaskBar(title: "Edit profile", cancelDisabled: saving, cancelIdentifier: "edit-profile-cancel",
+                     commit: ThorbisSheetHeaderAction(title: "Save", busy: saving, identifier: "edit-profile-save") {
+                         Task { await save() }
+                     }) { dismiss() }
     }
 
     // MARK: Content

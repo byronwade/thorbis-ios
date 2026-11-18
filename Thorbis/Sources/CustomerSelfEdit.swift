@@ -988,10 +988,7 @@ struct CustomerSelfEditForm: View {
                     focused = false
                     if draft.wrappedValue.isValid { done() } else { showErrors = true }
                 }
-                .frame(maxWidth: CustomerModeStyle.readableWidth)
-                .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-                .frame(maxWidth: .infinity)
-                .background(Theme.canvas)
+                .paperActionBarGround(Theme.canvas, maxWidth: CustomerModeStyle.readableWidth)
             }
         } else if let loadError = model.loadError {
             ScrollView {
@@ -1280,10 +1277,7 @@ struct CustomerSelfEditReview: View {
                 Button("Discard changes", role: .destructive) { onFinished() }
                     .font(Theme.customerFont(15, weight: .medium)).frame(minHeight: 44).disabled(model.saving)
             }
-            .frame(maxWidth: CustomerModeStyle.readableWidth)
-            .padding(.horizontal, Theme.gutter).padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(Theme.canvas)
+            .paperActionBarGround(Theme.canvas, maxWidth: CustomerModeStyle.readableWidth)
         }
     }
 

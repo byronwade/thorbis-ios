@@ -1570,38 +1570,12 @@ struct JobScheduleView: View {
     /// Paper 53B: Cancel on the left, the sheet's name centred, the commit as a brand pill.
     private var header: some View {
         let canSave = session.can("job.assign", feature: "jobs")
-        return HStack(spacing: 8) {
-            Button { dismiss() } label: {
-                Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 16).frame(minHeight: 44)
-                    .background(Theme.fill, in: Capsule())
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(PressStyle())
-            .disabled(busy)
-            Spacer(minLength: 4)
-            Text(job.scheduledFor == nil ? "Schedule visit" : "Move visit")
-                .font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 4)
-            Button { Task { await save() } } label: {
-                HStack(spacing: 6) {
-                    if busy { ProgressView().tint(.white) }
-                    Text(saved ? "Saved" : (job.scheduledFor == nil ? "Schedule" : "Reschedule"))
-                        .font(Theme.font(16, weight: .semibold))
-                }
-                .foregroundStyle(Color.white)
-                .padding(.horizontal, 18).frame(minHeight: 44)
-                .background(Theme.brand.opacity(busy || saved || !canSave ? 0.5 : 1), in: Capsule())
-                .contentShape(Capsule())
-            }
-            .buttonStyle(PressStyle())
-            .disabled(busy || saved || !canSave)
-            .accessibilityLabel(saved ? "Schedule saved" : "Save schedule")
-        }
-        .padding(.horizontal, PaperCardMetrics.margin)
-        .padding(.top, 14).padding(.bottom, 4)
+        return PaperTaskBar(title: job.scheduledFor == nil ? "Schedule visit" : "Move visit", cancelDisabled: busy,
+                            commit: ThorbisSheetHeaderAction(title: saved ? "Saved" : (job.scheduledFor == nil ? "Schedule" : "Reschedule"),
+                                                             busy: busy, enabled: !saved && canSave,
+                                                             accessibilityLabel: saved ? "Schedule saved" : "Save schedule") {
+                                Task { await save() }
+                            }) { dismiss() }
     }
 
     /// "JOB-2214 · now Tue Jul 21, 10:30 AM" (or "not scheduled yet").

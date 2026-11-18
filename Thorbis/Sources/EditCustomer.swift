@@ -407,40 +407,13 @@ struct EditCustomerSheet: View {
     // MARK: Header
 
     private var header: some View {
-        ZStack {
-            Text("Edit customer").font(Theme.font(17, weight: .semibold))
-                .lineLimit(1).minimumScaleFactor(0.8)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 100)
-            HStack {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(model.saving)
-                .accessibilityIdentifier("edit-customer-cancel")
-                Spacer(minLength: 8)
-                Button { Task { await commit() } } label: {
-                    HStack(spacing: 6) {
-                        if model.saving { ProgressView().tint(.white) }
-                        Text("Save").font(Theme.font(16, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18).frame(minHeight: 44)
-                    .background(Theme.brand, in: Capsule())
-                    .opacity(canEdit && model.draft != nil ? 1 : 0.45)
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(model.saving || !canEdit || model.draft == nil)
-                .accessibilityHint(canEdit ? "" : "Your role can't edit customers.")
-                .accessibilityIdentifier("edit-customer-save")
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        PaperTaskBar(title: "Edit customer", cancelDisabled: model.saving, cancelIdentifier: "edit-customer-cancel",
+                     commit: ThorbisSheetHeaderAction(title: "Save", busy: model.saving,
+                                                      enabled: canEdit && model.draft != nil,
+                                                      identifier: "edit-customer-save",
+                                                      hint: canEdit ? nil : "Your role can't edit customers.") {
+                         Task { await commit() }
+                     }) { dismiss() }
     }
 
     // MARK: Content
@@ -822,10 +795,7 @@ struct ArchiveCustomerView: View {
             .disabled(busy || !canArchive)
             .accessibilityIdentifier("archive-customer-commit")
         }
-        .padding(.horizontal, PaperCardMetrics.margin)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(Theme.canvas)
+        .paperActionBarGround(Theme.canvas, top: canArchive ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
     }
 
     private func archive() async {

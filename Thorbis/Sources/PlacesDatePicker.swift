@@ -154,27 +154,10 @@ struct PlaceDatePickerSheet: View {
 
     var body: some View {
         ScrollView {
+            VStack(spacing: 0) {
+                PaperTaskBar(title: title,
+                             commit: ThorbisSheetHeaderAction(title: "Done", identifier: "place-date-done") { onDone(clamped); dismiss() }) { dismiss() }
             VStack(spacing: 14) {
-                HStack(spacing: 8) {
-                    Button { dismiss() } label: {
-                        Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 16).frame(minHeight: 44)
-                            .background(Theme.card, in: Capsule()).contentShape(Capsule())
-                    }
-                    .buttonStyle(PressStyle())
-                    Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityAddTraits(.isHeader)
-                    Button { onDone(clamped); dismiss() } label: {
-                        Text("Done").font(Theme.font(16, weight: .semibold)).foregroundStyle(Color.white)
-                            .padding(.horizontal, 18).frame(minHeight: 44)
-                            .background(Theme.brand, in: Capsule()).contentShape(Capsule())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("place-date-done")
-                }
                 PlaceCalendarCard(date: $date, lower: lower, upper: upper)
                 if includesTime {
                     HStack(spacing: 8) {
@@ -187,7 +170,8 @@ struct PlaceDatePickerSheet: View {
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 22).padding(.bottom, 16)
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
+            }
         }
         .scrollBounceBehavior(.basedOnSize)
         .background(Theme.background.ignoresSafeArea())

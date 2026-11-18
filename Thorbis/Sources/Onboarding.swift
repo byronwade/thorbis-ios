@@ -469,11 +469,8 @@ struct CreateCompanyForm: View {
             .buttonStyle(PressStyle())
             // Not pre-disabled: pressed without a name, it says so under the field.
             .disabled(busy)
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 10)
-            .frame(maxWidth: 470)
-            .frame(maxWidth: .infinity)
-            .background(Theme.canvas)
             .accessibilityIdentifier("create-company-submit")
+            .paperActionBarGround(Theme.canvas, maxWidth: 470)
         }
         .toolbar(firstCompany ? .hidden : .automatic, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
@@ -788,10 +785,7 @@ struct CompanyDetailsForm: View {
                             .accessibilityHidden(true)
                     }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 10)
-                .frame(maxWidth: 600)
-                .frame(maxWidth: .infinity)
-                .background(Theme.canvas)
+                .paperActionBarGround(Theme.canvas, maxWidth: 600)
             }
         }
         .sensoryFeedback(.success, trigger: saved)
@@ -1224,10 +1218,7 @@ struct BusinessSetupView: View {
                         .buttonStyle(PressStyle())
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 10)
-            .frame(maxWidth: 600)
-            .frame(maxWidth: .infinity)
-            .background(Theme.canvas)
+            .paperActionBarGround(Theme.canvas, maxWidth: 600)
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)

@@ -109,33 +109,13 @@ struct ReportExportSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 8) {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.foreground.opacity(0.08), in: Capsule())
-                }
-                .buttonStyle(PressStyle())
-                Spacer(minLength: 0)
-                Button {
-                    guard let export = exports.first(where: { $0.id == (picked ?? exports.first?.id) }) else { return }
-                    dismiss()
-                    onExport(export)
-                } label: {
-                    Text("Export").font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("export-report-commit")
-            }
-            .overlay {
-                Text("Export report").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, 96)
-            }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 18).padding(.bottom, 12)
+            PaperTaskBar(title: "Export report",
+                         commit: ThorbisSheetHeaderAction(title: "Export", identifier: "export-report-commit") {
+                             guard let export = exports.first(where: { $0.id == (picked ?? exports.first?.id) }) else { return }
+                             dismiss()
+                             onExport(export)
+                         }) { dismiss() }
+                .padding(.bottom, 10)
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     PaperSectionLabel(title: "Report", gap: 0)

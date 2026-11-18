@@ -854,10 +854,7 @@ private struct InvoicePaymentDetailSheet: View {
         }
         .buttonStyle(PressStyle())
         .accessibilityHint("Refunds the entire recorded payment after you review and confirm it")
-        .padding(.horizontal, PaperCardMetrics.margin)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-        .background(Theme.background)
+        .paperActionBarGround()
     }
 
     private var discardReasonButton: some View {
@@ -936,10 +933,7 @@ private struct InvoicePaymentRefundForm: View {
                     .disabled(model.isSubmitting)
                     .accessibilityIdentifier("payment-refund-review")
                 }
-                .padding(.horizontal, PaperCardMetrics.margin)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .background(Theme.background)
+                .paperActionBarGround(top: model.payment.method == "card" ? PaperActionBarMetrics.topUnderHint : PaperActionBarMetrics.top)
             } else if model.didComplete {
                 // Paper 39S: where the refund shows, in 13 over the brand Done.
                 VStack(spacing: 12) {
@@ -950,10 +944,7 @@ private struct InvoicePaymentRefundForm: View {
                         .frame(maxWidth: .infinity)
                     PrimaryButton(title: "Done") { dismiss() }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin)
-                .padding(.top, 12)
-                .padding(.bottom, 8)
-                .background(Theme.background)
+                .paperActionBarGround(top: PaperActionBarMetrics.topUnderHint)
             }
         }
         // Paper 39I: "Refund" as the large title. Refund issued (39S) has none: the check leads.
