@@ -1442,7 +1442,7 @@ struct OnboardingPreview: View {
             if session.phase == .ready {
                 NavigationStack {
                     if screen == "onboard-details" { CompanyDetailsView() }
-                    else if screen == "onboard-wizard" { SetupWizardView(start: .company) }
+                    else if screen == "onboard-wizard" { SetupWizardView(start: SetupStep.previewStart ?? .company) }
                     else if screen == "onboard-trade" { SetupWizardView(start: .trade) }
                     else { BusinessSetupView(presented: true) }
                 }
