@@ -694,20 +694,14 @@ extension PaperActionBar where Secondary == EmptyView {
     }
 }
 
-/// The rimmed square that sits beside a commit, as tall as the commit.
+/// The round button that sits beside a commit, as tall as the commit: Paper's card circle (the job
+/// bar's call / message circles), not a rimmed square.
 struct PaperSquareButton: View {
     let symbol: String
     let label: String
     let action: () -> Void
     var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 17)).foregroundStyle(Theme.foreground)
-                .frame(width: Theme.commitHeight, height: Theme.commitHeight)
-                .panelBackground(cornerRadius: Theme.controlRadius)
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).stroke(Theme.border))
-        }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(label)
+        PaperCircleButton(symbol: symbol, label: label, size: Theme.commitHeight, fill: Theme.card, action: action)
     }
 }
 

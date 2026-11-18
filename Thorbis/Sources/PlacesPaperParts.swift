@@ -48,7 +48,7 @@ struct PlacePhoneLine: View {
 /// the words are typed here and narrow this list.
 struct PlaceSearchField<Filter: View>: View {
     @Binding var query: String
-    var placeholder = "Search"
+    var placeholder = "Search or ask"
     var chips: [PaperFilterChip] = []
     var identifier: String? = nil
     @ViewBuilder var filter: Filter
@@ -84,7 +84,7 @@ struct PlaceSearchField<Filter: View>: View {
 }
 
 extension PlaceSearchField where Filter == EmptyView {
-    init(query: Binding<String>, placeholder: String = "Search", chips: [PaperFilterChip] = [], identifier: String? = nil) {
+    init(query: Binding<String>, placeholder: String = "Search or ask", chips: [PaperFilterChip] = [], identifier: String? = nil) {
         self.init(query: query, placeholder: placeholder, chips: chips, identifier: identifier) { EmptyView() }
     }
 }
