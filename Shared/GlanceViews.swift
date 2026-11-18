@@ -196,9 +196,11 @@ struct ElapsedText: View {
     var alignment: TextAlignment = .trailing
 
     var body: some View {
-        // A step left open for more than a day reads "19 days, 15 hr", not "471:15:49".
-        if Date().timeIntervalSince(since) >= 86_400 {
-            Text(since, style: .relative).multilineTextAlignment(alignment)
+        // A step left open for more than a day reads "19d 15h" (as the app's on-site clock does),
+        // not "471:15:49", and short enough for the island's compact slot.
+        let seconds = Int(Date().timeIntervalSince(since))
+        if seconds >= 86_400 {
+            Text("\(seconds / 86_400)d \((seconds / 3600) % 24)h").multilineTextAlignment(alignment).lineLimit(1)
         } else {
             Text(timerInterval: since...Date.distantFuture, countsDown: false)
                 .multilineTextAlignment(alignment)

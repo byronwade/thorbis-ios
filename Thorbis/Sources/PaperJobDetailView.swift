@@ -1426,9 +1426,12 @@ struct JobDetailView: View {
                     .accessibilityIdentifier("job-number")
                     // A long press copies the full ID (also in •••).
                     .contextMenu { Button("Copy job ID", systemImage: "doc.on.doc") { UIPasteboard.general.string = job.id } }
+                // Three lines at most, like every page title: a 100-character title would otherwise
+                // fill the first screen. The whole title is in Edit and read by VoiceOver.
                 Text(job.title.isEmpty ? displayTitle(job) : job.title)
                     .font(Theme.font(34, weight: .bold))
                     .tracking(-0.85)
+                    .lineLimit(typeSize.isAccessibilitySize ? 6 : 3)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 2)
                     .accessibilityAddTraits(.isHeader)

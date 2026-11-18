@@ -1044,14 +1044,9 @@ struct ScheduleRowButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label("Schedule", systemImage: "calendar.badge.plus")
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.foreground)
-                .padding(.horizontal, 12)
-                .frame(height: Theme.chipHeight + 4)
-                .background(Theme.fill, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            // The compact 36pt pill every list row uses (the board's waiting rows too), so a row
+            // with a long title keeps its width for the words.
+            PaperButtonLabel(title: "Schedule", symbol: "calendar.badge.plus", size: .compact, tone: .quiet)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Schedule \(job.title)")
@@ -1384,6 +1379,7 @@ struct JobScheduleView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(store.customerName(job.customerId)) · \(job.title)")
                             .font(Theme.font(20, weight: .bold)).tracking(-0.2)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(visitSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)

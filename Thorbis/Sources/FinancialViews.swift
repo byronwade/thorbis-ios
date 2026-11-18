@@ -285,6 +285,8 @@ struct EstimateDetailView: View {
         let options = record.options ?? []
         if options.isEmpty { return paperLinesTotal(record.lines).map { money($0, currency: currency) } }
         guard let lowest = options.map({ $0.totalAmount }).min() else { return nil }
+        // One option is the price itself: "1 option · $2,250.00", never "1 options from".
+        if options.count == 1 { return "1 option \u{00B7} \(money(lowest, currency: currency))" }
         return "\(options.count) options from \(money(lowest, currency: currency))"
     }
 
@@ -860,10 +862,7 @@ struct InvoicesView: View {
             parts.append("void")
         default:
             if let issued = JobFiltering.date(record.issuedAt) {
-                let calendar = Calendar.current
-                let days = max(0, calendar.dateComponents([.day], from: calendar.startOfDay(for: issued),
-                                                          to: calendar.startOfDay(for: .now)).day ?? 0)
-                parts.append(days == 0 ? "issued today" : "issued \(days) day\(days == 1 ? "" : "s") ago")
+                parts.append(PaperAge.ago("issued", days: PaperAge.days(from: issued)))
             }
             let word = DocumentStatus(invoice: record).word
             parts.append(word == "Unpaid" ? "balance due" : word.lowercased())
@@ -1909,7 +1908,7 @@ struct DocumentCardRow: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(title).font(Theme.font(16, weight: .medium)).tracking(-0.16)
                     .foregroundStyle(Theme.foreground)
-                    .lineLimit(stacked ? nil : 2)
+                    .lineLimit(stacked ? nil : 1)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(subtitle).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     .lineLimit(stacked ? nil : 2)
@@ -1938,9 +1937,11 @@ struct DocumentCardRow: View {
                           : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
         return VStack(alignment: .leading, spacing: 3) {
             top {
+                // One line beside the amount: a long business name cuts at the end so a list of
+                // hundreds stays one compact row per record.
                 Text(title).font(Theme.font(16, weight: .semibold))
                     .foregroundStyle(chip?.tone == .cancelled ? Theme.muted : Theme.foreground)
-                    .lineLimit(stacked ? nil : 2)
+                    .lineLimit(stacked ? nil : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if let amount {
                     Text(amount).font(Theme.font(16, weight: .semibold)).foregroundStyle(amountTint)

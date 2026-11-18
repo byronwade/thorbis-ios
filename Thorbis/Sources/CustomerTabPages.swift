@@ -127,9 +127,12 @@ struct CustomerOpenJobCard: View {
         .padding(.horizontal, 10).frame(minHeight: PaperControl.statusHeight)
         .background(tone.surface, in: Capsule())
         let words = VStack(alignment: .leading, spacing: 0) {
+            // Two lines beside the pill at most; the job opens with its whole title.
             Text(job.title).font(Theme.font(17, weight: .semibold)).tracking(-0.17).foregroundStyle(Theme.foreground)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
             Text(line).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

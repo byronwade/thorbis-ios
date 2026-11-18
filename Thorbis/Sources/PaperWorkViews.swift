@@ -909,7 +909,7 @@ struct ScheduleCompactRow: View {
             NavigationLink(value: job) {
                 PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
                              subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
-                             subtitleLines: 2, titleLines: schedule == nil ? 2 : 3, dimmed: job.status == "completed") {
+                             subtitleLines: 2, titleLines: 2, dimmed: job.status == "completed") {
                     if schedule == nil {
                         StatusWord(jobStatus: pendingStatus ?? job.status, pending: pendingStatus != nil)
                     }
@@ -1006,7 +1006,7 @@ struct JobsView: View {
     private var attentionCount: Int { jobs.filter { $0.status == "paused" || isLate($0) }.count }
     /// Paper 20: "18 active · 6 need attention".
     private var subtitle: String {
-        attentionCount > 0 ? "\(activeCount) active · \(attentionCount) need\(attentionCount == 1 ? "s" : "") attention" : "\(activeCount) active"
+        attentionCount > 0 ? "\(PaperCount.text(activeCount)) active · \(PaperCount.text(attentionCount)) need\(attentionCount == 1 ? "s" : "") attention" : "\(PaperCount.text(activeCount)) active"
     }
     private var canSchedule: Bool { session.can("job.assign", feature: "jobs") }
     /// What the Filters sheet is doing to the board, as chips in the search field (Paper 20), so a
@@ -1540,9 +1540,11 @@ private struct JobCardRow: View {
                         pending: pendingStatus != nil, size: 20)
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 0) {
+                    // One line, cut at the end: a long real title ("DEMO visit 2 - Gas tank water heater
+                    // replacement labor - 75 gal…") would otherwise make every row three or four lines.
                     Text(job.title.dashKeptWithWordBefore).font(Theme.font(16, weight: .medium)).tracking(-0.16)
                         .foregroundStyle(finished ? Theme.subtle : Theme.foreground)
-                        .lineLimit(stacked ? nil : 2)
+                        .lineLimit(stacked ? nil : 1)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(subtitle).font(Theme.font(14))
                         .foregroundStyle(late ? Theme.destructive : Theme.muted)
