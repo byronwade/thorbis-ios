@@ -1328,7 +1328,7 @@ struct PaperRouteView: View {
         case .attention: NeedsAttentionView()
         case .home: OwnerHomeView()
         case .homeList(let list): OwnerHomeListView(list: list)
-        case .payments: PaymentsSetupView()
+        case .payments: PaymentsSetupView(showsPayouts: true)
         case .businessSetup: BusinessSetupView()
         case .timeClock: TimeClockView().id(session.generation)
         case .receipts: ReceiptsView().id(session.generation)

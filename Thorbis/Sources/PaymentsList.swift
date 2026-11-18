@@ -94,16 +94,36 @@ struct CompanyPaymentsView: View {
     @State private var tab = "All"
     @State private var search = ""
     @State private var openInvoice: String?
+    /// Paper 54A's chip in the search field: the stretch of time the list and its total cover.
+    @State private var period = PaymentPeriod.week
+
+    enum PaymentPeriod: String, CaseIterable {
+        case week = "This week", month = "This month", all = "All time"
+        var start: Date? {
+            switch self {
+            case .week: Calendar.current.dateInterval(of: .weekOfYear, for: .now)?.start
+            case .month: Calendar.current.dateInterval(of: .month, for: .now)?.start
+            case .all: nil
+            }
+        }
+    }
+    /// The iPad page keeps its own week summary beside the full list.
+    private var activePeriod: PaymentPeriod { wide ? .all : period }
+    private var inPeriod: [CompanyPayment] {
+        guard let start = activePeriod.start else { return payments }
+        return payments.filter { (JobFiltering.date($0.recordedAt) ?? .distantPast) >= start }
+    }
 
     /// Paper 54A's segments. "Cash and check" holds the money handed over in person.
     private static let tabs = ["All", "Card", "Cash and check", "Refunds"]
 
     private var shown: [CompanyPayment] {
+        let scope = inPeriod
         let byTab: [CompanyPayment] = switch tab {
-        case "Card": payments.filter(\.isCard)
-        case "Cash and check": payments.filter { $0.isCash || $0.method == "check" }
-        case "Refunds": payments.filter(\.refunded)
-        default: payments
+        case "Card": scope.filter(\.isCard)
+        case "Cash and check": scope.filter { $0.isCash || $0.method == "check" }
+        case "Refunds": scope.filter(\.refunded)
+        default: scope
         }
         let query = search.trimmingCharacters(in: .whitespaces)
         guard !query.isEmpty else { return byTab }
@@ -153,8 +173,26 @@ struct CompanyPaymentsView: View {
     }
 
     private var phoneSubtitle: String {
-        loaded ? "\(money(collected, currency: "USD")) collected\(complete ? "" : " in the latest \(payments.count)")"
-               : "Every payment, newest first"
+        guard loaded else { return "Every payment, newest first" }
+        // Paper 54A: "This week · $12,480 collected". When the read stops short of the period's
+        // start, the line says how many payments the figure covers.
+        let start = activePeriod.start
+        let whole = complete || start.map { start in
+            payments.contains { (JobFiltering.date($0.recordedAt) ?? .distantFuture) < start }
+        } ?? false
+        let sum = inPeriod.filter { !$0.refunded }.reduce(0) { $0 + $1.amount }
+        let figure = "\(money(sum, currency: "USD")) collected\(whole ? "" : " in the latest \(payments.count)")"
+        return activePeriod == .all ? figure : "\(activePeriod.rawValue) \u{00B7} \(figure)"
+    }
+
+    private var periodChips: [PaperFilterChip] {
+        period == .all ? [] : [PaperFilterChip(id: "period", title: period.rawValue) { period = .all }]
+    }
+
+    private var periodMenu: [ThorbisMenuItem] {
+        PaymentPeriod.allCases.map { option in
+            ThorbisMenuItem(option.rawValue, isSelected: period == option) { period = option }
+        }
     }
 
     /// Paper T54A: "This week · $12,480 collected" under the title.
@@ -171,16 +209,22 @@ struct CompanyPaymentsView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Paper 54A and T54A: "This week · $12,480 collected" whenever the read covers the
                 // week; otherwise what the latest payments add up to.
-                PaperHeader(title: "Payments", subtitle: wideSubtitle)
+                PaperHeader(title: "Payments", subtitle: wide ? wideSubtitle : phoneSubtitle, showsCreate: true)
                     // A pushed page: the back button leads, never the drawer's menu circle.
                     .environment(\.paperMenuButton, false)
                     .environment(\.paperDrawer, nil)
                 if wide {
                     wideBar
                 } else {
-                    DocumentSearchField(text: $search, label: "Search payments")
+                    // Paper 54A: the period chip in the field, the filter circle choosing the period.
+                    PlaceSearchField(query: $search, placeholder: "Search or ask", chips: periodChips, identifier: "payments-search") {
+                        ThorbisMenu(items: periodMenu, title: "Show", accessibilityLabel: "Choose the period") {
+                            PaperFilterCircle(active: false)
+                        }
+                        .accessibilityIdentifier("header-filter")
+                    }
                     PaperTabs(options: Self.tabs, selection: $tab)
-                        .padding(.top, 12)
+                        .padding(.top, 16)
                 }
                 if let error { ErrorBanner(message: error) { await load() } }
                 if wide {
@@ -221,7 +265,7 @@ struct CompanyPaymentsView: View {
                 Text(day.label).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                     .accessibilityAddTraits(.isHeader)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(money(day.total, currency: "USD")).font(Theme.monoFont(13)).foregroundStyle(Theme.muted)
+                Text(money(day.total, currency: "USD")).font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
             .accessibilityElement(children: .combine)
             .padding(.horizontal, Theme.gutter).padding(.top, 20).padding(.bottom, 8)
@@ -347,9 +391,14 @@ struct CompanyPaymentsView: View {
 
     /// "INV-2209 · Card", "INV-8819 · Card · refunded" (the day is the group's label).
     private func subtitle(_ payment: CompanyPayment) -> String {
+        // Paper 54A: "INV-8819 · Refund to Visa ending 7302". The record carries the method, not
+        // the card or who took it, so a full refund reads "Refund to card".
+        if wentBack(payment) {
+            let to = payment.method.isEmpty ? "Refund" : "Refund to \(payment.methodLabel.lowercased())"
+            return [reference(payment), to].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        }
         let refund: String? = payment.refunded
-            ? (payment.refundedAmount > 0 && payment.refundedAmount < payment.amount
-                ? "\(money(payment.refundedAmount, currency: "USD")) refunded" : "refunded")
+            ? (payment.refundedAmount > 0 ? "\(money(payment.refundedAmount, currency: "USD")) refunded" : "refunded")
             : nil
         return [reference(payment), payment.methodLabel, refund].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }

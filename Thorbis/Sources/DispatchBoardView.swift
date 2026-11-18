@@ -22,6 +22,19 @@ struct DispatchBoardView: View {
     @State private var movingJobID: String?
     @State private var error: String?
     @State private var moved = 0
+    /// Paper 53: each technician's day folds behind the chevron by their name.
+    @State private var folded: Set<String> = []
+    @State private var attentionFolded = false
+    /// Paper 53's toast after a one-tap move ("Job reassigned to Mike Tran · Undo"); the screen
+    /// that hosts the board draws it at its foot.
+    var toast: Binding<BoardToast?>? = nil
+
+    struct BoardToast: Identifiable {
+        let id = UUID()
+        let message: String
+        /// Puts the job back with the tech it came from; nil when it had none.
+        let undo: (() -> Void)?
+    }
     /// iPad only (Paper T12C): the Schedule's range. When set, the board draws its own title, the
     /// range segments and the day's numbers, and scrolls by itself; nil is the phone's Board tab.
     var tabletRange: Binding<String>? = nil
@@ -116,7 +129,7 @@ struct DispatchBoardView: View {
                                attentionTitle: String) -> some View {
         if let error { ErrorBanner(message: error) }
         if !unassigned.isEmpty {
-            PaperSection(attentionTitle, count: unassigned.count) {
+            PaperSection(attentionTitle, count: unassigned.count, collapsed: $attentionFolded) {
                 ForEach(unassigned) { job in
                     if job.id != unassigned.first?.id { WellDivider(leading: PaperCardMetrics.inset + 30) }
                     boardRow(job, names: names, assignChip: canAssign)
@@ -131,16 +144,16 @@ struct DispatchBoardView: View {
         }
         ForEach(roster) { person in
             let jobs = today.filter { $0.assignedToUserId == person.userId }
-            techSection(name: person.displayName, jobs: jobs, names: names)
+            techSection(id: person.userId, name: person.displayName, jobs: jobs, names: names)
         }
         if !elsewhere.isEmpty {
             // Without the roster (a role that can't assign) every assigned job lands here.
-            techSection(name: roster.isEmpty ? "Assigned" : "Other techs", jobs: elsewhere, names: names)
+            techSection(id: "elsewhere", name: roster.isEmpty ? "Assigned" : "Other techs", jobs: elsewhere, names: names)
         }
         // Finished with no tech on it: not "needs assignment", but still part of the day.
         let doneLoose = today.filter { $0.assignedToUserId == nil && $0.status == "completed" }
         if !doneLoose.isEmpty {
-            techSection(name: "Done", jobs: doneLoose, names: names)
+            techSection(id: "done-loose", name: "Done", jobs: doneLoose, names: names)
         }
         // The queue: everyone's jobs that still need a time, worked from the oldest.
         PaperSection("Waiting for a slot", count: unscheduled.count) {
@@ -284,29 +297,46 @@ struct DispatchBoardView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// Paper 53: the tech's initials, name, and "3 jobs" at the trailing edge, then their day on one card.
+    /// Paper 53: the fold chevron, the tech's initials and name, what they are doing now and
+    /// "3 jobs" at the trailing edge, then their day on one card.
     @ViewBuilder
-    private func techSection(name: String, jobs: [Job], names: [String: String]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
-                InitialsAvatar(name: name, size: 24).accessibilityHidden(true)
-                Text(name).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1)
-                // Paper 53: what the tech is doing now, as a word beside the name.
-                if let now = Self.nowWord(jobs) {
-                    Text(now).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.success)
+    private func techSection(id: String, name: String, jobs: [Job], names: [String: String]) -> some View {
+        // A tech with nothing booked has nothing to unfold: the chevron points right, as Paper's does.
+        let isFolded = jobs.isEmpty || folded.contains(id)
+        let state = Self.boardState(jobs)
+        let count = "\(jobs.count) job\(jobs.count == 1 ? "" : "s")"
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withMotion { if folded.contains(id) { folded.remove(id) } else { folded.insert(id) } }
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    PaperIcon(.chevronDown, size: 12, color: Theme.muted)
+                        .rotationEffect(.degrees(isFolded ? -90 : 0))
+                    InitialsAvatar(name: name, size: 24)
+                    Text(name).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
                         .lineLimit(1)
+                    // Paper 53: what the tech is doing now, as a word beside the name.
+                    if let state {
+                        Text(state.word).font(Theme.font(13, weight: .semibold))
+                            .foregroundStyle(state.tone == .late ? Theme.destructive : Theme.success)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                    Text(count).font(Theme.font(13)).foregroundStyle(Theme.muted)
                 }
-                Spacer(minLength: 8)
-                Text("\(jobs.count) job\(jobs.count == 1 ? "" : "s")").font(Theme.font(13)).monospacedDigit()
-                    .foregroundStyle(Theme.muted)
+                .padding(.horizontal, 4)
+                // 44pt to the finger, Paper's 24 to the eye.
+                .frame(minHeight: 44).contentShape(Rectangle()).padding(.vertical, -10)
             }
-            .padding(.horizontal, 4)
-            .frame(minHeight: 26)
+            .buttonStyle(PressStyle())
+            .disabled(jobs.isEmpty)
+            .padding(.bottom, 8)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel([name, Self.nowWord(jobs), "\(jobs.count) job\(jobs.count == 1 ? "" : "s")"].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityLabel([name, state?.word, count].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(.isHeader)
-            if !jobs.isEmpty {
+            .accessibilityValue(jobs.isEmpty ? "" : (isFolded ? "Collapsed" : "Expanded"))
+            .accessibilityIdentifier("board-tech-\(id)")
+            if !isFolded {
                 PaperCard {
                     ForEach(jobs) { job in
                         if job.id != jobs.first?.id { WellDivider(leading: PaperCardMetrics.inset + 34) }
@@ -325,6 +355,32 @@ struct DispatchBoardView: View {
         return nil
     }
 
+    /// Paper 53's word beside a tech's name: "Running late" (a booked start has passed and the job
+    /// has not begun), else where they are. Nothing when neither is known: the app has no
+    /// availability record, so it never prints Paper's "Available".
+    static func boardState(_ jobs: [Job], now: Date = .now) -> TechState? {
+        if TodayNumbers.late(jobs, now: now) > 0 { return TechState(word: "Running late", tone: .late) }
+        return nowWord(jobs).map { TechState(word: $0, tone: .good) }
+    }
+
+    /// "25 min behind" for a booked job whose start has passed without it beginning; nil otherwise.
+    static func behindWord(_ job: Job, now: Date = .now) -> String? {
+        guard ["scheduled", "dispatched"].contains(job.status), let start = JobFiltering.date(job.scheduledFor), start < now else { return nil }
+        let minutes = max(1, Int(now.timeIntervalSince(start) / 60))
+        return minutes < 60 ? "\(minutes) min behind" : "\(minutes / 60) hr \(minutes % 60) min behind"
+    }
+
+    /// Paper 53's second line word: "Done", "On site now", "25 min behind", else the status.
+    static func rowWord(_ job: Job, now: Date = .now) -> String {
+        if let behind = behindWord(job, now: now) { return behind }
+        switch job.status {
+        case "completed": return "Done"
+        case "arrived", "in_progress": return "On site now"
+        case "en_route": return "On the way"
+        default: return job.status.statusLabel
+        }
+    }
+
     /// Paper 53's row: the status mark, "AC tune-up · 88 Birch Ln" over "9:00 AM · Done", then the
     /// tech's initials (or Assign). Tapping it offers Assign, Reschedule, Open or a move.
     private func boardRow(_ job: Job, names: [String: String], assignChip: Bool) -> some View {
@@ -332,21 +388,32 @@ struct DispatchBoardView: View {
         let street = addresses.street(job)
         let tech = job.assignedToUserId.flatMap { names[$0] ?? (job.assignedToUserId == session.user?.id ? session.user?.name : nil) }
         let time = JobFiltering.date(job.scheduledFor)
-        let statusWord = job.assignedToUserId == nil && job.status != "completed" ? "No tech assigned" : job.status.statusLabel
+        let behind = Self.behindWord(job) != nil
+        let statusWord = job.assignedToUserId == nil && job.status != "completed" ? "No tech assigned" : Self.rowWord(job)
         let detail = [time?.clockTime, statusWord].compactMap { $0 }.joined(separator: " · ")
-        let title = street.map { "\(job.title) · \($0)" } ?? "\(job.title) · \(customer)"
+        // Paper 53: "AC tune-up · 88 Birch Ln"; the job no one has reads "Drain backup — 214 Maple St".
+        let joiner = assignChip ? " \u{2014} " : " \u{00B7} "
+        let title = "\(job.title)\(joiner)\(street ?? customer)"
+        let detailTint: Color = assignChip ? Theme.muted
+            : behind ? Theme.destructive : (ScheduleLead.activeStatuses.contains(job.status) ? Theme.warning : Theme.muted)
         return HStack(spacing: 0) {
             Button { menuJob = job } label: {
                 HStack(spacing: 0) {
-                    StatusRing(status: job.status, size: 18)
-                        .frame(width: 34, alignment: .leading)
+                    if assignChip {
+                        // Paper 53: a dashed circle around a person, 20pt in a 30pt slot.
+                        NoTechGlyph().frame(width: 30, alignment: .leading)
+                    } else {
+                        StatusGlyph(tone: StatusTone(jobStatus: job.status, hasTime: job.scheduledFor != nil),
+                                    label: job.status.statusLabel, size: 22)
+                            .frame(width: 34, alignment: .leading)
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         Text(title).font(Theme.font(16, weight: .medium)).tracking(-0.16)
                             .foregroundStyle(Theme.foreground)
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                         // Paper 53: a visit under way reads in the warning hue.
                         Text(detail).font(Theme.font(14)).monospacedDigit()
-                            .foregroundStyle(ScheduleLead.activeStatuses.contains(job.status) ? Theme.warning : Theme.muted)
+                            .foregroundStyle(detailTint)
                             .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -369,7 +436,7 @@ struct DispatchBoardView: View {
             .disabled(movingJobID != nil)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel([street ?? job.title, street != nil ? job.title : nil, customer, time?.tradeTime ?? "No time",
-                                 job.status.statusLabel, tech.map { "Assigned to \($0)" } ?? (job.assignedToUserId == nil ? "No tech" : "Assigned outside your roster")]
+                                 Self.rowWord(job), tech.map { "Assigned to \($0)" } ?? (job.assignedToUserId == nil ? "No tech" : "Assigned outside your roster")]
                 .compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(.isButton)
             .accessibilityHint("Assign, reschedule or open this job")
@@ -421,8 +488,8 @@ struct DispatchBoardView: View {
     private func brandChip(_ title: String) -> some View {
         Text(title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
             .fixedSize()
-            .padding(.horizontal, 14).frame(minHeight: 44)
-            .background(Theme.brandSurface, in: Capsule())
+            .padding(.horizontal, 10).frame(minHeight: 44)
+            .background(Theme.brandTint, in: Capsule())
             .contentShape(Capsule())
     }
 
@@ -479,7 +546,7 @@ struct DispatchBoardView: View {
 
     /// Reassigns with the assignee the board showed as the expected prior, so a change someone
     /// else made meanwhile is refused (409) instead of overwritten.
-    private func move(_ job: Job, to person: FieldAssignee) async {
+    private func move(_ job: Job, to person: FieldAssignee, announce: Bool = true) async {
         guard canAssign, movingJobID == nil else { return }
         let generation = session.generation
         movingJobID = job.id
@@ -490,6 +557,18 @@ struct DispatchBoardView: View {
             guard session.generation == generation else { return }
             error = nil
             moved += 1
+            // Paper 53: the move is confirmed at the foot of the screen with a way back.
+            let before = job.assignedToUserId.flatMap { id in people.first { $0.userId == id } }
+            if announce {
+                let moved = Job(id: job.id, customerId: job.customerId, title: job.title, status: job.status, createdAt: job.createdAt,
+                                updatedAt: job.updatedAt, allowedTransitions: job.allowedTransitions, scheduledFor: job.scheduledFor,
+                                assignedToUserId: person.userId, locationId: job.locationId)
+                toast?.wrappedValue = BoardToast(message: "Job reassigned to \(person.displayName)", undo: before.map { prior in
+                    { Task { await move(moved, to: prior, announce: false) } }
+                })
+            } else {
+                toast?.wrappedValue = nil
+            }
             if await store.refresh(api) == .failed { error = "Moved. The board could not refresh; pull to refresh." }
         } catch is CancellationError {
         } catch let problem as Problem where problem.status == 409 {
@@ -499,4 +578,25 @@ struct DispatchBoardView: View {
             self.error = error.localizedDescription
         }
     }
+}
+
+
+/// Paper 53's mark for a job no one has: a person inside a dashed ring (20pt, 1.3 stroke, muted).
+private struct NoTechGlyph: View {
+    var body: some View {
+        ZStack {
+            Circle().inset(by: 1.8).stroke(Theme.muted, style: StrokeStyle(lineWidth: 1.3, dash: [2.5, 2.5]))
+            PaperIcon(.noTechPerson, size: 20, color: Theme.muted)
+        }
+        .frame(width: 20, height: 20)
+        .accessibilityHidden(true)
+    }
+}
+
+extension PaperGlyph {
+    /// The person inside Paper 53's dashed ring.
+    static let noTechPerson = PaperGlyph(box: 20, [.circle(10, 8, 2.2, 1.3),
+                                                   .stroke("M6.2 14C6.8 12.5 8.2 11.7 10 11.7C11.8 11.7 13.2 12.5 13.8 14", 1.3)])
+    /// Paper 53's toast arrow (undo).
+    static let undoArrow = PaperGlyph(box: 20, [.stroke("M7.5 5L4 8.5L7.5 12M4.5 8.5H12C14.2 8.5 16 10.3 16 12.5C16 14.7 14.2 16.5 12 16.5H9.5", 1.7)])
 }

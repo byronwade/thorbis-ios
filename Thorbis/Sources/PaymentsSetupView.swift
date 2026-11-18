@@ -130,9 +130,21 @@ struct PaymentsSetupView: View {
     @State private var hosted: URL?
     @State private var busy = false
     @State private var error: String?
+    /// Money › Payouts (Paper 90): once Stripe is set up and nothing is asked of the owner, the
+    /// page is the balance and the recent payouts. Setup, or anything Stripe wants, keeps the
+    /// setup page below with its Open Stripe button.
+    var showsPayouts = false
+
+    private var payoutsSnapshot: MoneyAvailability? {
+        guard showsPayouts, let readiness, readiness.actionTitle == nil else { return nil }
+        return availability
+    }
 
     var body: some View {
         ScrollView {
+            if let snapshot = payoutsSnapshot {
+                PayoutsPage(snapshot: snapshot, company: session.activeOrganization?.name ?? "")
+            } else {
             VStack(alignment: .leading, spacing: 0) {
                 // MA-05 / Paper v2: the 34 Bold title and one muted subtitle line.
                 PaperHeader(title: "Payments", subtitle: subtitle)
@@ -183,6 +195,7 @@ struct PaymentsSetupView: View {
                         .padding(.horizontal, 4)
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
+            }
             }
         }
         .foregroundStyle(Theme.foreground)

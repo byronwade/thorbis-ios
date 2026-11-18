@@ -1433,6 +1433,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                  "explanation": "Stripe sent this payout for arrival on 2026-10-24. Stripe marking it paid does not confirm your bank has posted it.", "responsibleActor": "none", "providerCode": NSNull()]]] as [String: Any]
         }
         if path == "/v1/organization/merchant-readiness" {
+            // Paper 90 "Payouts" shows once Stripe is set up; the setup page keeps its own sample.
+            if PaperPreview.screen == "payouts" {
+                return ["state": "ready", "chargesReady": true, "payoutsReady": true, "actionRequired": false,
+                        "requirements": ["eventuallyDueCount": 0, "currentlyDueCount": 0, "pastDueCount": 0]] as [String: Any]
+            }
             return ["state": "action_required", "chargesReady": false, "payoutsReady": false, "actionRequired": true,
                     "requirements": ["eventuallyDueCount": 1, "currentlyDueCount": 2, "pastDueCount": 0]] as [String: Any]
         }
