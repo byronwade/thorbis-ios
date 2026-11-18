@@ -25,6 +25,20 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-11-18-menu-crash",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "bolt.shield", title: "Fixed a crash opening screens",
+                      detail: "Opening a conversation or another screen with a menu in its top bar could close the app. It no longer does."),
+                .init(symbol: "textformat.size", title: "Largest text sizes read cleanly",
+                      detail: "On Schedule, invoices and Messages, icons no longer sit on text and names are no longer cut or split."),
+                .init(symbol: "hand.tap", title: "Stacked choices are easier to tap",
+                      detail: "Choices stacked at large text no longer overlap, so a tap between two always picks the one you meant."),
+                .init(symbol: "number", title: "Menu counts stay short",
+                      detail: "Counts in the menu read 1,204, and the unread badge stops at 999+."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-real-data-fixes",
             date: "2026-11-18",
             highlights: [
