@@ -13,6 +13,22 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-job-sheets",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "plus.circle", title: "Add to job",
+                      detail: "A job's More menu has Add to job: estimate, invoice, photo or video, note and contact in one sheet."),
+                .init(symbol: "clock", title: "Time on a job",
+                      detail: "More opens Time and profit: drive time, time on site and time by technician. Profit is not shown yet."),
+                .init(symbol: "person.crop.circle", title: "Job contact page",
+                      detail: "A job contact opens on Call, Text and Email with the contact's number and email below."),
+                .init(symbol: "mic", title: "Voice notes and documents",
+                      detail: "Record a voice note with a live transcript. Documents has a + for a camera scan, photos or files."),
+                .init(symbol: "qrcode", title: "Scan to pay and revisions",
+                      detail: "Scan to pay shows a larger amount and code. Estimate revisions name what changed in the newest one."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-job-money-guards",
             date: "2026-11-18",
             highlights: [
