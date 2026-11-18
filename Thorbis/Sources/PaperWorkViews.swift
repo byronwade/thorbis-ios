@@ -1703,12 +1703,7 @@ private struct ScheduleEmptyState: View {
             }
             if let actionTitle {
                 Button(action: action) {
-                    Text(actionTitle).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 22)
-                        .frame(minHeight: 48)
-                        .background(Theme.brandSurface, in: Capsule())
-                        .contentShape(Capsule())
+                    Text(actionTitle).paperButton(.card, tone: .tinted)
                 }
                 .buttonStyle(PressStyle())
                 .padding(.top, 14)

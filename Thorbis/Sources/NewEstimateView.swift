@@ -279,7 +279,7 @@ struct NewEstimateView: View {
                         else if !recovering { PaperIcon(.shieldCheck, size: 15, color: .white) }
                         Text(recovering ? commitTitle : "Present to customer").font(Theme.font(16, weight: .semibold))
                     }
-                    .inkCommit(enabled: canCommit, height: 50)
+                    .inkCommit(enabled: canCommit)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy || !canCommit)

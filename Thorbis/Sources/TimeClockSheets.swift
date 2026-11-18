@@ -285,11 +285,7 @@ struct TimeClockEntryEditor: View {
                 ForEach(TimeClockEntry.Reason.allCases, id: \.self) { choice in
                     let chosen = reason == choice
                     Button { reason = choice; reasonMissing = false } label: {
-                        Text(choice.label).font(Theme.font(15, weight: chosen ? .semibold : .medium))
-                            .foregroundStyle(chosen ? Theme.brandText : Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 40)
-                            .background(chosen ? Theme.brandSurface : Theme.card, in: Capsule())
-                            .overlay { if chosen { Capsule().strokeBorder(Theme.brand, lineWidth: 1.5) } }
+                        PaperChoiceChipLabel(title: choice.label, isOn: chosen)
                             .contentShape(Rectangle().inset(by: -2))
                     }
                     .buttonStyle(PressStyle())

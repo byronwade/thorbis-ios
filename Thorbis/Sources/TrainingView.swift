@@ -695,11 +695,7 @@ private struct TrainingCredentialDetail: View {
                     UIPasteboard.general.string = number
                     copied = true
                 } label: {
-                    Text(copied ? "Number copied" : "Copy number")
-                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.fill, in: Capsule())
-                        .contentShape(Capsule())
+                    Text(copied ? "Number copied" : "Copy number").paperButton(.commit, tone: .quiet, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("training-license-copy")
@@ -951,12 +947,9 @@ private struct TrainingCapsuleLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
-            Text(title).font(Theme.font(15, weight: .medium)).fixedSize()
+            Text(title).fixedSize()
         }
-        .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, 14).frame(minHeight: 44)
-        .background(Theme.fill, in: Capsule())
-        .contentShape(Capsule())
+        .paperButton(.secondary, tone: .quiet)
     }
 }
 

@@ -171,11 +171,7 @@ struct CustomerRecordsView: View {
     private func mediaChip(_ name: String, count: Int) -> some View {
         let on = mediaFilter == name
         return Button { mediaFilter = name } label: {
-            Text("\(name) · \(count)").font(Theme.font(14, weight: on ? .semibold : .medium))
-                .foregroundStyle(on ? Theme.background : Theme.subtle)
-                .padding(.horizontal, 14).frame(minHeight: 36)
-                .background(on ? Theme.foreground : Theme.card, in: Capsule())
-                .frame(minHeight: 44).contentShape(Rectangle())
+            PaperChoiceChipLabel(title: "\(name) · \(count)", isOn: on)
         }
         .buttonStyle(PressStyle())
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)

@@ -774,10 +774,7 @@ struct BuilderLineRow: View {
     private var closeLineButton: some View {
         Button(action: toggle) {
             // Paper 35A: Done on the brand surface.
-            Text("Done").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
-                .padding(.horizontal, 16).frame(minHeight: 44)
-                .background(Theme.brandTint, in: Capsule())
-                .contentShape(Capsule())
+            Text("Done").paperButton(.secondary, tone: .tinted)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Close line")

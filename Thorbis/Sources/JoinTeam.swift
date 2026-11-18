@@ -525,12 +525,9 @@ struct JoinTeamFlow: View {
                 Button { problem = nil; step = .signIn } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "envelope").font(.system(size: 15, weight: .medium)).accessibilityHidden(true)
-                        Text("Email").font(Theme.font(15, weight: .semibold))
+                        Text("Email")
                     }
-                    .foregroundStyle(Theme.foreground)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Theme.card, in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.card, tone: .quiet, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("Sign in with email")

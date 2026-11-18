@@ -379,18 +379,19 @@ enum StaffUnlock {
 }
 
 /// Customer-facing sizes (design.thorbis.com customer presentation): 20 pt body, 17 pt smallest
-/// text, 56 pt tap targets, commits 56 pt on iPhone and 60 pt on iPad.
+/// text, 56 pt tap targets, commits 50 pt on iPhone (Paper 38A) and 60 pt on iPad.
 enum CustomerModeStyle {
     static let body: CGFloat = 20
     static let smallest: CGFloat = 17
     static let target: CGFloat = 56
-    static let commitHeight: CGFloat = 56
+    /// Paper 38A / 36: the customer's commit is the same 50pt pill as everywhere else.
+    static let commitHeight: CGFloat = Theme.commitHeight
     static let regularCommitHeight: CGFloat = 60
     static let readableWidth: CGFloat = 560
 }
 
 /// The one commit on a customer-facing screen: ink fill (blue is only a pointer), full readable
-/// width, 56 pt on iPhone and 60 pt on iPad.
+/// width, 50 pt on iPhone and 60 pt on iPad.
 struct CustomerCommitButton: View {
     let title: String
     var icon: String? = nil

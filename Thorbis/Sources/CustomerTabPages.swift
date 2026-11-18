@@ -275,12 +275,7 @@ struct CustomerBalanceCard: View {
             .accessibilityElement(children: .combine)
             if let collectTitle {
                 Button(action: collect) {
-                    Text(collectTitle).font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                        .padding(.horizontal, 18)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.brand, in: Capsule())
-                        .contentShape(Capsule())
+                    Text(collectTitle).paperButton(.card, tone: .brand, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityHint("Opens the invoice to take payment")

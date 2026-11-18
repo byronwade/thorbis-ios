@@ -422,15 +422,7 @@ struct JobMediaView: View {
             filter = option
             if option == .documents { endSelecting() }
         } label: {
-            Text("\(option.rawValue) · \(count)")
-                .font(Theme.font(14, weight: chosen ? .semibold : .medium)).monospacedDigit()
-                .foregroundStyle(chosen ? Theme.brandText : Theme.subtle)
-                .lineLimit(1)
-                .padding(.horizontal, 11)
-                .frame(minHeight: 40)
-                .background(chosen ? Theme.brandSurface : Theme.card, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            PaperChoiceChipLabel(title: "\(option.rawValue) · \(count)", isOn: chosen)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(option.rawValue)
@@ -482,14 +474,10 @@ struct JobMediaView: View {
                                 title: "Add photo or video", accessibilityLabel: "Add photo or video", presentation: .sheet) {
                         HStack(spacing: 8) {
                             Image(systemName: "camera").font(.system(size: 17, weight: .medium)).accessibilityHidden(true)
-                            Text("Add photo or video").font(Theme.font(16, weight: .semibold))
+                            Text("Add photo or video")
                                 .multilineTextAlignment(.center)
                         }
-                        .foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).padding(.vertical, 6)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
+                        .paperButton(.card, tone: .quiet, fills: true)
                     }
                     .accessibilityIdentifier("job-media-take-photo")
                     Button {
@@ -562,9 +550,9 @@ struct JobMediaView: View {
                     Spacer(minLength: 8)
                     if pendingMedia.uploadingID == nil && !session.isOffline {
                         Button("Send now") { Task { await retryWaiting() } }
-                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 44)
-                            .background(Theme.fill, in: Capsule())
+                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .padding(.horizontal, 16).frame(minHeight: 44)
+                            .background(Theme.quietFill, in: Capsule())
                             .buttonStyle(PressStyle())
                             .disabled(draining || !canAdd)
                             .accessibilityIdentifier("job-media-send-now")
@@ -851,12 +839,9 @@ struct JobMediaView: View {
                 ], title: "Tag", accessibilityLabel: "Tag") {
                     HStack(spacing: 6) {
                         Image(systemName: "tag").font(.system(size: 14, weight: .semibold)).accessibilityHidden(true)
-                        if !compact { Text("Tag").font(Theme.font(15, weight: .semibold)).lineLimit(1) }
+                        if !compact { Text("Tag").lineLimit(1) }
                     }
-                    .foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 14).frame(minWidth: 44, minHeight: 44)
-                    .background(Theme.fill, in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.secondary, tone: .quiet)
                 }
                 .accessibilityIdentifier("job-media-tag-picked")
                 Button { Task { await sharePicked() } } label: {

@@ -804,14 +804,7 @@ struct JobDetailView: View {
             pauseChoice = selected ? nil : option
             pauseReasonProblem = nil
         } label: {
-            Text(option)
-                .font(Theme.font(14, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 40)
-                .background(selected ? Theme.brandTint : Theme.fill, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            PaperChoiceChipLabel(title: option, isOn: selected)
         }
         .buttonStyle(PressStyle())
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
@@ -2033,7 +2026,7 @@ struct JobDetailView: View {
                     .font(Theme.font(17, weight: .semibold)).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.7)
             }
-            .inkCommit(height: 60)
+            .inkCommit(height: PaperControl.Size.field.height)
         }
         .buttonStyle(PressStyle())
         .disabled(busy || creatingInvoice)
@@ -2067,15 +2060,7 @@ struct JobDetailView: View {
 
     /// Paper's field-mode second action: a 52pt pill on the field fill, 17 Semibold.
     private func secondaryPill(_ title: String) -> some View {
-        Text(title)
-            .font(Theme.font(17, weight: .semibold))
-            .foregroundStyle(Theme.foreground)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: 52)
-            .background(Theme.fill, in: Capsule())
-            .contentShape(Capsule())
+        Text(title).paperButton(.commit, tone: .quiet, fills: true)
     }
 
     /// One of the bar's card circles (camera, Call, Text, Directions). Paper draws three at 50pt;
@@ -2121,7 +2106,7 @@ struct JobDetailView: View {
                     else { PaperIcon(.jobShieldCheck, size: 18, color: .white) }
                     commitLabel(rows).font(Theme.font(16, weight: .semibold))
                 }
-                .inkCommit(height: 48)
+                .inkCommit(height: PaperControl.Size.card.height)
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
@@ -2137,7 +2122,7 @@ struct JobDetailView: View {
                     Text(step.title(resuming: job?.status == "paused")).font(Theme.font(16, weight: .semibold))
                         .lineLimit(1).minimumScaleFactor(0.8)
                 }
-                .inkCommit(height: 48)
+                .inkCommit(height: PaperControl.Size.card.height)
             }
             .buttonStyle(PressStyle())
             .disabled(busy || creatingInvoice)
@@ -2155,7 +2140,7 @@ struct JobDetailView: View {
                     .font(Theme.font(18, weight: .semibold))
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
-            .inkCommit(height: 60)
+            .inkCommit(height: PaperControl.Size.field.height)
         }
         .buttonStyle(PressStyle())
         .disabled(busy || creatingInvoice)
@@ -2336,9 +2321,7 @@ struct JobDetailView: View {
                                             .fixedSize(horizontal: false, vertical: true)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                         if row.step == .afterPhotos || row.step == .beforePhotos {
-                                            Text("Add photo").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
-                                                .padding(.horizontal, 16).frame(minHeight: 48)
-                                                .background(Theme.brandTint, in: Capsule())
+                                            Text("Add photo").paperButton(.card, tone: .tinted)
                                         }
                                     }
                                     .padding(.trailing, 12).padding(.vertical, 8)
@@ -2465,9 +2448,7 @@ struct JobDetailView: View {
                                 HStack(spacing: 12) {
                                     Text("Follow-up").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                                         .frame(maxWidth: .infinity, alignment: .leading)
-                                    Text("Book").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
-                                        .padding(.horizontal, 20).frame(minHeight: 48)
-                                        .background(Theme.brandTint, in: Capsule())
+                                    Text("Book").paperButton(.card, tone: .tinted)
                                 }
                                 .padding(.trailing, 12).padding(.vertical, 8)
                                 .frame(minHeight: 64)
@@ -2518,13 +2499,13 @@ struct JobDetailView: View {
                     PaperIcon(.navigate, size: 18, color: .white)
                     Text("Go to next stop").font(Theme.font(18, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
                 }
-                .inkCommit(height: 60)
+                .inkCommit(height: PaperControl.Size.field.height)
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("job-paid-next")
         } else {
             Button { withMotion(.snappy) { fieldModeOpen = false } } label: {
-                Text("Done").font(Theme.font(18, weight: .semibold)).inkCommit(height: 60)
+                Text("Done").font(Theme.font(18, weight: .semibold)).inkCommit(height: PaperControl.Size.field.height)
             }
             .buttonStyle(PressStyle())
             .accessibilityHint("Closes field mode and shows the job's details")
@@ -2550,11 +2531,7 @@ struct JobDetailView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(shownStatus(job) == "dispatched" ? "Open" : "Resume")
-                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 44)
-                        .background(Theme.brandTint, in: Capsule())
+                    Text(shownStatus(job) == "dispatched" ? "Open" : "Resume").paperButton(.secondary, tone: .tinted)
                 }
                 .padding(.vertical, 12).padding(.leading, 16).padding(.trailing, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2710,12 +2687,7 @@ struct JobDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .combine)
                 Button { showRunningLate = true } label: {
-                    Text("Update time").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .lineLimit(1)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 48)
-                        .background(Theme.brandSurface, in: Capsule())
-                        .contentShape(Capsule())
+                    Text("Update time").paperButton(.card, tone: .tinted)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityHint("Text the customer a new arrival time")
@@ -3411,13 +3383,9 @@ struct JobDetailView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "pause").font(.system(size: 15, weight: .bold))
                             .accessibilityHidden(true)
-                        Text("Pause").font(Theme.font(16, weight: .semibold)).lineLimit(1)
+                        Text("Pause").lineLimit(1)
                     }
-                    .foregroundStyle(Theme.brandText)
-                    .padding(.horizontal, 18)
-                    .frame(minHeight: 48)
-                    .background(Theme.brandSurface, in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.card, tone: .tinted)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy)
@@ -4158,11 +4126,9 @@ struct JobDetailView: View {
                 Button { collectFromMoney(step) } label: {
                     HStack(spacing: 8) {
                         PaperIcon(.jobCard, size: 18, color: Theme.brandText)
-                        Text("Collect payment").font(Theme.font(16, weight: .semibold))
+                        Text("Collect payment")
                     }
-                        .foregroundStyle(Theme.brandText)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.brandTint, in: Capsule())
+                    .paperButton(.card, tone: .tinted, fills: true)
                         .padding(.horizontal, 18).padding(.bottom, 18)
                         .contentShape(Rectangle())
                 }
@@ -4223,13 +4189,7 @@ struct JobDetailView: View {
     private func activityFilterChip(_ filter: String) -> some View {
         let isOn = filter == activityFilter
         return Button { withMotion(.snappy) { activityFilter = filter } } label: {
-            Text(filter)
-                .font(Theme.font(14, weight: isOn ? .semibold : .medium))
-                .foregroundStyle(isOn ? Theme.brandText : Theme.subtle)
-                .lineLimit(1).fixedSize()
-                .padding(.horizontal, 12)
-                .frame(minHeight: 40)
-                .background(isOn ? Theme.brandSurface : Theme.card, in: Capsule())
+            PaperChoiceChipLabel(title: filter, isOn: isOn)
                 // Paper's pill is 40 tall; the tap target stays 44.
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())

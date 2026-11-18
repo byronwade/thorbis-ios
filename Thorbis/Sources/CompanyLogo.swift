@@ -99,10 +99,7 @@ struct CompanyLogoPicker: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if canEdit {
                     Button { showPicker = true } label: {
-                        Text(uploading ? "Uploading…" : logo == nil ? "Add logo" : "Change logo")
-                            .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 36)
-                            .background(Theme.fill, in: Capsule())
+                        Text(uploading ? "Uploading…" : logo == nil ? "Add logo" : "Change logo").paperButton(.compact, tone: .quiet)
                             .frame(minHeight: 44).contentShape(Rectangle())
                     }
                     .buttonStyle(PressStyle())

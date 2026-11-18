@@ -850,11 +850,7 @@ private struct InvoicePaymentDetailSheet: View {
             InvoicePaymentRefundForm(model: refundModel, invoiceReference: invoiceReference, onRefundCompleted: onRefundCompleted)
                 .thorbisBackButton()
         } label: {
-            Text(title)
-                .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
-                .frame(maxWidth: .infinity, minHeight: 52)
-                .background(Theme.card, in: Capsule())
-                .contentShape(Capsule())
+            Text(title).paperButton(.commit, tone: .dangerQuiet, fills: true)
         }
         .buttonStyle(PressStyle())
         .accessibilityHint("Refunds the entire recorded payment after you review and confirm it")
@@ -1470,7 +1466,7 @@ struct InvoicePaymentCollectionSheet: View {
                 .lineLimit(1).minimumScaleFactor(0.7)
                 .padding(.horizontal, 16)
                 .frame(minHeight: 44)
-                .background(selected ? Theme.brandSurface : Theme.card, in: Capsule())
+                .background(selected ? Theme.brandTint : Theme.quietFill, in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
@@ -2097,14 +2093,10 @@ struct InvoicePaymentCollectionSheet: View {
                             Image(systemName: "location.fill").font(.system(size: 18, weight: .semibold))
                                 .accessibilityHidden(true)
                         }
-                        Text(onMyWayTitle(job)).font(Theme.font(17, weight: .semibold))
+                        Text(onMyWayTitle(job))
                             .lineLimit(1).minimumScaleFactor(0.7)
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 16)
-                    .frame(maxWidth: .infinity, minHeight: 60)
-                    .background(Theme.brand, in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.field, tone: .brand, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(startingNextStop)

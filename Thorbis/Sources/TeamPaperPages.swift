@@ -241,10 +241,7 @@ struct MemberOffboardSheet: View {
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16).padding(.bottom, 16)
             }
             Button { removing = member } label: {
-                Text("Remove from team").font(Theme.font(17, weight: .semibold)).foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(Theme.brand, in: Capsule())
-                    .contentShape(Capsule())
+                Text("Remove from team").paperButton(.commit, tone: .brand, fills: true)
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("offboard-commit")
@@ -334,10 +331,7 @@ struct OwnershipView: View {
                         Button {
                             if let picked { transferring = picked } else { error = "Choose who the new owner is first." }
                         } label: {
-                            Text("Transfer ownership").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
-                                .frame(maxWidth: .infinity, minHeight: 50)
-                                .background(Theme.brand.opacity(0.24), in: Capsule())
-                                .contentShape(Capsule())
+                            Text("Transfer ownership").paperButton(.commit, tone: .tinted, fills: true)
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("ownership-transfer")

@@ -517,10 +517,7 @@ struct WorkspacePriceBookView: View {
                         if currentCursor != nil {
                             // Paper v2: the quiet pill (fill, 50 tall, 16 Semibold), 16 from the edges.
                             Button { Task { await loadMore() } } label: {
-                                Text("Load more items").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                                    .frame(maxWidth: .infinity).frame(minHeight: Theme.commitHeight)
-                                    .background(Theme.fill, in: Capsule())
-                                    .contentShape(Capsule())
+                                Text("Load more items").paperButton(.commit, tone: .quiet, fills: true)
                             }
                             .buttonStyle(PressStyle())
                             .disabled(loading)

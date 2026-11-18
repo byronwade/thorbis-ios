@@ -457,9 +457,7 @@ struct DataPlateScannerSheet: View {
                         if noteText == nil { problem = "Scan the tag, or type the brand, model or serial, to add a note." }
                         else { Task { await saveNote() } }
                     } label: {
-                        Text("Add to job notes").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(Theme.card, in: Capsule())
+                        Text("Add to job notes").paperButton(.commit, tone: .quiet, fills: true)
                     }
                     .buttonStyle(PressStyle())
                     .disabled(busy)
@@ -565,11 +563,9 @@ private struct QuietCapsuleLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.system(size: 14, weight: .medium))
-            Text(title).font(Theme.font(15, weight: .medium))
+            Text(title)
         }
-        .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, 14).frame(minHeight: 44)
-        .background(Theme.fill, in: Capsule())
+        .paperButton(.secondary, tone: .quiet)
     }
 }
 

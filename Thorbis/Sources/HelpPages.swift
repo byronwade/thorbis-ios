@@ -157,9 +157,7 @@ private struct GuidedTourOverlay: View {
                 Spacer(minLength: 8)
                 if index > 0 {
                     Button { index -= 1 } label: {
-                        Text("Back").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 18).frame(minHeight: 44)
-                            .background(Theme.fill, in: Capsule())
+                        Text("Back").paperButton(.secondary, tone: .quiet)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityIdentifier("tour-back")
@@ -167,10 +165,7 @@ private struct GuidedTourOverlay: View {
                 Button {
                     if index >= tour.steps.count - 1 { onEnd() } else { index += 1 }
                 } label: {
-                    Text(index >= tour.steps.count - 1 ? "Done" : "Next")
-                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(Color.white)
-                        .padding(.horizontal, 22).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
+                    Text(index >= tour.steps.count - 1 ? "Done" : "Next").paperButton(.secondary, tone: .brand)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("tour-next")

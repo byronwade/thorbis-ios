@@ -206,13 +206,7 @@ struct NoticeDeliveryLogView: View {
                     let on = choice == filter
                     let words = choice == .failed && failed > 0 ? "\(choice.title) \(failed)" : choice.title
                     Button { filter = choice } label: {
-                        Text(words)
-                            .font(Theme.font(14, weight: on ? .semibold : .medium))
-                            .foregroundStyle(on ? Theme.card : Theme.foreground)
-                            .padding(.horizontal, 14)
-                            .frame(minHeight: 44)
-                            .background(on ? Theme.foreground : Theme.card, in: Capsule())
-                            .contentShape(Capsule())
+                        PaperChoiceChipLabel(title: words, isOn: on)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityAddTraits(on ? .isSelected : [])

@@ -268,12 +268,7 @@ struct ReceiptsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             Button { share(chosen) } label: {
-                Text("Share CSV").font(Theme.font(14, weight: .semibold)).foregroundStyle(.white)
-                    .lineLimit(1)
-                    .padding(.horizontal, 22)
-                    .frame(minHeight: 44)
-                    .background(Theme.brand, in: Capsule())
-                    .contentShape(Capsule())
+                Text("Share CSV").paperButton(.secondary, tone: .brand)
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("receipts-share")
@@ -697,11 +692,7 @@ private struct ReceiptEditor: View {
                             ForEach(ReceiptCategory.allCases, id: \.self) { choice in
                                 let on = choice == category
                                 Button { category = choice } label: {
-                                    Text(choice.label).font(Theme.font(14, weight: on ? .semibold : .medium))
-                                        .foregroundStyle(on ? Theme.brandText : Theme.foreground)
-                                        .padding(.horizontal, 14).frame(minHeight: 40)
-                                        .background(on ? Theme.brandTint : Theme.card, in: Capsule())
-                                        .contentShape(Rectangle().inset(by: -2))
+                                    PaperChoiceChipLabel(title: choice.label, isOn: on)
                                 }
                                 .buttonStyle(PressStyle())
                                 .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
@@ -809,12 +800,9 @@ private struct ReceiptEditor: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: symbol).font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
-                Text(title).font(Theme.font(14, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                Text(title).fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundStyle(Theme.foreground)
-            .padding(.horizontal, 14).frame(minHeight: 44)
-            .background(Theme.fill, in: Capsule())
-            .contentShape(Capsule())
+            .paperButton(.secondary, tone: .quiet)
         }
         .buttonStyle(PressStyle())
         .accessibilityIdentifier(identifier)

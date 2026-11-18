@@ -126,12 +126,9 @@ struct AccountAndDataView: View {
                         Button { confirming = true } label: {
                             HStack(spacing: 8) {
                                 PaperIcon(.acctTrash, size: 15, color: Theme.destructive)
-                                Text("Delete my account").font(Theme.font(16, weight: .semibold))
+                                Text("Delete my account")
                             }
-                            .foregroundStyle(Theme.destructive)
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(Theme.destructive.opacity(0.14), in: Capsule())
-                            .contentShape(Capsule())
+                            .paperButton(.card, tone: .dangerQuiet, fills: true)
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityHint("Asks you to confirm before anything is deleted")
@@ -243,20 +240,16 @@ struct DeleteAccountSheet: View {
 
                 HStack(spacing: 10) {
                     Button { dismiss() } label: {
-                        Text("Keep my account").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(Theme.fill, in: Capsule())
+                        Text("Keep my account").paperButton(.commit, tone: .quiet, fills: true)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityIdentifier("account-delete-keep")
                     Button { Task { await submit() } } label: {
                         HStack(spacing: 6) {
                             if busy { ProgressView().tint(.white) }
-                            Text("Delete my account").font(Theme.font(16, weight: .semibold))
+                            Text("Delete my account")
                         }
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.destructiveFill, in: Capsule())
+                        .paperButton(.commit, tone: .danger, fills: true)
                     }
                     .buttonStyle(PressStyle())
                     .disabled(busy)

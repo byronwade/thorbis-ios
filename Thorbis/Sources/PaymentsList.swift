@@ -305,15 +305,7 @@ struct CompanyPaymentsView: View {
     private func filterChip(_ option: String) -> some View {
         let selected = tab == option
         return Button { tab = option } label: {
-            Text(option)
-                .font(Theme.font(14, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
-                .lineLimit(1)
-                .padding(.horizontal, 16)
-                .frame(minHeight: 40)
-                .background(selected ? Theme.brandSurface : Theme.fill, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            PaperChoiceChipLabel(title: option, isOn: selected)
         }
         .buttonStyle(PressStyle())
         .fixedSize()

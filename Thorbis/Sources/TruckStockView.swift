@@ -432,11 +432,7 @@ private struct TruckStockItemView: View {
             pills {
                 if low {
                     Button { restock = true } label: {
-                        Text("Request \(needed) more").font(Theme.font(16, weight: .semibold)).foregroundStyle(Color.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16).padding(.vertical, 8)
-                            .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(Theme.brand, in: Capsule()).contentShape(Capsule())
+                        Text("Request \(needed) more").paperButton(.commit, tone: .brand, fills: true)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityHint("Opens the restock list to share")
@@ -446,7 +442,7 @@ private struct TruckStockItemView: View {
                     Text("Fix count").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .frame(minWidth: 130, maxWidth: low && !typeSize.isAccessibilitySize ? 130 : .infinity, minHeight: 50)
-                        .background(Theme.card, in: Capsule()).contentShape(Capsule())
+                        .background(Theme.quietFill, in: Capsule()).contentShape(Capsule())
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("truckstock-fix-count")
@@ -784,7 +780,7 @@ private struct TruckRestockSheet: View {
             }
             Spacer(minLength: 8)
             Text("Get \(TruckStockRules.amount(line.needed, unit: line.item.unit))")
-                .font(Theme.font(17, weight: .semibold))
+                .font(Theme.font(15, weight: .semibold))
                 .multilineTextAlignment(.trailing)
                 .padding(.horizontal, 16).frame(minHeight: 44)
                 .background(Theme.fill, in: Capsule())

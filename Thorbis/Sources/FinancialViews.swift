@@ -219,10 +219,7 @@ struct EstimateDetailView: View {
                         }
                         if canEdit(record) {
                             Button { showRevisionEditor = true } label: {
-                                Text("Edit").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                                    .frame(maxWidth: .infinity, minHeight: 44)
-                                    .background(Theme.card, in: Capsule())
-                                    .contentShape(Capsule())
+                                Text("Edit").paperButton(.secondary, tone: .quiet, fills: true)
                             }
                             .buttonStyle(PressStyle())
                             .accessibilityLabel(record.status == "draft" ? "Edit lines" : "Revise estimate")
@@ -596,13 +593,13 @@ struct EstimateDetailView: View {
     @ViewBuilder private var estimateBar: some View {
         if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
             // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
-            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy, height: 52) { Task { await handToCustomer() } }
+            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { Task { await handToCustomer() } }
         } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
-            PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy, height: 52) { action = "Send"; confirm = true }
+            PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
         } else if let record, record.status == "sent", canShowSent(record) {
             // On site, the next step is the customer's yes: hand them the options to choose and sign.
             // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy, height: 52) { Task { await presentToCustomer() } }
+            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { Task { await presentToCustomer() } }
         }
     }
 
@@ -989,10 +986,7 @@ struct InvoiceDetailView: View {
                     }
                     if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
                         Button { showEditDraft = true } label: {
-                            Text("Edit").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .background(Theme.card, in: Capsule())
-                                .contentShape(Capsule())
+                            Text("Edit").paperButton(.secondary, tone: .quiet, fills: true)
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityLabel("Edit line items")

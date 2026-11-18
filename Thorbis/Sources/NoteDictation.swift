@@ -171,14 +171,7 @@ struct QuickNotesRow: View {
             HStack(spacing: 8) {
                 ForEach(QuickNotes.phrases, id: \.self) { phrase in
                     Button { insert(phrase) } label: {
-                        Text(phrase)
-                            .font(Theme.font(15, weight: .semibold))
-                            .foregroundStyle(Theme.foreground)
-                            .lineLimit(1).fixedSize()
-                            .padding(.horizontal, 15)
-                            .frame(minHeight: 44)
-                            .background(Theme.fill, in: Capsule())
-                            .contentShape(Capsule())
+                        Text(phrase).paperButton(.secondary, tone: .quiet)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Add “\(phrase)”")

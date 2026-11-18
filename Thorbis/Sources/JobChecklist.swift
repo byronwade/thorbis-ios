@@ -285,11 +285,7 @@ struct JobChecklistSheet: View {
             if canPhoto {
                 // Paper 21F: "Add photo" as a brand chip on the row.
                 Button { photoFor = item } label: {
-                    Text("Add photo").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .fixedSize()
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.brandSurface, in: Capsule())
-                        .contentShape(Capsule())
+                    Text("Add photo").paperButton(.secondary, tone: .tinted)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("Add a photo for \(item.label)")

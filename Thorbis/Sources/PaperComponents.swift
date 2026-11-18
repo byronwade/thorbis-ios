@@ -600,15 +600,13 @@ struct PaperActionBar<Secondary: View>: View {
     /// Paper 35C: one 13pt muted line centred above the pill, saying what the commit will do
     /// ("Nudge texts Nikolai a friendly check-in.").
     var hint: String? = nil
-    /// The pill's height. Paper's sheets and editors use 50 (15 Semibold); the estimate and
-    /// invoice pages (35C / 40C) use 52 with a 17 Semibold word and an 18pt glyph.
+    /// Kept for source compatibility; the bar's pill is always the ramp's commit (50 tall, 16
+    /// Semibold). Paper's main file has no taller brand pill outside Field mode.
     var height: CGFloat = Theme.commitHeight
     var ground: Color = Theme.background
     var identifier: String? = nil
     let action: () -> Void
     @ViewBuilder var secondary: Secondary
-
-    private var large: Bool { height >= 52 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -620,20 +618,20 @@ struct PaperActionBar<Secondary: View>: View {
             }
             HStack(spacing: 8) {
                 Button(action: action) {
-                    HStack(spacing: large ? 8 : 7) {
+                    HStack(spacing: 8) {
                         if busy {
                             ProgressView().tint(.white)
                         } else if let symbol {
                             // Paper's own mark where it draws one; the symbol otherwise.
                             if let glyph = PaperGlyph.chrome(symbol: symbol) {
-                                PaperIcon(glyph, size: large ? 18 : 16, color: .white)
+                                PaperIcon(glyph, size: 16, color: .white)
                             } else {
-                                Image(systemName: symbol).font(.system(size: large ? 16 : 15, weight: .medium)).accessibilityHidden(true)
+                                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).accessibilityHidden(true)
                             }
                         }
-                        Text(title).font(Theme.font(large ? 17 : 16, weight: .semibold))
+                        Text(title)
                     }
-                    .inkCommit(enabled: !disabled, height: height)
+                    .inkCommit(enabled: !disabled)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy || disabled)
@@ -1108,7 +1106,7 @@ struct FloatingCreateButton: View {
         HStack {
             Spacer()
             Button(action: action) {
-                Label(title, systemImage: "plus").font(Theme.font(15, weight: .medium))
+                Label(title, systemImage: "plus").font(Theme.font(15, weight: .semibold))
                     .padding(.horizontal, 16).frame(minHeight: 44)
                     .background(Theme.card, in: Capsule()).overlay(Capsule().stroke(Theme.border))
                     .contentShape(Capsule())

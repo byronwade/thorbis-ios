@@ -509,13 +509,9 @@ struct CommsCallCard: View {
                 Button { choosingJob = true } label: {
                     HStack(spacing: 6) {
                         if linking { ProgressView() } else { Image(systemName: "link").font(.system(size: 13, weight: .medium)) }
-                        Text(call.jobId == nil ? "Link to job" : "Change job").font(Theme.font(15, weight: .medium))
+                        Text(call.jobId == nil ? "Link to job" : "Change job")
                     }
-                    .foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 44)
-                    .background(Theme.quietFill, in: Capsule())
-                    .contentShape(Rectangle())
+                    .paperButton(.secondary, tone: .quiet)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(linking)

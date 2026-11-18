@@ -166,13 +166,7 @@ struct InvoicePaymentLinkView: View {
            model.paymentTotalCents == model.invoice?.amountPaid, invoiceState == .ready,
            case .ready(let url, _) = PaymentLinkPresentation(link: payLink, at: date) {
             ShareLink(item: url) {
-                Text("Text the link instead")
-                    .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .background(Theme.quietFill, in: Capsule())
-                    .contentShape(Capsule())
+                Text("Text the link instead").paperButton(.commit, tone: .quiet, fills: true)
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("share-invoice-payment-link")

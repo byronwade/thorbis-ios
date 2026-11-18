@@ -479,9 +479,9 @@ struct JobDepositSheet: View {
                 .font(Theme.font(14, weight: .semibold)).monospacedDigit()
                 .foregroundStyle(isOn ? Theme.brandText : Theme.foreground)
                 .lineLimit(1).fixedSize()
-                .padding(.horizontal, 16)
-                .frame(minHeight: 40)
-                .background(isOn ? Theme.brandSurface : Theme.fill, in: Capsule())
+                .padding(.horizontal, 14)
+                .frame(minHeight: PaperControl.chipHeight)
+                .background(isOn ? Theme.brandTint : Theme.quietFill, in: Capsule())
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
         }

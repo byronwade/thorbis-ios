@@ -786,15 +786,11 @@ struct JobEstimateSummaryCard: View {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.shield").font(.system(size: 16, weight: .medium))
                             .accessibilityHidden(true)
-                        Text("Build an estimate").font(Theme.font(16, weight: .semibold))
+                        Text("Build an estimate")
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 16).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Theme.fill, in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.card, tone: .quiet, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("job-estimates-build")

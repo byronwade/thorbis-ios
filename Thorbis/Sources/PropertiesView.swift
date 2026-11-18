@@ -423,12 +423,9 @@ struct PropertyDetailView: View {
             Button { openURL(url) } label: {
                 HStack(spacing: 6) {
                     PaperIcon(Self.directionsGlyph, size: 14, color: Theme.brandText)
-                    Text("Directions").font(Theme.font(14, weight: .semibold))
+                    Text("Directions")
                 }
-                .foregroundStyle(Theme.brandText)
-                .padding(.leading, 12).padding(.trailing, 14).frame(minHeight: 44)
-                .background(Theme.brandTint, in: Capsule())
-                .contentShape(Capsule())
+                .paperButton(.secondary, tone: .tinted)
             }
             .buttonStyle(PressStyle())
             .accessibilityHint("Opens Maps")
@@ -469,10 +466,7 @@ struct PropertyDetailView: View {
 
     private func reachPill(_ title: String, spoken: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text(title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                .frame(minWidth: 58, minHeight: 44)
-                .background(Theme.fill, in: Capsule())
-                .contentShape(Capsule())
+            Text(title).paperButton(.secondary, tone: .quiet)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(spoken)

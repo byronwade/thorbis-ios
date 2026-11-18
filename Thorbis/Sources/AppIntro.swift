@@ -247,9 +247,7 @@ private struct IntroJobCard: View {
             fact("Property", "214 Rivera Ln, Unit B")
             fact("Invoice", "$1,240.00")
                 .padding(.bottom, 14)
-            Text("Create estimate").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
-                .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Theme.brandSurface, in: Capsule())
+            Text("Create estimate").paperButton(.card, tone: .tinted, fills: true)
                 .padding(.bottom, 8)
         }
     }

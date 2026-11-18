@@ -515,11 +515,9 @@ private struct MaterialsCapsuleLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
-            Text(title).font(Theme.font(15, weight: .medium))
+            Text(title)
         }
-        .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, 14).frame(minHeight: 44)
-        .background(Theme.fill, in: Capsule())
+        .paperButton(.secondary, tone: .quiet)
     }
 }
 

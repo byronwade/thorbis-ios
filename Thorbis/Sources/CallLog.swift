@@ -343,11 +343,7 @@ struct CallDetailView: View {
                         .accessibilityHidden(true)
                     }
                     Button { player.cycleRate() } label: {
-                        Text(player.rateLabel).font(Theme.font(14, weight: .semibold)).monospacedDigit()
-                            .foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 12).frame(minWidth: 44, minHeight: 44)
-                            .background(Theme.fill, in: Capsule())
-                            .contentShape(Capsule())
+                        Text(player.rateLabel).monospacedDigit().paperButton(.secondary, tone: .quiet)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Playback speed")

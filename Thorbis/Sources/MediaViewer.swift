@@ -463,10 +463,8 @@ struct MediaCompareView: View {
             // Paper 21P: the commit shares the pair. It is one picture, before on the left.
             // Paper: a quiet card pill, 50 tall, 16 Semibold.
             Button { shareComparison() } label: {
-                Text("Share with customer").font(Theme.font(16, weight: .semibold))
-                    .foregroundStyle(canShare ? Theme.foreground : Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .background(Theme.card, in: Capsule())
+                Text("Share with customer").paperButton(.commit, tone: .quiet, fills: true)
+                    .opacity(canShare ? 1 : 0.5)
             }
             .buttonStyle(PressStyle())
             .disabled(!canShare)

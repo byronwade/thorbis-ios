@@ -396,11 +396,7 @@ struct PermissionPrimerView: View {
                 .disabled(asking)
                 .accessibilityIdentifier("permission-primer-allow")
                 Button { (later ?? done)() } label: {
-                    Text(primer.later)
-                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.fill, in: Capsule())
-                        .contentShape(Capsule())
+                    Text(primer.later).paperButton(.commit, tone: .quiet, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("permission-primer-later")

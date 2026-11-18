@@ -368,7 +368,8 @@ private struct InkCommit: ViewModifier {
     func body(content: Content) -> some View {
         let on = enabled ?? isEnabled
         content
-            .font(Theme.font(16, weight: .semibold))
+            // Paper: 16 Semibold at 50 and 48; Field mode's 60pt action is 18 Semibold.
+            .font(Theme.font(height >= 60 ? 18 : 16, weight: .semibold))
             .foregroundStyle(type.opacity(on ? 1 : 0.7))
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -473,8 +474,9 @@ struct PrimaryButton: View {
 }
 
 extension View {
-    /// MA-08: the screen's one commit. Ink fill, inverse type 17/500, at least 50 tall, radius 12, a
-    /// hairline rim so it holds its edge on the dark canvas. Disabled fades the ink, never turns it grey-blue.
+    /// The screen's one commit (Paper DS "Buttons"): a brand pill, white 16 Semibold, 50 tall
+    /// (`PaperControl.Size.commit`). `height` takes only the ramp's other values: 48 on a card, 60 in
+    /// Field mode. Disabled fades the fill, never turns it grey-blue.
     /// With `enabled` left nil the commit follows the button's own `.disabled(...)`.
     func inkCommit(enabled: Bool? = nil, height: CGFloat = Theme.commitHeight) -> some View {
         modifier(InkCommit(enabled: enabled, height: height))

@@ -487,11 +487,7 @@ struct DispatchBoardView: View {
 
     /// The brand chip Paper uses for a row's one action (Assign, Schedule), 44 tall.
     private func brandChip(_ title: String) -> some View {
-        Text(title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
-            .fixedSize()
-            .padding(.horizontal, 10).frame(minHeight: 44)
-            .background(Theme.brandTint, in: Capsule())
-            .contentShape(Capsule())
+        Text(title).paperButton(.secondary, tone: .tinted)
     }
 
     private func menuTitle(_ job: Job) -> String {

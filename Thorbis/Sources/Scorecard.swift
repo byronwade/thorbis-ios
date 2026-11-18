@@ -200,11 +200,7 @@ struct RecordFilterBar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Text(filter.title)
-                    .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 14).padding(.vertical, 6).frame(minHeight: 36)
-                    .background(Theme.brandSurface, in: Capsule())
+                Text(filter.title).paperButton(.compact, tone: .tinted)
                     .overlay(Capsule().strokeBorder(Theme.brand, lineWidth: 1.5))
                 Spacer(minLength: 8)
                 Button(action: clear) {

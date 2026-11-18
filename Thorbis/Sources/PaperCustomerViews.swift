@@ -2138,12 +2138,7 @@ struct CustomerDetailView: View {
     private func activityChip(_ name: String) -> some View {
         let selected = activityFilter == name
         return Button { activityFilter = name } label: {
-            Text(name).font(Theme.font(14, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Theme.background : Theme.subtle)
-                .padding(.horizontal, 12).frame(minHeight: 36)
-                .background(selected ? Theme.foreground : Theme.card, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            PaperChoiceChipLabel(title: name, isOn: selected)
         }
         .buttonStyle(PressStyle())
         .accessibilityAddTraits(selected ? .isSelected : [])

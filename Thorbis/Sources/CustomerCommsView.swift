@@ -117,12 +117,9 @@ struct CustomerCommsSection: View {
         Button(action: run) {
             HStack(spacing: 8) {
                 Image(systemName: symbol).font(.system(size: 15, weight: .medium)).accessibilityHidden(true)
-                Text(title).font(Theme.font(16, weight: .semibold))
+                Text(title)
             }
-            .foregroundStyle(Theme.foreground)
-            .frame(maxWidth: .infinity, minHeight: 50)
-            .background(Theme.card, in: Capsule())
-            .contentShape(Capsule())
+            .paperButton(.commit, tone: .quiet, fills: true)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("\(title) \(customerName)")

@@ -300,40 +300,179 @@ struct PaperInitials: View {
 
 // MARK: - Buttons
 
-/// Paper's one blue pill (the DS board's "Buttons"): brand fill, white 16 Semibold, 48 tall on a
-/// card ("Navigate") and 50 as a sheet's or a screen's commit ("Show 7 jobs"). A label only: wrap
-/// it in a `Button`, a `NavigationLink` or a `ThorbisMenu`. `tinted` is the quieter twin (brand
-/// text on brand at 24%, Paper 19 "Create your first job").
+/// Paper's control ramp (the DS board: "One blue pill per screen, 48–50 tall. Everything else is a
+/// quiet 44px pill or a 44px circle; chips are 40."). Every tappable pill in the app is one of
+/// these sizes in one of these tones; a feature file never types its own height, radius or label
+/// font. Measured in the main Paper file: brand pills 50 (75 of them), 48 on a card (13), 44
+/// "Done"/"Submit" (15 Semibold), 36 row and token pills (14 Semibold); Field mode's commit is 60.
+enum PaperControl {
+    enum Size {
+        /// Field mode's one action (Paper Field mode F1–F6 "On my way"): 60 tall, 18 Semibold. Only
+        /// on the gloves-on job screen; nowhere else.
+        case field
+        /// A screen's or a sheet's commit ("Show 7 jobs", "Save draft" beside it): 50 tall, 16 Semibold.
+        case commit
+        /// The main action on a card ("Navigate"): 48 tall, 16 Semibold.
+        case card
+        /// Every other button ("Text instead", "Resume", "Done"): 44 tall, 15 Semibold.
+        case secondary
+        /// A pill inside a row or a tight strip ("Schedule", a filter token): 36 tall to the eye,
+        /// 44 to the finger, 14 Semibold.
+        case compact
+
+        var height: CGFloat {
+            switch self { case .field: 60; case .commit: 50; case .card: 48; case .secondary: 44; case .compact: 36 }
+        }
+        var type: CGFloat {
+            switch self { case .field: 18; case .commit, .card: 16; case .secondary: 15; case .compact: 14 }
+        }
+        /// Either side of the words when the pill hugs them.
+        var inset: CGFloat {
+            switch self { case .field, .commit: 22; case .card: 18; case .secondary: 16; case .compact: 12 }
+        }
+        var glyph: CGFloat {
+            switch self { case .field: 20; case .commit, .card, .secondary: 16; case .compact: 14 }
+        }
+    }
+
+    enum Tone {
+        /// The one blue pill: white on brand.
+        case brand
+        /// Its quieter twin: brand text on brand at 24% ("Resume", "Create your first job").
+        case tinted
+        /// Everything else: ink on ink at 9% ("Save draft", "Text instead", "Add").
+        case quiet
+        /// A destructive commit: white on red ("Delete my account").
+        case danger
+        /// A destructive action that is not the commit: red words on red at 14%.
+        case dangerQuiet
+
+        var fill: Color {
+            switch self {
+            case .brand: Theme.brand
+            case .tinted: Theme.brandTint
+            case .quiet: Theme.quietFill
+            case .danger: Theme.destructiveFill
+            case .dangerQuiet: Theme.destructive.opacity(0.14)
+            }
+        }
+        var ink: Color {
+            switch self {
+            case .brand, .danger: .white
+            case .tinted: Theme.brandText
+            case .quiet: Theme.foreground
+            case .dangerQuiet: Theme.destructive
+            }
+        }
+    }
+
+    /// A choice or filter chip (Paper 20A): 40 tall, 14 Medium, 14 Semibold when chosen.
+    static let chipHeight: CGFloat = 40
+    /// A small status word on a row or a card ("Low", "Invite pending"): 26 tall, 13 Semibold, 10 either side.
+    static let statusHeight: CGFloat = 26
+    /// A text field or a picker well: 50 tall, radius 14, 16 either side, 16 Regular.
+    static let fieldHeight: CGFloat = 50
+    static let fieldRadius: CGFloat = 14
+}
+
+private struct PaperButtonFace: ViewModifier {
+    let size: PaperControl.Size
+    let tone: PaperControl.Tone
+    let fills: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.thorbisPressed) private var pressed
+
+    func body(content: Content) -> some View {
+        content
+            .font(Theme.font(size.type, weight: .semibold))
+            .foregroundStyle(tone.ink.opacity(isEnabled ? 1 : 0.7))
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, fills ? 16 : size.inset).padding(.vertical, 8)
+            .frame(maxWidth: fills ? .infinity : nil, minHeight: size.height)
+            .background(tone.fill.opacity(isEnabled ? (pressed ? 0.85 : 1) : 0.4), in: Capsule())
+            // 36 to the eye is still 44 to the finger.
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    /// Dresses any label (words, or a glyph and words) as one of Paper's pills. Sizes and tones are
+    /// `PaperControl`'s; a button that needs a different height needs a reason next to it.
+    ///
+    ///     Button(action: edit) { Text("Edit").paperButton(.secondary, tone: .quiet) }.buttonStyle(PressStyle())
+    func paperButton(_ size: PaperControl.Size = .secondary, tone: PaperControl.Tone = .quiet,
+                     fills: Bool = false) -> some View {
+        modifier(PaperButtonFace(size: size, tone: tone, fills: fills))
+    }
+}
+
+/// A pill with words and an optional leading mark, in Paper's ramp. A label only: wrap it in a
+/// `Button`, a `NavigationLink` or a `ThorbisMenu`.
 ///
-///     Button(action: go) { PaperPillLabel(title: "Navigate", glyph: .navigate) }.buttonStyle(PressStyle())
-struct PaperPillLabel: View {
+///     Button(action: text) { PaperButtonLabel(title: "Text instead", symbol: "bubble.left") }.buttonStyle(PressStyle())
+struct PaperButtonLabel: View {
     let title: String
     var glyph: PaperGlyph? = nil
     /// An SF Symbol, where Paper draws no glyph of its own for this action.
     var symbol: String? = nil
+    var size: PaperControl.Size = .secondary
+    var tone: PaperControl.Tone = .quiet
+    /// True fills the row; false hugs the words.
+    var fills = false
+    var busy = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if busy {
+                ProgressView().tint(tone.ink)
+            } else if let glyph {
+                PaperIcon(glyph, size: size.glyph, color: tone.ink)
+            } else if let symbol {
+                Image(systemName: symbol).font(.system(size: size.glyph - 1, weight: .semibold)).accessibilityHidden(true)
+            }
+            Text(title)
+        }
+        .paperButton(size, tone: tone, fills: fills)
+    }
+}
+
+/// Paper's one blue pill (the DS board's "Buttons"): brand fill, white 16 Semibold, 48 tall on a
+/// card ("Navigate") and 50 as a sheet's or a screen's commit ("Show 7 jobs"). `tinted` is the
+/// quieter twin (brand text on brand at 24%, Paper 19 "Create your first job"). `PaperButtonLabel`
+/// in the brand tone; kept so the screens that already say `PaperPillLabel` read the same.
+struct PaperPillLabel: View {
+    let title: String
+    var glyph: PaperGlyph? = nil
+    var symbol: String? = nil
+    /// 48 on a card, 50 as the commit. No other value: the ramp is `PaperControl.Size`.
     var height: CGFloat = 48
     var tinted = false
     var busy = false
-    /// False hugs the words (24 either side) instead of filling the row.
+    /// False hugs the words instead of filling the row.
     var fills = true
 
     var body: some View {
-        let ink: Color = tinted ? Theme.brandText : .white
-        HStack(spacing: 8) {
-            if busy {
-                ProgressView().tint(ink)
-            } else if let glyph {
-                PaperIcon(glyph, size: 16, color: ink)
-            } else if let symbol {
-                Image(systemName: symbol).font(.system(size: 15, weight: .semibold)).accessibilityHidden(true)
-            }
-            Text(title).font(Theme.font(16, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
-        }
-        .foregroundStyle(ink)
-        .padding(.horizontal, fills ? 16 : 24)
-        .frame(maxWidth: fills ? .infinity : nil, minHeight: height)
-        .background(tinted ? Theme.brandTint : Theme.brand, in: Capsule())
-        .contentShape(Capsule())
+        PaperButtonLabel(title: title, glyph: glyph, symbol: symbol,
+                         size: height >= 50 ? .commit : .card, tone: tinted ? .tinted : .brand,
+                         fills: fills, busy: busy)
+    }
+}
+
+/// A small status word on a row or a card (Paper 84 "Low", 62 "Invite pending"): 26 tall, 13
+/// Semibold, the tone's word on the tone's surface. Not tappable.
+struct PaperStatusPill: View {
+    let text: String
+    var ink: Color = Theme.muted
+    var surface: Color = Theme.fill
+
+    var body: some View {
+        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(ink)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .frame(minHeight: PaperControl.statusHeight)
+            .background(surface, in: Capsule())
     }
 }
 
@@ -387,7 +526,7 @@ struct PaperChoiceChipLabel: View {
             .foregroundStyle(isOn ? Theme.brandText : Theme.foreground)
             .lineLimit(1)
             .padding(.horizontal, 14)
-            .frame(minHeight: 40)
+            .frame(minHeight: PaperControl.chipHeight)
             .background(isOn ? Theme.brandTint : Theme.quietFill, in: Capsule())
             .frame(minHeight: 44)
             .contentShape(Rectangle())

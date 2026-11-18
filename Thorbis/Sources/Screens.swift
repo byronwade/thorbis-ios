@@ -375,12 +375,10 @@ struct CustomerContactSheet: View {
                 Button { Task { await save() } } label: {
                     HStack(spacing: 8) {
                         if busy { ProgressView().tint(.white) }
-                        Text(contact == nil ? "Save contact" : "Save changes").font(Theme.font(16, weight: .semibold))
+                        Text(contact == nil ? "Save contact" : "Save changes")
                     }
-                    .foregroundStyle(Color.white)
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .background(Theme.brand.opacity(saveBlockedReason == nil ? 1 : 0.5), in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.commit, tone: .brand, fills: true)
+                    .opacity(saveBlockedReason == nil ? 1 : 0.5)
                 }
                 .buttonStyle(PressStyle())
                 // Never pre-disabled for a blank name (pressing says so under it); off only while

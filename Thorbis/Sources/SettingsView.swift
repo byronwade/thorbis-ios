@@ -216,15 +216,11 @@ struct SignOutSheet: View {
             }
             HStack(spacing: 10) {
                 Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(Theme.fill, in: Capsule()).contentShape(Capsule())
+                    Text("Cancel").paperButton(.commit, tone: .quiet, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 Button { dismiss(); signOut() } label: {
-                    Text("Sign out").font(Theme.font(17, weight: .semibold)).foregroundStyle(.white)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(Theme.destructiveFill, in: Capsule()).contentShape(Capsule())
+                    Text("Sign out").paperButton(.commit, tone: .danger, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("sign-out-confirm")

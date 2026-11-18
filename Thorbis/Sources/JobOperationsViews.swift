@@ -669,14 +669,7 @@ struct JobCloseoutView: View {
         VStack(spacing: 10) {
             if let collect = collectTitle, let bill {
                 Button { pressComplete() } label: {
-                    Text("Complete job")
-                        .font(Theme.font(17, weight: .semibold))
-                        .foregroundStyle(Theme.foreground)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(Theme.fill, in: Capsule())
-                        .contentShape(Capsule())
+                    Text("Complete job").paperButton(.commit, tone: .quiet, fills: true)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy || closeout == nil)
@@ -685,7 +678,7 @@ struct JobCloseoutView: View {
                     Text(collect)
                         .font(Theme.font(18, weight: .semibold)).monospacedDigit()
                         .lineLimit(1).minimumScaleFactor(0.8)
-                        .inkCommit(height: 60)
+                        .inkCommit(height: PaperControl.Size.field.height)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy)
@@ -699,7 +692,7 @@ struct JobCloseoutView: View {
                             .font(Theme.font(18, weight: .semibold))
                             .lineLimit(1).minimumScaleFactor(0.8)
                     }
-                    .inkCommit(height: 60)
+                    .inkCommit(height: PaperControl.Size.field.height)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy || closeout == nil)
@@ -1317,12 +1310,10 @@ struct JobScheduleView: View {
             Button { Task { await save() } } label: {
                 HStack(spacing: 8) {
                     if busy { ProgressView().tint(.white) }
-                    Text(saved ? "Saved" : "Save").font(Theme.font(16, weight: .semibold))
+                    Text(saved ? "Saved" : "Save")
                 }
-                .foregroundStyle(Color.white)
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(Theme.brand.opacity(busy || saved || !canSave ? 0.5 : 1), in: Capsule())
-                .contentShape(Capsule())
+                .paperButton(.commit, tone: .brand, fills: true)
+                .opacity(busy || saved || !canSave ? 0.5 : 1)
             }
             .buttonStyle(PressStyle())
             .disabled(busy || saved || !canSave)

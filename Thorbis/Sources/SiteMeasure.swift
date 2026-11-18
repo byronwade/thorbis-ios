@@ -289,10 +289,7 @@ struct SiteMeasureView: View {
                         HStack {
                             if !session.points.isEmpty || sampleMeters != nil {
                                 Button { session.reset() } label: {
-                                    Text("Clear").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                                        .padding(.horizontal, 18).frame(minHeight: 44)
-                                        .background(Theme.card, in: Capsule())
-                                        .contentShape(Capsule())
+                                    Text("Clear").paperButton(.secondary, tone: .quiet)
                                 }
                                 .buttonStyle(PressStyle())
                                 .accessibilityIdentifier("measure-clear")

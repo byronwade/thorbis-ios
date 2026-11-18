@@ -469,10 +469,7 @@ struct SetupWizardView: View {
                         Text("Quick add — name · price").font(Theme.font(16)).foregroundStyle(Theme.muted)
                             .lineLimit(1).minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Text("Add").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 16)
-                            .frame(height: 44)
-                            .background(Theme.quietFill, in: Capsule())
+                        Text("Add").paperButton(.secondary, tone: .quiet)
                     }
                     .padding(.leading, 16).padding(.trailing, 8)
                     .frame(minHeight: 50)
@@ -559,12 +556,9 @@ struct SetupWizardView: View {
                 Button { showStripe = true } label: {
                     HStack(spacing: 8) {
                         Text(finished.contains(.payments) ? "Manage payouts" : "Set up payouts")
-                            .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                         PaperIcon(.setupArrow, size: 18, color: Theme.muted).accessibilityHidden(true)
                     }
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(Theme.quietFill, in: Capsule())
-                    .contentShape(Capsule())
+                    .paperButton(.card, tone: .quiet, fills: true)
                 }
                 .buttonStyle(PressStyle())
             }

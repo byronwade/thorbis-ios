@@ -462,13 +462,7 @@ struct CustomerImportPanel: View {
     private func sourceChip(_ name: String) -> some View {
         let chosen = source == name
         return Button { source = chosen ? nil : name } label: {
-            Text(name)
-                .font(Theme.font(14, weight: chosen ? .semibold : .medium))
-                .foregroundStyle(chosen ? Theme.brandText : Theme.foreground)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 44)
-                .background(chosen ? Theme.brandSurface : Theme.card, in: Capsule())
-                .contentShape(Capsule())
+            PaperChoiceChipLabel(title: name, isOn: chosen)
         }
         .buttonStyle(PressStyle())
         .accessibilityAddTraits(chosen ? .isSelected : [])

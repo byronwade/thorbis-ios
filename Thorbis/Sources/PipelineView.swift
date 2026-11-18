@@ -181,13 +181,7 @@ struct PipelineView: View {
                 ForEach(LeadStage.allCases, id: \.self) { item in
                     let isOn = item == stage
                     Button { stage = item } label: {
-                        Text("\(item.label) \u{00B7} \(counts[item] ?? 0)")
-                            .font(Theme.font(14, weight: isOn ? .semibold : .medium))
-                            .foregroundStyle(isOn ? Theme.onInk : Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 36)
-                            .background(isOn ? Theme.ink : Theme.card, in: Capsule())
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
+                        PaperChoiceChipLabel(title: "\(item.label) \u{00B7} \(counts[item] ?? 0)", isOn: isOn)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("\(item.label), \(counts[item] ?? 0)")

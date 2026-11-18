@@ -263,10 +263,7 @@ struct MarketingView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     if canEditCompany {
                         Button { showReviewSettings = true } label: {
-                            Text("Add review link").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 50)
-                                .background(Theme.fill, in: Capsule())
-                                .contentShape(Capsule())
+                            Text("Add review link").paperButton(.commit, tone: .quiet, fills: true)
                         }
                         .buttonStyle(PressStyle())
                         .padding(.top, 4)
@@ -327,13 +324,9 @@ struct MarketingView: View {
     private func pill(_ title: String, symbol: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.system(size: 14, weight: .medium)).accessibilityHidden(true)
-            Text(title).font(Theme.font(16, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            Text(title).lineLimit(1).minimumScaleFactor(0.8)
         }
-        .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, 12)
-        .frame(maxWidth: .infinity, minHeight: 50)
-        .background(Theme.fill, in: Capsule())
-        .contentShape(Capsule())
+        .paperButton(.commit, tone: .quiet, fills: true)
     }
 
     /// Paper 92A "Ask for a review after payment". The switch itself lives in Settings › Review
@@ -604,10 +597,7 @@ private struct MarketingCampaignEditor: View {
                             do { try onRemove(); dismiss() }
                             catch { self.error = error.localizedDescription }
                         } label: {
-                            Text("Remove campaign note").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
-                                .frame(maxWidth: .infinity, minHeight: 50)
-                                .background(Theme.card, in: Capsule())
-                                .contentShape(Capsule())
+                            Text("Remove campaign note").paperButton(.commit, tone: .dangerQuiet, fills: true)
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("marketing-campaign-remove")

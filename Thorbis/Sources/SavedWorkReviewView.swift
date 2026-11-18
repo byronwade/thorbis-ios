@@ -219,10 +219,7 @@ struct SavedWorkReviewView: View {
             .disabled(!editable || session.isOffline || busy)
             .accessibilityIdentifier("saved-work-sync")
             Button { close() } label: {
-                Text("Keep working").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .frame(maxWidth: .infinity).frame(minHeight: Theme.commitHeight)
-                    .background(Theme.fill, in: Capsule())
-                    .contentShape(Capsule())
+                Text("Keep working").paperButton(.commit, tone: .quiet, fills: true)
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("saved-work-keep-working")
@@ -328,19 +325,13 @@ struct SavedWorkReviewView: View {
     /// Paper 73A: the two answers as pills, the quieter one on the field fill.
     @ViewBuilder private func recoveryButtons(_ row: SavedWorkRow) -> some View {
         Button { retryCommand(row.originalID) } label: {
-            Text("Retry").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
-                .padding(.horizontal, 18).frame(minWidth: 44, minHeight: 44)
-                .background(Theme.brandSurface, in: Capsule())
-                .contentShape(Capsule())
+            Text("Retry").paperButton(.secondary, tone: .tinted)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Retry \(row.title)")
         .accessibilityIdentifier("saved-work-retry-\(row.originalID)")
         Button(role: .destructive) { if editable { discardID = DiscardRequest(id: row.originalID) } } label: {
-            Text("Dismiss").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                .padding(.horizontal, 18).frame(minWidth: 44, minHeight: 44)
-                .background(Theme.fill, in: Capsule())
-                .contentShape(Capsule())
+            Text("Dismiss").paperButton(.secondary, tone: .quiet)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Dismiss \(row.title)")

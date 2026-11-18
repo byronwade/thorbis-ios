@@ -262,11 +262,7 @@ struct OfficeSlotBookSheet: View {
                     ForEach(lengths, id: \.self) { length in
                         let on = length == minutes
                         Button { minutes = length } label: {
-                            Text(Self.lengthLabel(length)).font(Theme.font(15, weight: on ? .semibold : .medium))
-                                .foregroundStyle(on ? Theme.brandText : Theme.foreground)
-                                .padding(.horizontal, 14).frame(minHeight: 44)
-                                .background(on ? Theme.brandSurface : Theme.field, in: Capsule())
-                                .contentShape(Capsule())
+                            PaperChoiceChipLabel(title: Self.lengthLabel(length), isOn: on)
                         }
                         .buttonStyle(PressStyle())
                         .accessibilityAddTraits(on ? .isSelected : [])

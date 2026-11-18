@@ -43,11 +43,7 @@ struct JobSavedViewChips: View {
                 ForEach(builtIn, id: \.id) { view in
                     let selected = selectedID == nil && view.id == selectedBuiltIn
                     Button { onBuiltIn(view.id) } label: {
-                        Text(view.title).font(Theme.font(14, weight: selected ? .semibold : .medium)).lineLimit(1)
-                            .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 40)
-                            .background(selected ? Theme.brand.opacity(0.24) : Theme.card, in: Capsule())
-                            .frame(minHeight: 44).contentShape(Rectangle())
+                        PaperChoiceChipLabel(title: view.title, isOn: selected)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel(view.title)
@@ -106,7 +102,7 @@ struct JobSavedViewChips: View {
             }
             .foregroundStyle(selected ? Theme.brandText : usable ? Theme.foreground : Theme.muted)
             .padding(.horizontal, 14).frame(minHeight: 40)
-            .background(selected ? Theme.brand.opacity(0.24) : Theme.card, in: Capsule())
+            .background(selected ? Theme.brandTint : Theme.quietFill, in: Capsule())
             .frame(minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())

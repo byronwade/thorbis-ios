@@ -199,14 +199,10 @@ struct SalesBrandCommit: View {
             if let symbol {
                 Image(systemName: symbol).font(.system(size: 16, weight: .semibold)).accessibilityHidden(true)
             }
-            Text(title).font(Theme.font(17, weight: .semibold)).multilineTextAlignment(.center)
+            Text(title).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 16).padding(.vertical, 8)
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .background(Theme.brand, in: Capsule())
-        .contentShape(Capsule())
+        .paperButton(.commit, tone: .brand, fills: true)
     }
 }
 
@@ -226,8 +222,8 @@ struct SalesQuietPill: View {
         }
         .foregroundStyle(ink)
         .padding(.horizontal, 12).padding(.vertical, 6)
-        .frame(maxWidth: .infinity, minHeight: 48)
-        .background(Theme.card, in: Capsule())
+        .frame(maxWidth: .infinity, minHeight: PaperControl.Size.card.height)
+        .background(Theme.quietFill, in: Capsule())
         .contentShape(Capsule())
     }
 }

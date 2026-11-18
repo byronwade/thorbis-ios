@@ -369,8 +369,8 @@ struct NewJobSheet: View {
                     .foregroundStyle(isSet ? Theme.brandText : Theme.subtle)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 12).frame(height: 40)
-            .background(isSet ? Theme.brandSurface : Theme.card, in: Capsule())
+            .padding(.horizontal, 14).frame(height: PaperControl.chipHeight)
+            .background(isSet ? Theme.brandTint : Theme.card, in: Capsule())
             // 44pt to press; the chip itself stays Paper's 40.
             .frame(minHeight: 44).contentShape(Rectangle())
         }

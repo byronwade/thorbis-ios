@@ -139,11 +139,9 @@ struct RoleEditorView: View {
                     Button { attemptSave() } label: {
                         HStack(spacing: 8) {
                             if busy { ProgressView().tint(Theme.foreground) }
-                            Text("Save changes").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            Text("Save changes")
                         }
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
+                        .paperButton(.commit, tone: .quiet, fills: true)
                     }
                     .buttonStyle(PressStyle())
                     .disabled(busy || detail == nil)
