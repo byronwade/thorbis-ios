@@ -25,6 +25,16 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
+            id: "2026-11-18-one-signature",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "signature", title: "One signature, several estimates",
+                      detail: "In Customer view, a customer can pick the estimates they want and approve them all with one signature."),
+                .init(symbol: "checkmark.shield", title: "Each approval is confirmed",
+                      detail: "Estimates are approved one at a time. If one can't be confirmed, the run stops and says which need checking."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-menu-crash",
             date: "2026-11-18",
             highlights: [
