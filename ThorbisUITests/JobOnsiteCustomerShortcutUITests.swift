@@ -31,8 +31,13 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
         let handBack = app.buttons["Hand back to the technician"]
         XCTAssertTrue(handBack.exists)
         handBack.tap()
+        // The customer is thanked first; the technician unlocks from there (the fixture approves it).
+        let unlock = app.buttons["Technician: unlock"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["Job actions"].isHittable, "The job stays locked until the technician unlocks")
+        unlock.tap()
         // Back on the job, the door is in More again.
-        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20))
+        XCTAssertTrue(thorbisWaitForStaffJob(app), "The staff job must answer again after the hand-back")
         XCTAssertTrue(thorbisCustomerViewDoor(app).waitForExistence(timeout: 10))
     }
 

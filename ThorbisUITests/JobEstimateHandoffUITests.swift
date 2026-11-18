@@ -6,9 +6,37 @@ import XCTest
 func thorbisOpenJobMore(_ app: XCUIApplication, unless row: XCUIElement) {
     guard !row.exists else { return }
     let more = app.buttons["Job actions"]
-    guard more.waitForExistence(timeout: 30), more.isHittable else { return }
+    guard more.waitForExistence(timeout: 30) else { return }
+    // The circle can exist a moment before it answers (the job still loading, a cover leaving).
+    // Under Customer view it never answers, so the wait is short.
+    let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: more)
+    guard XCTWaiter.wait(for: [reachable], timeout: 3) == .completed else { return }
     more.tap()
-    _ = row.waitForExistence(timeout: 5)
+    // The menu is a bottom sheet: a long one opens at half height, its later rows below the fold.
+    if row.waitForExistence(timeout: 5) { thorbisRevealJobMenuRow(row, in: app) }
+}
+
+/// Brings a row of the open job menu (a `ThorbisMenu` sheet) into reach. Short, slow drags inside
+/// the sheet, up for a row below the fold and down for one scrolled past the top, so no row is
+/// stepped over and the sheet is never flung away. The first drag up also grows a half-height sheet.
+@MainActor
+func thorbisRevealJobMenuRow(_ row: XCUIElement, in app: XCUIApplication) {
+    for _ in 0..<16 where row.exists && !row.isHittable {
+        let up = row.frame.midY > app.frame.height * 0.3
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: up ? 0.7 : 0.4))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: up ? -220 : 220)),
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
+    }
+}
+
+/// After a hand-back the staff job takes a moment to answer again (the protected window leaves,
+/// the job's paper reloads). Waits for the job's More circle to be in reach.
+@MainActor
+@discardableResult
+func thorbisWaitForStaffJob(_ app: XCUIApplication, timeout: TimeInterval = 20) -> Bool {
+    let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"),
+                                              object: app.buttons["Job actions"])
+    return XCTWaiter.wait(for: [reachable], timeout: timeout) == .completed
 }
 
 /// More › Customer view: the menu's row, found once the menu is open.
@@ -177,6 +205,12 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: timeout), .completed)
     }
+    /// After the authenticated hand-back the staff job is back in reach: its More circle answers
+    /// and More › Show estimates can be used again (the door was Money's pinned "Show customer").
+    private func waitForStaffDoor(_ app: XCUIApplication, timeout: TimeInterval = 20) {
+        XCTAssertTrue(thorbisWaitForStaffJob(app, timeout: timeout), "The staff job must answer again after the hand-back")
+        waitHittable(thorbisShowCustomerDoor(app))
+    }
     private func toggleSampleControls(_ app: XCUIApplication) {
         let actions = ["Change sample workspace shortly", "End sample session shortly", "Choose sample workspace shortly", "Interrupt next membership read", "Interrupt next signature upload", "Allow sample unlock", "Refresh sample receipt"]
         let wasExpanded = app.buttons[actions[0]].exists
@@ -317,10 +351,14 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(try firstReadCount(), 1)
         let more = app.buttons["handoff-load-more-estimates"]
         let list = app.scrollViews["job-estimate-handoff"]
-        for _ in 0..<30 where !more.isHittable { list.swipeUp() }
-        XCTAssertTrue(more.isHittable); more.tap()
+        // The page's last control: it must clear the pinned Review bar before the tap. (It counts as
+        // hittable while it still peeks out under that bar, where a tap lands on the bar instead.)
+        for _ in 0..<30 where !more.exists { list.swipeUp() }
+        XCTAssertTrue(more.waitForExistence(timeout: 10)); visible(app, more)
+        XCTAssertTrue(more.isEnabled, "Load more answers once the first page's prices are in")
+        more.tap()
         let next = app.buttons["handoff-select-00000000-0000-4000-8000-000000082018"]
-        for _ in 0..<30 where !next.isHittable { list.swipeUp() }
+        for _ in 0..<30 where !next.exists { list.swipeUp() }
         XCTAssertTrue(next.waitForExistence(timeout: 45))
         let nextPrice = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "$320.00"), object: next)
         XCTAssertEqual(XCTWaiter.wait(for: [nextPrice], timeout: 45), .completed)
@@ -856,7 +894,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
         capture(app, "Two independent approvals before one technician handback")
         ownerExit(app).tap()
-        waitHittable(thorbisShowCustomerDoor(app))
+        waitForStaffDoor(app)
     }
     private func reachSecondSignature(_ app: XCUIApplication, optionID: String? = nil, firstPrice: String = "$190.00") {
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
@@ -955,7 +993,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1)
         toggleSampleControls(app); app.buttons["Allow sample unlock"].tap(); toggleSampleControls(app)
-        ownerExit(app).tap(); waitHittable(thorbisShowCustomerDoor(app))
+        ownerExit(app).tap(); waitForStaffDoor(app)
         thorbisShowCustomerDoor(app).tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 2)
@@ -974,7 +1012,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15)); app.buttons["See approvals"].tap()
         XCTAssertTrue(app.staticTexts["handoff-results-summary"].waitForExistence(timeout: 10))
         capture(app, "Production layout two completed estimates and one handback")
-        ownerExit(app).tap(); waitHittable(thorbisShowCustomerDoor(app))
+        ownerExit(app).tap(); waitForStaffDoor(app)
     }
     func testPackageChoiceKeepsItsCanonicalConsentWhileAnotherEstimateApprovesIndependently() throws {
         let app = open(["--paper-preview-handoff-options", "--paper-preview-handoff-public-patch-no-acceptance", "--paper-preview-handoff-hide-controls"])
@@ -1146,40 +1184,43 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(first.label.contains("Sample repair") && first.label.contains("$190.00") && first.label.contains("Sent"))
         XCTAssertTrue(second.label.contains("Sample additional work") && second.label.contains("$320.00") && second.label.contains("Sent"))
         XCTAssertTrue(app.buttons["Add estimate"].exists)
-        let present = thorbisShowCustomerDoor(app)
-        XCTAssertTrue(present.exists)
         // At accessibility sizes the section row is one pinned chooser (a40f825), not tabs.
         let tabs = app.buttons["job-section-chooser"]
         XCTAssertTrue(tabs.exists)
         XCTAssertTrue(tabs.label.contains("Money"))
-        // At accessibility sizes Present scrolls with the content (a40f825) instead of pinning
-        // above the bottom edge, so the card must fit between the pinned chooser and the screen's
-        // bottom; while Present is still pinned below the card, it must clear that too.
-        func bottom() -> CGFloat {
-            present.frame.minY > tabs.frame.maxY && present.frame.minY >= first.frame.minY ? min(present.frame.minY, app.frame.maxY) : app.frame.maxY
-        }
+        // Paper 23: nothing is pinned under Money at accessibility sizes (the bar scrolls with the
+        // content), so the card must fit between the pinned chooser and the screen's bottom.
         for _ in 0..<8 {
             let frame = first.frame
-            if first.isHittable && frame.minY >= tabs.frame.maxY && frame.maxY <= bottom() { break }
-            let upward = frame.maxY > bottom()
+            if first.isHittable && frame.minY >= tabs.frame.maxY && frame.maxY <= app.frame.maxY { break }
+            let upward = frame.maxY > app.frame.maxY
             let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.7 : 0.4))
             let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.5 : 0.6))
             start.press(forDuration: 0.1, thenDragTo: end)
         }
         XCTAssertTrue(first.isHittable, app.debugDescription)
         XCTAssertGreaterThanOrEqual(first.frame.minY, tabs.frame.maxY)
-        XCTAssertLessThanOrEqual(first.frame.maxY, bottom())
+        XCTAssertLessThanOrEqual(first.frame.maxY, app.frame.maxY)
         capture(app, "Job estimates at largest text")
+        // Paper 23: the estimates' customer door is More › Show estimates, in reach at this size too.
+        let present = thorbisShowCustomerDoor(app)
+        XCTAssertTrue(present.waitForExistence(timeout: 10))
+        XCTAssertTrue(present.isHittable)
+        XCTAssertGreaterThanOrEqual(present.frame.height, 44)
     }
 
     func testLargestTextCanReturnToCustomerPresentationFromInvoices() {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         // Paper's Money is one page with no jump chips: scroll down to the invoices and back.
-        XCTAssertTrue(thorbisSection(app, "Money").waitForExistence(timeout: 30))
+        // At accessibility sizes the sections are one chooser, which names the open section.
+        let chooser = app.buttons["job-section-chooser"]
+        XCTAssertTrue(chooser.waitForExistence(timeout: 30))
+        XCTAssertTrue(chooser.label.contains("Money"), chooser.label)
         for _ in 0..<6 { app.swipeUp() }
         // Paper 23: the estimates' customer door is More › Show estimates, wherever Money is scrolled to.
         let present = thorbisShowCustomerDoor(app)
         XCTAssertTrue(present.waitForExistence(timeout: 30), "The estimate presentation action must stay reachable at large text")
+        XCTAssertTrue(present.isHittable)
         present.tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 15))
     }
