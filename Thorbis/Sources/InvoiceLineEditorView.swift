@@ -565,12 +565,12 @@ struct InvoiceLineEditorView: View {
     /// Paper 40's top row: the 44 back circle on the card tone, and "…" for what Paper keeps off the
     /// page (scan or paste a parts list, discard). Back asks before dropping edits, as Cancel did.
     private var editorTopBar: some View {
-        HStack(spacing: 8) {
+        PaperPageSheetBar {
             PaperCircleButton(symbol: "chevron.left", label: "Cancel", size: 44, fill: Theme.card) {
                 if editor.hasChanges { confirmDiscard = true } else { dismiss() }
             }
             .disabled(busy)
-            Spacer(minLength: 0)
+        } trailing: {
             if !moreItems.isEmpty {
                 ThorbisMenu(items: moreItems, title: "Edit invoice", accessibilityLabel: "More") {
                     PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
@@ -579,7 +579,6 @@ struct InvoiceLineEditorView: View {
                 .accessibilityIdentifier("invoice-more")
             }
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 2)
         .background(Theme.background)
     }
 

@@ -1130,7 +1130,7 @@ private struct SearchScreen: View {
                 await favorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
             }
         if recents.searches.isEmpty && recents.items.isEmpty && groups.isEmpty {
-            ListRoomEmpty(title: "Nothing viewed yet",
+            ListRoomEmpty(glyph: .search, title: "Nothing viewed yet",
                           message: "Search for a job by street, a customer by name or phone, or an invoice by number.")
         }
         ForEach(groups) { group in

@@ -113,9 +113,9 @@ struct CustomersView: View {
                     ListRoomEmpty(symbol: "magnifyingglass", title: "No customers match", message: "Try a name, street or phone number.")
                 } else if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        ListRoomEmpty(title: "No archived customers", message: "Customers you archive move here.")
+                        ListRoomEmpty(glyph: .person, title: "No archived customers", message: "Customers you archive move here.")
                     } else {
-                        ListRoomEmpty(title: "No customers yet",
+                        ListRoomEmpty(glyph: .people, title: "No customers yet",
                                       actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
                                       action: { showNew = true })
                     }
@@ -1763,7 +1763,7 @@ struct CustomerDetailView: View {
             }
             if jobs.isEmpty {
                 // New job sits on the customer's page and in Customer actions.
-                ListRoomEmpty(title: "No jobs yet",
+                ListRoomEmpty(glyph: .jobs, title: "No jobs yet",
                               message: session.can("job.create", feature: "jobs") ? "Create a job with New job." : nil)
                     .padding(.horizontal, -Theme.gutter).padding(.top, 22)
             }

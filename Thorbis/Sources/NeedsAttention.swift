@@ -88,7 +88,7 @@ struct NeedsAttentionView: View {
                         }
                     }
                     if loaded && unpaid.isEmpty && waiting.isEmpty && unscheduled.isEmpty {
-                        ListRoomEmpty(title: "Nothing needs attention",
+                        ListRoomEmpty(glyph: .bell, title: "Nothing needs attention",
                                       message: "Unpaid invoices, estimates waiting over a week and jobs with no time land here. Pull down to check again.")
                     }
                 }

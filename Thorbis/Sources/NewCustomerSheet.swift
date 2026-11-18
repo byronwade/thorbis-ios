@@ -58,7 +58,7 @@ struct NewCustomerSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if let error { ErrorBanner(message: error, outer: 0) }
+                    if let error { ErrorBanner(message: error, tint: Theme.destructive, outer: 0) }
                     card {
                         field("Name", text: $request.name, prompt: "Danielle Marlowe", focus: .name, error: nameProblem)
                             .textContentType(.name).submitLabel(.next).onSubmit { focused = .phone }

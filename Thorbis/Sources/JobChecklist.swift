@@ -121,21 +121,25 @@ struct JobChecklistSheet: View {
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                // Paper 21F: the bar is the 44pt back circle alone. "Start over" is behind More.
-                ThorbisToolbarItem(placement: .topBarLeading) {
+            // Paper 21F: the bar is the 44pt back circle alone. "Start over" is behind More. The
+            // page sheet's circle row, not a system bar, so it opens at the same height as the rest.
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaperPageSheetBar {
                     PaperCircleButton(symbol: "chevron.left", label: finished ? "Done" : "Close", size: 44, fill: Theme.card, action: onDone)
                         .accessibilityHint(finished ? "" : "Progress stays on this phone.")
                         .accessibilityIdentifier("checklist-close")
-                }
-                if run != nil, !finished {
-                    ThorbisToolbarItem(placement: .topBarTrailing) {
+                } trailing: {
+                    if run != nil, !finished {
                         ThorbisMenu(items: [ThorbisMenuItem("Start over", icon: "arrow.counterclockwise", role: .destructive) { confirmRestart = true }],
                                     accessibilityLabel: "Checklist actions") {
                             PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
                         }
                     }
                 }
+                .background(Theme.background)
+            }
+            .toolbar {
                 ThorbisKeyboardDoneBar { focused = nil }
             }
             .safeAreaInset(edge: .bottom) {

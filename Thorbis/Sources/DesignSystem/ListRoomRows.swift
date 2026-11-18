@@ -351,13 +351,15 @@ extension ListViewBar where Popover == EmptyView {
 /// same as every other empty screen; `symbol` is the room's glyph.
 struct ListRoomEmpty: View {
     var symbol: String = "tray"
+    /// Paper's glyph for the room (`.jobs`, `.calendar`, `.person`…); the tray only where none fits.
+    var glyph: PaperGlyph? = nil
     let title: String
     var message: String? = nil
     var actionTitle: String? = nil
     var action: (() -> Void)? = nil
 
     var body: some View {
-        PaperEmptyState(symbol: symbol, title: title, message: message, actionTitle: actionTitle,
+        PaperEmptyState(symbol: symbol, glyph: glyph, title: title, message: message, actionTitle: actionTitle,
                         prominent: true, action: action)
     }
 }

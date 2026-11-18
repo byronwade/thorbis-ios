@@ -426,7 +426,7 @@ struct EditCustomerSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         if let saveError = model.saveError {
-            ErrorBanner(message: saveError, outer: 0)
+            ErrorBanner(message: saveError, tint: Theme.destructive, outer: 0)
         }
         if let draft = Binding($model.draft) {
             form(draft)

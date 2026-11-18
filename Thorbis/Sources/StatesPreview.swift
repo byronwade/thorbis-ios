@@ -130,6 +130,10 @@ private struct ErrorStatesGallery: View {
                                 actionTitle: "Try again", tint: Theme.warning, problem: true) {}
                 PaperEmptyState(symbol: "lock", title: "You don’t have access to Reports",
                                 message: "Your role is Technician. An owner or manager can give you access.", problem: true)
+                // A refused save is Paper 48A's red strip; connection and server trouble stay amber.
+                label("Couldn't save")
+                ErrorBanner(message: "That email is already on another customer. Change it and save again.",
+                            tint: Theme.destructive)
                 label("No signal")
                 ErrorBanner(error: Problem(title: "Network error", status: nil, detail: "No connection. Check your signal and try again."),
                             retry: {})

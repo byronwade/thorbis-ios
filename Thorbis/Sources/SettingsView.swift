@@ -35,7 +35,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     // Paper 65: the 44pt back circle, 14 under it "Settings" in 34 Bold.
                     ThorbisBackButton()
-                        .padding(.top, 2)
+                        .padding(.top, PaperSheetMetrics.pageTop)
                     AccountPageTitle(title: "Settings", underBar: false)
 
                     // Paper 65: the person, then a chevron into Account and data (67).

@@ -3866,6 +3866,9 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 22) {
             estimatesContent(job)
             invoiceContent(job)
+            // With no estimate to sit beside, Customer view keeps its own one-row card so the door
+            // is on Money whatever the job holds (the Share circle opens the same view).
+            if jobEstimates.isEmpty { JobPanel { customerViewRow } }
         }
     }
 
@@ -3949,7 +3952,7 @@ struct JobDetailView: View {
             }
             // The estimates' customer door (it was More › Show estimates): after the estimates it
             // hands over, before "Add an estimate".
-            if !jobEstimates.isEmpty { showEstimatesRow }
+            if !jobEstimates.isEmpty { showEstimatesRow; customerViewRow }
             if canBuildEstimate { addEstimateRow }
         }
     }
@@ -3975,14 +3978,31 @@ struct JobDetailView: View {
     /// "Show estimates": the job's estimates in the locked Customer view, as a row of Paper 23's
     /// estimates card (56 tall, its mark in the status column, the hint under the words).
     private var showEstimatesRow: some View {
-        Button { openCustomerView(.estimates) } label: {
+        customerDoorRow(title: "Show estimates", detail: "Hand the estimates to the customer", symbol: "iphone",
+                        spokenHint: "Shows this job's estimates to the customer",
+                        identifier: "job-money-customer-view") { openCustomerView(.estimates) }
+    }
+
+    /// "Customer view": the same locked Customer view at its home (estimates, invoices and the
+    /// customer's own details), the door the Share circle also opens, beside Show estimates.
+    private var customerViewRow: some View {
+        customerDoorRow(title: "Customer view", detail: "Estimates, invoices and their details", symbol: "person.crop.rectangle",
+                        spokenHint: "Hands the phone to the customer",
+                        identifier: "job-money-customer-view-home") { openCustomerView(.home) }
+    }
+
+    /// One customer door on the Money section: 56 tall, its mark in the status column, the hint
+    /// under the words, behind the same Customer view gate as every other door.
+    private func customerDoorRow(title: String, detail: String, symbol: String, spokenHint: String,
+                                 identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: "iphone").font(.system(size: 17, weight: .regular))
+                Image(systemName: symbol).font(.system(size: 17, weight: .regular))
                     .foregroundStyle(Theme.foreground).frame(width: 20)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Show estimates").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    Text("Hand the estimates to the customer").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -3995,8 +4015,8 @@ struct JobDetailView: View {
         .disabled(!canOpenCustomerView)
         .opacity(canOpenCustomerView ? 1 : 0.4)
         .accessibilityElement(children: .combine)
-        .accessibilityHint("Shows this job's estimates to the customer")
-        .accessibilityIdentifier("job-money-customer-view")
+        .accessibilityHint(spokenHint)
+        .accessibilityIdentifier(identifier)
     }
 
     private func scope(for job: JobRecord) -> JobDocumentScope? {

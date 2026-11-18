@@ -83,7 +83,7 @@ struct EditProfileSheet: View {
                 VStack(spacing: 16) {
                     avatar
                     if let saveError {
-                        ErrorBanner(message: saveError, outer: 0)
+                        ErrorBanner(message: saveError, tint: Theme.destructive, outer: 0)
                             .accessibilityIdentifier("edit-profile-error")
                     }
                     detailsCard

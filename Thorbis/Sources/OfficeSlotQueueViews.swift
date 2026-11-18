@@ -136,7 +136,7 @@ struct OfficeSlotQueueList: View {
                 } else if !queue.loaded && queue.problem == nil {
                     ListRoomSkeleton(count: 3)
                 } else if queue.loaded {
-                    ListRoomEmpty(title: "Nothing is waiting for a slot",
+                    ListRoomEmpty(glyph: .calendar, title: "Nothing is waiting for a slot",
                                   message: "A follow-up shows here when the field asks for one and it can\u{2019}t be booked on its own.")
                 }
             }

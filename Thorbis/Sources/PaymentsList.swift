@@ -257,7 +257,7 @@ struct CompanyPaymentsView: View {
     @ViewBuilder private var dayGroups: some View {
         if !loaded && error == nil { ListRoomSkeleton(count: 5, threeLines: false) }
         if loaded && shown.isEmpty {
-            ListRoomEmpty(title: payments.isEmpty ? "No payments yet" : "None here",
+            ListRoomEmpty(glyph: .money, title: payments.isEmpty ? "No payments yet" : "None here",
                           message: payments.isEmpty ? "Collect a payment on an invoice and it shows here." : nil)
         }
         ForEach(days) { day in
