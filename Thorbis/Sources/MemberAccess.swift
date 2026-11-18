@@ -107,7 +107,7 @@ struct MemberAccessView: View {
                         Text(member.roleLabel).font(Theme.font(15)).foregroundStyle(Theme.muted)
                     }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                .padding(.horizontal, Theme.gutter).padding(.top, PaperHeaderMetrics.titleTopUnderBar)
 
                 // Paper 62B: Message and Call on the card tone. The app knows only their email.
                 if let mail = URL(string: "mailto:\(member.member.email)") {
@@ -138,9 +138,8 @@ struct MemberAccessView: View {
                 }
                 .padding(.top, 16)
 
-                Text("This week").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, Theme.gutter).padding(.top, 20).padding(.bottom, 8)
+                PaperCardLabel(title: "This week")
+                    .padding(.top, 22)
                 PaperRowsCard {
                     if !week.isEmpty {
                         HStack(spacing: 0) {

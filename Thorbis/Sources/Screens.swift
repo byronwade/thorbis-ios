@@ -291,11 +291,7 @@ struct CustomerContactSheet: View {
                                   label: contact == nil ? "Cancel new contact" : "Cancel contact changes",
                                   size: 44, fill: Theme.quietFill) { dismiss() }
                     .disabled(busy)
-                Text(contact == nil ? "New contact" : "Edit contact")
-                    .font(Theme.font(22, weight: .bold)).tracking(-0.44)
-                    .lineLimit(1).minimumScaleFactor(0.8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityAddTraits(.isHeader)
+                PaperSheetTitle(title: contact == nil ? "New contact" : "Edit contact")
             }
             .padding(.top, 14).padding(.bottom, 4)
             .onChange(of: name) { _, _ in nameProblem = nil }

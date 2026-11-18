@@ -235,16 +235,7 @@ struct CommsInboxView: View {
     /// field's filter circle and shows inside the field as chips.
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Messages").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .foregroundStyle(Theme.foreground)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .accessibilityAddTraits(.isHeader)
-                Text(unreadSummary ?? subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
+            PaperPageTitle(title: "Messages", subtitle: unreadSummary ?? subtitle)
             PaperSearchBar(placeholder: "Search or ask", chips: scopeChips) {
                 ThorbisMenu(items: scopeItems, title: "Show",
                             accessibilityLabel: "\(section.menuTitle == "All" ? "Messages" : section.title), switch what Messages shows") {

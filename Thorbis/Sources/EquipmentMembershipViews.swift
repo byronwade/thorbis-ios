@@ -693,16 +693,7 @@ struct EquipmentDetailView: View {
         let rows = facts
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(shown.name).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    if !subtitle.isEmpty {
-                        Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                PaperPageTitle(title: shown.name, subtitle: subtitle, columnInset: PaperCardMetrics.margin)
                 PaperSection(title: "Details") {
                     if rows.isEmpty {
                         Text("No brand, model or serial number yet.").font(Theme.font(15)).foregroundStyle(Theme.muted)
@@ -744,7 +735,7 @@ struct EquipmentDetailView: View {
                         .accessibilityIdentifier("equipment-start-job")
                 }
             }
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)

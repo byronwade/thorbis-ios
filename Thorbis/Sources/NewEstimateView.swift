@@ -349,18 +349,7 @@ struct NewEstimateView: View {
     /// customer pills, then (16 from the edges) Add item, the line items card, the tip and the totals.
     private var builder: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(created == nil ? "New estimate" : "Estimate saved")
-                    .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                // The subtitle names the job it's for.
-                if let subtitle {
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.horizontal, Theme.gutter)
+            PaperPageTitle(title: created == nil ? "New estimate" : "Estimate saved", subtitle: subtitle)
             VStack(alignment: .leading, spacing: 6) {
                 // The label stays above the field; the placeholder is only an example.
                 Text("Title").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
@@ -432,7 +421,7 @@ struct NewEstimateView: View {
             }
             .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 22)
         }
-        .padding(.top, 14).padding(.bottom, 28)
+        .padding(.bottom, 28)
     }
 
     /// The customer as Paper 35's pill: their initials on the brand surface and the name; before

@@ -414,13 +414,7 @@ struct MarketingLeadSourcesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 92D: the back circle rides the bar; under it the title in 28 Bold over the count.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Where leads come from").font(Theme.heading()).tracking(-0.56)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(subtitle(tally)).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                PaperPageTitle(title: "Where leads come from", subtitle: subtitle(tally))
                 VStack(alignment: .leading, spacing: 14) {
                     PlaceSegments(options: LeadSourcePeriod.allCases.map { (value: $0, label: $0.label) }, selection: $period, pill: true)
                         .accessibilityIdentifier("marketing-leads-period")

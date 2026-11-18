@@ -39,17 +39,8 @@ struct MyNotificationsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    // Paper 65C: the title is 28 Bold.
-                    Text("My notifications")
-                        .font(Theme.heading()).tracking(-0.56)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("What this phone tells you about")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 16)
+                PaperPageTitle(title: "My notifications", subtitle: "What this phone tells you about", columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 16)
 
                 card {
                     Button { Task { await permissionTapped() } } label: {

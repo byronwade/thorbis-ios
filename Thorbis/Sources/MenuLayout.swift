@@ -481,7 +481,7 @@ struct CustomizeMenuView: View {
                     .listRowBackground(Color.clear)
                     .padding(.horizontal, 4)
                     .padding(.bottom, 14)
-                    .listRowInsets(EdgeInsets(top: 14, leading: 0, bottom: 0, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: PaperHeaderMetrics.titleTopUnderBar, leading: 0, bottom: 0, trailing: 0))
                     .listRowSeparator(.hidden)
             }
             startSection
@@ -528,15 +528,8 @@ struct CustomizeMenuView: View {
     }
 
     private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Menu and start screen").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .lineLimit(2).minimumScaleFactor(0.7)
-                .accessibilityAddTraits(.isHeader)
-            Text("Make the menu yours").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .foregroundStyle(Theme.foreground)
+        // The list row places the block (its own insets); the shared title draws the words.
+        PaperPageTitle(title: "Menu and start screen", subtitle: "Make the menu yours", columnInset: Theme.gutter, top: 0)
     }
 
     /// What the start-screen control shows as chosen: a place this role lost falls back to Automatic.

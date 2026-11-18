@@ -766,8 +766,7 @@ struct JobDetailView: View {
     private var pauseForm: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Reason").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
+                PaperSectionLabel(title: "Reason", inset: 0, gap: 0)
                 FlowRow(spacing: 8, lineSpacing: 4) {
                     ForEach(Self.pauseReasons, id: \.self) { option in
                         pauseReasonChip(option)
@@ -2344,8 +2343,7 @@ struct JobDetailView: View {
                 }
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("Summary").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+                PaperSectionLabel(title: "Summary", gap: 0)
                 VStack(spacing: 0) {
                     if session.can("invoice.view", feature: "invoicing"), let bill, let total = paperLinesTotal(bill.lines) {
                         fieldSummaryRow("Parts and labor", value: money(total, currency: bill.currency), first: true)
@@ -2364,8 +2362,7 @@ struct JobDetailView: View {
             }
             if let signature = rows.first(where: { $0.step == .signature }) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Customer sign-off").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+                    PaperSectionLabel(title: "Customer sign-off", gap: 0)
                     Button { openWrapUpRow(signature) } label: {
                         VStack(spacing: 6) {
                             PaperIcon(.jobSignature, size: 28, color: signature.done ? Theme.statusDone : Theme.muted)

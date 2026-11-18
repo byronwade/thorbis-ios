@@ -642,7 +642,7 @@ struct CustomerDetailView: View {
                 hub.padding(.top, 20)
                 Color.clear.frame(height: 1).id("customer-end")
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         #if DEBUG
         // `--paper-preview-scroll center|bottom`: the lower sections, once they have loaded.
@@ -997,18 +997,11 @@ struct CustomerDetailView: View {
                     MembershipPlanBody(customerID: customer.id, customerName: record?.name ?? customer.name,
                                        plan: $plan, reload: planReload)
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             } else {
             VStack(alignment: .leading, spacing: 20) {
                 OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(hubTitle(part)).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(record?.name ?? customer.name).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 4).padding(.top, 10)
+                PaperPageTitle(title: hubTitle(part), subtitle: record?.name ?? customer.name, columnInset: PaperCardMetrics.margin)
                 switch part {
                 case .jobs, .money, .activity, .media:
                     EmptyView()
@@ -1037,7 +1030,7 @@ struct CustomerDetailView: View {
                                          locations: locations, model: phoneNotes)
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             }
         }
         .foregroundStyle(Theme.foreground).background(Theme.canvas)
@@ -1158,18 +1151,7 @@ struct CustomerDetailView: View {
     /// ("Archived" leads when it is).
     private var customerIdentity: some View {
         let name = record?.name ?? customer.name
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(name)
-                .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            if let line = identityLine {
-                Text(line).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 4).padding(.top, 10)
+        return PaperPageTitle(title: name, subtitle: identityLine, columnInset: PaperCardMetrics.margin)
     }
 
     /// Paper 48D: "CUS-0412 · Customer since Mar 2022" over the name on the tabbed page.
@@ -2195,9 +2177,8 @@ struct CustomerDetailView: View {
         } else {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(groups) { group in
-                    Text(group.title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 10)
+                    PaperSectionLabel(title: group.title)
+                        .padding(.top, 14)
                     ForEach(Array(group.events.enumerated()), id: \.element.id) { index, item in
                         switch item {
                         case .event(let event): activityRow(event, last: index == group.events.count - 1)

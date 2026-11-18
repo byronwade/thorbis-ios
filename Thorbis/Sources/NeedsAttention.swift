@@ -48,15 +48,8 @@ struct NeedsAttentionView: View {
                 // Redesign phase 3: the 30pt semibold title, then one grouped well per kind with its
                 // count; rows lead with their status glyph and amounts are semibold tabular.
                 // v2: the detail title on the ramp (24), one quiet line, then a group per kind.
-                VStack(alignment: .leading, spacing: 4) {
-                    // Paper v2: every screen title is 34 Bold, tracked -0.02em.
-                    Text("Needs attention").font(Theme.font(34, weight: .bold)).tracking(-0.68)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking…")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .foregroundStyle(Theme.foreground)
-                .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                PaperPageTitle(title: "Needs attention", subtitle: loaded ? summary(unpaid.count + waiting.count + unscheduled.count) : "Checking\u{2026}")
+                    .padding(.bottom, 14)
                 if let error { ErrorBanner(message: error) }
                 // v2 List room, like Jobs and Customers: rows on the canvas under a 13 Medium label
                 // with its count. Each row names its state as a word ("Unpaid", "Waiting", "No time").

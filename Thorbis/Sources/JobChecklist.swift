@@ -102,13 +102,8 @@ struct JobChecklistSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     // Paper 21F: the 34 Bold title, "AC repair · 5 of 8 done" under it.
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Checklist").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                            .accessibilityAddTraits(.isHeader)
-                        Text(headerSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, 4).padding(.bottom, 10)
+                    PaperPageTitle(title: "Checklist", subtitle: headerSubtitle, columnInset: PaperCardMetrics.margin)
+                        .padding(.bottom, 10)
                     if let run, let template { runList(run, template) } else if !finished { picker }
                     if let result {
                         Label(result.message, systemImage: result.succeeded ? (result == .saved ? "checkmark.circle" : "clock.arrow.circlepath") : "exclamationmark.triangle")
@@ -121,7 +116,7 @@ struct JobChecklistSheet: View {
                             .padding(.horizontal, 4).padding(.top, 8)
                     }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.background)

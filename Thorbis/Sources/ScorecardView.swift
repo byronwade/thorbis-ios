@@ -36,11 +36,8 @@ struct ScorecardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 91A: the title in 34 Bold, then whose card it is and for when.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("My scorecard").font(Theme.font(34, weight: .bold)).tracking(-0.85).accessibilityAddTraits(.isHeader)
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 14)
+                PaperPageTitle(title: "My scorecard", subtitle: subtitle)
+                    .padding(.bottom, 14)
                 PaperTabs(options: ScorecardPeriod.allCases.map(\.rawValue), selection: $period, wrapOverflow: true)
                 if let error, card == nil { ErrorBanner(message: error) { await load() }.padding(.top, 12) }
                 Group {

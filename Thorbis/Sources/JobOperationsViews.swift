@@ -313,14 +313,14 @@ struct JobCloseoutView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(isCompleted ? "Job complete" : "Wrap up this job")
                         .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(2).minimumScaleFactor(0.7)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                     Text(closeoutSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                     if completionWaiting { WaitingToSyncLabel().padding(.top, 4) }
                 }
                 .padding(.horizontal, 4)
-                .padding(.top, 14).padding(.bottom, 22)
+                .padding(.top, PaperHeaderMetrics.titleTopUnderBar).padding(.bottom, 22)
                 }
                 if let error { ErrorBanner(message: error, retry: closeout == nil ? { await load() } : nil).padding(.horizontal, -PaperCardMetrics.margin) }
                 if let closeout {
@@ -488,7 +488,7 @@ struct JobCloseoutView: View {
                 }
             }
             // Paper v2: cards 16 from the edges, titles and labels 20 (4 more inside).
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
@@ -1783,14 +1783,8 @@ struct JobFollowUpsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
                 // Paper 21H: the 34 Bold title and the job under it in 15 muted.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Book a follow-up").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(2).minimumScaleFactor(0.7)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(jobLine).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 16)
+                PaperPageTitle(title: "Book a follow-up", subtitle: jobLine, columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 16)
                 if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -PaperCardMetrics.margin) }
                 if let savedNote {
                     Text(savedNote).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.bottom, 10).padding(.horizontal, 4)
@@ -1799,9 +1793,7 @@ struct JobFollowUpsView: View {
                     // Paper 21H: "Reason" over its chips, then the note. Paper's "Open times" needs
                     // the office's free slots, which the server doesn't list, so the request goes to
                     // the office to book (Paper's "Can't find a time?" path).
-                    Text("Reason").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 4).padding(.bottom, 8)
-                        .accessibilityAddTraits(.isHeader)
+                    PaperSectionLabel(title: "Reason")
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(Self.reasons, id: \.self) { option in
@@ -1869,7 +1861,7 @@ struct JobFollowUpsView: View {
                     PaperEmptyState(symbol: "list.bullet", title: "No follow-ups on this job")
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
@@ -2049,14 +2041,8 @@ struct FollowUpBookingSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     // Paper 21H: the 34 Bold title, the follow-up's reason under it.
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Book a follow-up").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                            .lineLimit(1).minimumScaleFactor(0.7)
-                            .accessibilityAddTraits(.isHeader)
-                        Text(followUp.reason).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                            .lineLimit(2)
-                    }
-                    .padding(.horizontal, 4).padding(.top, 6).padding(.bottom, 4)
+                    PaperPageTitle(title: "Book a follow-up", subtitle: followUp.reason, columnInset: PaperCardMetrics.margin)
+                        .padding(.bottom, 4)
                     PaperSection("Arrival window") {
                         VStack(spacing: 0) {
                             DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date)
@@ -2083,7 +2069,7 @@ struct FollowUpBookingSheet: View {
                     if let result { Label(result, systemImage: "checkmark.circle").font(Theme.font(15)).foregroundStyle(Theme.success) }
                     if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.canvas)

@@ -43,7 +43,7 @@ struct WellSection<Data: RandomAccessCollection, Row: View, Trailing: View>: Vie
         let items = Array(data)
         if !items.isEmpty {
             SectionHeader(title: title, count: count) { trailing }
-                .padding(.top, 12).padding(.bottom, 2)
+                .padding(.top, 12)
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 row(item).wellSlice(first: index == 0, last: index == items.count - 1, dividerInset: dividerInset)
             }

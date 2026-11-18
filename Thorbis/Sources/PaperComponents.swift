@@ -86,7 +86,7 @@ struct PaperHeader: View {
                 }
                 .frame(minHeight: 44)
                 .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
-                .padding(.bottom, 14)
+                .padding(.bottom, PaperHeaderMetrics.titleTopUnderCircles)
             }
             HStack(alignment: .center, spacing: 8) {
                 Text(title)
@@ -116,7 +116,11 @@ struct PaperHeader: View {
             .padding(.top, 2)
         }
         .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 14)
+        // One title position app-wide: 60 under the status bar (`PaperHeaderMetrics`), whether the
+        // circles are this header's own row or the navigation bar's. A wide iPad column has no bar.
+        .padding(.horizontal, Theme.gutter)
+        .padding(.top, showsMenuButton ? 2 : (sizeClass == .regular ? 12 : PaperHeaderMetrics.titleTopUnderBar))
+        .padding(.bottom, 14)
         .toolbar {
             if circlesInBar && hasCircles {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -450,27 +454,16 @@ struct PaperEyebrow: View {
     }
 }
 
-/// Sentence-case group header: 13/500 muted title, mono count (left out at zero, where the
-/// empty state below already says so), optional trailing action.
+/// A group's header in a list: the one section label (`PaperSectionLabel`), its count at the
+/// trailing edge, then an optional trailing action.
 struct PaperGroupHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
     @ViewBuilder var trailing: Trailing
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        // At accessibility sizes the trailing figure drops under the title instead of squeezing it.
-        let row = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-                                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
-        row {
-            // "Later today  3": the word, then the count beside it, as every list room reads.
-            PaperSection<EmptyView, EmptyView>.label(title, count: count)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            trailing
-        }
-        .foregroundStyle(Theme.muted)
-        .frame(minHeight: 32)
-        .accessibilityElement(children: .contain)
+        PaperSectionLabel(title: title, count: count, inset: 0) { trailing }
+            .accessibilityElement(children: .contain)
     }
 }
 
@@ -1670,31 +1663,17 @@ struct PaperSection<Content: View, Accessory: View>: View {
                     .accessibilityValue(collapsed.wrappedValue ? "Collapsed" : "Expanded")
                     .accessibilityHint(collapsed.wrappedValue ? "Shows this section" : "Hides this section")
                     if let count, count > 0 {
-                        Text("\(count)").font(Theme.font(13)).monospacedDigit()
+                        Text("\(count)").font(Theme.font(13))
                     }
                     accessory
                 }
                 .foregroundStyle(Theme.muted)
-                .frame(minHeight: wells ? 32 : 26)
-                .padding(.horizontal, 4).padding(.bottom, wells ? 2 : 8)
-            } else if let title, wells {
-                SectionHeader(title: title, count: count) { accessory }.padding(.bottom, 2)
-            } else if let title {
-                // Paper v2: the label on the left, its count at the trailing edge, 8 above the card.
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(title).font(Theme.font(13, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if let count, count > 0 {
-                        Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                    }
-                    accessory
-                }
-                // Not combined: the accessory (Add contact, Add equipment) stays its own button.
-                .frame(minHeight: 26)
+                .frame(minHeight: 18)
                 .padding(.horizontal, 4).padding(.bottom, 8)
+            } else if let title {
+                // The one section label: 13/18 Semibold muted, count at the trailing edge, 8 above the card.
+                // Not combined: the accessory (Add contact, Add equipment) stays its own button.
+                PaperSectionLabel(title: title, count: count) { accessory }
             }
             if !isCollapsed { PaperCard { content } }
         }

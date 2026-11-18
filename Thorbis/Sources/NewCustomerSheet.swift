@@ -163,38 +163,11 @@ struct NewCustomerSheet: View {
 
     /// Paper's title row: Cancel on a card pill, the title, Save customer on the brand pill.
     private func header(canCreate: Bool) -> some View {
-        // Paper's row is justify-between: a long "Save customer" pill leaves the title less room.
-        HStack(spacing: 8) {
-                Button { dismiss() } label: {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy)
-                Text("New customer").font(Theme.font(17, weight: .semibold))
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityAddTraits(.isHeader)
-                Button { Task { await commit() } } label: {
-                    HStack(spacing: 6) {
-                        if busy { ProgressView().tint(.white) }
-                        Text("Save customer").font(Theme.font(16, weight: .semibold)).lineLimit(1).fixedSize()
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18).frame(minHeight: 44)
-                    .background(Theme.brand, in: Capsule())
-                    .opacity(canCreate ? 1 : 0.45)
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .disabled(busy || !canCreate)
-                .accessibilityLabel("Save customer")
-                .accessibilityHint(canCreate ? "" : "Your role can't add customers. Ask your office.")
-                .accessibilityIdentifier("sheet-commit")
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        PaperTaskBar(title: "New customer", cancelDisabled: busy,
+                     commit: ThorbisSheetHeaderAction(title: "Save customer", busy: busy, enabled: canCreate, identifier: "sheet-commit",
+                                                      hint: canCreate ? nil : "Your role can't add customers. Ask your office.",
+                                                      action: { Task { await commit() } }),
+                     onCancel: { dismiss() })
         // A title row is a bar: it stops growing at xLarge so the pills never break mid-word and
         // the title keeps its room. The form under it follows the reader's text size in full.
         .dynamicTypeSize(...DynamicTypeSize.xLarge)

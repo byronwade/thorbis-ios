@@ -322,9 +322,7 @@ struct LogoCropEditor: View {
                     }
                     .padding(.horizontal, 16).padding(.top, 18)
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Preview").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 4)
-                            .accessibilityAddTraits(.isHeader)
+                        PaperSectionLabel(title: "Preview", gap: 0)
                         HStack(alignment: .top, spacing: 8) {
                             invoicePreview
                             textPreview

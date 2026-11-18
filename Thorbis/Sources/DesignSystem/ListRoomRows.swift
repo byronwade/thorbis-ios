@@ -11,7 +11,7 @@ enum ListRoom {
     /// Rows and labels line up with the screen's gutter.
     static let gutter: CGFloat = Theme.gutter
     /// The pause above a group's label: generous between groups, tight inside one.
-    static let groupGap: CGFloat = 24
+    static let groupGap: CGFloat = 22
 }
 
 /// A group's label on the canvas: 13 Medium in the marker grey with its count ("Scheduled  4"),
@@ -25,7 +25,6 @@ struct ListGroupLabel<Trailing: View>: View {
     var body: some View {
         SectionHeader(title: title, count: count, horizontalPadding: ListRoom.gutter) { trailing }
             .padding(.top, first ? 8 : ListRoom.groupGap)
-            .padding(.bottom, 2)
     }
 }
 

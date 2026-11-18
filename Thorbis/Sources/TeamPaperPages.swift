@@ -14,7 +14,7 @@ struct TeamDetailTitle<Line: View>: View {
             line
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Theme.gutter).padding(.top, 14)
+        .padding(.horizontal, Theme.gutter).padding(.top, PaperHeaderMetrics.titleTopUnderBar)
     }
 }
 
@@ -279,14 +279,7 @@ struct OwnershipView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ownership").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .accessibilityAddTraits(.isHeader)
-                    if let company = session.activeOrganization?.name {
-                        Text(company).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                PaperPageTitle(title: "Ownership", subtitle: session.activeOrganization?.name)
                 if let owner {
                     label("Owner")
                     HStack(alignment: .center, spacing: 12) {
@@ -355,8 +348,7 @@ struct OwnershipView: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            .accessibilityAddTraits(.isHeader)
-            .padding(.horizontal, Theme.gutter).padding(.top, 22).padding(.bottom, 8)
+        PaperCardLabel(title: text)
+            .padding(.top, 22)
     }
 }

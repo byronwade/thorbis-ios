@@ -226,11 +226,9 @@ struct OperatingFactsFields: View {
     private var hoursEditor: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Business hours").font(Theme.font(22, weight: .bold)).tracking(-0.4)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 8)
+                PaperSheetTitle(title: "Business hours")
                 Button { editingHours = false } label: {
-                    Text("Done").font(Theme.font(15, weight: .semibold)).foregroundStyle(.white)
+                    Text("Done").font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
                         .padding(.horizontal, 18).frame(minHeight: 44)
                         .background(Theme.brand, in: Capsule())
                         .contentShape(Capsule())

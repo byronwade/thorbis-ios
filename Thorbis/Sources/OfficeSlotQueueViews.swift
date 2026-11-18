@@ -101,7 +101,7 @@ struct OfficeSlotQueueList: View {
                         Text("Waiting for a slot").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                             .accessibilityAddTraits(.isHeader)
                         Spacer(minLength: 8)
-                        Text("\(queue.reviews.count)").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        Text("\(queue.reviews.count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                             .accessibilityLabel(OfficeSlotRules.countLabel(queue.reviews.count))
                     }
                     .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 20).padding(.bottom, 8)

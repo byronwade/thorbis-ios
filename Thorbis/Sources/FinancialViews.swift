@@ -2187,16 +2187,7 @@ struct EstimateRevisionsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Revisions").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .foregroundStyle(Theme.foreground)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("\(reference) \u{00B7} \(customerName)").font(Theme.font(15))
-                        .foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                PaperPageTitle(title: "Revisions", subtitle: "\(reference) \u{00B7} \(customerName)")
                 if let error {
                     ErrorBanner(message: error, retry: { await load() })
                         .padding(.top, 12)
@@ -2241,10 +2232,8 @@ struct EstimateRevisionsView: View {
     }
 
     private func sectionLabel(_ title: String) -> some View {
-        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            .accessibilityAddTraits(.isHeader)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Theme.gutter).padding(.top, 22).padding(.bottom, 8)
+        PaperCardLabel(title: title)
+            .padding(.top, 22)
     }
 
     /// Paper 35B's row: "Revision 3 · $340.00" in 16 Medium, when it was sent and what it changed in
@@ -2455,18 +2444,7 @@ struct EstimateRevisionDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(reference) \u{00B7} \(customerName)").font(Theme.font(14, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Revision \(revision.revisionNumber)").font(Theme.heading()).tracking(-0.56)
-                        .foregroundStyle(Theme.foreground)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                PaperPageTitle(eyebrow: "\(reference) \u{00B7} \(customerName)", title: "Revision \(revision.revisionNumber)", subtitle: subtitle)
                 if let changesTab {
                     PaperTabs(options: [changesTab, Self.asSent], selection: tabBinding)
                         .padding(.top, 16)

@@ -671,11 +671,8 @@ private struct ReceiptEditor: View {
             .padding(.horizontal, 16).padding(.top, 14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text(existing == nil ? "Add receipt" : "Edit receipt")
-                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, 4)
+                    PaperPageTitle(title: existing == nil ? "Add receipt" : "Edit receipt",
+                                   columnInset: PaperCardMetrics.margin, underBar: false)
                     if let error {
                         Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                             .fixedSize(horizontal: false, vertical: true)
@@ -685,8 +682,7 @@ private struct ReceiptEditor: View {
                     photoCard
                     detailsCard
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Category").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+                        PaperSectionLabel(title: "Category", gap: 0)
                         // Paper 44: 40-tall pills in 14; the chosen one on the brand tint in brand ink.
                         FlowRow(spacing: 8, lineSpacing: 8) {
                             ForEach(ReceiptCategory.allCases, id: \.self) { choice in
@@ -709,7 +705,7 @@ private struct ReceiptEditor: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 24)
+                .padding(.horizontal, 16).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollDismissesKeyboard(.interactively)
@@ -850,8 +846,7 @@ private struct ReceiptEditor: View {
     /// Paper 44 "Receipt details": the label on the left, the answer on the right, 56 tall.
     private var detailsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Receipt details").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+            PaperSectionLabel(title: "Receipt details", gap: 0)
             VStack(alignment: .leading, spacing: 0) {
                 inlineRow("Vendor", problem: missing.contains(.merchant) ? "Add the vendor to save." : nil) {
                     TextField("", text: typed(.merchant, $merchant), prompt: .placeholder("Where it was bought"))

@@ -267,19 +267,13 @@ struct CommsCallThreadView: View {
                 if let thread {
                     // Paper 51's title block: "CALL-0142 · (916) 555-0148" (14 muted) over the
                     // caller (34 Bold, -0.025em), 20 from the edge; the chips sit 14 under it.
-                    VStack(alignment: .leading, spacing: 2) {
-                        let place = local.flags(threadID).place
-                        Text(([thread.calls.first.map { "CALL-\($0.id.suffix(4).uppercased())" },
-                               thread.displayNumber == thread.name ? nil : thread.displayNumber,
-                               place == .inbox ? nil : "In \(place.title)"] as [String?]).compactMap { $0 }.joined(separator: " \u{00B7} "))
-                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(thread.name).font(Theme.font(34, weight: .bold)).tracking(-0.85).foregroundStyle(Theme.foreground)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                    .padding(.horizontal, 4).padding(.top, 2).padding(.bottom, -14)
-                    .accessibilityIdentifier("inbox-call-title")
+                    let place = local.flags(threadID).place
+                    PaperPageTitle(eyebrow: ([thread.calls.first.map { "CALL-\($0.id.suffix(4).uppercased())" },
+                                             thread.displayNumber == thread.name ? nil : thread.displayNumber,
+                                             place == .inbox ? nil : "In \(place.title)"] as [String?]).compactMap { $0 }.joined(separator: " \u{00B7} "),
+                                   title: thread.name, columnInset: PaperCardMetrics.margin, top: 2)
+                        .padding(.bottom, -14)
+                        .accessibilityIdentifier("inbox-call-title")
                     ForEach(thread.calls, id: \.id) { call in
                         CommsCallCard(call: call, model: model, player: player,
                                       canLink: session.can("job.edit") && session.can("customer.view"))

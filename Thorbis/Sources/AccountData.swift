@@ -80,7 +80,6 @@ struct AccountAndDataView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 AccountPageTitle(title: "Account and data")
-                    .padding(.top, 14)
 
                 AccountGroup(title: "Your account") {
                     Button { editingProfile = true } label: {
@@ -162,9 +161,7 @@ struct AccountAndDataView: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            .padding(.horizontal, 4).padding(.bottom, 8)
-            .accessibilityAddTraits(.isHeader)
+        PaperSectionLabel(title: text)
     }
 }
 

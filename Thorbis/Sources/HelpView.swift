@@ -172,7 +172,7 @@ struct HelpArticleView: View {
                     Text(article.summary).font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                .padding(.horizontal, Theme.gutter).padding(.top, PaperHeaderMetrics.titleTopUnderBar)
                 VStack(alignment: .leading, spacing: 0) {
                     PaperCard {
                         ForEach(Array(article.steps.enumerated()), id: \.offset) { index, step in

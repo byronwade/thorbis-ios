@@ -108,23 +108,12 @@ struct SavedWorkReviewView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Paper 73A / 73B: a 34 Bold heading and one 15 muted line that counts. Refused
                 // changes lead ("Needs your attention"); otherwise it is the outbox.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(refused > 0 ? "Needs your attention" : "Saved on this phone")
-                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(2).minimumScaleFactor(0.7)
-                        .accessibilityAddTraits(.isHeader)
-                    if refused > 0 {
-                        Text("\(refused) \(refused == 1 ? "change" : "changes") could not be saved")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    } else if total > 0 {
-                        Text("\(total) \(total == 1 ? "thing" : "things") waiting to send")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    } else {
-                        Text("Review saved changes, photos and scans by job.")
-                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.bottom, 4)
+                PaperPageTitle(title: refused > 0 ? "Needs your attention" : "Saved on this phone",
+                               subtitle: refused > 0 ? "\(refused) \(refused == 1 ? "change" : "changes") could not be saved"
+                                   : (total > 0 ? "\(total) \(total == 1 ? "thing" : "things") waiting to send"
+                                                : "Review saved changes, photos and scans by job."),
+                               columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 4)
                 if !pinsActions {
                     actionButtons.padding(.top, 12)
                 }
@@ -188,7 +177,7 @@ struct SavedWorkReviewView: View {
                         .padding(.horizontal, 4).padding(.top, 12)
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             .frame(maxWidth: 720, alignment: .leading).frame(maxWidth: .infinity)
         }
         .accessibilityIdentifier("saved-work-review")

@@ -307,15 +307,7 @@ struct TimeClockPageTitle: View {
     let identifier: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityIdentifier(identifier)
-            Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 4)
+        PaperPageTitle(title: title, subtitle: subtitle, columnInset: PaperCardMetrics.margin, titleIdentifier: identifier)
     }
 }
 
@@ -378,12 +370,8 @@ struct TimeClockView: View {
     /// Paper 27: the menu circle and the ••• circle share the top row (here the navigation bar);
     /// under them the 34 Bold title, 4 in from the cards' edge and 14 above the first card.
     private var header: some View {
-        Text("Time clock").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityIdentifier("timeclock-root")
-            .padding(.horizontal, 4)
-            .padding(.top, 2).padding(.bottom, 14)
+        PaperPageTitle(title: "Time clock", columnInset: PaperCardMetrics.margin, titleIdentifier: "timeclock-root")
+            .padding(.bottom, 14)
     }
 
     private var moreMenu: some View {
@@ -781,7 +769,7 @@ struct TimeClockEntriesView: View {
                         .padding(.top, 16)
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
@@ -1039,7 +1027,7 @@ struct TimeClockTimeOffView: View {
                         .padding(.top, 16)
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)

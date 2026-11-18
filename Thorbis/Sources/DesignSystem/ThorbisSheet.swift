@@ -25,6 +25,8 @@ struct ThorbisSheetHeaderAction {
     var busy = false
     var enabled = true
     var identifier: String? = nil
+    /// Read by VoiceOver while the commit is off ("Your role can't add customers.").
+    var hint: String? = nil
     var action: () -> Void
 }
 
@@ -55,18 +57,7 @@ struct ThorbisSheetHeader: View {
     /// Leading title and subtitle, the close circle on the right.
     private var titleRow: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                if let title {
-                    Text(title).font(Theme.font(22, weight: .bold)).tracking(-0.44).foregroundStyle(Theme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                }
-                if let subtitle {
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: 0)
+            PaperSheetTitle(title: title, subtitle: subtitle)
             if drawsClose, let onClose {
                 PaperCircleButton(symbol: "xmark", label: closeLabel, size: 44, fill: Theme.fill, action: onClose)
             }
@@ -92,7 +83,7 @@ struct ThorbisSheetHeader: View {
                 if drawsClose, let onClose {
                     if closeStyle == .headerPill {
                         Button(action: onClose) {
-                            Text(closeLabel).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            Text(closeLabel).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .lineLimit(1).fixedSize()
                                 .padding(.horizontal, 16).frame(minHeight: 44)
                                 .background(Theme.fill, in: Capsule())
@@ -110,7 +101,7 @@ struct ThorbisSheetHeader: View {
                             if trailing.busy { ProgressView().tint(.white) }
                             Text(trailing.title)
                         }
-                        .font(Theme.font(15, weight: .semibold)).foregroundStyle(Color.white)
+                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Color.white)
                         .lineLimit(1).fixedSize()
                         .padding(.horizontal, 18).frame(minHeight: 44)
                         .background(Theme.brand.opacity(trailing.enabled ? 1 : 0.45), in: Capsule())
@@ -123,6 +114,96 @@ struct ThorbisSheetHeader: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44)
+    }
+}
+
+/// A sheet's title words (Paper 20A "Filters", 21E "Pause this job", 21K): 22/28 Bold (-0.02em)
+/// and, 2 under it, one 15/20 muted line that names the thing. Every sheet that leads with a
+/// title draws it with this, whatever sits at its trailing edge (close circle, Reset, Done).
+struct PaperSheetTitle: View {
+    let title: String?
+    var subtitle: String? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let title {
+                Text(title).font(Theme.font(22, weight: .bold)).tracking(-0.44).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            if let subtitle {
+                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A task sheet's title row (Paper 27A "Time off", 42B, 82C, 88B, 21T): the way out on a card pill
+/// (16 Medium), the title in 17/22 Semibold between, the commit on a brand pill (16 Semibold). 44
+/// tall, 16 from the edges, 14 under the sheet's top. This is the one bar for a sheet that is a
+/// form; a short sheet uses `ThorbisSheetHeader` (22 Bold title, close circle).
+/// When the three do not fit one line the title takes its own line under the pills.
+struct PaperTaskBar: View {
+    let title: String
+    var cancelTitle = "Cancel"
+    var cancelDisabled = false
+    /// The brand pill; nil where the commit sits at the bottom of the sheet (or there is none).
+    var commit: ThorbisSheetHeaderAction? = nil
+    let onCancel: () -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            row(titleInRow: true)
+            VStack(alignment: .leading, spacing: 10) {
+                row(titleInRow: false)
+                titleText.fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 2)
+    }
+
+    private var titleText: some View {
+        Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func row(titleInRow: Bool) -> some View {
+        HStack(spacing: 0) {
+            Button(action: onCancel) {
+                Text(cancelTitle).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).fixedSize()
+                    .padding(.horizontal, 16).frame(minHeight: 44)
+                    .background(Theme.card, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+            .disabled(cancelDisabled)
+            Spacer(minLength: 8)
+            if titleInRow { titleText.lineLimit(1).fixedSize(); Spacer(minLength: 8) }
+            if let commit {
+                Button(action: commit.action) {
+                    HStack(spacing: 6) {
+                        if commit.busy { ProgressView().tint(.white) }
+                        Text(commit.title).font(Theme.font(16, weight: .semibold)).lineLimit(1).fixedSize()
+                    }
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 18).frame(minHeight: 44)
+                    .background(Theme.brand.opacity(commit.enabled ? 1 : 0.45), in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(commit.busy || !commit.enabled)
+                .accessibilityLabel(commit.title)
+                .accessibilityHint(commit.hint ?? "")
+                .accessibilityIdentifier(commit.identifier ?? "sheet-commit")
+            } else if titleInRow {
+                // Balances the way out so the title sits in the middle (Paper 41A / 27B).
+                Text(cancelTitle).font(Theme.font(16, weight: .medium)).lineLimit(1).fixedSize()
+                    .padding(.horizontal, 16).hidden().accessibilityHidden(true)
+            }
+        }
     }
 }
 

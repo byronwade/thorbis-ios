@@ -29,16 +29,7 @@ struct JobAtAddressView<Extras: View>: View {
         let subtitle = [street, visitsLoaded ? "\(count) \(count == 1 ? "visit" : "visits")" : nil].compactMap { $0 }
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("At this address").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    if !subtitle.isEmpty {
-                        Text(subtitle.joined(separator: " \u{00B7} ")).font(Theme.font(15)).foregroundStyle(Theme.subtle)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.horizontal, 4)
+                PaperPageTitle(title: "At this address", subtitle: subtitle.joined(separator: " \u{00B7} "), columnInset: PaperCardMetrics.margin)
                 if !history.visits.isEmpty {
                     section("Past visits") {
                         ForEach(Array(history.visits.enumerated()), id: \.element.id) { index, visit in
@@ -80,7 +71,7 @@ struct JobAtAddressView<Extras: View>: View {
                 }
                 extras
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 28)
+            .padding(.horizontal, 16).padding(.bottom, 28)
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)

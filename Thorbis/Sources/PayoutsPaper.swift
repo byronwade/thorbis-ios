@@ -33,9 +33,8 @@ struct PayoutsPage: View {
                     balanceCard(balance).padding(.top, index == 0 ? 0 : 12)
                 }
                 if !snapshot.payouts.isEmpty {
-                    Text("Recent payouts").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, 4).padding(.top, 20).padding(.bottom, 8)
+                    PaperSectionLabel(title: "Recent payouts")
+                        .padding(.top, 22)
                     VStack(spacing: 0) {
                         ForEach(Array(snapshot.payouts.enumerated()), id: \.offset) { index, payout in
                             if index > 0 { WellDivider(leading: 16) }

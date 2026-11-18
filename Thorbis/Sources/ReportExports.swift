@@ -138,9 +138,7 @@ struct ReportExportSheet: View {
             .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 18).padding(.bottom, 12)
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Report").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, 4)
+                    PaperSectionLabel(title: "Report", gap: 0)
                     VStack(spacing: 0) {
                         ForEach(Array(exports.enumerated()), id: \.element.id) { index, export in
                             if index > 0 { WellDivider(leading: 0) }

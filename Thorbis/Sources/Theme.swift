@@ -319,8 +319,8 @@ func initials(_ name: String) -> String {
     return s.isEmpty ? "?" : s.uppercased()
 }
 
-/// v2: a grouped section's header, chrome 13 Medium in the marker colour with the
-/// count beside it ("Up next  2"), and an optional trailing accessory. Sits above a `Well`.
+/// A grouped section's header: the one section label (`PaperSectionLabel`), kept under this
+/// name for the list rooms that pass their own horizontal inset.
 struct SectionHeader<Trailing: View>: View {
     let title: String
     var count: Int? = nil
@@ -328,21 +328,8 @@ struct SectionHeader<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        // Paper v2: the label in 13 Semibold, its count at the trailing edge.
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).font(Theme.font(13, weight: .semibold))
-                .accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 0)
-            if let count, count > 0 {
-                Text("\(count)").font(Theme.font(13)).monospacedDigit()
-                    .accessibilityLabel("\(count)")
-            }
-            trailing
-        }
-        .foregroundStyle(Theme.muted)
-        .padding(.horizontal, horizontalPadding)
-        .frame(minHeight: 32)
-        .accessibilityElement(children: .contain)
+        PaperSectionLabel(title: title, count: count, inset: horizontalPadding) { trailing }
+            .accessibilityElement(children: .contain)
     }
 }
 

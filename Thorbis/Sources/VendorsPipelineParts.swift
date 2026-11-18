@@ -3,7 +3,7 @@ import SwiftUI
 /// Small pieces shared by Vendors and POs and by Pipeline: the sheet's title row, form cards,
 /// the quantity capsule, the status chip and the brand commit, all at Paper's sizes.
 
-/// Paper 42B / 82C / 41A: Cancel on a card capsule, the title in 17 Semibold, the brand Save.
+/// Paper 42B / 82C / 41A: the shared task bar (`PaperTaskBar`) under its sales-sheet name.
 struct SalesSheetHeader: View {
     let title: String
     var saveTitle: String? = "Save"
@@ -12,47 +12,10 @@ struct SalesSheetHeader: View {
     var onSave: () -> Void = {}
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            row(titleInRow: true)
-            VStack(alignment: .leading, spacing: 10) {
-                row(titleInRow: false)
-                titleText.fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
-    }
-
-    private var titleText: some View {
-        Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    private func row(titleInRow: Bool) -> some View {
-        HStack(spacing: 8) {
-            Button(action: onCancel) {
-                Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 16).frame(minHeight: 44)
-                    .background(Theme.card, in: Capsule())
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(PressStyle())
-            Spacer(minLength: 8)
-            if titleInRow { titleText.lineLimit(1).fixedSize(); Spacer(minLength: 8) }
-            if let saveTitle {
-                // Never pre-disabled: pressed with something missing, the sheet says what.
-                Button(action: onSave) {
-                    Text(saveTitle).font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier(saveIdentifier ?? "sales-sheet-save")
-            } else if titleInRow {
-                // Balances Cancel so the title sits in the middle (Paper 41A).
-                Color.clear.frame(width: 83, height: 44).accessibilityHidden(true)
-            }
-        }
+        // Never pre-disabled: pressed with something missing, the sheet says what.
+        PaperTaskBar(title: title,
+                     commit: saveTitle.map { ThorbisSheetHeaderAction(title: $0, identifier: saveIdentifier ?? "sales-sheet-save", action: onSave) },
+                     onCancel: onCancel)
     }
 }
 

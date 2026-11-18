@@ -175,21 +175,11 @@ struct TeamView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Paper 55 / 62: a 34 Bold title (owners see "Team and permissions"), one muted line.
-                VStack(alignment: .leading, spacing: 2) {
-                    // Paper 62: owners see where this lives ("Business settings") above the title;
-                    // the counts sit on the section labels below.
-                    if canManage {
-                        Text("Business settings").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                    Text(canManage ? "Team and permissions" : "Team")
-                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .accessibilityAddTraits(.isHeader)
-                    if !canManage || members.isEmpty {
-                        Text(teamSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 14)
+                // The title names the page; the parent ("Business settings") is one Back away and is
+                // not printed over it. The counts sit on the section labels below.
+                PaperPageTitle(title: canManage ? "Team and permissions" : "Team",
+                               subtitle: !canManage || members.isEmpty ? teamSubtitle : nil)
+                    .padding(.bottom, 14)
                 // Paper 55 / 62: the search field under the title; owners then get the role
                 // segments (62). Paper 55's Roster / Payroll segments are not drawn: no payroll.
                 if !members.isEmpty {

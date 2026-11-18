@@ -554,16 +554,7 @@ private struct LocalVehicleDetail: View {
         let more = facts(draft, Self.moreKeys)
         let notes = draft.optional("notes") ?? ""
         return VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(draft.required("name")).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                if !line.isEmpty {
-                    Text(line).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            PaperPageTitle(title: draft.required("name"), subtitle: line, columnInset: PaperCardMetrics.margin)
             if let actionError {
                 Text(actionError).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
@@ -616,7 +607,7 @@ private struct LocalVehicleDetail: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)

@@ -36,8 +36,7 @@ struct SettingsView: View {
                     // Paper 65: the 44pt back circle, 14 under it "Settings" in 34 Bold.
                     ThorbisBackButton()
                         .padding(.top, 2)
-                    AccountPageTitle(title: "Settings")
-                        .padding(.top, 14)
+                    AccountPageTitle(title: "Settings", underBar: false)
 
                     // Paper 65: the person, then a chevron into Account and data (67).
                     AccountGroup(title: "Account") {
@@ -296,17 +295,9 @@ private struct SettingsAppearancePage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    // Paper 65G: the title is 28 Bold.
-                    Text("Appearance").font(Theme.heading()).tracking(-0.56)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(UIDevice.current.userInterfaceIdiom == .pad ? "How Thorbis looks on this iPad" : "How Thorbis looks on this phone")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 16)
-                Text("Theme").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+                PaperPageTitle(title: "Appearance", subtitle: UIDevice.current.userInterfaceIdiom == .pad ? "How Thorbis looks on this iPad" : "How Thorbis looks on this phone")
+                    .padding(.bottom, 16)
+                PaperCardLabel(title: "Theme")
                 let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                                                           : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
                 layout {

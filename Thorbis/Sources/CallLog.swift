@@ -216,7 +216,7 @@ struct CallDetailView: View {
                     SkeletonRows(count: 4, leading: false, inset: 0)
                 }
             }
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
@@ -250,16 +250,8 @@ struct CallDetailView: View {
     private func header(_ call: BookingCallRecord) -> some View {
         let named = !(call.callerName ?? "").isEmpty
         let number: String? = named ? call.callerNumber.map { CommsCallGrouping.display($0) } : nil
-        return VStack(alignment: .leading, spacing: 2) {
-            if let number, !number.isEmpty {
-                Text(number).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
-            }
-            Text(call.caller).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-        }
-        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.top, 6)
-        .accessibilityElement(children: .combine)
+        return PaperPageTitle(eyebrow: number, title: call.caller, columnInset: PaperCardMetrics.margin)
+            .accessibilityElement(children: .combine)
     }
 
     /// Paper 51's chips: which way the call went (on the brand tint), when, and how long. 40 tall.
