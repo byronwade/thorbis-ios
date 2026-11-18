@@ -645,9 +645,11 @@ private struct ScheduleHero: View {
                             }
                         }
                     }
+                    // Two lines at most: a long real title would otherwise make the card fill the screen.
                     Text(job.title.dashKeptWithWordBefore).font(Theme.font(22, weight: .bold)).tracking(-0.44)
                         .foregroundStyle(Theme.foreground)
                         .multilineTextAlignment(.leading)
+                        .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                     if !supporting.isEmpty {
                         Text(supporting).font(Theme.font(15)).foregroundStyle(Theme.subtle)
@@ -909,7 +911,7 @@ struct ScheduleCompactRow: View {
             NavigationLink(value: job) {
                 PaperListRow(leading: leading, title: (street ?? job.title).dashKeptWithWordBefore,
                              subtitle: street != nil ? "\(job.title) · \(customer)".dashKeptWithWordBefore : customer,
-                             subtitleLines: 2, titleLines: 2, dimmed: job.status == "completed") {
+                             subtitleLines: 1, titleLines: 2, dimmed: job.status == "completed") {
                     if schedule == nil {
                         StatusWord(jobStatus: pendingStatus ?? job.status, pending: pendingStatus != nil)
                     }
