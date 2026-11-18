@@ -24,6 +24,7 @@ struct InvoicePaymentLinkView: View {
                 // customer in 15 muted, the code on a white card, the scan caption and the waiting line,
                 // then the link.
                 VStack(alignment: .center, spacing: 20) {
+                    PaperPageTitle(title: "Scan to pay", columnInset: Theme.gutter)
                     VStack(spacing: 0) {
                         Text(money(model.outstandingCents ?? 0, currency: model.invoice?.currency ?? "USD"))
                             .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
@@ -59,7 +60,7 @@ struct InvoicePaymentLinkView: View {
                 }
                 .frame(maxWidth: 520)
                 .padding(.horizontal, Theme.gutter)
-                .padding(.top, 20).padding(.bottom, 20)
+                .padding(.bottom, 20)
                 .frame(maxWidth: .infinity)
             }
             .refreshable { await model.load() }
@@ -68,9 +69,9 @@ struct InvoicePaymentLinkView: View {
         }
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
-        // Paper 39C: "Scan to pay" as the large title.
-        .navigationTitle("Scan to pay")
-        .navigationBarTitleDisplayMode(.large)
+        // Paper 39C: "Scan to pay" as the large title, drawn in the content like every other page.
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ThorbisToolbarItem(placement: .topBarTrailing) {
                 Button("Done", action: onDone).frame(minWidth: 44, minHeight: 44)

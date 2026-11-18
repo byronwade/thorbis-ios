@@ -780,9 +780,11 @@ private struct PriceBookLocalDetail: View {
                     .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
             }
             .background(Theme.canvas)
-            .navigationTitle("Price book item")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            // A short read-only sheet: the shared sheet title row, Done on the close circle.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                ThorbisSheetHeader(title: "Price book item", closeLabel: "Done", onClose: { dismiss() }).background(Theme.canvas)
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 }

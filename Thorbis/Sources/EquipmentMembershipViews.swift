@@ -468,9 +468,11 @@ struct CustomerMembershipSection: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.canvas)
-            .navigationTitle("Choose a plan")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ThorbisToolbarItem(placement: .topBarLeading) { Button("Cancel") { choosing = false } } }
+            // Paper 27A: a picker sheet leads with the task bar, not a system bar title.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaperTaskBar(title: "Choose a plan") { choosing = false }.background(Theme.canvas)
+            }
+            .toolbar(.hidden, for: .navigationBar)
         }
         .presentationDetents([.medium, .large])
     }
