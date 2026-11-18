@@ -222,6 +222,9 @@ struct CommsInboxView: View {
         .task {
             await model.refresh(api: api, access: access)
             if let target = Self.previewOpen(model.threads) { open = target }
+            #if DEBUG
+            if PaperPreview.enabled, PaperPreview.opensSheet("inbox-new-text") { composing = .text }
+            #endif
         }
     }
 

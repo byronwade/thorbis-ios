@@ -356,6 +356,8 @@ struct CustomerImportPanel: View {
     /// False when the screen pins `CustomerImportCommit` to its bottom edge (Paper 97).
     var showsCommit = true
     @State private var choosing = false
+    /// The details the file has no column for are shown once asked for (Paper 97 lists only matched ones).
+    @State private var showsUnmatched = false
     /// The app the file comes from ("Or import from", Paper 11); nil is any CSV.
     @State private var source: String?
     static let sources = ["ServiceTitan", "Jobber", "Housecall Pro", "QuickBooks"]
@@ -503,18 +505,37 @@ struct CustomerImportPanel: View {
     private var mappingSection: some View {
         VStack(alignment: .leading, spacing: 20) {
             PaperSection("Match columns") {
+                // Paper 97 lists the details this file fills. The ones it has no column for wait
+                // behind one quiet row, so any of them can still be matched by hand.
                 columnPicker("Name", .name, first: true)
                 if model.mapping.name == nil {
                     columnPicker("First name", .firstName)
                     columnPicker("Last name", .lastName)
                 }
-                columnPicker("Phone", .phone)
-                columnPicker("Email", .email)
-                columnPicker("Street address", .address)
-                columnPicker("City", .city)
-                columnPicker("State", .state)
-                columnPicker("ZIP", .zip)
-                columnPicker("Notes", .notes)
+                let rest: [(String, CustomerImportMapping.Field)] = [("Phone", .phone), ("Email", .email), ("Address", .address),
+                                                                     ("City", .city), ("State", .state), ("ZIP", .zip), ("Notes", .notes)]
+                let unmatched = rest.filter { model.mapping[$0.1] == nil }
+                ForEach(rest, id: \.0) { label, field in
+                    if model.mapping[field] != nil || showsUnmatched { columnPicker(label, field) }
+                }
+                if !unmatched.isEmpty && !showsUnmatched {
+                    WellDivider()
+                    Button { showsUnmatched = true } label: {
+                        HStack(spacing: 10) {
+                            Text(unmatched.count == 1 ? "1 more detail not in this file" : "\(unmatched.count) more details not in this file")
+                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            PaperIcon(.chevronDown, size: 16, color: Theme.muted).accessibilityHidden(true)
+                        }
+                        .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 14)
+                        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Shows \(unmatched.map(\.0).joined(separator: ", ")) so you can match a column")
+                    .accessibilityIdentifier("import-more-details")
+                }
             }
             let samples = Array(model.rows.prefix(2))
             if !samples.isEmpty {
@@ -529,7 +550,7 @@ struct CustomerImportPanel: View {
                     if noPhone > 0 {
                         WellDivider()
                         Text(noPhone == 1 ? "1 row has no phone number" : "\(noPhone) rows have no phone number")
-                            .font(Theme.font(14, weight: .medium)).monospacedDigit().foregroundStyle(Theme.warning)
+                            .font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.warning)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, PaperCardMetrics.inset)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -608,7 +629,7 @@ struct CustomerImportPanel: View {
                     Image(systemName: "arrow.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                     Text(label).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                    PaperIcon(.chevronRight, size: 16, color: Theme.muted)
                 }
                 .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 14)
                 .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
@@ -696,5 +717,30 @@ struct CustomerImportView: View {
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
         .navigationBarTitleDisplayMode(.inline)
+        #if DEBUG
+        .task { if PaperPreview.enabled, PaperPreview.opensSheet("customers-import") { model.loadPreviewSample() } }
+        #endif
     }
 }
+
+#if DEBUG
+extension CustomerImportModel {
+    /// The design preview's file: Paper 97's columns and first rows, read the way a real file is.
+    func loadPreviewSample() {
+        let text = """
+        Client Name,Mobile,Street,Notes
+        Danielle Marlowe,(916) 555-0148,412 Birchwood Ln,Gate code 4482
+        Marcus Oyelaran,(916) 555-0172,88 Alder Creek Dr,
+        Tom Becker,,17 Larkspur Way,
+        Linda Park,(916) 555-0119,6 Fern Ct,
+        """
+        let table = CSVReader.rows(text)
+        fileName = "customers.csv"
+        headers = table[0]
+        records = Array(table.dropFirst())
+        firstRecordLine = 2
+        mapping = .guess(headers)
+        phase = .map
+    }
+}
+#endif

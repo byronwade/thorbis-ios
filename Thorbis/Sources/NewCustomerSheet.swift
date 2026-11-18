@@ -79,7 +79,7 @@ struct NewCustomerSheet: View {
                                   error: addressProblem, padded: false)
                                 .textContentType(.fullStreetAddress).submitLabel(.done)
                                 .onSubmit { Task { await commit() } }
-                            Image(systemName: "mappin").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                            PaperIcon(.formPin, size: 20, color: Theme.muted)
                                 .frame(width: 20, height: 20).accessibilityHidden(true)
                         }
                         .padding(.horizontal, 16).padding(.vertical, 12)

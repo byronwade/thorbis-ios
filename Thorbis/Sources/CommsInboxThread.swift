@@ -1115,10 +1115,6 @@ struct CommsComposeSheet: View {
     @ObservedObject var store: CommsLocalStore
     let onOpen: (String) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var phone = ""
-    @State private var name = ""
-    @State private var textOpenFailed = false
-    @FocusState private var phoneFocused: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -1126,45 +1122,266 @@ struct CommsComposeSheet: View {
         case .email:
             CommsMailSheet(draft: CommsMailDraft(), store: store) { id in onOpen(id) } onClose: { dismiss() }
         case .text:
-            ThorbisSheetScaffold(title: "New text", onClose: { dismiss() }) {
-                PaperFormField("Phone number") {
-                    TextField("Phone number", text: $phone, prompt: .placeholder("(555) 010-0100"))
-                        .keyboardType(.phonePad).textContentType(.telephoneNumber).font(Theme.font(16)).fieldWell()
-                        .focused($phoneFocused)
-                        .accessibilityIdentifier("inbox-new-text-phone")
-                }
-                PaperFormField("Name", note: "Optional") {
-                    TextField("Name", text: $name, prompt: .placeholder("Who it is")).textContentType(.name).font(Theme.font(16)).fieldWell()
-                }
-                Text("An existing conversation with this number opens instead of a new one. Drafts stay on this device.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                if textOpenFailed {
-                    Text("Couldn't open this text. Copy any unsaved work before restarting the app, then check saved messages.")
-                        .font(Theme.font(14)).foregroundStyle(Theme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("inbox-new-text-storage-error")
-                }
-                let ready = CommsCallGrouping.key(phone) != nil
-                Button {
-                    if let id = store.threadForPhone(phone, contactName: name) {
-                        textOpenFailed = false
-                        onOpen(id)
-                    } else {
-                        textOpenFailed = true
-                    }
-                } label: {
-                    Text("Start text").inkCommit(enabled: ready)
-                }
-                .buttonStyle(PressStyle())
-                .disabled(!ready)
-            }
-            // At accessibility sizes half a screen hides Start text, so it opens full height.
-            .thorbisSheetPresentation(typeSize.isAccessibilitySize ? [.large] : [.medium, .large])
-            // Opened to text someone: the number is the first thing to type.
-            .task { try? await Task.sleep(for: .milliseconds(400)); phoneFocused = true }
+            CommsNewMessageSheet(store: store, onOpen: onOpen) { dismiss() }
         }
     }
+}
+
+/// Paper 49D "New message": who it is to (a customer by name, or a number), the saved replies as
+/// templates, and the words. Nothing sends from here: the arrow opens the conversation with the
+/// words waiting in its composer, where drafts stay on this phone.
+private struct CommsNewMessageSheet: View {
+    @ObservedObject var store: CommsLocalStore
+    let onOpen: (String) -> Void
+    let onClose: () -> Void
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @State private var to = ""
+    /// The customer picked from the list; typing in To again lets go of them.
+    @State private var picked: CustomerRecord?
+    @State private var message = ""
+    @State private var customers: [CustomerRecord] = []
+    @State private var openFailed = false
+    @FocusState private var focus: Field?
+
+    private enum Field { case to, message }
+
+    private var words: String { to.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// The number the conversation opens for: the picked customer's, else a typed number.
+    private var phone: String? {
+        if let picked { return picked.phone }
+        let digits = words.filter(\.isNumber)
+        let letters = words.contains { $0.isLetter }
+        return !letters && digits.count >= 7 ? words : nil
+    }
+    private var ready: Bool { CommsCallGrouping.key(phone) != nil }
+    private var matches: [CustomerRecord] {
+        guard picked == nil, !words.isEmpty else { return [] }
+        let digits = words.filter(\.isNumber)
+        return Array(customers.lazy.filter { customer in
+            if Self.nameRange(customer.name, words) != nil { return true }
+            if words.count >= 3, customer.address?.localizedCaseInsensitiveContains(words) == true { return true }
+            return digits.count >= 3 && (customer.phone ?? "").filter(\.isNumber).contains(digits)
+        }.prefix(6))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            taskBar
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    toCard.paperCardMargin()
+                    if openFailed {
+                        Text("Couldn't open this text. Copy any unsaved work before restarting the app, then check saved messages.")
+                            .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 12)
+                            .accessibilityIdentifier("inbox-new-text-storage-error")
+                    }
+                    let found = matches
+                    if !found.isEmpty {
+                        PaperCardLabel(title: "Customers").padding(.top, 20)
+                        PaperRowsCard {
+                            ForEach(Array(found.enumerated()), id: \.element.id) { index, customer in
+                                if index > 0 { WellDivider(leading: 64) }
+                                customerRow(customer)
+                            }
+                        }
+                    }
+                    if !store.cannedReplies.isEmpty {
+                        PaperCardLabel(title: "Templates").padding(.top, 20)
+                        PaperRowsCard {
+                            ForEach(Array(store.cannedReplies.enumerated()), id: \.element.id) { index, reply in
+                                if index > 0 { WellDivider(leading: 0) }
+                                templateRow(reply)
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 16).padding(.bottom, 16)
+            }
+            .scrollDismissesKeyboard(.interactively)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background.ignoresSafeArea())
+        .thorbisSheetPresentation([.large])
+        .task {
+            if session.can("customer.view", feature: "core_crm") {
+                customers = (try? await api.fieldCustomers()) ?? []
+            }
+            #if DEBUG
+            // `--paper-preview-new-text-typed`: Paper 49D's capture, with "M" typed in To.
+            if PaperPreview.enabled, ProcessInfo.processInfo.arguments.contains("--paper-preview-new-text-typed") { to = "M" }
+            #endif
+        }
+        // Opened to text someone: who it is to is the first thing to type.
+        .task { try? await Task.sleep(for: .milliseconds(400)); if focus == nil { focus = .to } }
+    }
+
+    /// Paper's task bar: Cancel on a card pill, the title centred, nothing trailing.
+    private var taskBar: some View {
+        ZStack {
+            Text("New message").font(Theme.font(17, weight: .semibold))
+                .lineLimit(1).accessibilityAddTraits(.isHeader)
+            HStack {
+                Button(action: onClose) {
+                    Text("Cancel").font(Theme.font(16, weight: .medium)).lineLimit(1).fixedSize().foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 16).frame(minHeight: 44)
+                        .background(Theme.card, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressStyle())
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
+    }
+
+    /// "To" in the muted ink (16, 44 wide) and the name or number at 17 Medium, 54 tall.
+    private var toCard: some View {
+        HStack(spacing: 10) {
+            Text("To").font(Theme.font(16)).foregroundStyle(Theme.muted)
+                .frame(width: 44, alignment: .leading).accessibilityHidden(true)
+            TextField("", text: Binding(get: { to }, set: { next in
+                if next != to { picked = nil }
+                to = next
+            }), prompt: .placeholder("Name or phone number"))
+                .font(Theme.font(17, weight: .medium))
+                .textContentType(.name).autocorrectionDisabled()
+                .focused($focus, equals: .to)
+                .submitLabel(.next).onSubmit { if ready { focus = .message } }
+                .accessibilityLabel("To")
+                .accessibilityIdentifier("inbox-new-text-phone")
+        }
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    /// 36pt initials on the brand surface, the name (16 Medium, the typed letters heavier) over
+    /// the number and street (14 muted), 64 tall. Without a number there is nothing to text.
+    private func customerRow(_ customer: CustomerRecord) -> some View {
+        let textable = CommsCallGrouping.key(customer.phone) != nil
+        let street = customer.address?.split(separator: ",").first.map { String($0).trimmingCharacters(in: .whitespaces) }
+        let line = [textable ? customer.phone : "No phone number", street]
+            .compactMap { $0?.isEmpty == false ? $0 : nil }.joined(separator: " \u{00B7} ")
+        return Button {
+            picked = customer
+            to = customer.name
+            focus = .message
+        } label: {
+            HStack(alignment: .center, spacing: 12) {
+                PaperInitials(name: customer.name, size: 36)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(matchedName(customer.name)).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(line).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .contentShape(Rectangle())
+            .opacity(textable ? 1 : 0.5)
+        }
+        .buttonStyle(RowPressStyle())
+        .disabled(!textable)
+        .accessibilityHint(textable ? "" : "No phone number on file")
+        .accessibilityIdentifier("inbox-new-text-customer-\(customer.id)")
+    }
+
+    /// The name with the typed letters in bold, as Paper marks them.
+    private func matchedName(_ name: String) -> AttributedString {
+        var marked = AttributedString(name)
+        if let found = Self.nameRange(name, words), let range = Range(found, in: marked) {
+            marked[range].font = Theme.font(16, weight: .bold)
+        }
+        return marked
+    }
+
+    /// Where the typed letters sit in a name: at the start of one of its words (so "M" finds
+    /// Marlowe and Mei, not every name with an m in it); three or more letters match anywhere.
+    static func nameRange(_ name: String, _ typed: String) -> Range<String.Index>? {
+        guard !typed.isEmpty else { return nil }
+        var from = name.startIndex
+        while from < name.endIndex,
+              let range = name.range(of: typed, options: [.caseInsensitive, .diacriticInsensitive], range: from..<name.endIndex) {
+            let startsWord = range.lowerBound == name.startIndex || !name[name.index(before: range.lowerBound)].isLetter
+            if startsWord || typed.count >= 3 { return range }
+            from = range.upperBound
+        }
+        return nil
+    }
+
+    /// A saved reply: its name (16 Medium) over its words (14 muted). Choosing one writes it.
+    private func templateRow(_ reply: CommsCannedReply) -> some View {
+        Button {
+            message = reply.body
+            focus = ready ? .message : .to
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(reply.name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(reply.body).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .lineLimit(2).multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityHint("Writes this in the message")
+    }
+
+    /// The words on a 44-tall card capsule and the arrow circle (44): brand once there is someone
+    /// to text. It opens the conversation with the words in its composer; nothing is sent.
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("", text: $message, prompt: .placeholder("Text message"), axis: .vertical)
+                .lineLimit(1...4)
+                .font(Theme.font(16))
+                .focused($focus, equals: .message)
+                .padding(.horizontal, 16).padding(.vertical, 11)
+                .frame(minHeight: 44)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .accessibilityLabel("Text message")
+                .accessibilityIdentifier("inbox-new-text-message")
+            Button(action: start) {
+                PaperIcon(.arrowUp, size: 18, color: ready ? Color.white : Theme.subtleForeground)
+                    .frame(width: 44, height: 44)
+                    .background(ready ? Theme.brand : Theme.fill, in: Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(PressStyle())
+            .disabled(!ready)
+            .accessibilityLabel("Start text")
+            .accessibilityHint("Opens the conversation with these words. Nothing is sent.")
+        }
+        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+        .background(Theme.background)
+    }
+
+    private func start() {
+        guard let phone, ready else { return }
+        let name = picked?.name ?? ""
+        guard let id = store.threadForPhone(phone, contactName: name) else {
+            openFailed = true
+            return
+        }
+        openFailed = false
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { store.setComposing(id, text) }
+        onOpen(id)
+    }
+}
+
+private extension PaperGlyph {
+    /// Paper 49D's send arrow (18 box).
+    static let arrowUp = PaperGlyph(box: 18, [.stroke("M9 14.5V3.5M4.5 8L9 3.5L13.5 8", 1.8)])
 }
 
 /// An email being written: a new one, a reply, or a saved draft being edited.

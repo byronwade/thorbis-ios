@@ -484,7 +484,7 @@ struct EditCustomerSheet: View {
                       focus: .service, content: .fullStreetAddress, axis: .vertical,
                       error: showErrors ? value.serviceAddressError : nil, identifier: "edit-customer-service-address",
                       padded: false)
-                Image(systemName: "mappin").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                PaperIcon(.formPin, size: 20, color: Theme.muted)
                     .frame(width: 20, height: 20).accessibilityHidden(true)
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
@@ -784,7 +784,7 @@ struct ArchiveCustomerView: View {
         return Button { reason = option } label: {
             HStack(alignment: .center, spacing: 12) {
                 ZStack {
-                    Circle().strokeBorder(chosen ? Theme.brand : Theme.muted, lineWidth: chosen ? 2 : 1.5)
+                    Circle().strokeBorder(chosen ? Theme.brand : Theme.borderStrong, lineWidth: chosen ? 2 : 1.5)
                     if chosen { Circle().fill(Theme.brand).frame(width: 10, height: 10) }
                 }
                 .frame(width: 22, height: 22)
@@ -876,7 +876,7 @@ struct ArchivedCustomersView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                     Text("\(archived.count) archived \u{00B7} jobs and invoices are kept")
-                        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 20).padding(.top, 14)
@@ -915,8 +915,7 @@ struct ArchivedCustomersView: View {
     /// "Search archived" on the card, 46 tall, radius 14.
     private var searchField: some View {
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+            PaperIcon(.searchSmall, size: 18, color: Theme.muted).accessibilityHidden(true)
             TextField("", text: $query, prompt: .placeholder("Search archived"))
                 .font(Theme.font(16)).foregroundStyle(Theme.foreground)
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -948,7 +947,7 @@ struct ArchivedCustomersView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(customer.name).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(place ?? "Archived").font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(place ?? "Archived").font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
