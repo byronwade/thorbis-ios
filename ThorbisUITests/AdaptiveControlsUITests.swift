@@ -49,8 +49,9 @@ final class AdaptiveControlsUITests: XCTestCase {
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         let signOut = app.buttons["Sign out"]
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 30))
-        for _ in 0..<8 where !signOut.isHittable { app.swipeUp() }
+        // Paper 65: Settings is a page with its own back circle and 34 Bold title; the bar is hidden.
+        XCTAssertTrue(app.buttons["settings-account-data"].waitForExistence(timeout: 30))
+        for _ in 0..<12 where !signOut.isHittable { app.swipeUp() }
         XCTAssertTrue(signOut.isHittable)
         signOut.tap()
         let warning = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "older saved photos")).firstMatch
