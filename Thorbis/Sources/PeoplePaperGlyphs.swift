@@ -71,3 +71,11 @@ extension PaperRecordRow where Trailing == EmptyView {
         self.init(title: title, subtitle: subtitle, status: status, statusColor: statusColor, dimmed: dimmed) { EmptyView() }
     }
 }
+
+extension PaperGlyph {
+    /// Paper 47A / 48C: the map pin trailing the service address (20 box).
+    static let formPin = PaperGlyph(box: 20, [
+        .stroke("M10 17.5C10 17.5 15.5 12.4 15.5 8.2C15.5 5.1 13 2.6 10 2.6C7 2.6 4.5 5.1 4.5 8.2C4.5 12.4 10 17.5 10 17.5Z", 1.5),
+        .circle(10, 8.2, 2, 1.5),
+    ])
+}

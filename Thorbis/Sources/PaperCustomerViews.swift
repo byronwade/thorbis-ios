@@ -37,6 +37,9 @@ struct CustomersView: View {
     @State private var error: String?
     /// Paper 48H "Archived customers", pushed from the filter circle.
     @State private var showArchived = false
+    #if DEBUG
+    @State private var previewImport = false
+    #endif
     /// Paper 48B "Archive customer" for the row that was swiped or long-pressed.
     @State private var archiveTarget: CustomerRecord?
     /// Paper 47: one row open at a time; scrolling closes it.
@@ -131,6 +134,15 @@ struct CustomersView: View {
             NewCustomerSheet(onCreated: { _ in Task { await loadCustomers() } }, offersBooking: true)
         } }
         .sheet(item: $newJobFor) { customer in SheetSurface { NewJobSheet(preselected: customer) } }
+        #if DEBUG
+        // `--paper-preview-sheet customers-archived | customers-import`: opens 48H or 97 for a capture.
+        .thorbisDestination(isPresented: $previewImport) { CustomerImportView() }
+        .task {
+            guard PaperPreview.enabled else { return }
+            if PaperPreview.opensSheet("customers-archived") { try? await Task.sleep(for: .milliseconds(1200)); showArchived = true }
+            if PaperPreview.opensSheet("customers-import") { previewImport = true }
+        }
+        #endif
         .thorbisDestination(isPresented: $showArchived) {
             ArchivedCustomersView(customers: records) { _ in
                 _ = await store.refresh(api)
@@ -539,6 +551,7 @@ struct CustomerDetailView: View {
     @State private var showsAllInvoices = false
     /// DEBUG previews open a hub page once.
     @State private var previewOpened = false
+    @State private var showRecentlyArchived = false
     @State private var records: CustomerJobCompilation?
     @State private var recordsLoading = false
     @State private var recordsError: String?
@@ -710,6 +723,8 @@ struct CustomerDetailView: View {
                 if PaperPreview.screen == "customer-membership" { openPart = .membership }
                 if PaperPreview.screen == "customer-activity" { openPart = .activity }
                 if PaperPreview.screen == "customer-details" { openPart = .details }
+                if PaperPreview.opensSheet("customer-archive") { showArchive = true }
+                if PaperPreview.opensSheet("customer-edit") { showEditCustomer = true }
             }
             #endif
         }
@@ -798,8 +813,7 @@ struct CustomerDetailView: View {
                         Text("Archive customer").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        PaperIcon(.chevronRightSmall, size: 16, color: Theme.muted).accessibilityHidden(true)
                     }
                     .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 9)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
@@ -807,6 +821,21 @@ struct CustomerDetailView: View {
                 }
                 .buttonStyle(RowPressStyle())
                 .accessibilityIdentifier("customer-record-archive")
+                // Paper 48A: the archived list, one row down.
+                WellDivider(leading: 16)
+                Button { showRecentlyArchived = true } label: {
+                    HStack(spacing: 12) {
+                        Text("Recently archived customers").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        PaperIcon(.chevronRightSmall, size: 16, color: Theme.muted).accessibilityHidden(true)
+                    }
+                    .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityIdentifier("customer-record-archived-list")
             }
         }
     }
@@ -1042,6 +1071,13 @@ struct CustomerDetailView: View {
                 }
             }
         }
+        .thorbisDestination(isPresented: $showRecentlyArchived) { RecentlyArchivedCustomersPage() }
+        #if DEBUG
+        // `--paper-preview-sheet membership-cancel`: opens Cancel membership (85B) for a capture.
+        .onChange(of: plan?.id) { _, _ in
+            if PaperPreview.enabled, PaperPreview.opensSheet("membership-cancel"), cancellingPlan == nil, let plan { cancellingPlan = plan }
+        }
+        #endif
         .thorbisDestination(item: $cancellingPlan) { membership in
             CancelMembershipView(customerID: customer.id, membership: membership,
                                  customerName: record?.name ?? customer.name,
@@ -1393,40 +1429,16 @@ struct CustomerDetailView: View {
         // Captured so dismissing the confirm (which clears smsConsentChoice) can't blank the choice
         // before the action reads it.
         let pendingGrant = smsConsentChoice
-        // At accessibility sizes the choice sits under its label instead of squeezing beside it.
-        let stacked = typeSize.isAccessibilitySize
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0)) : AnyLayout(HStackLayout())
-        return layout {
+        // Paper 48A: a switch like Emails. Flipping it asks first (the confirm below), because it
+        // records what the customer said; the day it was recorded is read out with the switch.
+        return Toggle(isOn: Binding(get: { smsConsent?.decision == "grant" }, set: { next in smsConsentChoice = next })) {
             Text("Texts").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                // The menu below says "Job texts" itself, so VoiceOver doesn't stop on the label alone.
-                .accessibilityHidden(canEdit)
-            if !stacked { Spacer() }
-            let granted = smsConsent?.decision == "grant"
-            if canEdit {
-                ThorbisMenu(items: [
-                    ThorbisMenuItem("Customer agreed to job texts", icon: "checkmark.message", isDisabled: granted) { smsConsentChoice = true },
-                    ThorbisMenuItem("Customer asked to stop texts", icon: "nosign", isDisabled: smsConsent?.decision == "revoke") { smsConsentChoice = false },
-                ]) {
-                    HStack(spacing: 4) {
-                        Text(smsConsentLabel)
-                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundStyle(Theme.foreground)
-                    // A real 44pt target: the frame alone left VoiceOver and the hit test on the
-                    // ~18pt words, so the shape covers the whole box for both, with room either side.
-                    .padding(.leading, stacked ? 0 : 12)
-                    .frame(minHeight: 44)
-                    .contentShape([.interaction, .accessibility], Rectangle())
-                }
-                .frame(minHeight: 44)
-                .contentShape([.interaction, .accessibility], Rectangle())
                 .accessibilityLabel("Job texts")
-                .accessibilityValue(smsConsentLabel)
-                .accessibilityHint("Record what the customer said about job texts")
-            } else {
-                Text(smsConsentLabel).foregroundStyle(Theme.foreground)
-            }
         }
+        .tint(Theme.brand)
+        .disabled(!canEdit || session.isOffline)
+        .accessibilityValue(smsConsentLabel)
+        .accessibilityHint("Record what the customer said about job texts")
         .font(Theme.font(15))
         .frame(minHeight: 44)
         .thorbisConfirm(pendingGrant == true ? "Record that the customer agreed to job texts?" : "Record that the customer asked to stop job texts?",
@@ -2492,4 +2504,39 @@ private struct CustomerActivityMark {
         formatter.unitsStyle = .abbreviated
         return formatter
     }()
+}
+
+/// Paper 48A's "Recently archived customers" row: the archived list (48H), read the way the
+/// Customers list reads it.
+private struct RecentlyArchivedCustomersPage: View {
+    @EnvironmentObject private var api: APIClient
+    @State private var records: [CustomerRecord] = []
+    @State private var loaded = false
+    @State private var error: String?
+
+    var body: some View {
+        Group {
+            if loaded {
+                ArchivedCustomersView(customers: records) { _ in await load() }
+            } else if let error {
+                ScrollView { ErrorBanner(message: error, outer: PaperCardMetrics.margin).padding(.top, 12) }
+                    .background(Theme.canvas)
+            } else {
+                ScrollView { SkeletonRows(count: 4, leading: false, inset: PaperCardMetrics.inset).paperCardMargin().padding(.top, 12) }
+                    .background(Theme.canvas)
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        do {
+            records = try await api.fieldCustomers(includeArchived: true)
+            loaded = true
+            error = nil
+        } catch is CancellationError {
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
 }

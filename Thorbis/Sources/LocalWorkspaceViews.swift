@@ -425,7 +425,17 @@ struct LocalWorkspaceView: View {
             model.bind(actorID: actorID, organizationID: organizationID)
             #if DEBUG
             // `--paper-preview-screen vehicle-detail`: open the first truck.
-            if PaperPreview.enabled, PaperPreview.screen == "vehicle-detail", section == .fleet { openedVehicle = model.rows(.fleet).first }
+            if PaperPreview.enabled, PaperPreview.screen == "vehicle-detail", section == .fleet {
+                // The preview account's book starts empty on a fresh simulator: Paper 88A's van.
+                if model.rows(.fleet).isEmpty {
+                    var van = LocalWorkspaceDraft()
+                    van.values = ["name": "Van 3", "model": "Ford Transit 250", "plate": "8XYZ412", "assignedTo": "Ramon Mendez",
+                                  "mileage": "84210", "nextOilChange": "2026-12-05", "registrationDue": "2027-06-30",
+                                  "notes": "Rear brakes squeal when cold. Pads look fine, check again at next service."]
+                    try? model.save(van, section: .fleet)
+                }
+                openedVehicle = model.rows(.fleet).first
+            }
             #endif
         }
         .thorbisDestination(item: $openedVehicle) { row in
@@ -458,6 +468,7 @@ struct LocalWorkspaceView: View {
 private struct LocalVehicleFact: Identifiable {
     let label: String
     let value: String
+    var due = false
     var id: String { label }
 }
 
@@ -486,9 +497,36 @@ private struct LocalVehicleDetail: View {
     private func facts(_ draft: LocalWorkspaceDraft, _ keys: [(key: String, label: String)]) -> [LocalVehicleFact] {
         var rows: [LocalVehicleFact] = []
         for item in keys {
-            if let value = draft.optional(item.key) { rows.append(LocalVehicleFact(label: item.label, value: value)) }
+            if let value = draft.optional(item.key) {
+                rows.append(LocalVehicleFact(label: item.label, value: Self.shown(item.key, value), due: Self.isDueSoon(item.key, value)))
+            }
         }
         return rows
+    }
+
+    /// Paper 88A prints what was typed the way people read it: "84,210 mi", "Jun 30, 2027",
+    /// "Aug 18 · oil change". Anything typed another way is shown as typed.
+    static func shown(_ key: String, _ value: String) -> String {
+        switch key {
+        case "mileage":
+            let digits = value.replacingOccurrences(of: ",", with: "")
+            if let miles = Int(digits) { return "\(miles.formatted(.number.grouping(.automatic))) mi" }
+            return value
+        case "nextOilChange":
+            guard let day = EquipmentRecord.day(value) else { return value }
+            return "\(day.formatted(.dateTime.month(.abbreviated).day())) \u{00B7} oil change"
+        case "registrationDue", "purchaseDate", "lastOilChange", "lastTireRotation", "lastNewTires":
+            guard let day = EquipmentRecord.day(value) else { return value }
+            return day.formatted(.dateTime.month(.abbreviated).day().year())
+        default:
+            return value
+        }
+    }
+
+    /// The next service reads in the warning ink once its day is within a month (or past).
+    static func isDueSoon(_ key: String, _ value: String, now: Date = Date()) -> Bool {
+        guard key == "nextOilChange", let day = EquipmentRecord.day(value) else { return false }
+        return day.timeIntervalSince(now) < 30 * 86_400
     }
 
     private func subtitle(_ draft: LocalWorkspaceDraft) -> String {
@@ -500,7 +538,11 @@ private struct LocalVehicleDetail: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { fact in
                 if fact.id != rows.first?.id { WellDivider() }
-                PaperDetailRow(label: fact.label) { Text(fact.value) }
+                // Paper 88A: the answer at 16 Medium; a service coming due in the warning ink.
+                PaperDetailRow(label: fact.label) {
+                    Text(fact.value).font(Theme.font(16, weight: .medium))
+                        .foregroundStyle(fact.due ? Theme.warning : Theme.foreground)
+                }
                     .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
             }
         }

@@ -1584,6 +1584,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-discount-authorized") { capabilities.append("invoice.discount") }
+            // The archive captures (48A's Record rows, 48B, 48H) need the archive capability.
+            if ["customer-archive", "customers-archived", "customer-record", "customer-edit"].contains(where: PaperPreview.opensSheet) { capabilities.append("customer.archive") }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-deny-document-edit") {
                 capabilities.removeAll { ["invoice.edit", "estimate.create"].contains($0) }
             }
@@ -2298,10 +2300,14 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         let longName = ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-name-long")
         let firstName = shortName ? "I" : (longName ? "Birch Community Hall and Neighborhood Services Center" : "Danielle Marlowe")
         let rows = [("0412", firstName, "412 Birchwood Ln"), ("0413", "Alex Petrov", "88 Larch Ave"), ("0414", "David Chen", "245 Rosemont Dr"), ("0415", "Elena Alvarez", "19 Fenwick Ct"), ("0416", "Mei Nakamura", "731 Cassia Way")]
-        return rows.map { ref, name, address in
+        // 48H's capture lists archived customers; 49D's (New message) needs numbers to text.
+        let archived = PaperPreview.opensSheet("customers-archived")
+            ? [("0421", "Tom Becker", "17 Larkspur Way"), ("0422", "Linda Park", "6 Fern Ct"), ("0423", "Kessler Dental", "200 Main St"), ("0424", "Greg Ostrowski", "9 Alder Creek Dr")] : []
+        let phones = PaperPreview.screen.hasPrefix("book-job") || PaperPreview.screen.hasPrefix("search") || PaperPreview.opensSheet("inbox-new-text")
+        return (rows + archived).map { ref, name, address in
             ["id": "00000000-0000-4000-8000-00000000\(ref)", "organizationId": PaperPreview.organizationID, "name": name, "address": address,
-             "accountType": "residential", "archived": false, "createdAt": "2022-03-01T12:00:00Z", "updatedAt": "2026-07-20T12:00:00Z", "billingTerms": "Due on receipt",
-             "phone": PaperPreview.screen.hasPrefix("book-job") || PaperPreview.screen.hasPrefix("search") ? "(916) 555-0\(ref.suffix(3))" : NSNull()] as [String: Any]
+             "accountType": "residential", "archived": Int(ref) ?? 0 > 420, "createdAt": "2022-03-01T12:00:00Z", "updatedAt": "2026-07-20T12:00:00Z", "billingTerms": "Due on receipt",
+             "phone": phones && !(ref == "0416" && PaperPreview.opensSheet("inbox-new-text")) ? "(916) 555-0\(ref.suffix(3))" : NSNull()] as [String: Any]
         }
     }
 }
