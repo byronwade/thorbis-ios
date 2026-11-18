@@ -191,6 +191,11 @@ struct JobDetailView: View {
     }
     /// Paper 21O "At this address", pushed from More.
     @State private var showAtAddress = false
+    /// Paper F4A "Recording voice note": the sheet, when it began and the draft as it was before.
+    @State private var showVoiceNote = false
+    @State private var voiceNoteStarted = Date()
+    @State private var voiceNoteBefore = ""
+    @State private var voiceNoteDiscarded = false
     /// Paper 22 "Add to job": the sheet, and the row picked in it (run once the sheet has gone).
     @State private var showAdd = false
     @State private var pendingAdd: (() -> Void)?
@@ -453,6 +458,18 @@ struct JobDetailView: View {
                 showAtAddress = true
                 return
             }
+            if PaperPreview.screen == "job-voice-note" {
+                try? await Task.sleep(for: .seconds(2))
+                voiceNoteStarted = Date()
+                showVoiceNote = true
+                return
+            }
+            if PaperPreview.screen == "job-cancel" {
+                try? await Task.sleep(for: .seconds(2))
+                wrapUpCancels = true
+                showWrapUp = true
+                return
+            }
             if PaperPreview.screen == "job-add" {
                 try? await Task.sleep(for: .seconds(2))
                 showAdd = true
@@ -492,6 +509,20 @@ struct JobDetailView: View {
                     showAdd = false
                 }
             }
+        } }
+        // Swiping the sheet away is Stop: the words stay in the draft, and the note field opens.
+        .sheet(isPresented: $showVoiceNote, onDismiss: {
+            dictation.stop()
+            if voiceNoteDiscarded { note = voiceNoteBefore; return }
+            guard dictation.problem != .denied else { return }
+            Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                if selectedTab == "Activity" { noteFocused = true }
+            }
+        }) { SheetSurface {
+            JobVoiceNoteSheet(dictation: dictation, text: note, before: voiceNoteBefore, started: voiceNoteStarted,
+                              onDiscard: { voiceNoteDiscarded = true; showVoiceNote = false },
+                              onStop: { showVoiceNote = false })
         } }
         .thorbisDestination(isPresented: $showTime) {
             if let job {
@@ -3497,7 +3528,13 @@ struct JobDetailView: View {
         Task {
             try? await Task.sleep(for: .milliseconds(350))
             guard selectedTab == "Activity", !dictation.isListening else { return }
+            // Paper F4A: the recording shows on its own sheet; the words still fill the note draft.
+            voiceNoteBefore = note
+            voiceNoteDiscarded = false
+            voiceNoteStarted = Date()
             await dictation.start(draft: note, isOffline: session.isOffline) { note = $0 }
+            // No microphone or speech access: the note field says so and offers Settings.
+            if dictation.isListening { showVoiceNote = true }
         }
     }
 

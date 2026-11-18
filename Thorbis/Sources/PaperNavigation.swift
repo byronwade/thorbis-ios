@@ -910,7 +910,7 @@ struct RootView: View {
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
         case "revenue", "payments-list": previewPlace(.money)
         case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
-             "job-more", "job-time", "job-add", "job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule", "job-unpaid", "job-contact",
+             "job-more", "job-time", "job-voice-note", "job-cancel", "job-add", "job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule", "job-unpaid", "job-contact",
              "job-history", "job-history-empty", "job-onsite",
              "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
             // Another preview refresh may supersede the one awaited above. Wait for its real

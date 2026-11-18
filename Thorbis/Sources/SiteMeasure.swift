@@ -257,47 +257,66 @@ struct SiteMeasureView: View {
                     Text("Measure").font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
                         .accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 0)
-                    if !session.points.isEmpty {
-                        Button { session.reset() } label: {
-                            Text("Clear").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                                .padding(.horizontal, 18).frame(minHeight: 44)
-                                .background(Theme.card, in: Capsule())
-                                .contentShape(Capsule())
-                        }
-                        .buttonStyle(PressStyle())
-                        .accessibilityIdentifier("measure-clear")
-                    } else {
-                        Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
-                    }
+                    Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
                 }
                 .padding(.horizontal, -4)
                 if let error { ErrorBanner(message: error) }
                 Spacer()
-                VStack(spacing: 12) {
+                // Paper 21N: the reading on a light pill, the hint under it, then Clear, the shutter
+                // (it saves the measured photo to the job) on one row. The pill switches the unit.
+                VStack(spacing: 14) {
                     if let distance {
-                        Text(MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale))
-                            .font(Theme.font(34, weight: .bold)).monospacedDigit()
-                            .lineLimit(1).minimumScaleFactor(0.6)
-                            .accessibilityLabel("Distance \(MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale))")
-                            .accessibilityIdentifier("measure-result")
-                        ThorbisSegmented(options: MeasureDistanceFormatter.Unit.allCases.map { ($0, $0.label) }, selection: unitBinding)
-                    }
-                    if !cameraDenied {
-                        Text(sampleMeters != nil ? "Save to add this to the job, or tap to measure again." : session.hint)
-                            .font(Theme.font(14)).foregroundStyle(Theme.subtle).multilineTextAlignment(.center)
-                    }
-                    if let distance {
-                        Button { save(distance) } label: {
-                            Label("Save to job", systemImage: "square.and.arrow.down").inkCommit()
+                        let reading = MeasureDistanceFormatter.format(meters: distance, unit: unit, locale: locale)
+                        Button { nextUnit() } label: {
+                            Text(reading).font(Theme.font(16, weight: .semibold))
+                                .foregroundStyle(Theme.canvas)
+                                .lineLimit(1).minimumScaleFactor(0.6)
+                                .padding(.horizontal, 14).frame(minHeight: 34)
+                                .background(Theme.foreground, in: Capsule())
+                                .frame(minHeight: 44).contentShape(Rectangle())
                         }
                         .buttonStyle(PressStyle())
+                        .accessibilityLabel("Distance \(reading)")
+                        .accessibilityHint("Changes the unit")
+                        .accessibilityIdentifier("measure-result")
+                    }
+                    if !cameraDenied {
+                        Text(sampleMeters != nil ? "Tap to drop a point at each end" : session.hint)
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ZStack {
+                        HStack {
+                            if !session.points.isEmpty || sampleMeters != nil {
+                                Button { session.reset() } label: {
+                                    Text("Clear").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                        .padding(.horizontal, 18).frame(minHeight: 44)
+                                        .background(Theme.card, in: Capsule())
+                                        .contentShape(Capsule())
+                                }
+                                .buttonStyle(PressStyle())
+                                .accessibilityIdentifier("measure-clear")
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        Button { if let distance { save(distance) } } label: {
+                            Circle().fill(Theme.foreground).frame(width: 58, height: 58)
+                                .padding(4)
+                                .overlay { Circle().strokeBorder(Theme.foreground, lineWidth: 3) }
+                                .frame(width: 72, height: 72)
+                                .opacity(distance == nil ? 0.35 : 1)
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(distance == nil)
+                        .accessibilityLabel("Save to job")
+                        .accessibilityHint(distance == nil ? "Measure first" : "Saves the measured photo to this job")
                         .accessibilityIdentifier("measure-save")
                     }
                 }
-                .foregroundStyle(Theme.foreground)
-                .padding(16)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 16)
                 .frame(maxWidth: .infinity)
-                .background(Theme.background, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                .background { Rectangle().fill(Theme.canvas).ignoresSafeArea(edges: .bottom) }
+                .padding(.horizontal, -PaperCardMetrics.margin).padding(.bottom, -12)
             }
             .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
         }
@@ -305,6 +324,13 @@ struct SiteMeasureView: View {
             cameraDenied = [.denied, .restricted].contains(AVCaptureDevice.authorizationStatus(for: .video)) && sampleMeters == nil
         }
         .onDisappear { session.pause() }
+    }
+
+    /// The reading's pill steps through the units (ft in, in, m / cm); the choice is remembered.
+    private func nextUnit() {
+        let all = MeasureDistanceFormatter.Unit.allCases
+        guard let at = all.firstIndex(of: unit) else { return }
+        storedUnit = all[(at + 1) % all.count].rawValue
     }
 
     private func save(_ distance: Double) {

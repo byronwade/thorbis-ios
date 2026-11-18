@@ -276,7 +276,11 @@ struct DataPlateScannerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) {
-                    Button(saved ? "Done" : "Close", action: finish).accessibilityIdentifier("data-plate-close")
+                    // Paper 21M: a 44pt card circle with a cross.
+                    Button(action: finish) { PaperCircleLabel(symbol: "xmark", size: 44, fill: Theme.card) }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel(saved ? "Done" : "Close")
+                        .accessibilityIdentifier("data-plate-close")
                 }
             }
             .safeAreaInset(edge: .bottom) { commitBar }
@@ -437,6 +441,33 @@ struct DataPlateScannerSheet: View {
                     finish()
                 }
             })
+        } else if canEditEquipment, !saved {
+            // Paper 21M: "Save to equipment" is the commit; the note is the quiet pill under it.
+            // Neither is pre-disabled when nothing has been read: pressing says what to do.
+            VStack(spacing: 0) {
+                PaperActionBar(title: "Save to equipment", identifier: "data-plate-equipment", action: {
+                    if model.isEmpty && serial.isEmpty && brand.isEmpty {
+                        problem = "Scan the tag, or type the brand, model or serial."
+                    } else {
+                        Task { await openEquipment() }
+                    }
+                })
+                if JobNotePoster.canPost(session) {
+                    Button {
+                        if noteText == nil { problem = "Scan the tag, or type the brand, model or serial, to add a note." }
+                        else { Task { await saveNote() } }
+                    } label: {
+                        Text("Add to job notes").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(Theme.card, in: Capsule())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy)
+                    .accessibilityIdentifier("data-plate-note")
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 8)
+                }
+            }
+            .background(Theme.background)
         } else {
             // Not pre-disabled when nothing has been read yet: pressing says what to do, under the
             // fields. Without the note permission it stays off, and the sentence under it says why.

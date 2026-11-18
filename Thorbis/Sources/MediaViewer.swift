@@ -411,11 +411,15 @@ struct MediaCompareView: View {
     @StateObject private var loader: MediaImageLoader
     @State private var beforeID: String
     @State private var afterID: String
-    @State private var mode = "slider"
     @State private var split: CGFloat = 0.5
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     /// The side-by-side picture handed to the share sheet (Paper 21P "Share with customer").
     @State private var shared: MediaShareFiles?
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// Paper 21P is the slider alone. A handle can't be dragged with VoiceOver, so there the two
+    /// photos sit side by side instead.
+    private var mode: String { voiceOver ? "side" : "slider" }
 
     init(befores: [MediaAssetRecord], afters: [MediaAssetRecord], load: @escaping MediaFileLoader, onClose: @escaping () -> Void) {
         self.befores = befores; self.afters = afters; self.load = load; self.onClose = onClose
@@ -440,7 +444,6 @@ struct MediaCompareView: View {
                 .lineLimit(1).minimumScaleFactor(0.7)
                 .accessibilityAddTraits(.isHeader)
                 .padding(.horizontal, 4).padding(.top, 2)
-            ThorbisSegmented(options: [("slider", "Slider"), ("side", "Side by side")], selection: $mode)
             GeometryReader { proxy in
                 Group {
                     if mode == "slider" { slider(size: proxy.size) } else { sideBySide(size: proxy.size) }
@@ -454,8 +457,12 @@ struct MediaCompareView: View {
                 .font(Theme.font(14)).foregroundStyle(Theme.muted)
                 .padding(.horizontal, 4)
             // Paper 21P: the commit shares the pair. It is one picture, before on the left.
+            // Paper: a quiet card pill, 50 tall, 16 Semibold.
             Button { shareComparison() } label: {
-                Text("Share with customer").inkCommit(enabled: canShare)
+                Text("Share with customer").font(Theme.font(16, weight: .semibold))
+                    .foregroundStyle(canShare ? Theme.foreground : Theme.muted)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Theme.card, in: Capsule())
             }
             .buttonStyle(PressStyle())
             .disabled(!canShare)
