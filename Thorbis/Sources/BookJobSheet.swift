@@ -176,7 +176,6 @@ struct NewJobSheet: View {
                         VStack(alignment: .leading, spacing: 10) {
                             composerHead
                             composerChips(reader)
-                            quickPicks
                         }
                         .padding(.top, 6)
                         callerSection.id("book-job-caller-section")
@@ -377,30 +376,6 @@ struct NewJobSheet: View {
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(spoken)
-    }
-
-    /// Quick picks while the title is still blank: this workspace's own recent titles.
-    @ViewBuilder private var quickPicks: some View {
-        let picks = draft.title.trimmingCharacters(in: .whitespaces).isEmpty ? BookJobSearch.commonTitles(store.jobs, limit: 5) : []
-        if !picks.isEmpty && savedJob == nil {
-            FlowRow(spacing: 6, lineSpacing: 6) {
-                ForEach(picks, id: \.self) { title in
-                    Button { draft.title = title; error = nil } label: {
-                        // Paper's choice chip: 40 tall on the field fill, 14 Medium.
-                        Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .lineLimit(1).fixedSize()
-                            .padding(.horizontal, 12).frame(height: 40)
-                            .background(Theme.fill, in: Capsule())
-                            .padding(.vertical, 2).contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Use \(title)")
-                }
-            }
-            .padding(.horizontal, 16 - Theme.gutter)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Recent job titles")
-        }
     }
 
     // MARK: Who's calling
