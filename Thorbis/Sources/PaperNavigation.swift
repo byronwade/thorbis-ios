@@ -910,7 +910,7 @@ struct RootView: View {
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
         case "revenue", "payments-list": previewPlace(.money)
         case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
-             "job-more", "job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule", "job-unpaid", "job-contact",
+             "job-more", "job-time", "job-voice-note", "job-cancel", "job-add", "job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule", "job-unpaid", "job-contact",
              "job-history", "job-history-empty", "job-onsite",
              "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
             // Another preview refresh may supersede the one awaited above. Wait for its real
@@ -928,6 +928,9 @@ struct RootView: View {
                 if PaperPreview.screen == "job-closeout" || PaperPreview.screen == "job-unpaid" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
                 // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
+                if PaperPreview.screen == "job-contact", let customerID = job.customerId {
+                    jobsPath.append(PaperRoute.contact(customerID: customerID, contactID: "00000000-0000-4000-8000-000000008002"))
+                }
             }
         case "customer", "customer-activity", "customer-details", "customer-records", "customer-jobs", "customer-money", "customer-media", "customer-membership":
             if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {

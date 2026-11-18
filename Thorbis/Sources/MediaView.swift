@@ -93,6 +93,9 @@ struct JobMediaView: View {
     /// A short clip (60 s at most) recorded with the system camera, filed under Documents.
     @State private var showVideo = false
     @State private var videoNotice: String?
+    /// Paper 21W "Add document": the sheet, and the source picked in it (opened once the sheet has gone).
+    @State private var showAddDocument = false
+    @State private var pendingDocumentSource: (() -> Void)?
     /// The stage the quick tag step preselects ("Before", "After", "Other"). Paper 21C.
     @State private var stage = "Before"
     @State private var filter: MediaFilter = .all
@@ -189,8 +192,9 @@ struct JobMediaView: View {
                 if showsPhotos { photoSections }
                 if showsDocuments { documentSection }
                 loadMoreRow
-                if canAdd && !(allPhotos.isEmpty && documents.isEmpty) {
-                    Text(videoNotice ?? "Photos, PDFs and video clips up to 8 MB.").font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
+                // Paper 21A has no caption under the grid; only what happened to a clip is said.
+                if canAdd, let videoNotice {
+                    Text(videoNotice).font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
                 }
             }
             // Paper v2: cards and tiles sit 16 in from the screen's edges.
@@ -204,6 +208,16 @@ struct JobMediaView: View {
         }
         .sheet(isPresented: $showLegacyRecovery) { SheetSurface {
             LegacyMediaRecoveryView(jobID: jobID, workspaceName: session.activeOrganization?.name ?? "Current workspace")
+        } }
+        .sheet(isPresented: $showAddDocument, onDismiss: { pendingDocumentSource?(); pendingDocumentSource = nil }) { SheetSurface {
+            MediaAddDocumentSheet(jobNumber: "JOB-\(jobID.suffix(4).uppercased())", canScan: tools.scan) { source in
+                switch source {
+                case .scan: pendingDocumentSource = { showScanner = true }
+                case .photos: pendingDocumentSource = { showLibrary = true }
+                case .files: pendingDocumentSource = { importDocument = true }
+                }
+                showAddDocument = false
+            }
         } }
         .fullScreenCover(isPresented: $showScanner) {
             DocumentScanner { pdf in
@@ -757,7 +771,7 @@ struct JobMediaView: View {
                 // Paper 21A: "Documents · 2" with a brand plus that adds a PDF.
                 JobPanelLabel(title: hasMore ? "Documents loaded" : "Documents", count: "\(documents.count + waitingDocuments.count)",
                               actionTitle: canAdd ? "Add a PDF" : nil, actionSymbol: "plus",
-                              actionIdentifier: "job-media-add-document", action: { importDocument = true })
+                              actionIdentifier: "job-media-add-document", action: { showAddDocument = true })
                 JobPanel {
                     ForEach(waitingDocuments) { media in
                         let state = MediaUploadState.of(media, in: pendingMedia)
@@ -1274,6 +1288,7 @@ struct JobMediaView: View {
         case "measure": showMeasure = true
         case "untagged": filter = .untagged
         case "documents": filter = .documents
+        case "add-document": showAddDocument = true
         default: break
         }
     }
@@ -1473,4 +1488,94 @@ enum JobPhotoDateGroups {
         if !unavailable.isEmpty { groups.append(Group(day: nil, photos: unavailable)) }
         return groups
     }
+}
+
+/// Paper 21W "Add document": a bottom sheet with Cancel and the title on one line, "Goes in
+/// Documents on JOB-2214" under them, then each way to add as its own radius-18 card: a 44pt tile
+/// (the scan's in brand), the name at 16 Semibold over what it does at 13 muted. Paper's "Type" and
+/// "Danielle can see it" are left out: a job file has no type or customer visibility on the server.
+struct MediaAddDocumentSheet: View {
+    enum Source { case scan, photos, files }
+    let jobNumber: String
+    let canScan: Bool
+    let choose: (Source) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @State private var height: CGFloat = 380
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                ZStack {
+                    Text("Add document").font(Theme.font(17, weight: .semibold))
+                        .accessibilityAddTraits(.isHeader)
+                    HStack {
+                        Button { dismiss() } label: {
+                            Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .padding(.horizontal, 16).frame(minHeight: 44)
+                                .background(Theme.quietFill, in: Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("media-add-document-cancel")
+                        Spacer()
+                    }
+                }
+                Text("Goes in Documents on \(jobNumber)").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 2).padding(.bottom, 14)
+                VStack(spacing: 8) {
+                    if canScan {
+                        row("Camera scan", detail: "Turns paper into a clean PDF", brand: true, source: .scan) {
+                            PaperIcon(.documentScan, size: 22, color: Theme.brandText)
+                        }
+                    }
+                    row("Photos", detail: "Pick from your photo library", brand: false, source: .photos) {
+                        PaperIcon(.jobPhoto, size: 22)
+                    }
+                    row("Files", detail: "A PDF from Files", brand: false, source: .files) {
+                        Image(systemName: "folder").font(.system(size: 18, weight: .regular))
+                    }
+                }
+                Text("Up to 8 MB. Scans are saved as PDF.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4).padding(.top, 12)
+            }
+            .padding(.horizontal, 16).padding(.top, 24).padding(.bottom, 12)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .foregroundStyle(Theme.foreground)
+        .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.height(height)])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(30)
+        .accessibilityIdentifier("media-add-document")
+    }
+
+    private func row<Mark: View>(_ title: String, detail: String, brand: Bool, source: Source, @ViewBuilder mark: () -> Mark) -> some View {
+        Button { choose(source) } label: {
+            HStack(spacing: 14) {
+                mark()
+                    .frame(width: 44, height: 44)
+                    .background(brand ? Theme.brandSurface : Theme.quietFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).font(Theme.font(16, weight: .semibold))
+                    Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+    }
+}
+
+extension PaperGlyph {
+    /// Paper 21W: the camera scan tile's frame-and-line mark.
+    static let documentScan = PaperGlyph(box: 22, [.stroke("M3 7V5a2 2 0 0 1 2-2h2M15 3h2a2 2 0 0 1 2 2v2M19 15v2a2 2 0 0 1-2 2h-2M7 19H5a2 2 0 0 1-2-2v-2M6 11h10", 1.7)])
 }

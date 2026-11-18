@@ -1768,6 +1768,10 @@ struct JobFollowUpsView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var store: Store
+    /// Paper 21H's reasons, in its order. "Other" opens a field to say why.
+    private static let reasons = ["Part on order", "Second visit", "Seasonal check", "Other"]
+    @State private var reasonChoice: String?
     @State private var records: [FieldFollowUpRecord] = []
     @State private var loading = true
     @State private var busy = false
@@ -1789,14 +1793,54 @@ struct JobFollowUpsView: View {
                 OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
                 // Paper 21H: the 34 Bold title and the job under it in 15 muted.
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Follow-ups").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                    Text("Book a follow-up").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .lineLimit(2).minimumScaleFactor(0.7)
                         .accessibilityAddTraits(.isHeader)
-                    Text("JOB-\(jobID.suffix(4).uppercased())").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text(jobLine).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 16)
                 if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -PaperCardMetrics.margin) }
                 if let savedNote {
                     Text(savedNote).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.bottom, 10).padding(.horizontal, 4)
+                }
+                if session.can("job.edit", feature: "jobs") {
+                    // Paper 21H: "Reason" over its chips, then the note. Paper's "Open times" needs
+                    // the office's free slots, which the server doesn't list, so the request goes to
+                    // the office to book (Paper's "Can't find a time?" path).
+                    Text("Reason").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 4).padding(.bottom, 8)
+                        .accessibilityAddTraits(.isHeader)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Self.reasons, id: \.self) { option in
+                                PaperChoiceChip(title: option, isOn: reasonChoice == option) {
+                                    reasonChoice = option
+                                    reason = option == "Other" ? "" : option
+                                    reasonProblem = nil
+                                    if option == "Other" { followUpFocus = 0 }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, PaperCardMetrics.margin)
+                    }
+                    .padding(.horizontal, -PaperCardMetrics.margin)
+                    if reasonChoice == "Other" {
+                        followUpField("What happened?", example: "Part on order, customer away until Friday\u{2026}", text: $reason,
+                                      error: reasonProblem, focusID: 0).padding(.top, 10)
+                    } else if let reasonProblem {
+                        FieldProblem(message: reasonProblem).padding(.top, 6)
+                    }
+                    ThorbisSegmented(options: [
+                        (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
+                        (FieldFollowUpRequest.Kind.notifyOffice, "Notify office"),
+                    ], selection: $kind)
+                    .padding(.top, 16)
+                    followUpField(nil, example: "Note for the visit", text: $nextAction,
+                                  error: nextProblem, focusID: 1).padding(.top, 12)
+                    Text("A return-visit request goes to the office to book; it doesn\u{2019}t reserve a time.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8).padding(.horizontal, 4)
+                        .padding(.bottom, 20)
                 }
                 let waiting = outbox.pendingFollowUps(for: jobID)
                 if !waiting.isEmpty {
@@ -1830,20 +1874,6 @@ struct JobFollowUpsView: View {
                     }
                     .padding(.bottom, 20)
                 }
-                if session.can("job.edit", feature: "jobs") {
-                    PaperGroupHeader(title: "New follow-up").padding(.horizontal, 4)
-                    ThorbisSegmented(options: [
-                        (FieldFollowUpRequest.Kind.notifyOffice, "Notify office"),
-                        (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
-                    ], selection: $kind)
-                    .padding(.bottom, 10)
-                    followUpField("What happened?", example: "Part on order, customer away until Friday…", text: $reason,
-                                  error: reasonProblem, focusID: 0)
-                    followUpField("What needs to happen next?", example: "Book a return visit to fit the part…", text: $nextAction,
-                                  error: nextProblem, focusID: 1).padding(.top, 12)
-                    Text("A return-visit request goes to the office to book; it doesn't reserve a time.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8).padding(.horizontal, 4)
-                }
                 if !loading && records.isEmpty && !session.can("job.edit", feature: "jobs") {
                     PaperEmptyState(symbol: "list.bullet", title: "No follow-ups on this job")
                 }
@@ -1860,7 +1890,7 @@ struct JobFollowUpsView: View {
         .safeAreaInset(edge: .bottom) {
             if session.can("job.edit", feature: "jobs") {
                 // Never pre-disabled: pressed with a question unanswered, it says which under it.
-                PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy) {
+                PaperActionBar(title: kind == .officeScheduling ? "Ask the office to schedule" : "Send to the office", busy: busy) {
                     if showFollowUpProblems() { Task { await create() } }
                 }
             }
@@ -1870,15 +1900,33 @@ struct JobFollowUpsView: View {
     }
 
     /// The question stays above the field once typing starts (GR-26); the placeholder is only an example.
-    private func followUpField(_ label: String, example: String, text: Binding<String>, error: String?, focusID: Int) -> some View {
-        PaperFormField(label, error: error) {
-            TextField(example, text: text, prompt: .placeholder(example), axis: .vertical)
-                .font(Theme.font(16)).lineLimit(2...5)
-                .fieldWell()
-                .focused($followUpFocus, equals: focusID)
-                .onChange(of: text.wrappedValue) { _, _ in if focusID == 0 { reasonProblem = nil } else { nextProblem = nil } }
-                .accessibilityLabel(label)
+    private func followUpField(_ label: String?, example: String, text: Binding<String>, error: String?, focusID: Int) -> some View {
+        let field = TextField(example, text: text, prompt: .placeholder(example), axis: .vertical)
+            .font(Theme.font(16)).lineLimit(2...5)
+            .fieldWell()
+            .focused($followUpFocus, equals: focusID)
+            .onChange(of: text.wrappedValue) { _, _ in if focusID == 0 { reasonProblem = nil } else { nextProblem = nil } }
+            .accessibilityLabel(label ?? example)
+        return Group {
+            if let label {
+                PaperFormField(label, error: error) { field }
+            } else {
+                // Paper 21H "Note for the visit": the field alone, its name as the placeholder.
+                VStack(alignment: .leading, spacing: 6) {
+                    field
+                    if let error { FieldProblem(message: error) }
+                }
+            }
         }
+    }
+
+    /// Paper 21H's second line: "AC not cooling · Danielle Marlowe"; the job's number until it loads.
+    private var jobLine: String {
+        let number = "JOB-\(jobID.suffix(4).uppercased())"
+        guard let job = store.jobs.first(where: { $0.id == jobID }) else { return number }
+        let customer = store.customerName(job.customerId)
+        let parts = [job.title, customer == "Customer" ? "" : customer].filter { !$0.isEmpty }
+        return parts.isEmpty ? number : parts.joined(separator: " \u{00B7} ")
     }
 
     /// Says what's missing or too long under each question and moves to the first; true when ready.
@@ -1888,9 +1936,9 @@ struct JobFollowUpsView: View {
             if trimmed.isEmpty { return missing }
             return text.utf16.count > 2000 ? "Keep this to 2,000 characters." : nil
         }
-        reasonProblem = problem(reason, missing: "Say what happened, like \u{201C}Part on order.\u{201D}")
-        nextProblem = problem(nextAction, missing: "Say what needs to happen next, like \u{201C}Book a return visit.\u{201D}")
-        if reasonProblem != nil { followUpFocus = 0 } else if nextProblem != nil { followUpFocus = 1 }
+        reasonProblem = problem(reason, missing: reasonChoice == "Other" ? "Say what happened, like \u{201C}Part on order.\u{201D}" : "Pick a reason.")
+        nextProblem = problem(nextAction, missing: "Add a note for the visit, like \u{201C}Fit the new capacitor.\u{201D}")
+        if reasonProblem != nil { if reasonChoice == "Other" { followUpFocus = 0 } } else if nextProblem != nil { followUpFocus = 1 }
         return reasonProblem == nil && nextProblem == nil
     }
 
@@ -1956,6 +2004,7 @@ struct JobFollowUpsView: View {
                 return
             }
             reason = ""
+            reasonChoice = nil
             nextAction = ""
             error = nil
             savedNote = "Saved on this phone · sends to the office when you’re back online."
@@ -1964,6 +2013,7 @@ struct JobFollowUpsView: View {
         do {
             _ = try await api.requestFieldFollowUp(jobID, request: .init(kind: kind, reason: payload.reason, nextAction: payload.nextAction))
             reason = ""
+            reasonChoice = nil
             nextAction = ""
             await load()
         } catch is CancellationError {} catch {

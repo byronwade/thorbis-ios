@@ -306,44 +306,77 @@ struct CustomerContactDetailView: View {
     let customerID: String
     let contactID: String
     @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var store: Store
+    @Environment(\.openURL) private var openURL
+    @Environment(\.inboxText) private var inboxText
+    @Environment(\.inboxEmail) private var inboxEmail
     @State private var contact: CustomerContactRecord?
     @State private var error: String?
     @State private var loading = true
 
     var body: some View {
         ScrollView {
-            // Paper record: the name in 34 Bold with a 15 muted line, then the ways to reach them on one card.
+            // Paper 26B "Contact": initials on a 60pt circle beside the name (28 Bold) and "Spouse ·
+            // Danielle Marlowe's account", Call, Text and Email as three card tiles, then how to
+            // reach them on one card. Paper's permissions, "Linked to" and "Remove from account"
+            // have nothing behind them on the server yet, so they are left out.
             VStack(alignment: .leading, spacing: 0) {
                 if loading { SkeletonRows(count: 3, inset: 0).padding(.horizontal, 4) }
                 if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin) }
                 if let contact {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(contact.name).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                            .lineLimit(2).minimumScaleFactor(0.7)
-                            .foregroundStyle(Theme.foreground)
-                            .accessibilityAddTraits(.isHeader)
-                        if let role = contact.role, !role.isEmpty {
-                            Text(role).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        }
-                    }
-                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.bottom, 16)
                     let phone = filled(contact.phone)
                     let email = filled(contact.email)
-                    if phone != nil || email != nil {
-                        PaperCard {
-                            if let phone { labeled("Phone", phone) }
-                            if phone != nil, email != nil { WellDivider() }
-                            if let email { labeled("Email", email) }
+                    let reach = JobReach(phone: phone, email: email)
+                    HStack(spacing: 14) {
+                        Text(initials(contact.name))
+                            .font(Theme.font(20, weight: .semibold))
+                            .foregroundStyle(Theme.subtle)
+                            .frame(width: 60, height: 60)
+                            .background(Theme.quietFill, in: Circle())
+                            .dynamicTypeSize(...DynamicTypeSize.large)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(contact.name).font(Theme.font(28, weight: .bold)).tracking(-0.56)
+                                .lineLimit(2).minimumScaleFactor(0.7)
+                                .foregroundStyle(Theme.foreground)
+                                .accessibilityAddTraits(.isHeader)
+                            if let line = identityLine(contact) {
+                                Text(line).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
+                    }
+                    .padding(.horizontal, 4)
+                    if !reach.isEmpty {
+                        HStack(spacing: 8) {
+                            if let call = reach.call { tile("Call", glyph: .contactCall) { openURL(call) } }
+                            if let text = reach.text { tile("Text", glyph: .contactText) { inboxText(text, name: contact.name, openURL: openURL) } }
+                            if let mail = reach.email {
+                                tile("Email", glyph: .contactEmail) { inboxEmail(mail, context: "customer:\(customerID):contact:\(contact.id)") }
+                            }
+                        }
+                        .padding(.top, 18)
+                    }
+                    if phone != nil || email != nil {
+                        VStack(spacing: 0) {
+                            if let phone { labeled("Mobile", phone, first: true) }
+                            if let email { labeled("Email", email, first: phone == nil) }
+                        }
+                        .panelBackground(cornerRadius: Theme.cardRadius)
+                        .padding(.top, 18)
+                    }
+                    if contact.primary {
+                        Text("\(firstName(contact.name)) is the primary contact.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, 4).padding(.top, 12)
                     }
                 }
             }
             .padding(.horizontal, PaperCardMetrics.margin)
-            .padding(.vertical, 16)
+            .padding(.top, 16).padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.canvas)
-        .navigationTitle("Contact")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
@@ -353,14 +386,43 @@ struct CustomerContactDetailView: View {
         return value
     }
 
-    /// One card row: the 14 muted label over its 16 Medium value.
-    private func labeled(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title).font(Theme.font(14)).foregroundStyle(Theme.muted)
-            Text(value).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground).textSelection(.enabled)
+    private func firstName(_ name: String) -> String {
+        name.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? name
+    }
+
+    /// "Spouse · Danielle Marlowe's account": the role, then whose account they are on.
+    private func identityLine(_ contact: CustomerContactRecord) -> String? {
+        let owner = store.customerName(customerID)
+        let account = owner == "Customer" || owner == contact.name ? nil : "\(owner)\u{2019}s account"
+        let parts = [filled(contact.role), account].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// Paper: a card tile, radius 18, a 20pt brand glyph 4 over the word at 14 Medium.
+    private func tile(_ title: String, glyph: PaperGlyph, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                PaperIcon(glyph, size: 20, color: Theme.brandText)
+                Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+            }
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 68)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 9)
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .buttonStyle(PressStyle())
+    }
+
+    /// One card row: the 13 muted label 2 over its 17 Medium value, 12 above and below.
+    private func labeled(_ title: String, _ value: String, first: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(value).font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { if !first { Rectangle().fill(Theme.border).frame(height: 1) } }
+        .accessibilityElement(children: .combine)
     }
 
     private func load() async {
