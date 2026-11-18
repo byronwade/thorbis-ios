@@ -120,6 +120,7 @@ struct TeamView: View {
     @State private var removing: RoleMember?
     @State private var openingInvite: TeamInvitation?
     @State private var showingRoles = false
+    @State private var showingOwnership = false
     private var canInvite: Bool { session.can("organization.members.manage") }
     /// Changing someone's access needs both owner capabilities, the same pair the server checks.
     private var canManage: Bool {
@@ -261,12 +262,14 @@ struct TeamView: View {
         .thorbisDestination(item: $openingInvite) { invitation in
             TeamInviteDetailView(invitation: invitation) { await load() }
         }
-        .sheet(isPresented: $inviting) { SheetSurface {
+        .sheet(isPresented: $inviting) {
             InviteMemberSheet { sent in
                 notice = sent.delivery == "sent" ? "Invite sent to \(sent.email)." : "Invite created for \(sent.email). Email isn't set up yet, so share the link from the web."
                 await load()
             }
-        } }
+            // Paper 62C draws the invite as a full page on the app's ground.
+            .paperPageGround()
+        }
         .safeAreaInset(edge: .top) {
             if let notice {
                 Text(notice).font(Theme.font(13)).foregroundStyle(Theme.foreground)
@@ -287,6 +290,7 @@ struct TeamView: View {
             // Screenshots of the pushed screens: the first custom role, the first person who is not the owner.
             if PaperPreview.enabled, PaperPreview.screen == "role-editor" { editingRoleID = customRoles.first?.id }
             if PaperPreview.enabled, PaperPreview.screen == "team-roles" { showingRoles = true }
+            if PaperPreview.enabled, PaperPreview.screen == "team-ownership" { showingOwnership = true }
             if PaperPreview.enabled, PaperPreview.screen == "team-invite-detail" {
                 // Screenshot only: the fixtures carry no pending invite.
                 openingInvite = invitations.first ?? TeamInvitation(
@@ -307,6 +311,9 @@ struct TeamView: View {
         }, onError: { message in error = message })
         .thorbisDestination(item: $opening) { member in
             MemberAccessView(member: member) { await load() }
+        }
+        .thorbisDestination(isPresented: $showingOwnership) {
+            OwnershipView(members: members) { await load() }
         }
         .thorbisDestination(isPresented: $showingRoles) {
             TeamRolesView(members: members, roles: customRoles) { await load() }
@@ -375,8 +382,13 @@ extension TeamView {
 
     /// Paper 62's •••: the Roles page (Paper 61D, each role into its editor), then New role.
     fileprivate var roleItems: [ThorbisMenuItem] {
-        [ThorbisMenuItem("Roles", icon: "person.badge.key", subtitle: "What each role can see and do") { showingRoles = true },
-         ThorbisMenuItem("New role", icon: "plus") { newRoleName = ""; naming = true }]
+        var items = [ThorbisMenuItem("Roles", icon: "person.badge.key", subtitle: "What each role can see and do") { showingRoles = true },
+                     ThorbisMenuItem("New role", icon: "plus") { newRoleName = ""; naming = true }]
+        // Paper 62A: the owner's page for handing the company over.
+        if members.contains(where: { OwnershipTransferRules.canOffer($0, session: session) }) {
+            items.append(ThorbisMenuItem("Ownership", icon: "crown", subtitle: "Who owns the company") { showingOwnership = true })
+        }
+        return items
     }
 
     /// Paper 62 Invited: a dashed initial, the email, when it was sent, and "Pending" in the warning

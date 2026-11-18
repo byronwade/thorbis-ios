@@ -242,7 +242,7 @@ struct SetupWizardView: View {
             PriceBookItemEditor(api: api, existing: nil) { Task { await loadItems() } }
         }
         .sheet(isPresented: $inviting) {
-            InviteMemberSheet { invitation in invites.insert(invitation, at: 0) }
+            InviteMemberSheet { invitation in invites.insert(invitation, at: 0) }.paperPageGround()
         }
         .sheet(isPresented: $startingJob) { SheetSurface { NewJobSheet() } }
         .sheet(isPresented: $startingCustomer) { SheetSurface { NewCustomerSheet() } }

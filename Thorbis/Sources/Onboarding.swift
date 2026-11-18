@@ -1240,9 +1240,9 @@ struct BusinessSetupView: View {
             case .team: EmptyView()
             }
         }
-        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) { SheetSurface {
-            InviteMemberSheet { _ in }
-        } }
+        .sheet(isPresented: $inviting, onDismiss: { Task { await model.refresh(api: api, session: session) } }) {
+            InviteMemberSheet { _ in }.paperPageGround()
+        }
         .onChange(of: opened) { old, new in
             // Back from a step: read it again, so its word changes to Done.
             if old != nil, new == nil { Task { await model.refresh(api: api, session: session) } }

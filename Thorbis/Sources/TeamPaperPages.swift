@@ -259,3 +259,110 @@ struct MemberOffboardSheet: View {
         }, onError: { message in error = message })
     }
 }
+
+/// Paper 62A "Ownership": who owns the company, then handing it to someone on the team. The
+/// server transfers at once (there is no request to accept) and has no route to close an
+/// organization, so the note says what really happens and Paper's Danger zone is left out.
+struct OwnershipView: View {
+    let members: [RoleMember]
+    let onChanged: () async -> Void
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.dismiss) private var dismiss
+    @State private var pickedID: String?
+    @State private var transferring: RoleMember?
+    @State private var error: String?
+
+    private var owner: RoleMember? { members.first { $0.member.isLegalOwner } }
+    private var candidates: [RoleMember] {
+        members.filter { OwnershipTransferRules.canOffer($0, session: session) }
+            .sorted { $0.member.displayName.localizedCaseInsensitiveCompare($1.member.displayName) == .orderedAscending }
+    }
+    private var picked: RoleMember? { candidates.first { $0.id == pickedID } }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ownership").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .accessibilityAddTraits(.isHeader)
+                    if let company = session.activeOrganization?.name {
+                        Text(company).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    }
+                }
+                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                if let owner {
+                    label("Owner")
+                    HStack(alignment: .center, spacing: 12) {
+                        Text(initials(owner.member.displayName))
+                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                            .frame(width: 40, height: 40).background(Theme.brand.opacity(0.24), in: Circle())
+                            .dynamicTypeSize(...DynamicTypeSize.large)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(owner.member.displayName).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            Text("Owner").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, PaperCardMetrics.margin)
+                    .accessibilityElement(children: .combine)
+                }
+                if !candidates.isEmpty {
+                    label("Transfer ownership")
+                    VStack(alignment: .leading, spacing: 12) {
+                        ThorbisMenu(items: candidates.map { member in
+                            ThorbisMenuItem(member.member.displayName, subtitle: member.roleLabel, isSelected: member.id == pickedID) { pickedID = member.id }
+                        }, title: "New owner", accessibilityLabel: "New owner, \(picked?.member.displayName ?? "not chosen")") {
+                            HStack(spacing: 10) {
+                                Text("New owner").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text(picked?.member.displayName ?? "Choose").font(Theme.font(16, weight: .medium))
+                                    .foregroundStyle(picked == nil ? Theme.muted : Theme.foreground).lineLimit(1)
+                                PaperIcon(.chevronDown, size: 16, color: Theme.muted)
+                            }
+                            .padding(.horizontal, 14).frame(minHeight: 50)
+                            .background(Theme.foreground.opacity(0.09), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .accessibilityIdentifier("ownership-new-owner")
+                        Text("\(picked.map { String($0.member.displayName.split(separator: " ").first ?? "They") } ?? "They") can do everything, including billing. You become an Admin.")
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4)
+                        Button {
+                            if let picked { transferring = picked } else { error = "Choose who the new owner is first." }
+                        } label: {
+                            Text("Transfer ownership").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                .frame(maxWidth: .infinity, minHeight: 50)
+                                .background(Theme.brand.opacity(0.24), in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityIdentifier("ownership-transfer")
+                    }
+                    .padding(12)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, PaperCardMetrics.margin)
+                }
+                if let error { ErrorBanner(message: error).padding(.top, 12) }
+            }
+            .padding(.bottom, 44)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.canvas)
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: pickedID) { _, _ in error = nil }
+        .transferOwnershipPrompt($transferring, onTransferred: {
+            await onChanged()
+            dismiss()
+        }, onError: { message in error = message })
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, Theme.gutter).padding(.top, 22).padding(.bottom, 8)
+    }
+}
