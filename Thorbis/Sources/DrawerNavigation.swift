@@ -17,6 +17,13 @@ struct DrawerMenuCircle: View {
     var size: CGFloat = 44
 
     var body: some View {
+        if control.showsCircle { circle } else {
+            // The bottom bar's More opens the drawer; the row keeps the circle's height.
+            Color.clear.frame(width: 0, height: size).accessibilityHidden(true)
+        }
+    }
+
+    private var circle: some View {
         Button(action: control.open) {
             // Paper 18: two lines, the lower one short; the 9pt brand dot rides the circle's top
             // right (1 in), ringed 2pt in the canvas so it reads as cut out of the circle.
