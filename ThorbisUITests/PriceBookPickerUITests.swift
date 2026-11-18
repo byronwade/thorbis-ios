@@ -17,6 +17,7 @@ final class PriceBookPickerUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-partial"]
         app.launch()
         openPicker(in: app, addItem: "invoice-add-item")
+        settleSearchFocus(in: app)
         let notice = app.staticTexts["price-book-partial"]
         XCTAssertTrue(notice.waitForExistence(timeout: 20))
         XCTAssertTrue(notice.label.contains("Search covers loaded items only"))
@@ -26,8 +27,11 @@ final class PriceBookPickerUITests: XCTestCase {
         loadingShot.name = "Loaded items with partial catalog notice"
         loadingShot.lifetime = .keepAlways
         add(loadingShot)
-        for _ in 0..<8 where !item.isHittable { app.swipeUp() }
+        reveal(item, in: app)
         item.tap()
+        let one = app.buttons.matching(identifier: item.identifier)
+            .matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch
+        XCTAssertTrue(one.waitForExistence(timeout: 5), "The loaded item is the one added")
         XCTAssertTrue(app.buttons["price-book-done"].label.contains("1 item"))
         let search = app.textFields["invoice-catalog-search"]
         search.tap()
@@ -152,8 +156,10 @@ final class PriceBookPickerUITests: XCTestCase {
 
     func testInvoicePickerKeepsFirstPageSelectionOpen() {
         let app = openPriceBook()
+        settleSearchFocus(in: app)
         let item = app.buttons["price-book-item-00000000-0000-4000-8000-000000009701"]
         XCTAssertTrue(item.waitForExistence(timeout: 10))
+        reveal(item, in: app)
         item.tap()
         let added = app.buttons.matching(identifier: item.identifier)
             .matching(NSPredicate(format: "value == %@", "1 in draft")).firstMatch
@@ -333,11 +339,31 @@ final class PriceBookPickerUITests: XCTestCase {
 
     /// Opens the picker from the document's "Add item" row.
     private func openPicker(in app: XCUIApplication, addItem: String) {
-        let add = app.buttons.matching(identifier: addItem).firstMatch
-        XCTAssertTrue(add.waitForExistence(timeout: 20))
-        for _ in 0..<8 where !add.isHittable { app.swipeUp() }
-        add.tap()
-        XCTAssertTrue(app.buttons["price-book-done"].waitForExistence(timeout: 5), "Add item opens the price book")
+        app.openPriceBook(from: app.buttons.matching(identifier: addItem).firstMatch)
+    }
+
+    /// The search field takes focus 350 ms after the picker opens (EB-01). Where that raises the
+    /// software keyboard, Done rides on it and covers every row but the first, and the rows move
+    /// as it rises; a tap on a row read before then lands on its neighbour. Wait for the focus,
+    /// then put the keyboard away with the picker's own keyboard circle, as a person would.
+    private func settleSearchFocus(in app: XCUIApplication) {
+        let hide = app.buttons["Hide keyboard"].firstMatch
+        XCTAssertTrue(hide.waitForExistence(timeout: 5), "The search field takes focus when the picker opens")
+        hide.tap()
+        XCTAssertTrue(app.buttons["Search the price book"].firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.waitForKeyboardToHide(timeout: 5))
+    }
+
+    /// Brings a row above the pinned Done bar. A row under the bar still reports hittable, and a
+    /// tap on it lands on the bar or the row above.
+    private func reveal(_ row: XCUIElement, in app: XCUIApplication) {
+        let done = app.buttons["price-book-done"]
+        func clear() -> Bool { row.exists && row.isHittable && row.frame.maxY <= done.frame.minY - 4 }
+        for _ in 0..<8 where !clear() {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)))
+        }
+        XCTAssertTrue(clear(), "\(row.frame) is clear of Done at \(done.frame)")
     }
 
     /// "Line items · N" read from its identifier, so additions are counted, not guessed.

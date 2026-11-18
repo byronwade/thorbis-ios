@@ -122,7 +122,10 @@ struct ThorbisSegmented<Value: Hashable>: View {
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }
-                    .contentShape(Rectangle().inset(by: -4))
+                    // 4 more to the finger side by side; stacked, only half the 2pt gap, so
+                    // neighbouring choices' touch areas never overlap (a tap between them was
+                    // ambiguous, and at accessibility sizes the frames read as overlapping).
+                    .contentShape(Rectangle().inset(by: horizontal ? -4 : -1))
             }
             .buttonStyle(PressStyle())
             .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
