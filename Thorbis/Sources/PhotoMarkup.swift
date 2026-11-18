@@ -211,7 +211,7 @@ struct PhotoMarkupView: View {
         .background(Theme.canvas)
         .thorbisConfirm("Discard your markup?", message: "The original photo stays on the job.",
                         isPresented: $confirmDiscard,
-                        actions: [ThorbisConfirmAction("Discard markup", role: .destructive) { onCancel() }])
+                        actions: [ThorbisConfirmAction("Discard", role: .destructive) { onCancel() }])
     }
 
     /// Paper 21D's toolbar: the tools as 44pt card circles (the chosen one on brand surface), then

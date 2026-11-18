@@ -427,12 +427,12 @@ struct PriceBookResultsList: View {
             if canUsePriceBook, current, !catalog.loading, !catalog.isPartial, catalog.error == nil,
                page.results.isEmpty, recent.isEmpty, favorites.isEmpty {
                 if addCustomLine == nil {
-                    ContentUnavailableView(
-                        catalog.items.isEmpty ? "No active Price Book items" : "No matching items",
-                        systemImage: "book.closed",
-                        description: Text(catalog.items.isEmpty
+                    PaperEmptyState(
+                        symbol: catalog.items.isEmpty ? "book.closed" : "magnifyingglass",
+                        title: catalog.items.isEmpty ? "No active Price Book items" : "No matching items",
+                        message: catalog.items.isEmpty
                             ? "Add items to your Price Book to use them here."
-                            : "Try another search or choose a different category."))
+                            : "Try another search or choose a different category.")
                 } else if !trimmedQuery.isEmpty || !catalog.items.isEmpty {
                     Text("No price book items match. Add it as a custom item above, or try another word.")
                         .font(Theme.font(14)).foregroundStyle(Theme.muted)

@@ -386,7 +386,7 @@ struct LocalWorkspaceView: View {
                         if rows.isEmpty && sharedEquipment {
                             EmptyView()
                         } else if rows.isEmpty {
-                            ListRoomEmpty(title: "Nothing here yet.",
+                            ListRoomEmpty(title: "Nothing here yet",
                                           message: "\(section.addTitle) with the + above.")
                         } else {
                             // Paper 88: a 13 Semibold label and its count over one card of rows.

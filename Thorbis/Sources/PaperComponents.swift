@@ -849,31 +849,11 @@ struct OfflineBanner: View {
     /// Paper 73 / 74 strip: a tinted 14pt-radius ground, the cloud and the words in the tone's text
     /// colour (14 Semibold), and the count in a 24pt pill of the same tone.
     private func banner(symbol: String, tone: Tone, text: String, trailing: String?) -> some View {
-        let ink: Color = tone == .warning ? Theme.warning : (tone == .success ? Theme.success : Theme.foreground)
-        let ground: Color = tone == .warning ? Theme.warningSurface : (tone == .success ? Theme.successSurface : Theme.fill)
-        // At accessibility sizes the count reads under the words, which then keep the width.
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                                  : AnyLayout(HStackLayout(spacing: 8))
-        return HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(ink)
-                .frame(width: 18, height: 18)
-                .accessibilityHidden(true)
-            layout {
-                Text(text).font(Theme.font(14, weight: .semibold)).foregroundStyle(ink).fixedSize(horizontal: false, vertical: true)
-                if !typeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                if let trailing {
-                    Text(trailing).font(Theme.font(13, weight: .semibold)).monospacedDigit().foregroundStyle(ink)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 9).frame(minHeight: 24)
-                        .background(ink.opacity(0.18), in: Capsule())
-                }
-            }
+        // The shared strip (`PaperBannerStrip`): the same grammar as every error banner.
+        let shared: BannerTone = tone == .warning ? .warning : (tone == .success ? .success : .quiet)
+        return PaperBannerStrip(symbol: symbol, tone: shared, text: text) {
+            if let trailing { BannerPill(title: trailing, tone: shared) }
         }
-        .padding(.leading, 14).padding(.trailing, 10).padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(ground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }

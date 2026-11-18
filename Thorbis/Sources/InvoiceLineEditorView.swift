@@ -146,9 +146,9 @@ struct InvoiceLineEditorView: View {
             memberPricing = pricing
         }
         .thorbisConfirm("Reload the latest invoice?",
-                        message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
+                        message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines and discards your edits.",
                         isPresented: $confirmReload,
-                        actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+                        actions: [ThorbisConfirmAction("Reload", role: .destructive) { Task { await reloadLatest() } }])
         #if DEBUG
         .task {
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor-line" { expandedLine = editor.lines.first?.id }

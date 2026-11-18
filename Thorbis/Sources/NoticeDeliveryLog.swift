@@ -159,13 +159,13 @@ struct NoticeDeliveryLogView: View {
                 if let error { ErrorBanner(message: error) { await load() } }
                 if !loaded && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
                 if loaded && items.isEmpty && error == nil {
-                    ListRoomEmpty(title: "Nothing sent yet.",
+                    ListRoomEmpty(title: "Nothing sent yet",
                                   message: "Each email or in-app update about a booked, changed or canceled job shows here.")
                 }
                 if !items.isEmpty { chips }
                 let rows = shown
                 if !items.isEmpty && rows.isEmpty {
-                    ListRoomEmpty(title: "Nothing here.", message: "None of the notices loaded so far match.")
+                    ListRoomEmpty(title: "Nothing here", message: "None of the notices loaded so far match.")
                 }
                 ForEach(rows) { item in
                     let first = item.id == rows.first?.id

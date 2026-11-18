@@ -228,7 +228,7 @@ struct TimeClockEntryEditor: View {
         .placeDatePicker($picking)
         .thorbisConfirm("Delete this entry?", message: "Its hours come off the week. This can\u{2019}t be undone.",
                         isPresented: $confirmDelete,
-                        actions: [ThorbisConfirmAction("Delete entry", role: .destructive) { delete() }])
+                        actions: [ThorbisConfirmAction("Delete", role: .destructive) { delete() }])
     }
 
     /// Paper 27B's card: Clock in, Clock out (with "Missing" while fixing), the break, the day total.
@@ -441,7 +441,7 @@ struct TimeClockTimeOffEditor: View {
         .placeDatePicker($picking)
         .thorbisConfirm("Delete this request?", message: "It was never sent, so nobody else is told.",
                         isPresented: $confirmDelete,
-                        actions: [ThorbisConfirmAction("Delete request", role: .destructive) { delete() }])
+                        actions: [ThorbisConfirmAction("Delete", role: .destructive) { delete() }])
     }
 
     /// Paper 27A: "From" over "Mon, Aug 10" (13 muted over 17 Medium), half the card wide.

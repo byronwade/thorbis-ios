@@ -321,12 +321,12 @@ struct TeamView: View {
         .thorbisDestination(item: $editingRoleID) { id in
             RoleEditorView(roleID: id, memberCount: customRoles.first { $0.id == id }.map(roleCount)) { await load() }
         }
-        .alert("New role", isPresented: $naming) {
-            TextField("Role name", text: $newRoleName, prompt: .placeholder("Role name"))
-            Button("Create") { Task { await createRole() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Then choose what this role can do.")
+        .thorbisConfirm("New role", message: "Then choose what this role can do.", isPresented: $naming,
+                        reason: ThorbisConfirmReason(label: "Role name", placeholder: "Role name", required: true,
+                                                     missingMessage: "Enter a role name.", identifier: "new-role-name"),
+                        actionTitle: "Create") { typed in
+            newRoleName = typed
+            Task { await createRole() }
         }
     }
 
@@ -619,7 +619,7 @@ private struct TeamInviteDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .thorbisConfirm("Revoke this invite?", message: "\(invitation.email) won't be able to join with this link.",
                         isPresented: $confirmRevoke,
-                        actions: [ThorbisConfirmAction("Revoke invite", role: .destructive) { Task { await revoke() } }])
+                        actions: [ThorbisConfirmAction("Revoke", role: .destructive) { Task { await revoke() } }])
     }
 
     /// Paper 62D: the label in ink, its answer in the muted tone, both 16.

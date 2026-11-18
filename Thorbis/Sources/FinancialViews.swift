@@ -89,15 +89,15 @@ struct EstimatesView: View {
                     .documentCardSlot(first: index == 0, last: index == rows.count - 1)
                 }
                 if !records.isEmpty && visible.isEmpty {
-                    ListRoomEmpty(title: "No estimates match \u{201C}\(search.trimmingCharacters(in: .whitespaces))\u{201D}.",
+                    ListRoomEmpty(symbol: "magnifyingglass", title: "No estimates match \u{201C}\(search.trimmingCharacters(in: .whitespaces))\u{201D}",
                                   message: "Try a customer's name, the work, or an EST number.")
                 } else if !records.isEmpty && rows.isEmpty {
-                    ListRoomEmpty(title: tab == "Open" ? "No open estimates." : "No \(tab.lowercased()) estimates.",
+                    ListRoomEmpty(title: tab == "Open" ? "No open estimates" : "No \(tab.lowercased()) estimates",
                                   message: tab == "Open" ? "Drafts and estimates out with customers show here." : nil)
                 }
                 if !loading && records.isEmpty && error == nil {
                     let canCreate = session.can("estimate.create", feature: "estimates")
-                    ListRoomEmpty(title: "No estimates.",
+                    ListRoomEmpty(title: "No estimates",
                                   message: canCreate ? "Price the work before you start." : "Estimates your shop sends show up here.",
                                   actionTitle: canCreate ? "Create an estimate" : nil, action: { showCreate = true })
                 }
@@ -807,14 +807,14 @@ struct InvoicesView: View {
                     }
                 }
                 if !records.isEmpty && visible.isEmpty {
-                    ListRoomEmpty(title: "No invoices match \u{201C}\(search.trimmingCharacters(in: .whitespaces))\u{201D}.",
+                    ListRoomEmpty(symbol: "magnifyingglass", title: "No invoices match \u{201C}\(search.trimmingCharacters(in: .whitespaces))\u{201D}",
                                   message: "Try a customer's name or an INV number.")
                 } else if !records.isEmpty && rows.isEmpty {
-                    ListRoomEmpty(title: currentTab == "Unpaid" ? "Nothing unpaid." : currentTab == "Drafts" ? "No drafts." : "No \(currentTab.lowercased()) invoices.",
+                    ListRoomEmpty(title: currentTab == "Unpaid" ? "Nothing unpaid" : currentTab == "Drafts" ? "No drafts" : "No \(currentTab.lowercased()) invoices",
                                   message: currentTab == "Unpaid" ? "Every sent invoice is paid." : nil)
                 }
                 if !loading && records.isEmpty && error == nil {
-                    ListRoomEmpty(title: "No invoices.", message: "Invoices are made from a job. Open a finished job to invoice it.")
+                    ListRoomEmpty(title: "No invoices", message: "Invoices are made from a job. Open a finished job to invoice it.")
                 }
             }
             .environment(\.paperRowInset, ListRoom.gutter)
@@ -961,7 +961,7 @@ struct InvoiceDetailView: View {
                     VStack(alignment: .leading, spacing: 12) {
                     balanceCard(record, total: total, due: due)
                         .thorbisConfirm("Cancel this application?", message: "The customer's link stops working.",
-                                        isPresented: $confirmCancelFinancing,
+                                        isPresented: $confirmCancelFinancing, cancelTitle: "Keep application",
                                         actions: [
                                             ThorbisConfirmAction("Cancel application", role: .destructive) {
                                                 if let application = financingApplications.first { Task { await cancelFinancing(application) } }

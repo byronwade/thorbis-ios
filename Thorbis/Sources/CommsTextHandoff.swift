@@ -74,11 +74,9 @@ private struct InboxTextPresenterModifier: ViewModifier {
             .onChange(of: session.user?.id) { _, _ in bind() }
             .onChange(of: session.activeOrganization?.id) { _, _ in bind() }
             .onDisappear { presenter.identity = nil; presenter.opening = nil; presenter.storageUnavailable = false }
-            .alert("Couldn't open text", isPresented: $presenter.storageUnavailable) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Your inbox on this device isn't available. Copy unsaved work before restarting the app, then check saved messages.")
-            }
+            .thorbisConfirm("Couldn’t open text",
+                            message: "Your inbox on this device isn’t available. Copy unsaved work before restarting the app, then check saved messages.",
+                            isPresented: $presenter.storageUnavailable, actions: [])
             .sheet(item: $presenter.opening) { opening in
                 NavigationStack {
                     CommsLocalThreadView(threadID: opening.id,

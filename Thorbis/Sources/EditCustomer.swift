@@ -885,7 +885,7 @@ struct ArchivedCustomersView: View {
                     ErrorBanner(message: error, outer: PaperCardMetrics.margin).padding(.top, 12)
                 }
                 if shown.isEmpty {
-                    ListRoomEmpty(title: archived.isEmpty ? "No archived customers." : "No archived customers match.",
+                    ListRoomEmpty(symbol: "magnifyingglass", title: archived.isEmpty ? "No archived customers" : "No archived customers match",
                                   message: archived.isEmpty ? "Customers you archive move here." : "Try a name, street or phone number.")
                         .padding(.top, 8)
                 } else {

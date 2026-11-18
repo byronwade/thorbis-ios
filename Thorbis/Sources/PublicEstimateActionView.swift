@@ -66,7 +66,7 @@ struct PublicEstimateActionView: View {
         .thorbisConfirm("Decline this estimate?",
                         message: "The company will be notified that you declined this estimate.",
                         isPresented: $confirmsDecline,
-                        actions: [ThorbisConfirmAction("Decline estimate", role: .destructive) { decline() }])
+                        actions: [ThorbisConfirmAction("Decline", role: .destructive) { decline() }])
         .onChange(of: model.signerName) { _, value in
             if value.count > 120 { model.signerName = String(value.prefix(120)) }
         }

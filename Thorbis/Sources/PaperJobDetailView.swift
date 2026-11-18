@@ -414,7 +414,8 @@ struct JobDetailView: View {
                         }
                 }
             } else {
-                ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text("Return to the job and refresh to open this document."))
+                PaperEmptyState(symbol: "lock", title: "Document unavailable", message: "Return to the job and refresh to open this document.", problem: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.canvas)
             }
         }
         .thorbisDestination(item: $reviewInvoiceID) { id in

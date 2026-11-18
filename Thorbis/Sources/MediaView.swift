@@ -325,7 +325,7 @@ struct JobMediaView: View {
         .thorbisConfirm(pickedRecords.count == 1 ? "Remove this photo from the job?" : "Remove \(pickedRecords.count) photos from the job?",
                         message: "They’re archived, not erased: the office can still restore them.",
                         isPresented: $confirmBulkArchive,
-                        actions: [ThorbisConfirmAction(pickedRecords.count == 1 ? "Remove photo" : "Remove photos", role: .destructive) {
+                        actions: [ThorbisConfirmAction("Remove", role: .destructive) {
                             let chosen = pickedRecords
                             Task { if await archive(chosen) { endSelecting() } }
                         }])

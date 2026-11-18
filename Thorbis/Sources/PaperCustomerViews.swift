@@ -110,12 +110,12 @@ struct CustomersView: View {
                     }
                 }
                 if items.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recordsLoading {
-                    ListRoomEmpty(title: "No customers match.", message: "Try a name, street or phone number.")
+                    ListRoomEmpty(symbol: "magnifyingglass", title: "No customers match", message: "Try a name, street or phone number.")
                 } else if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        ListRoomEmpty(title: "No archived customers.", message: "Customers you archive move here.")
+                        ListRoomEmpty(title: "No archived customers", message: "Customers you archive move here.")
                     } else {
-                        ListRoomEmpty(title: "No customers yet.",
+                        ListRoomEmpty(title: "No customers yet",
                                       actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
                                       action: { showNew = true })
                     }
@@ -774,7 +774,7 @@ struct CustomerDetailView: View {
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
                         actions: { location in
-            [ThorbisConfirmAction("Remove \(location.label)", role: .destructive) {
+            [ThorbisConfirmAction("Remove", role: .destructive) {
                 Task { await removeLocation(location) }
             }]
         })
@@ -782,7 +782,7 @@ struct CustomerDetailView: View {
                         title: { _ in "Remove customer contact?" },
                         message: { contact in "This removes \(contact.name) from \(record?.name ?? customer.name)." },
                         actions: { contact in
-            [ThorbisConfirmAction("Remove \(contact.name)", role: .destructive) {
+            [ThorbisConfirmAction("Remove", role: .destructive) {
                 Task { await removeContact(contact) }
             }]
         })
@@ -1111,7 +1111,7 @@ struct CustomerDetailView: View {
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
                         actions: { location in
-            [ThorbisConfirmAction("Remove \(location.label)", role: .destructive) {
+            [ThorbisConfirmAction("Remove", role: .destructive) {
                 Task { await removeLocation(location) }
             }]
         })
@@ -1781,7 +1781,7 @@ struct CustomerDetailView: View {
             }
             if jobs.isEmpty {
                 // New job sits on the customer's page and in Customer actions.
-                ListRoomEmpty(title: "No jobs yet.",
+                ListRoomEmpty(title: "No jobs yet",
                               message: session.can("job.create", feature: "jobs") ? "Create a job with New job." : nil)
                     .padding(.horizontal, -Theme.gutter).padding(.top, 22)
             }

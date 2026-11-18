@@ -155,9 +155,9 @@ struct EstimateRevisionEditorView: View {
                 if descriptionProblem != nil { refreshDescriptionProblem() }
             }
             .thorbisConfirm("Reload the latest estimate?",
-                            message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options.",
+                            message: "The estimate changed on the server. Reloading replaces this form with its latest saved lines and options and discards your edits.",
                             isPresented: $confirmReload,
-                            actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+                            actions: [ThorbisConfirmAction("Reload", role: .destructive) { Task { await reloadLatest() } }])
             #if DEBUG
             .task {
                 guard PaperPreview.enabled else { return }
