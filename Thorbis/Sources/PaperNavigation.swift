@@ -248,7 +248,7 @@ struct RootView: View {
                 .background(DrawerPanel.fill)
                 .clipShape(DrawerPanel.shape)
                 .overlay { DrawerPanel.shape.strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
-                .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.22), radius: 25, y: 20)
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.14), radius: 25, y: 20)
                 .padding(.leading, DrawerPanel.inset).padding(.bottom, DrawerPanel.inset)
                 .ignoresSafeArea(.container, edges: .bottom)
         }
