@@ -34,6 +34,12 @@ enum PropertiesUnion {
     }
 }
 
+/// The customer a new address is being added to from Properties.
+private struct PropertyNewAddress: Identifiable {
+    let customerID: String
+    var id: String { customerID }
+}
+
 struct PropertiesView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
@@ -51,6 +57,10 @@ struct PropertiesView: View {
     /// address. Both fill in after the list; either stays empty when this person can't read it.
     @State private var commercialIDs: Set<String> = []
     @State private var units: [String: Int] = [:]
+    /// Paper 87A's +: choose whose address it is, then the Add location sheet for that customer.
+    @State private var choosingCustomer = false
+    @State private var addingFor: PropertyNewAddress?
+    private var canAdd: Bool { session.can("customer.edit", feature: "core_crm") && !store.customers.isEmpty }
 
     private static let allFilter = "All"
     private static let openFilter = "With open work"
@@ -129,7 +139,9 @@ struct PropertiesView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 87A: the place header, then the addresses on one card 16 from the edges.
                 PaperHeader(title: "Properties",
-                            subtitle: loaded ? (rows.count == 1 ? "1 address" : "\(rows.count) addresses") : "Every service address, across customers")
+                            subtitle: loaded ? (rows.count == 1 ? "1 address" : "\(rows.count) addresses") : "Every service address, across customers",
+                            showsCreate: canAdd)
+                    .environment(\.paperCreate, canAdd ? PaperCreateAction(label: "Add property", run: { choosingCustomer = true }) : nil)
                 // Paper 87A: the search on the card, then All / With open work / Commercial.
                 searchField
                 PaperTabs(options: [PropertiesView.allFilter, PropertiesView.openFilter, PropertiesView.commercialFilter],
@@ -169,6 +181,15 @@ struct PropertiesView: View {
             .padding(.bottom, 24)
         }
         .thorbisDestination(item: $opened) { PropertyDetailView(row: $0) }
+        .sheet(isPresented: $choosingCustomer) { SheetSurface {
+            CustomerPickerSheet(selectedID: "", canCreate: false, onNew: { _ in }) { id in
+                choosingCustomer = false
+                addingFor = PropertyNewAddress(customerID: id)
+            }
+        } }
+        .sheet(item: $addingFor) { new in SheetSurface {
+            ServiceLocationSheet(customerID: new.customerID, location: nil) { _ in Task { await load() } }
+        } }
         .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
@@ -264,6 +285,20 @@ struct PropertyDetailView: View {
     @State private var contacts: [CustomerContactRecord] = []
 
     private var location: ServiceLocationRecord { saved ?? row.location }
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private static let pinGlyph = PaperGlyph(box: 24, [
+        .stroke("M12 21C12 21 5.5 15.2 5.5 10.2C5.5 6.5 8.4 3.5 12 3.5C15.6 3.5 18.5 6.5 18.5 10.2C18.5 15.2 12 21 12 21Z", 1.6),
+        .circle(12, 10, 2.4, 1.6)])
+    private static let directionsGlyph = PaperGlyph(box: 14, [.stroke("M4.5 9.5L9.5 4.5M5.5 4.5H9.5V8.5", 1.5)])
+    /// "412 Birchwood Ln" of "412 Birchwood Ln, Sacramento, CA".
+    private var street: String {
+        location.address.split(separator: ",").first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? location.address
+    }
+    /// The city, when the address carries one after the street.
+    private var city: String {
+        let parts = location.address.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        return parts.count > 1 ? parts[1] : ""
+    }
     private var canEdit: Bool { session.can("customer.edit", feature: "core_crm") }
     private var canCreateJob: Bool { session.can("job.create", feature: "jobs") }
     private var mapsURL: URL? { Directions.url(address: location.address, coordinates: location.coordinates) }
@@ -284,26 +319,17 @@ struct PropertyDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Paper 87: the address as the 34 Bold title, then the place and whose it is.
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(location.address).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                // Paper 87: the street as the 34 Bold title, then the place, its city and whose it
+                // is on one plain line 2 under it. Open customer is in Property actions.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(street).font(Theme.font(34, weight: .bold)).tracking(-0.85)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
-                    Button { openCustomer = row.customer } label: {
-                        HStack(spacing: 4) {
-                            Text([location.label, row.kindLabel, row.customer.name].filter { !$0.isEmpty }
-                                    .joined(separator: " \u{00B7} "))
-                                .fixedSize(horizontal: false, vertical: true)
-                            Image(systemName: "arrow.up.right").font(.system(size: 11, weight: .medium)).accessibilityHidden(true)
-                        }
+                    Text([location.label, city, row.customer.name].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
                         .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Customer, \(row.customer.name)")
-                    .accessibilityHint("Opens the customer")
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.top, 6)
                 if let mapsURL { placeCard(mapsURL) }
                 if !facts.isEmpty || canEdit {
                     PaperSection(title: "Access") {
@@ -352,7 +378,8 @@ struct PropertyDetailView: View {
                             .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
                     }
                 }
-                if canCreateJob {
+                // At accessibility sizes a pinned commit would cover the page, so it follows the content.
+                if canCreateJob, typeSize.isAccessibilitySize {
                     Button { showNewJob = true } label: { Text("New job here").inkCommit() }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("property-new-job")
@@ -362,6 +389,12 @@ struct PropertyDetailView: View {
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
+        // Paper 87: "+ New job here" is the page's one commit, pinned at the foot.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if canCreateJob, !typeSize.isAccessibilitySize {
+                PaperActionBar(title: "New job here", symbol: "plus", identifier: "property-new-job") { showNewJob = true }
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -384,18 +417,17 @@ struct PropertyDetailView: View {
     /// Paper 87: the place card (140 tall, radius 20) with Directions on a brand-surface pill.
     private func placeCard(_ url: URL) -> some View {
         ZStack(alignment: .bottomTrailing) {
-            Image(systemName: "mappin.and.ellipse").font(.system(size: 26, weight: .regular))
-                .foregroundStyle(Theme.muted)
+            PaperIcon(Self.pinGlyph, size: 28, color: Theme.muted)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityHidden(true)
             Button { openURL(url) } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "arrow.up.right").font(.system(size: 12, weight: .semibold))
+                    PaperIcon(Self.directionsGlyph, size: 14, color: Theme.brandText)
                     Text("Directions").font(Theme.font(14, weight: .semibold))
                 }
                 .foregroundStyle(Theme.brandText)
                 .padding(.leading, 12).padding(.trailing, 14).frame(minHeight: 44)
-                .background(Theme.brandSurface, in: Capsule())
+                .background(Theme.brandTint, in: Capsule())
                 .contentShape(Capsule())
             }
             .buttonStyle(PressStyle())

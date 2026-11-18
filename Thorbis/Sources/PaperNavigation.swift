@@ -856,8 +856,8 @@ struct RootView: View {
         case "invoices": previewPlace(.invoices)
         case "price-book": previewPlace(.priceBook)
         case "drafts": previewPlace(.drafts)
-        case "local-fleet": openLocal(.fleet)
-        case "local-equipment": openLocal(.equipment)
+        case "local-fleet", "vehicle-detail": openLocal(.fleet)
+        case "local-equipment", "equipment-detail": openLocal(.equipment)
         case "local-agreements": openLocal(.agreements)
         case "team", "role-editor", "member-access": previewPlace(.team)
         case "payouts": previewPlace(.money, then: .payments)
@@ -925,7 +925,7 @@ struct RootView: View {
                 // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
             }
-        case "customer", "customer-activity", "customer-details", "customer-records", "customer-jobs", "customer-money":
+        case "customer", "customer-activity", "customer-details", "customer-records", "customer-jobs", "customer-money", "customer-media", "customer-membership":
             if let customer = store.customers.first(where: { $0.id == PaperPreview.customerID }) {
                 primaryTab = .customers
                 customersPath.append(customer)

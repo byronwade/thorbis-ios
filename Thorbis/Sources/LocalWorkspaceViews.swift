@@ -423,6 +423,10 @@ struct LocalWorkspaceView: View {
             openedVehicle = nil
             actionError = nil
             model.bind(actorID: actorID, organizationID: organizationID)
+            #if DEBUG
+            // `--paper-preview-screen vehicle-detail`: open the first truck.
+            if PaperPreview.enabled, PaperPreview.screen == "vehicle-detail", section == .fleet { openedVehicle = model.rows(.fleet).first }
+            #endif
         }
         .thorbisDestination(item: $openedVehicle) { row in
             LocalVehicleDetail(id: row.id, model: model) { saved in
@@ -513,7 +517,7 @@ private struct LocalVehicleDetail: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 if !line.isEmpty {
-                    Text(line).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(line).font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

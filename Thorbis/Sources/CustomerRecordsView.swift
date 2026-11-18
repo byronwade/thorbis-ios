@@ -14,6 +14,13 @@ struct CustomerRecordsView: View {
     let customerID: String
     var retryMedia: () async -> Void = {}
     var parts: Set<CustomerRecordsPart> = Set(CustomerRecordsPart.allCases)
+    /// Paper 48F: the customer's Media segment (chips, then each job's photos and files together).
+    var mediaTab = false
+    /// Each job's day for the Media segment's headings ("today", "Sep 9, 2024").
+    var jobDays: [String: String] = [:]
+    @State private var mediaFilter = "All"
+    /// Older jobs fold to one line until "Show".
+    @State private var shownMediaJobs: Set<String> = []
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.paperGroupedWells) private var wells
     @State private var openedLegacy: LegacyCustomerPhoto?
@@ -31,7 +38,13 @@ struct CustomerRecordsView: View {
             if compilation.identityIncomplete {
                 ErrorBanner(message: "Some customer records could not be verified. Please try again.") { await retryMedia() }
             }
-            if compilation.jobsAccessible {
+            if mediaTab {
+                if compilation.jobsAccessible { mediaSegment } else {
+                    Label("Job photos, notes, and documents are unavailable with your current access.", systemImage: "lock")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("customer-job-records-unavailable")
+                }
+            } else if compilation.jobsAccessible {
                 if parts.contains(.photos) { photosSection }
                 if parts.contains(.notes) {
                     textSection("Notes", total: compilation.noteCount, groups: compilation.notes, symbol: "note.text") { $0.body }
@@ -67,6 +80,198 @@ struct CustomerRecordsView: View {
             LegacyCustomerPhotoDetail(photo: photo)
         }
         .thorbisDestination(item: $openedRoute) { PaperRouteView(route: $0).tabletReadable() }
+    }
+
+    // MARK: Paper 48F
+
+    private static let fileGlyph = PaperGlyph(box: 18, [.stroke("M5 2.5H10.5L14 6V15.5H5Z", 1.5), .stroke("M10.5 2.5V6H14", 1.5)])
+
+    /// Chips ("All · 16", "Photos · 13", "Documents · 3"), then each job: its name with its number,
+    /// day and count, its photos (the newest job three across with captions, the next four across),
+    /// its files, and older jobs folded to one line with "Show".
+    private var mediaSegment: some View {
+        let photos = compilation.photoCount, documents = compilation.documentCount
+        let incomplete = !compilation.mediaIncompleteJobIDs.isEmpty || !compilation.documentIncompleteJobIDs.isEmpty || compilation.identityIncomplete
+        var order = compilation.photos.map(\.jobID)
+        for group in compilation.documents where !order.contains(group.jobID) { order.append(group.jobID) }
+        let showsPhotos = mediaFilter != "Documents", showsDocuments = mediaFilter != "Photos"
+        let visible = order.filter { id in
+            (showsPhotos && compilation.photos.contains { $0.jobID == id }) || (showsDocuments && compilation.documents.contains { $0.jobID == id })
+        }
+        return LazyVStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    mediaChip("All", count: photos + documents)
+                    mediaChip("Photos", count: photos)
+                    mediaChip("Documents", count: documents)
+                }
+            }
+            if incomplete {
+                ErrorBanner(message: "Some photos or files may be missing. Please try again.") { await retryMedia() }
+                    .accessibilityIdentifier("customer-photo-partial").padding(.top, 12)
+            }
+            if visible.isEmpty {
+                Text(mediaFilter == "Documents" ? "No documents yet" : mediaFilter == "Photos" ? "No photos yet" : "No photos or documents yet")
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.horizontal, 4).padding(.top, 20)
+            }
+            ForEach(Array(visible.enumerated()), id: \.element) { index, jobID in
+                let shots = showsPhotos ? (compilation.photos.first { $0.jobID == jobID }?.items ?? []) : []
+                let files = showsDocuments ? (compilation.documents.first { $0.jobID == jobID }?.items ?? []) : []
+                let title = compilation.photos.first { $0.jobID == jobID }?.title ?? compilation.documents.first { $0.jobID == jobID }?.title ?? "Job"
+                if index >= 2 && !shownMediaJobs.contains(jobID) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("\(title) · \(mediaCounts(shots.count, files.count, short: true))").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+                        Button { withMotion { _ = shownMediaJobs.insert(jobID) } } label: {
+                            Text("Show").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                                .padding(.vertical, 12).padding(.leading, 12).contentShape(Rectangle()).padding(.vertical, -12)
+                        }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel("Show \(title)")
+                    }
+                    .padding(.horizontal, 4).padding(.top, 20)
+                } else {
+                    Button { openedRoute = .job(jobID) } label: {
+                        let layout = dynamicTypeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
+                            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+                        layout {
+                            Text(title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text((["JOB-\(jobID.suffix(4).uppercased())", jobDays[jobID]].compactMap { $0 }
+                                  + (shots.isEmpty ? [] : [shots.count == 1 ? "1 photo" : "\(shots.count) photos"])).joined(separator: " · "))
+                                .font(Theme.font(13)).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
+                        .padding(.horizontal, 4).padding(.top, index == 0 ? 20 : 22).padding(.bottom, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens the job")
+                    .accessibilityIdentifier("customer-records-job-\(jobID)")
+                    if !shots.isEmpty {
+                        let across = dynamicTypeSize.isAccessibilitySize ? 2 : index == 0 ? 3 : 4
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: across), alignment: .leading, spacing: 8) {
+                            ForEach(shots) { mediaTile($0, jobID: jobID, large: index == 0) }
+                        }
+                        .padding(.bottom, 8)
+                    }
+                    VStack(spacing: 8) { ForEach(files) { mediaFile($0) } }
+                }
+            }
+        }
+    }
+
+    private func mediaCounts(_ photos: Int, _ files: Int, short: Bool = false) -> String {
+        [photos > 0 ? (photos == 1 ? "1 photo" : "\(photos) photos") : nil,
+         files > 0 ? (files == 1 ? "1 doc" : "\(files) docs") : nil].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// A 36-tall chip (44-point target): the chosen one in the ink, the rest on the card.
+    private func mediaChip(_ name: String, count: Int) -> some View {
+        let on = mediaFilter == name
+        return Button { mediaFilter = name } label: {
+            Text("\(name) · \(count)").font(Theme.font(14, weight: on ? .semibold : .medium))
+                .foregroundStyle(on ? Theme.background : Theme.subtle)
+                .padding(.horizontal, 14).frame(minHeight: 36)
+                .background(on ? Theme.foreground : Theme.card, in: Capsule())
+                .frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("customer-media-filter-\(name.lowercased())")
+    }
+
+    /// A square photo tile: radius 16 (14 when four across), its stage chip top-left and, on the
+    /// newest job, its caption along the foot.
+    @ViewBuilder private func mediaTile(_ source: JobPhotoSource, jobID: String, large: Bool) -> some View {
+        switch source {
+        case let .modern(asset, fallback):
+            let title = asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename
+            let stage: String? = asset.tags.contains { $0.caseInsensitiveCompare("after") == .orderedSame } ? "After"
+                : asset.tags.contains { $0.caseInsensitiveCompare("before") == .orderedSame } ? "Before" : nil
+            if !MediaThumbnailCache.isImage(asset), let fallback {
+                Button { openedLegacy = LegacyCustomerPhoto(record: fallback, jobID: jobID) } label: {
+                    mediaTileBody(stage: stage, caption: large ? title : nil, large: large) { LegacyCustomerThumbnail(record: fallback, jobID: jobID) }
+                }
+                .buttonStyle(.plain).accessibilityLabel("Photo, \(title)")
+                .accessibilityIdentifier("customer-photo-\(asset.id)")
+            } else {
+                Button { openedRoute = .media(jobID: jobID, assetID: asset.id) } label: {
+                    mediaTileBody(stage: stage, caption: large ? (asset.uploadState == "stored" ? title : asset.uploadState.statusLabel) : nil, large: large) {
+                        MediaThumbnail(record: asset)
+                    }
+                }
+                .buttonStyle(.plain).disabled(asset.uploadState != "stored")
+                .accessibilityLabel([stage, "Photo", title].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityHint(asset.uploadState == "stored" ? "Open photo" : "Photo is not ready yet")
+                .accessibilityIdentifier("customer-photo-\(asset.id)")
+            }
+        case let .legacy(record):
+            Button { openedLegacy = LegacyCustomerPhoto(record: record, jobID: jobID) } label: {
+                mediaTileBody(stage: nil, caption: nil, large: large) { LegacyCustomerThumbnail(record: record, jobID: jobID) }
+            }
+            .buttonStyle(.plain).accessibilityLabel("Photo from job")
+            .accessibilityIdentifier("customer-legacy-photo-\(record.id)")
+        }
+    }
+
+    private func mediaTileBody<Content: View>(stage: String?, caption: String?, large: Bool, @ViewBuilder image: () -> Content) -> some View {
+        let after = stage == "After"
+        let shape = RoundedRectangle(cornerRadius: large ? 16 : 14, style: .continuous)
+        return (after ? Theme.successSurface : Theme.card)
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { image().frame(maxWidth: .infinity, maxHeight: .infinity).clipped() }
+            .overlay(alignment: .bottom) {
+                if caption != nil {
+                    LinearGradient(colors: [.clear, Theme.background.opacity(0.75)], startPoint: .top, endPoint: .bottom).frame(height: 44)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if let stage {
+                    Text(stage).font(Theme.font(large ? 12 : 11, weight: .semibold))
+                        .foregroundStyle(after ? Theme.card : Theme.foreground)
+                        .padding(.horizontal, large ? 8 : 7).frame(height: large ? 22 : 20)
+                        .background(after ? Theme.statusDone : Theme.background.opacity(0.7), in: Capsule())
+                        .padding(large ? 8 : 6)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if let caption {
+                    Text(caption).font(Theme.font(12)).foregroundStyle(after ? Theme.success : Theme.muted)
+                        .lineLimit(1).padding(8)
+                }
+            }
+            .clipShape(shape).contentShape(shape)
+    }
+
+    /// A file on the card (radius 16): the brand-surface mark, its name (15 Medium) and when it was added.
+    private func mediaFile(_ asset: MediaAssetRecord) -> some View {
+        let added = JobFiltering.date(asset.capturedAt ?? asset.createdAt)
+        return Button { openedRoute = .media(jobID: asset.jobId, assetID: asset.id) } label: {
+            HStack(spacing: 12) {
+                PaperIcon(Self.fileGlyph, size: 18, color: Theme.brandText)
+                    .frame(width: 36, height: 36)
+                    .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(asset.caption.flatMap { $0.isEmpty ? nil : $0 } ?? asset.originalFilename)
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(asset.uploadState != "stored" ? "File is not ready yet"
+                         : added.map { "Added \($0.formatted(.dateTime.month(.abbreviated).day().year()))" } ?? "Document")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(RowPressStyle())
+        .disabled(asset.uploadState != "stored")
+        .accessibilityHint(asset.uploadState == "stored" ? "Opens the file" : "File is not ready yet")
+        .accessibilityIdentifier("customer-document-\(asset.id)")
     }
 
     private var photosSection: some View {

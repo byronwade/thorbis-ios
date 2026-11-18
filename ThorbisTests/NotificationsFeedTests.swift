@@ -30,14 +30,14 @@ final class NotificationsFeedTests: XCTestCase {
         XCTAssertEqual(NotificationsFeed.unreadCount(list), 2)
     }
 
-    func testGroupsPutNewOverEarlierOnlyWhenBothExist() {
+    func testGroupsAreOneCardNewestFirst() {
         let mixed = [notice("a", read: false, at: "2026-11-17T10:00:00Z"), notice("b", read: true, at: "2026-11-16T10:00:00Z"),
                      notice("c", read: false, at: "2026-11-15T10:00:00Z")]
         let groups = NotificationsFeed.groups(mixed, filter: .all)
-        XCTAssertEqual(groups.map(\.title), ["New", "Earlier"])
-        XCTAssertEqual(groups.map { $0.notices.map(\.id) }, [["a", "c"], ["b"]])
+        // Paper 77: one card without a label, read and unread together in time order.
+        XCTAssertEqual(groups.map(\.title), [""])
+        XCTAssertEqual(groups.map { $0.notices.map(\.id) }, [["a", "b", "c"]])
 
-        // Paper 77's one card, without a label, when everything is unread, read, or narrowed to unread.
         let allUnread = NotificationsFeed.groups([notice("a", read: false), notice("b", read: false)], filter: .all)
         XCTAssertEqual(allUnread.map(\.title), [""])
         XCTAssertEqual(allUnread.first?.notices.count, 2)

@@ -53,19 +53,11 @@ enum NotificationsFeed {
 
     static func unreadCount(_ notices: [StaffNotice]) -> Int { notices.filter { !$0.read }.count }
 
-    /// What the screen shows under the tabs: the unread notices lead on a card of their own once
-    /// some have been read, so what is new is never mixed into what was seen. With nothing read,
-    /// or nothing unread, it is Paper's one card without a label.
+    /// What the screen shows under the tabs: Paper 77's one card, newest first, with no labels.
+    /// A notice's dot, brand bell and Semibold words say it is unread.
     static func groups(_ notices: [StaffNotice], filter: NotificationsFilter) -> [NotificationsGroup] {
         let list = visible(notices, filter: filter)
-        guard !list.isEmpty else { return [] }
-        let unread = list.filter { !$0.read }
-        let read = list.filter(\.read)
-        if unread.isEmpty || read.isEmpty {
-            return [NotificationsGroup(id: "all", title: "", notices: list)]
-        }
-        return [NotificationsGroup(id: "new", title: "New", notices: unread),
-                NotificationsGroup(id: "earlier", title: "Earlier", notices: read)]
+        return list.isEmpty ? [] : [NotificationsGroup(id: "all", title: "", notices: list)]
     }
 
     /// Paper 77's line under the title: "3 unread", counted only once every page is here so it is

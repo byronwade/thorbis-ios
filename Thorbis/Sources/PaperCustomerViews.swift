@@ -389,8 +389,9 @@ private struct CustomerInitials: View {
 /// Paper 48N's hub rows, each a page about the customer.
 private enum CustomerHubPart: String, Hashable, Identifiable {
     case jobs, comms, property, equipment, membership, money, notes
-    /// Not hub rows: what Customer actions opens (contacts, details and preferences; the timeline).
-    case details, activity
+    /// Not hub rows: what Customer actions opens (contacts, details and preferences; the timeline),
+    /// and the Media segment of the tabbed page.
+    case details, activity, media
 
     var id: String { rawValue }
 
@@ -405,17 +406,23 @@ private enum CustomerHubPart: String, Hashable, Identifiable {
         case .money: "Money"
         case .details: "Contacts and details"
         case .activity: "Activity"
+        case .media: "Media"
         }
     }
 
-    /// The compiled records a page needs: `tab` drives the loaders ("Jobs", "Money", else none).
+    /// Paper 48D–48G: the segment a page opens on. Jobs, Billing, Media and Activity share one
+    /// tabbed page; `tab` also drives the loaders. Every other page has no segment.
     var tab: String {
         switch self {
         case .jobs: "Jobs"
-        case .money: "Money"
+        case .money: "Billing"
+        case .media: "Media"
+        case .activity: "Activity"
         default: "Overview"
         }
     }
+
+    var isTabbed: Bool { tab != "Overview" }
 }
 
 private struct CustomerHubRow: Identifiable {
@@ -521,6 +528,15 @@ struct CustomerDetailView: View {
     @State private var openPart: CustomerHubPart?
     /// A job opened from the Jobs page. That page is pushed by state, where a value link never opens.
     @State private var openedJob: Job?
+    /// An invoice or estimate opened from the Billing segment.
+    @State private var openedRoute: PaperRoute?
+    /// Paper 85: the customer's one active plan (its page pins "Book covered visit"), the plan
+    /// being cancelled (85B), and a count that makes the page read the plan again.
+    @State private var plan: MembershipRecord?
+    @State private var cancellingPlan: MembershipRecord?
+    @State private var planReload = 0
+    /// Billing lists five invoices until "See all".
+    @State private var showsAllInvoices = false
     /// DEBUG previews open a hub page once.
     @State private var previewOpened = false
     @State private var records: CustomerJobCompilation?
@@ -638,6 +654,7 @@ struct CustomerDetailView: View {
         }
         .thorbisDestination(item: $openPart) { part in
             hubPage(part).thorbisDestination(item: $openedJob) { JobDetailView(jobId: $0.id).tabletReadable() }
+                .thorbisDestination(item: $openedRoute) { PaperRouteView(route: $0).tabletReadable() }
         }
         .thorbisDestination(isPresented: $showArchive) {
             ArchiveCustomerView(customerID: customer.id, customerName: record?.name ?? customer.name) { saved in
@@ -685,8 +702,12 @@ struct CustomerDetailView: View {
             // Once: coming back from the pushed page must not push it again.
             if PaperPreview.enabled && !previewOpened {
                 previewOpened = true
-                if ["customer-records", "customer-jobs"].contains(PaperPreview.screen) { openPart = .jobs }
+                if PaperPreview.screen == "customer-jobs" { openPart = .jobs }
+                // The compiled photos and files live on the Media segment.
+                if PaperPreview.screen == "customer-records" { openPart = .media }
                 if PaperPreview.screen == "customer-money" { openPart = .money }
+                if PaperPreview.screen == "customer-media" { openPart = .media }
+                if PaperPreview.screen == "customer-membership" { openPart = .membership }
                 if PaperPreview.screen == "customer-activity" { openPart = .activity }
                 if PaperPreview.screen == "customer-details" { openPart = .details }
             }
@@ -915,9 +936,37 @@ struct CustomerDetailView: View {
         .accessibilityIdentifier("customer-hub-\(part.rawValue)")
     }
 
-    /// A hub row's page, pushed: its title, then the same sections the customer always had.
+    /// A hub row's page, pushed. Jobs, Billing, Media and Activity are Paper 48D–48G's tabbed page:
+    /// the number and since line, the name, the five segments ("Overview" goes back to the hub),
+    /// then the segment's body. Every other page keeps its title over its sections.
     @ViewBuilder private func hubPage(_ part: CustomerHubPart) -> some View {
         ScrollView {
+            if part.isTabbed {
+                VStack(alignment: .leading, spacing: 0) {
+                    OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
+                    CustomerTabsHeader(eyebrow: tabEyebrow, name: record?.name ?? customer.name,
+                                       tabs: ["Overview", "Jobs", "Billing", "Media", "Activity"],
+                                       selection: tab == "Overview" ? part.tab : tab) { chosen in
+                        if chosen == "Overview" { openPart = nil } else { tab = chosen }
+                    }
+                    switch tab == "Overview" ? part.tab : tab {
+                    case "Billing": billingTab
+                    case "Media": recordsParts([.photos, .documents], media: true).padding(.top, 14)
+                    case "Activity": activitySection.padding(.top, 14)
+                    default:
+                        if session.can("job.view", feature: "jobs") { jobsSection }
+                        else { unavailable("Jobs", "You don’t have access to jobs in this workspace.").padding(.top, 22) }
+                    }
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 34)
+            } else if part == .membership {
+                VStack(alignment: .leading, spacing: 0) {
+                    OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
+                    MembershipPlanBody(customerID: customer.id, customerName: record?.name ?? customer.name,
+                                       plan: $plan, reload: planReload)
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+            } else {
             VStack(alignment: .leading, spacing: 20) {
                 OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
                 VStack(alignment: .leading, spacing: 2) {
@@ -929,17 +978,14 @@ struct CustomerDetailView: View {
                 }
                 .padding(.horizontal, 4).padding(.top, 10)
                 switch part {
-                case .jobs:
-                    if session.can("job.view", feature: "jobs") { jobsSection }
-                    else { unavailable("Jobs", "You don’t have access to jobs in this workspace.") }
+                case .jobs, .money, .activity, .media:
+                    EmptyView()
                 case .property:
                     locationsSection
                 case .equipment:
                     CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
                 case .membership:
-                    CustomerMembershipSection(customerID: customer.id)
-                case .money:
-                    moneySection
+                    EmptyView()
                 case .comms:
                     CustomerCommsSection(customerID: customer.id, customerName: record?.name ?? customer.name,
                                          numbers: customerNumbers, emails: customerEmails,
@@ -954,29 +1000,62 @@ struct CustomerDetailView: View {
                     }
                     contactsSection.id("customer-contacts")
                     recordSection
-                case .activity:
-                    activitySection
                 case .notes:
                     CustomerNotesSection(customerID: customer.id, customerName: record?.name ?? customer.name,
                                          locations: locations, model: phoneNotes)
                 }
-                // At accessibility sizes a pinned New job would cover half the screen, so it
-                // follows the content instead.
-                if part == .jobs && typeSize.isAccessibilitySize { newJobBar }
             }
             .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+            }
         }
         .foregroundStyle(Theme.foreground).background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Theme.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .bottom) { if part == .jobs && !typeSize.isAccessibilitySize { newJobBar } }
+        .toolbar {
+            // Paper 48D: the ⋯ circle stays on the tabbed page; New job moved into it from the
+            // bar the Jobs page used to pin.
+            if part == .membership, let plan, canEdit {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    ThorbisMenu(items: planMenuItems(plan), accessibilityLabel: "Plan actions") { PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card) }
+                }
+            }
+            if part.isTabbed {
+                let items = customerMenuItems(onPage: true)
+                if !items.isEmpty {
+                    ThorbisToolbarItem(placement: .topBarTrailing) {
+                        ThorbisMenu(items: items, accessibilityLabel: "Customer actions") { PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card) }
+                    }
+                }
+            }
+        }
+        // Paper 85: "Book covered visit" is the plan page's commit, with the plan's menu beside it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if part == .membership, let plan, session.can("job.create", feature: "jobs"), !typeSize.isAccessibilitySize {
+                PaperActionBar(title: "Book covered visit", symbol: "calendar", identifier: "membership-book-visit") { showNewJob = true } secondary: {
+                    if canEdit {
+                        ThorbisMenu(items: planMenuItems(plan), accessibilityLabel: "More plan actions", arrowEdge: .bottom) {
+                            PaperCircleLabel(symbol: "ellipsis", size: 50, fill: Theme.card)
+                        }
+                    }
+                }
+            }
+        }
+        .thorbisDestination(item: $cancellingPlan) { membership in
+            CancelMembershipView(customerID: customer.id, membership: membership,
+                                 customerName: record?.name ?? customer.name,
+                                 onCancelled: { planReload += 1 })
+        }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
-                if part == .jobs || part == .money { await loadRecords() }
-                if part == .jobs { await loadJobRecords() }
+                if part == .membership { planReload += 1 }
+                if part.isTabbed {
+                    await loadSelectedRecords()
+                    if tab == "Activity" { await loadActivity(reset: true) }
+                }
+                if part.isTabbed && tab == "Jobs" { await loadJobRecords() }
                 if part == .comms && callsAvailable { await comms.refresh(api: api) }
             }
         }
@@ -997,17 +1076,6 @@ struct CustomerDetailView: View {
                 Task { await removeLocation(location) }
             }]
         })
-    }
-
-    /// New job under the customer's job history (the empty history points to it).
-    @ViewBuilder private var newJobBar: some View {
-        if session.can("job.create", feature: "jobs") {
-            Button { showNewJob = true } label: { Text("New job").inkCommit() }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("customer-new-job-action")
-                .padding(.horizontal, typeSize.isAccessibilitySize ? 0 : PaperCardMetrics.margin).padding(.vertical, 8)
-                .background(Theme.canvas)
-        }
     }
 
     /// Paper 48N: New job (the page's one brand commit) beside 50pt Call and Text circles. Email and
@@ -1063,6 +1131,16 @@ struct CustomerDetailView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 4).padding(.top, 10)
+    }
+
+    /// Paper 48D: "CUS-0412 · Customer since Mar 2022" over the name on the tabbed page.
+    private var tabEyebrow: String? {
+        var parts = ["CUS-\(customer.id.suffix(4).uppercased())"]
+        if isArchived { parts.append("Archived") }
+        if let date = JobFiltering.date(record?.createdAt ?? customer.createdAt) {
+            parts.append("Customer since \(date.formatted(.dateTime.month(.abbreviated).year()))")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var identityLine: String? {
@@ -1167,8 +1245,25 @@ struct CustomerDetailView: View {
 
     /// Email and Directions (Paper 48N keeps only Call and Text on the page), Save to Contacts,
     /// Customer view and the record changes.
-    private var customerMenuItems: [ThorbisMenuItem] {
+    private var customerMenuItems: [ThorbisMenuItem] { customerMenuItems(onPage: false) }
+
+    /// Paper 85 / 85B: the plan's menu. Cancel membership opens its own page.
+    private func planMenuItems(_ plan: MembershipRecord) -> [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
+        if typeSize.isAccessibilitySize, session.can("job.create", feature: "jobs") {
+            items.append(ThorbisMenuItem("Book covered visit", icon: "calendar") { showNewJob = true })
+        }
+        items.append(ThorbisMenuItem("Cancel membership", icon: "xmark.circle", role: .destructive) { cancellingPlan = plan })
+        return items
+    }
+
+    /// `onPage`: the tabbed page's menu. New job leads it; the timeline is a segment there, and the
+    /// rows that open another page or a sheet of the hub's stay on the hub.
+    private func customerMenuItems(onPage: Bool) -> [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if onPage, session.can("job.create", feature: "jobs") {
+            items.append(ThorbisMenuItem("New job", icon: "plus") { showNewJob = true })
+        }
         if let mail = MailDraft(recipient: primaryEmail) {
             items.append(ThorbisMenuItem("Email", icon: "envelope") { inboxEmail(mail, context: "customer:\(customer.id)") })
         }
@@ -1182,7 +1277,7 @@ struct CustomerDetailView: View {
         }
         // What Paper 48N's page no longer carries under the hub: the people and details, the timeline.
         items.append(ThorbisMenuItem("Contacts and details", icon: "person.2") { openPart = .details })
-        items.append(ThorbisMenuItem("Activity", icon: "clock") { openPart = .activity })
+        if !onPage { items.append(ThorbisMenuItem("Activity", icon: "clock") { openPart = .activity }) }
         if let record, record.id == customer.id, let scope = ScopedRecordFavorites.currentScope(session: session, api: api),
            scope.organizationID.caseInsensitiveCompare(record.organizationId) == .orderedSame {
             let starred = favorites.isBound(to: scope) && favorites.entries.contains { $0.kind == .customer && $0.id == record.id.lowercased() }
@@ -1191,7 +1286,7 @@ struct CustomerDetailView: View {
                 favorites.toggle(.customer, id: record.id)
             })
         }
-        if canEdit {
+        if canEdit && !onPage {
             // Paper 48C: edit the customer's details in one sheet.
             items.append(ThorbisMenuItem("Edit customer", icon: "pencil") { showEditCustomer = true })
             // Customer view: hands the phone to the customer to check and fix their details.
@@ -1201,7 +1296,7 @@ struct CustomerDetailView: View {
             items.append(ThorbisMenuItem("Add location", icon: "mappin.and.ellipse") { locationSheet = .add })
         }
         // Paper 48B / 48H: archive the customer, or bring an archived one back.
-        if canArchive, record != nil {
+        if canArchive, record != nil, !onPage {
             if isArchived {
                 items.append(ThorbisMenuItem("Restore customer", icon: "arrow.uturn.backward", isDisabled: restoring) {
                     Task { await restoreCustomer() }
@@ -1606,139 +1701,274 @@ struct CustomerDetailView: View {
 
     /// CustomerJobs.dc.html: open jobs, then past jobs with a date column, the job's notes and a
     /// meta line (tech · photos · paid). Then the jobs' photos, notes, documents and activity.
+    /// Paper 48D's Jobs segment: each open job on its own card under the day it is booked for, then
+    /// "Past jobs · 6" with the lifetime figure over one card of rows (the job, its number and day,
+    /// what it was invoiced).
     private var jobsSection: some View {
         let ordered = CustomerJobOrder.sorted(jobs)
         let open = ordered.filter { !["completed", "canceled"].contains($0.status) }
         let past = ordered.filter { ["completed", "canceled"].contains($0.status) }
         // Keep history approachable and avoid constructing every old row at once.
         let shownPast = Array(past.prefix(visiblePastCount))
-        let nextCount = CustomerJobHistory.nextCount(total: past.count, visible: shownPast.count)
         let recordsByID = CustomerJobHistory.firstByID(jobRecords, id: \.id)
-        return VStack(alignment: .leading, spacing: 18) {
-            if !open.isEmpty {
-                PaperSection("Open", count: open.count) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(open.enumerated()), id: \.element.id) { index, job in
-                            if index > 0 { WellDivider(leading: JobListRowContent.dividerInset) }
-                            customerJobRow(job, open: true, record: recordsByID[job.id])
-                        }
+        let figures = Dictionary(uniqueKeysWithValues: past.compactMap { job in jobInvoiced(job.id).map { (job.id, $0) } })
+        let lifetime = figures.values.reduce(0, +)
+        var days: [String] = []
+        for job in open where !days.contains(openDay(job)) { days.append(openDay(job)) }
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(days, id: \.self) { day in
+                CustomerTabLabel(title: day)
+                VStack(spacing: 8) {
+                    ForEach(open.filter { openDay($0) == day }) { job in
+                        CustomerOpenJobCard(job: job, line: openLine(job), invoiceLine: openInvoiceLine(job.id)) { openedJob = job }
                     }
                 }
             }
             if !past.isEmpty {
-                VStack(spacing: 0) {
-                    PaperSection("Past jobs", count: past.count) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(shownPast.enumerated()), id: \.element.id) { index, job in
-                                if index > 0 { WellDivider() }
-                                customerJobRow(job, open: false, record: recordsByID[job.id])
+                CustomerTabLabel(title: "Past jobs · \(past.count)") {
+                    if lifetime > 0 {
+                        Text("\(summaryMoney(lifetime, currency: "USD")) lifetime").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                }
+                CustomerRowsCard {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(shownPast.enumerated()), id: \.element.id) { index, job in
+                            if index > 0 { WellDivider(leading: 16) }
+                            Button { openedJob = job } label: {
+                                CustomerFigureRow(title: job.title,
+                                                  line: [job.shortRef, pastDay(job, record: recordsByID[job.id]), job.status == "canceled" ? "Canceled" : nil]
+                                                    .compactMap { $0 }.joined(separator: " · "),
+                                                  figure: figures[job.id].map { summaryMoney($0, currency: "USD") })
                             }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityHint("Opens the job")
                         }
                     }
-                    if past.count > shownPast.count {
-                        // Paper: one quiet button brings the rest of the history; the rows are lazy.
-                        let remaining = past.count - shownPast.count
-                        Button { withMotion { visiblePastCount = past.count } } label: {
-                            Text("Show \(remaining) older job\(remaining == 1 ? "" : "s")")
-                                .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                                .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-                        }
-                        .buttonStyle(PressStyle())
-                        .padding(.top, 4)
+                }
+                if past.count > shownPast.count {
+                    // One quiet button brings the rest of the history; the rows are lazy.
+                    let remaining = past.count - shownPast.count
+                    Button { withMotion { visiblePastCount = past.count } } label: {
+                        Text("Show \(remaining) older job\(remaining == 1 ? "" : "s")")
+                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
                     }
+                    .buttonStyle(PressStyle())
+                    .padding(.top, 4)
                 }
             }
             if jobs.isEmpty {
-                // New job is the page's one commit, so the empty history points to it.
+                // New job sits on the customer's page and in Customer actions.
                 ListRoomEmpty(title: "No jobs yet.",
                               message: session.can("job.create", feature: "jobs") ? "Create a job with New job." : nil)
-                    .padding(.horizontal, -Theme.gutter)
+                    .padding(.horizontal, -Theme.gutter).padding(.top, 22)
             }
-            recordsParts([.photos, .notes, .documents, .activity])
         }
     }
 
-    private func customerJobRow(_ job: Job, open: Bool, record full: JobRecord?) -> some View {
-        return Button { openedJob = job } label: {
-            if open {
-                // Open work, in the jobs row grammar: the street, the problem, when and who.
-                JobRoomRow(job: job, street: street(for: job.locationId),
-                           when: JobFiltering.date(job.scheduledFor).map { $0.visitLabel() } ?? "No time yet",
-                           who: tech(job.assignedToUserId),
-                           late: ["scheduled", "dispatched"].contains(job.status) && (JobFiltering.date(job.scheduledFor).map { $0 < .now } ?? false),
-                           inset: PaperCardMetrics.inset)
-            } else {
-                // History, the same grammar: the street, the problem, the date and tech · photos · paid,
-                // then the job's notes folding with "More"; Done or Canceled trails.
-                JobRoomRow(job: job, street: street(for: job.locationId),
-                           when: shortDate(job, record: full), who: meta(job), note: summary(job, record: full),
-                           inset: PaperCardMetrics.inset)
-            }
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityHint("Opens the job")
-    }
-
-    /// "Today", "Tomorrow", "Apr 14", or "Oct 2, 2025" outside this year.
-    private func shortDate(_ job: Job, record: JobRecord?) -> String {
-        let raw = ["completed", "canceled"].contains(job.status)
-            ? (record?.completedAt ?? record?.canceledAt ?? job.scheduledFor ?? job.updatedAt)
-            : job.scheduledFor
-        guard let date = JobFiltering.date(raw) else { return "No time" }
+    /// The label an open job's card sits under: "Today", "Tomorrow", "Upcoming", or "Not scheduled".
+    private func openDay(_ job: Job) -> String {
+        guard let date = JobFiltering.date(job.scheduledFor) else { return "Not scheduled" }
         if Calendar.current.isDateInToday(date) { return "Today" }
         if Calendar.current.isDateInTomorrow(date) { return "Tomorrow" }
-        return Calendar.current.isDate(date, equalTo: .now, toGranularity: .year)
-            ? date.formatted(.dateTime.month(.abbreviated).day())
-            : date.formatted(.dateTime.month(.abbreviated).day().year())
+        return date < .now ? "Earlier" : "Upcoming"
     }
 
-    /// The job's own notes (what was found or done), else its latest note.
-    private func summary(_ job: Job, record: JobRecord?) -> String? {
-        if let notes = record?.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !notes.isEmpty { return notes }
-        let latest = visibleRecords?.notes.first { $0.jobID == job.id }?.items.max { $0.createdAt < $1.createdAt }
-        return latest?.body
-    }
-
-    /// Tech · N photos · $X paid: only what the server returns for this job.
-    private func meta(_ job: Job) -> String? {
-        var parts: [String] = []
-        if let tech = tech(job.assignedToUserId) { parts.append(tech) }
-        if let photos = visibleRecords?.photos.first(where: { $0.jobID == job.id })?.count, photos > 0 {
-            parts.append("\(photos) photo\(photos == 1 ? "" : "s")")
+    /// "JOB-2214 · 10:30 AM · Ramon M.": the number, when, and who.
+    private func openLine(_ job: Job) -> String {
+        var parts = [job.shortRef]
+        if let date = JobFiltering.date(job.scheduledFor) {
+            parts.append(Calendar.current.isDateInToday(date) || Calendar.current.isDateInTomorrow(date) ? date.tradeTime : date.visitLabel())
         }
-        if let invoices = visibleRecords?.invoices.first(where: { $0.jobID == job.id })?.items {
-            let paid = invoices.filter { $0.amountPaid > 0 && $0.status != "void" }
-            if let currency = paid.first?.currency, paid.allSatisfy({ $0.currency == currency }) {
-                parts.append("\(money(paid.reduce(0) { $0 + $1.amountPaid }, currency: currency))\u{00A0}paid")
+        if let tech = tech(job.assignedToUserId) { parts.append(tech) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "INV-2209 · $340 due": the job's unpaid invoice, once the records have loaded.
+    private func openInvoiceLine(_ jobID: String) -> String? {
+        guard let invoices = visibleRecords?.invoices.first(where: { $0.jobID == jobID })?.items else { return nil }
+        for invoice in invoices where ["issued", "sent", "open", "overdue"].contains(invoice.status) {
+            if let due = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)?.due, due > 0 {
+                return "INV-\(invoice.id.suffix(4).uppercased()) · \(summaryMoney(due, currency: invoice.currency)) due"
             }
+        }
+        return nil
+    }
+
+    /// What a past job was invoiced, in cents: its issued and paid invoices in dollars. Nil until
+    /// the records load, or when the job has none.
+    private func jobInvoiced(_ jobID: String) -> Int? {
+        guard let invoices = visibleRecords?.invoices.first(where: { $0.jobID == jobID })?.items else { return nil }
+        let totals = invoices.filter { !["draft", "void", "voided"].contains($0.status) && $0.currency == "USD" }
+            .compactMap { CustomerDocumentAmounts(lines: $0.lines, currency: $0.currency, amountPaid: $0.amountPaid)?.total }
+        return totals.isEmpty ? nil : totals.reduce(0, +)
+    }
+
+    /// A past job's day with its year (Paper 48D "Mar 12, 2026").
+    private func pastDay(_ job: Job, record: JobRecord?) -> String? {
+        JobFiltering.date(record?.completedAt ?? record?.canceledAt ?? job.scheduledFor ?? job.updatedAt).map(CustomerTabDates.full)
+    }
+
+    /// Paper 48E's Billing segment: the balance and Collect, the invoices, the estimates (which
+    /// have no other home on the customer), and how the customer pays.
+    @ViewBuilder private var billingTab: some View {
+        let scope = recordsScope
+        let visible = scope != nil && moneyRecordsPublishedScope == scope ? moneyRecords : nil
+        let visibleError = scope != nil && moneyRecordsRequestedScope == scope ? moneyRecordsError : nil
+        VStack(alignment: .leading, spacing: 0) {
+            if scope == nil {
+                emptyText("You don’t have access to this customer’s records.").padding(.top, 20)
+            } else {
+                if let visibleError {
+                    ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) { await loadMoneyRecords() }
+                        .accessibilityIdentifier("customer-records-retry").padding(.top, 20)
+                }
+                if let visible {
+                    billingBody(visible)
+                } else if visibleError == nil {
+                    CustomerRowsCard { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }.padding(.top, 20)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func billingBody(_ compiled: CustomerJobCompilation) -> some View {
+        let invoices = billingInvoices(compiled)
+        let open = invoices.filter { $0.isOpen && ($0.due ?? 0) > 0 && $0.currency == "USD" }
+        let balance = open.reduce(0) { $0 + ($1.due ?? 0) }
+        let estimates = compiled.estimates.flatMap(\.items) + compiled.estimatesOffJob
+        if compiled.invoicesAccessible {
+            CustomerBalanceCard(balance: money(balance, currency: "USD"),
+                                line: open.isEmpty ? "Nothing owed" : open.count == 1 ? open[0].heading : "\(open.count) unpaid invoices",
+                                collectTitle: open.last.map { _ in "Collect \(summaryMoney(open.count == 1 ? balance : (open.last?.due ?? 0), currency: "USD"))" }) {
+                // The oldest unpaid invoice: payment is taken on the invoice itself.
+                if let first = open.last { openedRoute = .invoice(first.id) }
+            }
+            .padding(.top, 20)
+            CustomerTabLabel(title: "Invoices and payments") {
+                if invoices.count > 5 {
+                    Button { withMotion { showsAllInvoices.toggle() } } label: {
+                        Text(showsAllInvoices ? "Show fewer" : "See all").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                            .padding(.vertical, 13).contentShape(Rectangle()).padding(.vertical, -13)
+                    }
+                    .buttonStyle(PressStyle())
+                }
+            }
+            if invoices.isEmpty {
+                Text("No invoices yet").font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.horizontal, 4)
+            } else {
+                CustomerRowsCard {
+                    ForEach(Array((showsAllInvoices ? invoices : Array(invoices.prefix(5))).enumerated()), id: \.element.id) { index, invoice in
+                        if index > 0 { WellDivider(leading: 16) }
+                        Button { openedRoute = .invoice(invoice.id) } label: {
+                            CustomerFigureRow(title: invoice.heading, line: invoice.line(),
+                                              lineColor: invoice.isOpen ? Theme.warning : Theme.muted,
+                                              figure: invoice.isVoid ? nil : invoice.total.map { summaryMoney($0, currency: invoice.currency) },
+                                              figureColor: invoice.status == "paid" ? Theme.success : Theme.foreground,
+                                              figureWeight: invoice.isOpen ? .semibold : .medium)
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Opens the invoice")
+                        .accessibilityIdentifier("customer-invoice-\(invoice.id)")
+                    }
+                }
+            }
+        } else {
+            Label("Invoices are unavailable with your current access.", systemImage: "lock")
+                .font(Theme.font(15)).foregroundStyle(Theme.muted).padding(.top, 20)
+                .accessibilityIdentifier("customer-invoices-unavailable")
+        }
+        if compiled.estimatesAccessible, !estimates.isEmpty {
+            CustomerTabLabel(title: "Estimates")
+            CustomerRowsCard {
+                ForEach(Array(estimates.enumerated()), id: \.element.id) { index, estimate in
+                    let row = CustomerMoneyRow.estimate(estimate)
+                    if index > 0 { WellDivider(leading: 16) }
+                    Button { openedRoute = row.route } label: {
+                        CustomerFigureRow(title: "\(row.reference) · \(row.title)",
+                                          line: [estimate.status.statusLabel, row.meta].compactMap { $0 }.joined(separator: " · "),
+                                          figure: row.amount.map { _ in "" }.flatMap { _ in
+                                              CustomerDocumentAmounts(lines: estimate.lines, currency: "USD").map { summaryMoney($0.total, currency: "USD") }
+                                          })
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityHint("Opens the estimate")
+                    .accessibilityIdentifier("customer-estimate-\(estimate.id)")
+                }
+            }
+        }
+        if let pricing, pricing.isMember {
+            // Paper 48E "How she pays": the app keeps no card on file and no autopay, so the
+            // membership is the one row, and it opens the Membership page.
+            CustomerTabLabel(title: "How \(hubName) pays")
+            CustomerRowsCard {
+                Button { openPart = .membership } label: {
+                    HStack(spacing: 12) {
+                        PaperIcon(.shield, size: 20, color: Theme.muted).frame(width: 40, height: 28)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(pricing.membership?.name ?? "Member").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let line = membershipLine(pricing) {
+                                Text(line).font(Theme.font(14)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        PaperRowChevron()
+                    }
+                    .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityHint("Opens the membership")
+            }
+        }
+    }
+
+    /// "15% off · renews Aug 1".
+    private func membershipLine(_ pricing: MemberPricing) -> String? {
+        var parts: [String] = []
+        if pricing.discountPercent > 0 { parts.append("\(pricing.discountPercent)% off") }
+        if let renews = JobFiltering.date(pricing.membership?.renewsOn) ?? pricing.membership?.renewsOn.flatMap({ try? Date($0, strategy: .iso8601.year().month().day()) }) {
+            parts.append("\(parts.isEmpty ? "Renews" : "renews") \(CustomerTabDates.short(renews))")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
-    /// Money: the customer's estimates and invoices, on and off jobs.
-    private var moneySection: some View { recordsParts([.estimates, .invoices], moneyOnly: true) }
+    /// The customer's invoices, newest first, each with the job it bills.
+    private func billingInvoices(_ compiled: CustomerJobCompilation) -> [CustomerBillingInvoice] {
+        func make(_ invoice: InvoiceRecord, title: String?) -> CustomerBillingInvoice {
+            let amounts = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
+            return CustomerBillingInvoice(id: invoice.id, reference: "INV-\(invoice.id.suffix(4).uppercased())", title: title,
+                                          status: invoice.status, total: amounts?.total, due: amounts?.due, paid: invoice.amountPaid, currency: invoice.currency,
+                                          issuedAt: JobFiltering.date(invoice.issuedAt ?? invoice.createdAt), paidAt: JobFiltering.date(invoice.paidAt))
+        }
+        let all = compiled.invoices.flatMap { group in group.items.map { make($0, title: group.title) } }
+            + compiled.invoicesOffJob.map { make($0, title: nil) }
+        return all.sorted { ($0.issuedAt ?? .distantPast) > ($1.issuedAt ?? .distantPast) }
+    }
 
-    private func recordsParts(_ parts: Set<CustomerRecordsPart>, moneyOnly: Bool = false) -> some View {
+    /// Paper 48F's Media segment: the compiled photos and documents, grouped by job.
+    private func recordsParts(_ parts: Set<CustomerRecordsPart>, media: Bool = false) -> some View {
         let scope = recordsScope
-        let visible = moneyOnly ? (scope != nil && moneyRecordsPublishedScope == scope ? moneyRecords : nil) : visibleRecords
-        let visibleError = moneyOnly
-            ? (scope != nil && moneyRecordsRequestedScope == scope ? moneyRecordsError : nil)
-            : (scope != nil && recordsRequestedScope == scope ? recordsError : nil)
+        let visible = visibleRecords
+        let visibleError = scope != nil && recordsRequestedScope == scope ? recordsError : nil
+        let days = Dictionary(uniqueKeysWithValues: jobs.compactMap { job in
+            JobFiltering.date(job.scheduledFor ?? job.updatedAt).map { (job.id, Calendar.current.isDateInToday($0) ? "today" : CustomerTabDates.full($0)) }
+        })
         return VStack(alignment: .leading, spacing: 10) {
             if scope == nil {
                 emptyText("You don’t have access to this customer’s records.")
             } else {
                 if let visibleError {
-                    ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) {
-                        if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
-                    }.accessibilityIdentifier("customer-records-retry")
+                    ErrorBanner(message: visible == nil ? "Records did not load. \(visibleError)" : visibleError) { await loadRecords() }
+                        .accessibilityIdentifier("customer-records-retry")
                 }
                 if visible == nil && visibleError == nil {
                     SkeletonRows(count: 3, inset: 0)
                 } else if let visible {
-                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: {
-                        if moneyOnly { await loadMoneyRecords() } else { await loadRecords() }
-                    }, parts: parts)
+                    CustomerRecordsView(compilation: visible, customerID: customer.id, retryMedia: { await loadRecords() },
+                                        parts: parts, mediaTab: media, jobDays: days)
                 }
             }
         }
@@ -1753,8 +1983,8 @@ struct CustomerDetailView: View {
 
     private func loadSelectedRecords() async {
         switch tab {
-        case "Money": await loadMoneyRecords()
-        case "Jobs", "Photos": await loadRecords()
+        case "Billing": await loadMoneyRecords()
+        case "Jobs", "Media": await loadRecords()
         default: break
         }
     }
@@ -1829,16 +2059,6 @@ struct CustomerDetailView: View {
                 // Paper 48G: the label, the chips, then a timeline on the canvas (no card): a month
                 // label over rows of a 32pt mark on a rail, what happened and when.
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("Activity").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                            .accessibilityAddTraits(.isHeader)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if !activity.isEmpty {
-                            Text("\(activity.count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                        }
-                    }
-                    .frame(minHeight: 26)
-                    .padding(.horizontal, 4).padding(.bottom, 8)
                     if activityLoading && activity.isEmpty {
                         PaperCard { SkeletonRows(count: 3, leading: false, inset: PaperCardMetrics.inset) }
                     } else if activity.isEmpty && customerCalls.isEmpty {
