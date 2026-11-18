@@ -239,7 +239,7 @@ struct JobSavedViewsSheet: View {
                     }
                     .padding(.horizontal, 4).padding(.top, 8)
                     if entries.isEmpty {
-                        Text(book.loaded ? "No saved views yet. Set filters on Jobs, then save them as a view." : "Loading your views.")
+                        Text(book.loaded ? "No saved views yet. Set filters on Jobs, then save them as a view." : "Loading…")
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(16).frame(maxWidth: .infinity, alignment: .leading)
@@ -288,7 +288,7 @@ struct JobSavedViewsSheet: View {
                         title: { "Archive \u{201C}\($0.label)\u{201D}?" },
                         message: { _ in "It leaves your saved views here and on the web. No jobs change." },
                         actions: { view in
-                            [ThorbisConfirmAction("Archive view", role: .destructive) { archive(view) }]
+                            [ThorbisConfirmAction("Archive", role: .destructive) { archive(view) }]
                         })
     }
 

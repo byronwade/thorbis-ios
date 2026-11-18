@@ -80,12 +80,18 @@ extension Error {
 
 // MARK: - Empty
 
-/// MA-14, Linear style (phase 4): a soft tinted glyph, a semibold title that says what is empty,
-/// an optional quieter sentence for a reason the person needs ("Your role can't assign jobs"), and
-/// the one action that fills it. `tint` is the place's mark colour (as More shows it); nil is a
-/// neutral grey. `prominent` draws the action in ink, for a place's root list where it is the
-/// screen's one action; inside a record (where the bar already holds the ink commit) it stays a
-/// quiet capsule (golden rule 8).
+/// The one empty-state grammar, centred, in three sizes that share one shape (mark, title,
+/// sentence, one action):
+/// - a screen with nothing in it (`prominent`, Paper 19 "Today (empty state)"): a 56pt circle with
+///   a 26pt muted glyph, a 22 Bold title 16 under it, one 15/20 muted sentence 6 under that, and
+///   the action 20 under that as Paper's tinted pill (48pt, brand at 24%, 16 Semibold brand text);
+/// - a screen that failed or is locked (`problem`, Paper 73C "Couldn't load" / 73D "No access"): a
+///   64pt circle (warning surface for a failure, neutral for a lock), 22 Bold title, 16/22 muted
+///   sentence, 12 between parts, and the action 24 under as the solid brand pill, full width, 50pt;
+/// - inside a card or a section of a record (neither flag): the same shape one step down (48pt
+///   circle, 17 Semibold title, 15 sentence) with Paper 48A's small tinted pill (44pt, 14 Semibold).
+/// The title is sentence case with no full stop; the sentence ends with one. `tint` is the place's
+/// mark colour; nil is Paper's neutral circle.
 struct PaperEmptyState: View {
     let symbol: String
     let title: String
@@ -93,67 +99,74 @@ struct PaperEmptyState: View {
     var actionTitle: String? = nil
     var tint: Color? = nil
     var prominent = false
+    /// Paper 73C / 73D: the screen's own failed or locked state.
+    var problem = false
     var action: (() -> Void)? = nil
-    @ScaledMetric(relativeTo: .title3) private var mark: CGFloat = 48
+    @ScaledMetric(relativeTo: .title3) private var scale: CGFloat = 1
 
     init(symbol: String, title: String, message: String? = nil, actionTitle: String? = nil,
-         tint: Color? = nil, prominent: Bool = false, action: (() -> Void)? = nil) {
+         tint: Color? = nil, prominent: Bool = false, problem: Bool = false, action: (() -> Void)? = nil) {
         self.symbol = symbol
         self.title = title
         self.message = message
         self.actionTitle = actionTitle
         self.tint = tint
-        self.prominent = prominent
+        self.prominent = prominent || problem
+        self.problem = problem
         self.action = action
     }
 
+    private var markSize: CGFloat { (problem ? 64 : prominent ? 56 : 48) * min(scale, 1.5) }
+
     var body: some View {
-        // Paper 73C / 73D: a screen's own state (`prominent`) is a 64pt tinted circle, a 22 Bold
-        // title, a 16 muted sentence and the brand pill. Inside a record it stays one size down.
         VStack(spacing: 0) {
-            EmptyGlyph(symbol: symbol, tint: tint, size: prominent ? mark * 4 / 3 : mark)
-                .padding(.bottom, prominent ? 12 : 14)
+            EmptyGlyph(symbol: symbol, tint: tint, size: markSize)
+                .padding(.bottom, problem ? 12 : prominent ? 16 : 14)
             Text(title)
                 .font(prominent ? Theme.font(22, weight: .bold) : Theme.font(17, weight: .semibold))
+                .tracking(prominent ? -0.44 : 0)
                 .foregroundStyle(Theme.foreground)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             if let message, !message.isEmpty {
                 Text(message)
-                    .font(Theme.font(prominent ? 16 : 15)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(problem ? 16 : 15)).foregroundStyle(Theme.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 310)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, prominent ? 12 : 4)
+                    .padding(.top, problem ? 12 : prominent ? 6 : 4)
             }
             if let actionTitle, let action {
                 Button(action: action) {
-                    if prominent {
-                        Text(actionTitle).inkCommit()
+                    if problem {
+                        PaperPillLabel(title: actionTitle, height: 50)
+                    } else if prominent {
+                        PaperPillLabel(title: actionTitle, height: 48, tinted: true, fills: false)
                     } else {
                         Text(actionTitle)
-                            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 18).padding(.vertical, 8).frame(minHeight: 44)
-                            .background(Theme.fill, in: Capsule())
+                            .padding(.horizontal, 16).padding(.vertical, 8).frame(minHeight: 44)
+                            .background(Theme.brandTint, in: Capsule())
                             .contentShape(Capsule())
                     }
                 }
                 .buttonStyle(PressStyle())
-                .padding(.top, prominent ? 24 : 16)
+                .padding(.top, problem ? 24 : prominent ? 20 : 16)
                 .accessibilityIdentifier("empty-state-action")
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40).padding(.horizontal, Theme.gutter)
+        .padding(.vertical, 40).padding(.horizontal, problem ? 40 : Theme.gutter)
         .accessibilityElement(children: .contain)
     }
 }
 
-/// The glyph of an empty, failed or locked state (Paper 73C / 73D): the symbol on a soft circle.
-/// With a hue the circle is that hue's pale surface; without one it is a neutral circle with a
-/// secondary-ink symbol. Decorative; the words carry the meaning.
+/// The glyph of an empty, failed or locked state (Paper 19 / 73C / 73D): the symbol on a circle.
+/// With a hue the circle is that hue's pale surface; without one it is Paper's neutral circle (ink
+/// at 9%, which reads on the canvas and on a card) with a muted symbol. Decorative; the words
+/// carry the meaning.
 struct EmptyGlyph: View {
     let symbol: String
     var tint: Color? = nil
@@ -161,11 +174,24 @@ struct EmptyGlyph: View {
 
     var body: some View {
         Image(systemName: symbol)
-            .font(.system(size: size * 0.44, weight: .medium))
-            .foregroundStyle(tint ?? Theme.subtle)
+            .font(.system(size: size * 0.42, weight: .regular))
+            .foregroundStyle(tint ?? Theme.muted)
             .frame(width: size, height: size)
-            .background((tint ?? Theme.muted).opacity(0.16), in: Circle())
+            .background(tint.map { $0.opacity(0.16) } ?? Theme.quietFill, in: Circle())
             .accessibilityHidden(true)
+    }
+}
+
+/// "Nothing here" as one line inside a card or a section that still shows its heading ("No line
+/// items yet."): a 15/20 muted sentence, the same type as an empty state's sentence. A whole
+/// screen or a whole section with nothing uses `PaperEmptyState`.
+struct PaperInlineEmpty: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -185,6 +211,82 @@ struct BannerGlyph: View {
     }
 }
 
+// MARK: - Banner
+
+/// What a banner is saying, which picks its colours (Paper 73 / 74).
+enum BannerTone {
+    /// Something is wrong or waiting on the person: offline, a failed read, needs review.
+    case warning
+    /// Something is going right: back online, sending.
+    case success
+    /// Neither: a locked area, a permission that is off, work saved on this phone.
+    case quiet
+
+    var ink: Color {
+        switch self {
+        case .warning: Theme.warning
+        case .success: Theme.success
+        case .quiet: Theme.foreground
+        }
+    }
+    var ground: Color {
+        switch self {
+        case .warning: Theme.warningSurface
+        case .success: Theme.successSurface
+        case .quiet: Theme.fill
+        }
+    }
+    /// The glyph follows the words, except on the quiet strip where it steps back.
+    var glyph: Color { self == .quiet ? Theme.muted : ink }
+}
+
+/// The one banner grammar (Paper 73 "Offline pill" / 74 "Syncing pill"), used by every banner:
+/// a strip on the tone's surface, radius 14, at least 44 tall, 10 above and below, 14 leading,
+/// 10 trailing, 8 between parts; an 18pt glyph and the words in the tone's text colour
+/// (14 Semibold); and at most one trailing 24pt pill (13 Semibold on the tone at 18%) that holds
+/// a count ("3 queued") or the one way out ("Try again"). At accessibility sizes, or when the
+/// words are long, the pill drops under the words so they keep the width.
+struct PaperBannerStrip<Trailing: View>: View {
+    let symbol: String
+    let tone: BannerTone
+    let text: String
+    var stacked = false
+    @ViewBuilder var trailing: Trailing
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let stack = stacked || typeSize.isAccessibilitySize
+        let layout = stack ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                           : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        HStack(alignment: stack ? .top : .center, spacing: 8) {
+            BannerGlyph(symbol: symbol, tint: tone.glyph)
+            layout {
+                Text(text).font(Theme.font(14, weight: .semibold)).foregroundStyle(tone.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                trailing
+            }
+        }
+        .padding(.leading, 14).padding(.trailing, 10).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(tone.ground, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// The banner's trailing pill (Paper 73 "3 queued"): 24pt, 13 Semibold, the tone at 18%.
+struct BannerPill: View {
+    let title: String
+    let tone: BannerTone
+
+    var body: some View {
+        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(tone.ink)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 9).frame(minHeight: 24)
+            .background(tone.ink.opacity(tone == .quiet ? 0.09 : 0.18), in: Capsule())
+    }
+}
+
 // MARK: - Errors and permissions
 
 /// MA-15: errors name the exit. The words stay body colour, only the glyph is tinted, and when
@@ -200,17 +302,20 @@ struct ErrorBanner: View {
     var symbol: String = "exclamationmark.triangle"
     var tint: Color = Theme.warning
     var action: Action? = nil
+    /// The action's accessibility identifier, where a test finds it by one.
+    var actionIdentifier: String? = nil
     /// Side margin; zero when the parent already pads its content.
     var outer: CGFloat = Theme.gutter
     @State private var running = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     init(message: String, symbol: String = "exclamationmark.triangle", tint: Color = Theme.warning,
-         action: Action? = nil, outer: CGFloat = Theme.gutter) {
+         action: Action? = nil, actionIdentifier: String? = nil, outer: CGFloat = Theme.gutter) {
         self.message = message
         self.symbol = symbol
         self.tint = tint
         self.action = action
+        self.actionIdentifier = actionIdentifier
         self.outer = outer
     }
 
@@ -229,41 +334,40 @@ struct ErrorBanner: View {
     }
 
     var body: some View {
-        // A long message keeps the full width and puts its action underneath.
-        let stacked = typeSize.isAccessibilitySize || (action != nil && message.count > 64)
-        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
-        layout {
-            HStack(alignment: .center, spacing: 8) {
-                BannerGlyph(symbol: symbol, tint: tint)
-                Text(message).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+        // Paper 73: a problem is the warning strip; a locked area or a permission that is off (the
+        // muted tint) is the quiet one. A long message keeps the full width, its action underneath.
+        let tone: BannerTone = tint == Theme.muted ? .quiet : .warning
+        PaperBannerStrip(symbol: symbol, tone: tone, text: message, stacked: action != nil && message.count > 64) {
             if let action {
                 Button {
                     Task { running = true; await action.run(); running = false }
                 } label: {
-                    Text(action.title).font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 12).frame(minHeight: 32)
-                        .background(Theme.foreground.opacity(0.09), in: Capsule())
-                        .frame(minHeight: 44).contentShape(Rectangle())
+                    // The pill is Paper's 24pt; the touch target around it is 44.
+                    BannerPill(title: action.title, tone: tone)
+                        .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                        .padding(.vertical, -10)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(running)
                 .fixedSize()
-                .padding(.leading, stacked ? 26 : 0)
+                .modifier(BannerActionIdentifier(identifier: actionIdentifier))
             }
         }
-        .padding(.leading, 14).padding(.trailing, 10).padding(.vertical, action == nil || stacked ? 10 : 2)
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .padding(.horizontal, outer).padding(.top, 8)
         .accessibilityElement(children: .contain)
     }
 
     /// The same strip without its own side margin, for parents that already pad.
     func flush() -> ErrorBanner { var copy = self; copy.outer = 0; return copy }
+}
+
+/// Sets an accessibility identifier only when there is one, so a control without one is still
+/// found by its label.
+private struct BannerActionIdentifier: ViewModifier {
+    let identifier: String?
+    func body(content: Content) -> some View {
+        if let identifier { content.accessibilityIdentifier(identifier) } else { content }
+    }
 }
 
 /// What a person turned off in iOS Settings, and why Thorbis asks for it.
@@ -408,6 +512,24 @@ struct SkeletonSection: View {
     var leading = false
 
     var body: some View { SkeletonList(count: rows, leading: leading) }
+}
+
+/// Waiting on one thing that is not a list (a document being prepared, a check running): a small
+/// spinner and what is happening, in 14pt muted words, centred. Lists and records use the
+/// skeletons above (Paper 73E); this is the one spinner-with-words. VoiceOver hears the words.
+struct ThorbisLoadingLine: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small).tint(Theme.muted)
+                .accessibilityHidden(true)
+            Text(message).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .accessibilityElement(children: .combine)
+    }
 }
 
 /// The wait between launch (or sign-out) and the first screen: the mark on the cream ground and

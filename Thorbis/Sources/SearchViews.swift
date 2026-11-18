@@ -818,7 +818,7 @@ private struct SearchScreen: View {
             .accessibilityLabel("Searching")
         } else if built.isEmpty {
             // design.thorbis.com States: say what found nothing and the next move.
-            ListRoomEmpty(title: "No matches for \u{201C}\(terms.text)\u{201D}.", message: "Try a street or a phone number.")
+            ListRoomEmpty(symbol: "magnifyingglass", title: "No matches for \u{201C}\(terms.text)\u{201D}", message: "Try a street or a phone number.")
         }
     }
 
@@ -1063,7 +1063,7 @@ private struct SearchScreen: View {
     @ViewBuilder private var emptyQuery: some View {
         let groups = emptyGroups
         if recents.searches.isEmpty && recents.items.isEmpty {
-            ListRoomEmpty(title: "Nothing viewed yet.",
+            ListRoomEmpty(title: "Nothing viewed yet",
                           message: "Search for a job by street, a customer by name or phone, or an invoice by number.")
         }
         ForEach(groups) { group in

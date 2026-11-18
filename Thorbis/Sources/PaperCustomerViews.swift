@@ -84,7 +84,7 @@ struct CustomersView: View {
         let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(active.count) \(active.count == 1 ? "customer" : "customers") · \(activeJobs) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading…" : "\(active.count) \(active.count == 1 ? "customer" : "customers") · \(activeJobs) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
                 // Paper 47: "Search or ask" on the card, the book's filter circle inside it.
                 searchBar
                 if let error = error ?? store.error {
@@ -110,12 +110,12 @@ struct CustomersView: View {
                     }
                 }
                 if items.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recordsLoading {
-                    ListRoomEmpty(title: "No customers match.", message: "Try a name, street or phone number.")
+                    ListRoomEmpty(symbol: "magnifyingglass", title: "No customers match", message: "Try a name, street or phone number.")
                 } else if items.isEmpty && !recordsLoading && error == nil && store.error == nil {
                     if scope == .archived {
-                        ListRoomEmpty(title: "No archived customers.", message: "Customers you archive move here.")
+                        ListRoomEmpty(title: "No archived customers", message: "Customers you archive move here.")
                     } else {
-                        ListRoomEmpty(title: "No customers yet.",
+                        ListRoomEmpty(title: "No customers yet",
                                       actionTitle: session.can("customer.create", feature: "core_crm") ? "Add a customer" : nil,
                                       action: { showNew = true })
                     }
@@ -774,7 +774,7 @@ struct CustomerDetailView: View {
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
                         actions: { location in
-            [ThorbisConfirmAction("Remove \(location.label)", role: .destructive) {
+            [ThorbisConfirmAction("Remove", role: .destructive) {
                 Task { await removeLocation(location) }
             }]
         })
@@ -782,7 +782,7 @@ struct CustomerDetailView: View {
                         title: { _ in "Remove customer contact?" },
                         message: { contact in "This removes \(contact.name) from \(record?.name ?? customer.name)." },
                         actions: { contact in
-            [ThorbisConfirmAction("Remove \(contact.name)", role: .destructive) {
+            [ThorbisConfirmAction("Remove", role: .destructive) {
                 Task { await removeContact(contact) }
             }]
         })
@@ -1111,7 +1111,7 @@ struct CustomerDetailView: View {
                         title: { _ in "Remove service location?" },
                         message: { _ in "This removes the location from \(record?.name ?? customer.name)." },
                         actions: { location in
-            [ThorbisConfirmAction("Remove \(location.label)", role: .destructive) {
+            [ThorbisConfirmAction("Remove", role: .destructive) {
                 Task { await removeLocation(location) }
             }]
         })
@@ -1781,7 +1781,7 @@ struct CustomerDetailView: View {
             }
             if jobs.isEmpty {
                 // New job sits on the customer's page and in Customer actions.
-                ListRoomEmpty(title: "No jobs yet.",
+                ListRoomEmpty(title: "No jobs yet",
                               message: session.can("job.create", feature: "jobs") ? "Create a job with New job." : nil)
                     .padding(.horizontal, -Theme.gutter).padding(.top, 22)
             }
@@ -2401,7 +2401,7 @@ struct CustomerDetailView: View {
         .accessibilityLabel("Warning, \(title): \(value)")
     }
 
-    private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
+    private func emptyText(_ text: String) -> some View { PaperInlineEmpty(text).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
     private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
         guard currentAuthority() else { return }

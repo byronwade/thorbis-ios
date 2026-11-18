@@ -70,11 +70,8 @@ private struct ReportExportMenu: ViewModifier {
             .sheet(isPresented: Binding(get: { preview.url != nil }, set: { if !$0 { preview.clear() } })) {
                 if let url = preview.url { NativeDocumentPreview(url: url).ignoresSafeArea() }
             }
-            .alert("The file did not download", isPresented: Binding(get: { preview.error != nil }, set: { if !$0 { preview.clear() } })) {
-                Button("OK", role: .cancel) { preview.clear() }
-            } message: {
-                Text(preview.error ?? "")
-            }
+            .thorbisConfirm("The file didn’t download", message: preview.error,
+                            isPresented: Binding(get: { preview.error != nil }, set: { if !$0 { preview.clear() } }), actions: [])
             .task {
                 #if DEBUG
                 if PaperPreview.enabled, PaperPreview.screen == "export-report" { choosing = true }

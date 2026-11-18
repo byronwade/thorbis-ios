@@ -285,7 +285,7 @@ struct CommsCallThreadView: View {
                                       canLink: session.can("job.edit") && session.can("customer.view"))
                     }
                 } else {
-                    ListRoomEmpty(title: "These calls aren\u{2019}t in the log anymore.", message: "Pull to refresh Messages.")
+                    ListRoomEmpty(title: "These calls aren\u{2019}t in the log anymore", message: "Pull to refresh Messages.")
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
@@ -464,7 +464,7 @@ struct CommsCallCard: View {
                     } else if segments.isEmpty && detail == nil {
                         SkeletonRows(count: 2, leading: false, inset: 0)
                     } else if segments.isEmpty {
-                        Text("No transcript was kept for this call.").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        PaperInlineEmpty("No transcript was kept for this call.")
                     } else {
                         ForEach(segments) { segment in
                             VStack(alignment: .leading, spacing: 2) {
@@ -689,7 +689,7 @@ struct CommsLocalThreadView: View {
                         }
                         Color.clear.frame(height: 1).id("end")
                     } else {
-                        ListRoomEmpty(title: "This conversation is gone.", message: "It may have been discarded on this device.")
+                        ListRoomEmpty(title: "This conversation is gone", message: "It may have been discarded on this device.")
                     }
                 }
                 .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
@@ -1654,13 +1654,11 @@ struct CommsMailSheet: View {
         .onChange(of: store.isActive) { _, active in
             if !active { onClose() }
         }
-        .alert("Keep your changes?", isPresented: $confirmClose) {
-            if canSave && saveFailure != .storage { Button("Save draft") { commit(send: false) } }
-            Button("Discard changes", role: .destructive) { if removeRecovery() { onClose() } }
-            Button("Keep editing", role: .cancel) { }
-        } message: {
-            Text(canSave ? "Save this draft on your device or discard your changes." : "Keep editing or discard your changes.")
-        }
+        .thorbisConfirm("Keep your changes?",
+                        message: canSave ? "Save this draft on your device or discard your changes." : "Keep editing or discard your changes.",
+                        isPresented: $confirmClose, cancelTitle: "Keep editing",
+                        actions: (canSave && saveFailure != .storage ? [ThorbisConfirmAction("Save draft") { commit(send: false) }] : [])
+                            + [ThorbisConfirmAction("Discard changes", role: .destructive) { if removeRecovery() { onClose() } }])
         // A new email starts at To; a reply or a saved draft already has one.
         .task {
             guard draft.to.isEmpty else { return }

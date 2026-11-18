@@ -414,7 +414,8 @@ struct JobDetailView: View {
                         }
                 }
             } else {
-                ContentUnavailableView("Document unavailable", systemImage: "lock", description: Text("Return to the job and refresh to open this document."))
+                PaperEmptyState(symbol: "lock", title: "Document unavailable", message: "Return to the job and refresh to open this document.", problem: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.canvas)
             }
         }
         .thorbisDestination(item: $reviewInvoiceID) { id in
@@ -3802,11 +3803,11 @@ struct JobDetailView: View {
                 }
                 if count > 0 { estimateRowsCard(unavailable) }
                 if let error = documents.estimatePageError {
-                    Text(error).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                    if !documents.canLoadMoreEstimates || documents.estimatePageNeedsRefresh {
-                        Button("Try loading estimates again") { Task { await loadJobEstimates(job) } }
-                            .accessibilityIdentifier("job-retry-estimates")
-                    }
+                    // The shared banner, in place of a loose line and a bare text button.
+                    ErrorBanner(message: error,
+                                action: !documents.canLoadMoreEstimates || documents.estimatePageNeedsRefresh
+                                    ? ErrorBanner.Action(title: String(localized: "Try again")) { await loadJobEstimates(job) } : nil,
+                                actionIdentifier: "job-retry-estimates", outer: 0)
                 }
                 if documents.canLoadMoreEstimates && !documents.estimatePageNeedsRefresh {
                     Button(documents.estimatePageError == nil ? "Load more estimates" : "Try loading estimates again") {
@@ -4585,9 +4586,9 @@ struct JobDetailView: View {
     }
 
     private func emptyCard(_ message: String) -> some View {
-        Text(message).font(Theme.font(13)).foregroundStyle(Theme.muted)
+        PaperInlineEmpty(message)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(18)
+            .padding(PaperCardMetrics.inset)
             .panelBackground(cornerRadius: Theme.cardRadius)
     }
 

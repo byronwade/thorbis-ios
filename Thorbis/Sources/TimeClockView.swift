@@ -608,8 +608,7 @@ struct TimeClockView: View {
             TimeClockSectionLabel(title: "This week", trailing: "\(TimeClockMath.decimalHours(total))h")
             TimeClockCard {
                 if worked.isEmpty {
-                    Text("No hours this week yet.").font(Theme.font(16)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
+                    PaperInlineEmpty("No hours this week yet.")
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 }

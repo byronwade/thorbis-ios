@@ -279,8 +279,7 @@ struct JoinTeamFlow: View {
         case .createAccount: createAccount
         case .signIn: signIn
         case .loading:
-            ProgressView().frame(maxWidth: .infinity, minHeight: 240)
-                .accessibilityLabel("Loading invitation")
+            ThorbisLoadingLine(message: "Loading invitation\u{2026}").frame(minHeight: 240)
         case .details(let invitation): details(invitation)
         case .confirmEmail: confirmEmail
         case .refused(let refusal): refused(refusal)
@@ -760,8 +759,7 @@ struct JoinWorkspaceView: View {
                 linkField.padding(.top, 18)
                 if let linkProblem { FieldProblem(message: linkProblem).padding(.horizontal, 4).padding(.top, 8) }
                 if looking {
-                    ProgressView().frame(maxWidth: .infinity, minHeight: 64)
-                        .accessibilityLabel("Looking up the invitation")
+                    ThorbisLoadingLine(message: "Looking up the invitation\u{2026}").frame(minHeight: 64)
                 } else if let found {
                     foundCard(found).padding(.top, 10)
                     Button { Task { await join(id: found.id, organizationID: found.organizationId) } } label: {

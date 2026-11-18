@@ -517,7 +517,7 @@ struct MaterialsPasteView: View {
                     ErrorBanner(message: problem, outer: PaperCardMetrics.margin)
                 }
                 if waitingForCatalog, !text.isEmpty {
-                    Text("Loading the price book\u{2026}").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    ThorbisLoadingLine(message: "Loading the price book\u{2026}")
                         .padding(.horizontal, Theme.gutter).padding(.top, 12)
                 }
                 if !resolvedRows.isEmpty {

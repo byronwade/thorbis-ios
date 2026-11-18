@@ -190,7 +190,7 @@ final class CustomerClarityUITests: XCTestCase {
         XCTAssertTrue(jobs.waitForExistence(timeout: 30))
         jobs.tap()
         // The empty history names the one action (design.thorbis.com "Empty names the one action").
-        XCTAssertTrue(app.staticTexts["No jobs yet."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["No jobs yet"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Next visit"].exists)
     }
 

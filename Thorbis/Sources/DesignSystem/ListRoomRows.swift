@@ -347,35 +347,18 @@ extension ListViewBar where Popover == EmptyView {
     }
 }
 
-/// An empty room: what belongs here and the one action that starts it ("No customers yet. Add a
-/// customer."). Left-aligned on the canvas like the rows it stands in for; no illustration.
+/// An empty room: what belongs here and the one action that starts it ("No customers yet", "Add a
+/// customer"). It is the shared empty state at screen size (Paper 19), so a list room reads the
+/// same as every other empty screen; `symbol` is the room's glyph.
 struct ListRoomEmpty: View {
+    var symbol: String = "tray"
     let title: String
     var message: String? = nil
     var actionTitle: String? = nil
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-            if let message, !message.isEmpty {
-                Text(message).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let actionTitle, let action {
-                Button(action: action) {
-                    Label(actionTitle, systemImage: "plus")
-                        .inkCommit(height: 44)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                .buttonStyle(PressStyle())
-                .padding(.top, 12)
-                .accessibilityIdentifier("empty-state-action")
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, ListRoom.gutter).padding(.top, 24).padding(.bottom, 16)
-        .accessibilityElement(children: .contain)
+        PaperEmptyState(symbol: symbol, title: title, message: message, actionTitle: actionTitle,
+                        prominent: true, action: action)
     }
 }

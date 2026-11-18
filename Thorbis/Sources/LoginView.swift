@@ -247,13 +247,13 @@ struct FieldProblem: View {
     let message: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "exclamationmark.circle.fill").font(.system(size: 13)).foregroundStyle(Theme.destructive)
-                .accessibilityHidden(true)
-            Text(message).font(Theme.font(13)).foregroundStyle(Theme.foreground)
+        // Paper 09A "Error text": 13/18 in the red text colour, 4 in from the field's edge, no mark.
+        HStack(spacing: 0) {
+            Text(message).font(Theme.font(13)).foregroundStyle(Theme.destructive)
                 .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
-        .padding(.top, 2)
+        .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Error: \(message)")
         .accessibilityIdentifier("field-problem")

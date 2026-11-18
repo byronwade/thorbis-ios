@@ -6,12 +6,8 @@ struct ListErrorRow: View {
     let message: String
 
     var body: some View {
-        Label {
-            Text(message).foregroundStyle(Theme.foreground)
-        } icon: {
-            Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.warning)
-        }
-        .font(Theme.font(16))
-        .frame(minHeight: 44, alignment: .leading)
+        // The shared banner strip (Paper 73), so a failed row reads like every other problem.
+        PaperBannerStrip(symbol: "exclamationmark.triangle", tone: .warning, text: message) { EmptyView() }
+            .accessibilityElement(children: .combine)
     }
 }

@@ -15,11 +15,21 @@ struct ThorbisToast: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(symbol.hasPrefix("checkmark") ? Theme.statusDone : Theme.foreground)
-                .frame(width: 22, height: 22)
-                .accessibilityHidden(true)
+            // Paper 74: a confirmation leads with the 22pt green disc and its white tick.
+            Group {
+                if symbol.hasPrefix("checkmark") {
+                    Image(systemName: "checkmark.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Theme.statusDone)
+                        .font(.system(size: 22, weight: .semibold))
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Theme.foreground)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
             Text(message)
                 .font(Theme.font(15, weight: .semibold))
                 .foregroundStyle(Theme.foreground)

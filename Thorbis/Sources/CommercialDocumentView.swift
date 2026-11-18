@@ -12,7 +12,7 @@ struct CommercialDocumentView: View {
                                 actionTitle: preview.loading ? nil : "Try again", action: { load() })
                     .frame(maxHeight: .infinity).background(Theme.canvas)
             } else {
-                ProgressView("Preparing document…").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                ThorbisLoadingLine(message: "Preparing document…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.canvas)
             }
         }

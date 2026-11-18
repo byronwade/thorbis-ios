@@ -188,13 +188,7 @@ struct JobContactsSection: View {
                           actionIdentifier: "job-contacts-add", action: onAdd)
             if failed && people.isEmpty {
                 // JS-11: the section says what didn't load and offers one Try again; the job still shows.
-                HStack(spacing: 8) {
-                    ListErrorRow(message: "Contacts didn't load.")
-                    Spacer(minLength: 8)
-                    Button("Try again") { Task { await retry() } }
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(minHeight: 44)
-                }
+                ErrorBanner(message: "Contacts didn’t load.", retry: { await retry() }).flush()
             } else if !loaded {
                 SkeletonRows(count: 1, leading: false, inset: 0)
             } else if people.isEmpty {

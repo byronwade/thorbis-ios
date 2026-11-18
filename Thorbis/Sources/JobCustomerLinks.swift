@@ -42,13 +42,7 @@ struct JobServiceAddressesSection: View {
         VStack(alignment: .leading, spacing: 6) {
             JobPanelLabel(title: "Service addresses", count: places.isEmpty ? nil : "\(places.count)")
             if failed && places.isEmpty {
-                HStack(spacing: 8) {
-                    ListErrorRow(message: "Addresses didn't load.")
-                    Spacer(minLength: 8)
-                    Button("Try again") { Task { await retry() } }
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(minHeight: 44)
-                }
+                ErrorBanner(message: "Addresses didn’t load.", retry: { await retry() }).flush()
             } else if !loaded {
                 SkeletonRows(count: 1, leading: false, inset: 0)
             } else if places.isEmpty {

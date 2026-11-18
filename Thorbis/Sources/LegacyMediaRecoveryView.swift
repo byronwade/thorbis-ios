@@ -23,7 +23,7 @@ struct LegacyMediaRecoveryView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     if let error { ErrorBanner(message: error) { await load() } }
                     if busy {
-                        ProgressView("Checking this job…").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        ThorbisLoadingLine(message: "Checking this job…")
                             .frame(maxWidth: .infinity)
                             .padding(.horizontal, PaperCardMetrics.margin)
                     }

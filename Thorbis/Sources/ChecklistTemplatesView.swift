@@ -607,7 +607,7 @@ private struct CloseoutCheckEditor: View {
         .thorbisConfirm("Remove this check?",
                         message: "Techs will no longer confirm “\(existing?.label ?? "")” before finishing a job.",
                         isPresented: $confirmingRemove,
-                        actions: [ThorbisConfirmAction("Remove check", role: .destructive) { remove() }])
+                        actions: [ThorbisConfirmAction("Remove", role: .destructive) { remove() }])
     }
 
     private func remove() {

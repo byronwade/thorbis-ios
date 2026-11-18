@@ -539,7 +539,7 @@ struct JobCloseoutView: View {
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
         // Paper 21U: the sheet is named "Cancel job", with the job under it ("JOB-2214 · AC not cooling").
         .thorbisConfirm("Cancel job", message: job.map { "JOB-\($0.id.suffix(4).uppercased()) \u{00B7} \($0.title)" },
-                        isPresented: $confirmCancel,
+                        isPresented: $confirmCancel, cancelTitle: "Keep job",
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
     /// Item and action side by side; at accessibility sizes the action goes under the words, whole.
@@ -1479,7 +1479,7 @@ struct JobScheduleView: View {
                 .ignoresSafeArea()
         }
         .thorbisConfirm("Cancel job", message: "JOB-\(job.id.suffix(4).uppercased()) \u{00B7} \(job.title)",
-                        isPresented: $confirmCancel,
+                        isPresented: $confirmCancel, cancelTitle: "Keep job",
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancelVisit() } }])
     }
 

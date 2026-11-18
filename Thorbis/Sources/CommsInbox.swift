@@ -513,50 +513,50 @@ struct CommsInboxView: View {
     @ViewBuilder private var empty: some View {
         let name = section == .all ? "Messages" : section.title
         if section == .calls || section == .voicemail, model.callsDenied {
-            ListRoomEmpty(title: "Calls are for the office.",
+            ListRoomEmpty(symbol: "lock", title: "Calls are for the office",
                           message: "The call log needs access to every customer. A call linked to your job shows on the job.")
         } else if (section == .calls || section == .voicemail), model.callsError != nil {
             EmptyView()
         } else if quickFilter != .all {
             switch quickFilter {
-            case .unread: ListRoomEmpty(title: "Nothing unread.", message: "All shows everything in \(folder.title).")
-            case .needsReply: ListRoomEmpty(title: "Nothing needs a reply.", message: "You answered last everywhere in \(folder.title).")
-            default: ListRoomEmpty(title: "Nothing starred.", message: "Star a conversation from its menu or by swiping left on it.")
+            case .unread: ListRoomEmpty(title: "Nothing unread", message: "All shows everything in \(folder.title).")
+            case .needsReply: ListRoomEmpty(title: "Nothing needs a reply", message: "You answered last everywhere in \(folder.title).")
+            default: ListRoomEmpty(title: "Nothing starred", message: "Star a conversation from its menu or by swiping left on it.")
             }
         } else {
             switch folder {
             case .drafts:
-                ListRoomEmpty(title: "No drafts.", message: "A text or email you save without sending waits here, on this device.")
+                ListRoomEmpty(title: "No drafts", message: "A text or email you save without sending waits here, on this device.")
             case .sent:
-                ListRoomEmpty(title: "Nothing sent yet.",
+                ListRoomEmpty(title: "Nothing sent yet",
                               message: "What you send collects here. Until a text or email provider is connected, a message waits instead of going out, and says so.")
             case .archive:
-                ListRoomEmpty(title: "Nothing archived.", message: "Archived conversations in \(name) wait here until you move them back.")
+                ListRoomEmpty(title: "Nothing archived", message: "Archived conversations in \(name) wait here until you move them back.")
             case .bin:
-                ListRoomEmpty(title: "The bin is empty.", message: "Binned conversations wait here. Nothing empties on its own.")
+                ListRoomEmpty(title: "The bin is empty", message: "Binned conversations wait here. Nothing empties on its own.")
             case .inbox:
                 switch section {
                 case .calls:
-                    ListRoomEmpty(title: "No calls yet.", message: "Calls to your business number land here with a recording and a summary.")
+                    ListRoomEmpty(title: "No calls yet", message: "Calls to your business number land here with a recording and a summary.")
                 case .voicemail:
-                    ListRoomEmpty(title: "No voicemail.",
+                    ListRoomEmpty(title: "No voicemail",
                                   message: "Thorbis records calls from when they\u{2019}re answered, so it doesn\u{2019}t take voicemail yet. Calls nobody answered show as missed calls.")
                 case .texts:
-                    ListRoomEmpty(title: "No texts.", message: "Start a text from a customer or with the + above. Drafts stay on this device.",
+                    ListRoomEmpty(title: "No texts", message: "Start a text from a customer or with the + above. Drafts stay on this device.",
                                   actionTitle: "New text") { composing = .text }
                 case .email:
-                    ListRoomEmpty(title: "No email waiting.", message: "New mail lands here when an email account is connected.",
+                    ListRoomEmpty(title: "No email waiting", message: "New mail lands here when an email account is connected.",
                                   actionTitle: "New email") { composing = .email }
                 case .notices:
-                    ListRoomEmpty(title: "No notices yet.", message: "New assignments and job changes land here.")
+                    ListRoomEmpty(title: "No notices yet", message: "New assignments and job changes land here.")
                 case .all:
                     // A first visit is usually empty: point at the way in rather than only explain.
                     if access.workspace {
-                        ListRoomEmpty(title: "Nothing waiting.",
+                        ListRoomEmpty(title: "Nothing waiting",
                                       message: "Calls, texts, email and job notices land here. Text on a customer or job opens their conversation here too.",
                                       actionTitle: "New text") { composing = .text }
                     } else {
-                        ListRoomEmpty(title: "Nothing waiting.", message: "Calls, texts, email and job notices land here as they come in.")
+                        ListRoomEmpty(title: "Nothing waiting", message: "Calls, texts, email and job notices land here as they come in.")
                     }
                 }
             }

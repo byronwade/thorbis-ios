@@ -114,7 +114,7 @@ struct MediaPhotoViewer: View {
         .onDisappear { loader.clear() }
         .thorbisConfirm(item: $confirmArchive, title: { _ in "Remove this photo from the job?" },
                         message: { _ in "It’s archived, not erased: the office can still restore it." },
-                        actions: { record in [ThorbisConfirmAction("Remove photo", role: .destructive) {
+                        actions: { record in [ThorbisConfirmAction("Remove", role: .destructive) {
                             Task { working = true; _ = await archive(record); working = false }
                         }] })
         .sheet(item: $share) { files in MediaShareSheet(urls: files.urls) { share = nil } }

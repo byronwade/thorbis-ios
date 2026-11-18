@@ -25,7 +25,7 @@ struct OfficeSlotQueueView: View {
                 PaperHeader(title: "Waiting for a slot", subtitle: subtitle)
                 OfflineBanner()
                 if !allowed {
-                    ListRoomEmpty(title: "Your role can\u{2019}t book follow-ups.",
+                    ListRoomEmpty(symbol: "lock", title: "Your role can\u{2019}t book follow-ups",
                                   message: "Booking a follow-up needs the right to book follow-ups and to assign jobs. An owner or admin can change that.")
                 } else {
                     OfficeSlotQueueList(queue: queue, roster: roster, standalone: true)
@@ -131,12 +131,12 @@ struct OfficeSlotQueueList: View {
                     .padding(.horizontal, PaperCardMetrics.margin + 4).padding(.top, 12)
             } else if standalone {
                 if session.isOffline && !queue.loaded {
-                    ListRoomEmpty(title: "This list needs a connection.",
+                    ListRoomEmpty(symbol: "wifi.slash", title: "This list needs a connection",
                                   message: "The server checks each follow-up against the job as it stands now, so it isn\u{2019}t kept on this phone.")
                 } else if !queue.loaded && queue.problem == nil {
                     ListRoomSkeleton(count: 3)
                 } else if queue.loaded {
-                    ListRoomEmpty(title: "Nothing is waiting for a slot.",
+                    ListRoomEmpty(title: "Nothing is waiting for a slot",
                                   message: "A follow-up shows here when the field asks for one and it can\u{2019}t be booked on its own.")
                 }
             }

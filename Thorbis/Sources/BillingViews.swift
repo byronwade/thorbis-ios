@@ -109,7 +109,7 @@ struct BillingSchedulesView: View {
                     }
                 }
                 if !loading && schedules.isEmpty && error == nil {
-                    ListRoomEmpty(title: "No billing schedules.",
+                    ListRoomEmpty(title: "No billing schedules",
                                   message: "A schedule starts when a job is billed in stages or takes a deposit.")
                 }
             }

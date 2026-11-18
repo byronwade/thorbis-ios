@@ -164,13 +164,9 @@ struct RoleEditorView: View {
                 }
             }
         }
-        .alert("Rename role", isPresented: $renaming) {
-            TextField("Role name", text: $name, prompt: .placeholder("Role name"))
-            TextField("What this role is for", text: $summary, prompt: .placeholder("What this role is for"))
-            Button("Done") { nameProblem = nil }
-        } message: {
-            Text("Save changes to keep the new name.")
-        }
+        .thorbisConfirm("Rename role", message: "Save changes to keep the new name.", isPresented: $renaming,
+                        fields: [ThorbisConfirmField(label: "Role name", text: $name),
+                                 ThorbisConfirmField(label: "What this role is for", text: $summary)]) { nameProblem = nil }
         .task { await load() }
     }
 

@@ -1096,8 +1096,8 @@ struct JobsView: View {
                     if MyDayRules.shouldShowEmptyState(isEmpty: jobs.isEmpty, isLoading: store.loading, hasError: store.error != nil) {
                         let canCreate = session.can("job.create", feature: "jobs")
                         ListRoomEmpty(
-                            title: filterActive ? "No jobs match these filters." : store.jobs.isEmpty ? "No open jobs."
-                                : tab == "Assigned" ? "No jobs assigned to you." : "No open jobs.",
+                            title: filterActive ? "No jobs match these filters" : store.jobs.isEmpty ? "No open jobs"
+                                : tab == "Assigned" ? "No jobs assigned to you" : "No open jobs",
                             message: filterActive ? "Clear the filters to see the whole board."
                                 : tab == "Assigned" && !store.jobs.isEmpty ? "All jobs shows the whole board." : nil,
                             actionTitle: canCreate && !filterActive ? "Create a job" : nil,

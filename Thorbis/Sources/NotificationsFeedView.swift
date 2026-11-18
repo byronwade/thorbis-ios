@@ -38,7 +38,7 @@ struct NotificationsFeedView: View {
                 .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 14)
                 if !available {
                     // Permission names what is missing (design.thorbis.com States).
-                    ListRoomEmpty(title: "Your role can\u{2019}t see notices.", message: "Ask your office for access to job notices.")
+                    ListRoomEmpty(symbol: "lock", title: "Your role can\u{2019}t see notices", message: "Ask your office for access to job notices.")
                 } else {
                     // Paper 77: "Search or ask" with the filter circle, then the segments 16 under it.
                     PaperSearchBar(placeholder: "Search or ask") {
@@ -77,9 +77,9 @@ struct NotificationsFeedView: View {
                     }
                     if groups.isEmpty && loaded && error == nil {
                         if chosen == .unread && !notices.isEmpty {
-                            ListRoomEmpty(title: "No unread notices.", message: "All shows every notice.")
+                            ListRoomEmpty(title: "No unread notices", message: "All shows every notice.")
                         } else {
-                            ListRoomEmpty(title: "No notices yet.", message: "New assignments and job changes land here.")
+                            ListRoomEmpty(title: "No notices yet", message: "New assignments and job changes land here.")
                         }
                     }
                 }

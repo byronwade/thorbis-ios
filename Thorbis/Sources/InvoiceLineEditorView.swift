@@ -102,7 +102,7 @@ struct InvoiceLineEditorView: View {
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
-                        actions: [ThorbisConfirmAction("Issue invoice", role: .destructive) { Task { await issue() } }])
+                        actions: [ThorbisConfirmAction("Issue invoice") { Task { await issue() } }])
         // The price book opens only once this sheet has finished closing (two sheets can't overlap).
         .sheet(isPresented: $showMaterials, onDismiss: {
             openAddedLine()
@@ -146,9 +146,9 @@ struct InvoiceLineEditorView: View {
             memberPricing = pricing
         }
         .thorbisConfirm("Reload the latest invoice?",
-                        message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
+                        message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines and discards your edits.",
                         isPresented: $confirmReload,
-                        actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+                        actions: [ThorbisConfirmAction("Reload", role: .destructive) { Task { await reloadLatest() } }])
         #if DEBUG
         .task {
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor-line" { expandedLine = editor.lines.first?.id }

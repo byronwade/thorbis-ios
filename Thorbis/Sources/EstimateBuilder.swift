@@ -379,13 +379,10 @@ struct PriceBookResultsList: View {
                 if !current || catalog.loading {
                     PaperCard { ForEach(0..<6, id: \.self) { _ in skeletonRow } }
                 } else if let error = catalog.error, !catalog.isPartial {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(catalog.needsScopedRefresh
-                             ? "The saved price book needs one online refresh after this update. \(error)"
-                             : "The price book didn't load. \(error)")
-                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                        Button("Try again", action: retry).font(Theme.font(15, weight: .medium)).frame(minHeight: 44)
-                    }
+                    ErrorBanner(message: catalog.needsScopedRefresh
+                                    ? "The saved price book needs one online refresh after this update. \(error)"
+                                    : "The price book didn’t load. \(error)",
+                                retry: { retry() }).flush()
                 }
             }
             if canUsePriceBook, current, catalog.isPartial {
@@ -427,12 +424,12 @@ struct PriceBookResultsList: View {
             if canUsePriceBook, current, !catalog.loading, !catalog.isPartial, catalog.error == nil,
                page.results.isEmpty, recent.isEmpty, favorites.isEmpty {
                 if addCustomLine == nil {
-                    ContentUnavailableView(
-                        catalog.items.isEmpty ? "No active Price Book items" : "No matching items",
-                        systemImage: "book.closed",
-                        description: Text(catalog.items.isEmpty
+                    PaperEmptyState(
+                        symbol: catalog.items.isEmpty ? "book.closed" : "magnifyingglass",
+                        title: catalog.items.isEmpty ? "No active Price Book items" : "No matching items",
+                        message: catalog.items.isEmpty
                             ? "Add items to your Price Book to use them here."
-                            : "Try another search or choose a different category."))
+                            : "Try another search or choose a different category.")
                 } else if !trimmedQuery.isEmpty || !catalog.items.isEmpty {
                     Text("No price book items match. Add it as a custom item above, or try another word.")
                         .font(Theme.font(14)).foregroundStyle(Theme.muted)

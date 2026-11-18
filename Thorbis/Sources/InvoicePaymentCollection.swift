@@ -771,7 +771,7 @@ private struct InvoicePaymentDetailSheet: View {
         .thorbisConfirm("Discard the saved refund reason?",
                         message: discardMessage,
                         isPresented: $confirmDiscard,
-                        actions: [ThorbisConfirmAction("Discard saved reason", role: .destructive) { refundModel.discardSavedIntent() }])
+                        actions: [ThorbisConfirmAction("Discard", role: .destructive) { refundModel.discardSavedIntent() }])
         #if DEBUG
         .task {
             guard PaperPreview.enabled,
@@ -993,7 +993,7 @@ private struct InvoicePaymentRefundForm: View {
                             ? "This removes the saved draft reason."
                             : "This removes the saved reason the app needs to check the refund outcome safely.",
                         isPresented: $confirmDiscard,
-                        actions: [ThorbisConfirmAction("Discard saved reason", role: .destructive) { model.discardSavedIntent() }])
+                        actions: [ThorbisConfirmAction("Discard", role: .destructive) { model.discardSavedIntent() }])
     }
 
     /// Why the refund can't be reviewed yet, said under the reason after they press.

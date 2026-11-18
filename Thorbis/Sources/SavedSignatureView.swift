@@ -97,7 +97,7 @@ struct SavedSignatureView: View {
         .thorbisConfirm("Delete your saved signature?",
                         message: "It is removed from this phone. You can draw it again any time.",
                         isPresented: $confirmDelete,
-                        actions: [ThorbisConfirmAction("Delete signature", role: .destructive) {
+                        actions: [ThorbisConfirmAction("Delete", role: .destructive) {
                             do { try store?.clear(); signature = nil; problem = nil }
                             catch { problem = "The signature was not deleted. \(error.localizedDescription)" }
                         }])

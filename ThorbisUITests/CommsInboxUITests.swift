@@ -405,7 +405,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(to.exists)
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let save = app.alerts["Keep your changes?"].buttons["Save draft"]
+        let save = app.otherElements["thorbis-confirm"].buttons["Save draft"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.tap()
         XCTAssertTrue(app.staticTexts["Draft"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)

@@ -142,7 +142,9 @@ carry Paper's own values; build screens from them before writing a one-off.
 | Danger commit (Cancel job, Void invoice) | `.dangerCommit()` | `../Theme.swift` |
 | **Select row** (replaces menu/default `Picker`) | **`ThorbisSelect`** | `ThorbisControls.swift` |
 | **Pill segmented** (replaces `.pickerStyle(.segmented)`) | **`ThorbisSegmented`** | `ThorbisControls.swift` |
-| **Confirm sheet** (replaces `.confirmationDialog`) | **`.thorbisConfirm`** | `ThorbisControls.swift` |
+| **Confirm card** (replaces `.confirmationDialog` and `.alert`; Paper P4, centred over a scrim) | **`.thorbisConfirm`** | `ThorbisControls.swift` |
+| Banner (offline, failed read, permission; Paper 73 / 74 strip) | `ErrorBanner`, `OfflineBanner`, `PermissionNotice`, `ListErrorRow` (all draw `PaperBannerStrip`) | `ThorbisStates.swift` |
+| Inline "nothing here" line, spinner with words | `PaperInlineEmpty`, `ThorbisLoadingLine` | `ThorbisStates.swift` |
 | Selectable chip | `ThorbisChipToggle` / `ThorbisChipGroup` | `ThorbisSheet.swift` |
 | Empty state (tinted glyph, title, sentence, action) | `PaperEmptyState(tint:)`, `EmptyGlyph` | `ThorbisStates.swift` |
 | Loading list / rows | `SkeletonList`, `SkeletonRows`, `SkeletonPulse` | `ThorbisStates.swift` |
@@ -215,9 +217,13 @@ ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Comme
 
 ## ThorbisConfirm (confirmationDialog)
 
-`.thorbisConfirm` presents a confirm modal — a clean panel sheet with the question, the
-consequence, the commit (a destructive one in the danger tone) and an automatic Cancel. Use the `isPresented:` form for a Bool, or the `item:` form in
-place of `.confirmationDialog(presenting:)` (it clears the item on dismiss, so swipe-away = Cancel).
+`.thorbisConfirm` presents the one confirm card (Paper P4): 342pt wide, centred over a 45% scrim,
+radius 28, the question as a 20 Bold title that names the thing, one 15pt muted line that says
+what happens, then 50pt pills: Cancel on the left, the action on the right (red when
+`.destructive`, brand otherwise). The red pill repeats the verb alone ("Delete", "Remove",
+"Discard", "Archive"). Several actions stack with Cancel last. `actions: []` is a notice with one
+"OK"; `reason:` adds one required or optional field; `fields:` edits bound values; `cancelTitle:`
+renames Cancel where the action is itself a cancel ("Keep job"). Never use `.alert`.
 
 ```swift
 .thorbisConfirm("Remove this item?", isPresented: $confirm,
@@ -225,7 +231,7 @@ place of `.confirmationDialog(presenting:)` (it clears the item on dismiss, so s
 
 .thorbisConfirm(item: $toRemove, title: { _ in "Remove location?" },
                 message: { "Removes it from \($0.customer)." },
-                actions: { loc in [ThorbisConfirmAction("Remove \(loc.label)", role: .destructive) { remove(loc) }] })
+                actions: { loc in [ThorbisConfirmAction("Remove", role: .destructive) { remove(loc) }] })
 ```
 
 > **Capture the value before dismiss.** When a Bool-driven confirm's action reads the same state

@@ -67,8 +67,8 @@ struct PriceBookCartPicker: View {
                     if let notice { ErrorBanner(message: notice).padding(.horizontal, PaperCardMetrics.margin) }
                     if let error { ErrorBanner(message: error).padding(.horizontal, PaperCardMetrics.margin) }
                     if !canUsePriceBook, addCustomLine == nil {
-                        ContentUnavailableView("Price Book unavailable", systemImage: "book.closed",
-                                               description: Text(unavailableReason ?? "This account cannot select Price Book items."))
+                        PaperEmptyState(symbol: "book.closed", title: "Price Book unavailable",
+                                        message: unavailableReason ?? "This account cannot select Price Book items.")
                     } else {
                         PriceBookResultsList(
                             catalog: catalog, context: context, query: query, kind: kind, canUsePriceBook: canUsePriceBook,

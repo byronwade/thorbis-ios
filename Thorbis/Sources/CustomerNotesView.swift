@@ -81,7 +81,7 @@ struct CustomerNotesSection: View {
                         title: { _ in "Delete this note?" },
                         message: { _ in "It is removed from this phone and can\u{2019}t be brought back." },
                         actions: { note in
-            [ThorbisConfirmAction("Delete note", role: .destructive) {
+            [ThorbisConfirmAction("Delete", role: .destructive) {
                 do { try model.remove(note.id); problem = nil }
                 catch { problem = "The note was not deleted. \(error.localizedDescription)" }
             }]
