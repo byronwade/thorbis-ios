@@ -33,8 +33,7 @@ struct SettingsView: View {
                     // Paper 65: the 44pt back circle, 14 under it "Settings" in 34 Bold.
                     ThorbisBackButton()
                         .padding(.top, 2)
-                    AccountPageTitle(title: "Settings")
-                        .padding(.top, 14)
+                    AccountPageTitle(title: "Settings", underBar: false)
 
                     // Paper 65: the person, then a chevron into Account and data (67).
                     AccountGroup(title: "Account") {

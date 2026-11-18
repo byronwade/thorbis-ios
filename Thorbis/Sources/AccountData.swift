@@ -80,7 +80,6 @@ struct AccountAndDataView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 AccountPageTitle(title: "Account and data")
-                    .padding(.top, 14)
 
                 AccountGroup(title: "Your account") {
                     Button { editingProfile = true } label: {

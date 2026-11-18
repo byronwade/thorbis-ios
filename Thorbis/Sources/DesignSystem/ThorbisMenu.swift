@@ -680,18 +680,7 @@ struct ThorbisMenuCard: View {
     /// Paper 21K / F8: the title at 22 Bold, a muted line under it, and (F8) the close circle.
     private var headerRow: some View {
         HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                if let title {
-                    Text(title).font(Theme.font(22, weight: .bold)).foregroundStyle(Theme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                }
-                if let subtitle {
-                    Text(subtitle).font(Theme.font(closeCircle ? 14 : 15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            PaperSheetTitle(title: title, subtitle: subtitle)
             if closeCircle {
                 PaperCircleButton(symbol: "xmark", label: "Close", size: 48, fill: Theme.fill, action: { dismiss() })
             }

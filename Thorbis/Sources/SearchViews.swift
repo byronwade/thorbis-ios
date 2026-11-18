@@ -677,10 +677,7 @@ private struct SearchScreen: View {
     private var sheetField: some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         return VStack(alignment: .leading, spacing: 14) {
-            Text("Search").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .foregroundStyle(Theme.foreground)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 4)
+            PaperPageTitle(title: "Search", columnInset: PaperCardMetrics.margin, top: 0)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
                     .foregroundStyle(model.query.isEmpty ? Theme.muted : Theme.foreground)

@@ -197,9 +197,7 @@ struct AppMenuEditor: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 // Paper sheets: the title in 22 Bold, the close word in the brand's words colour.
-                Text("Edit menu").font(Theme.font(22, weight: .bold))
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
+                PaperSheetTitle(title: "Edit menu")
                 Button("Done", action: done)
                     .font(Theme.font(16, weight: .semibold))
                     .foregroundStyle(Theme.brandText)

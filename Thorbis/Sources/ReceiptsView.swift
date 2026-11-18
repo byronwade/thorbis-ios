@@ -676,11 +676,8 @@ private struct ReceiptEditor: View {
             .padding(.horizontal, 16).padding(.top, 14)
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text(existing == nil ? "Add receipt" : "Edit receipt")
-                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, 4)
+                    PaperPageTitle(title: existing == nil ? "Add receipt" : "Edit receipt",
+                                   columnInset: PaperCardMetrics.margin, underBar: false)
                     if let error {
                         Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                             .fixedSize(horizontal: false, vertical: true)
@@ -718,7 +715,7 @@ private struct ReceiptEditor: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4)
                 }
-                .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 24)
+                .padding(.horizontal, 16).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollDismissesKeyboard(.interactively)

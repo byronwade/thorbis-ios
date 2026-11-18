@@ -26,16 +26,8 @@ struct NotificationsFeedView: View {
         let groups = NotificationsFeed.groups(notices, filter: chosen)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Notifications").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("notifications-title")
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("notifications-subtitle")
-                }
-                .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 14)
+                PaperPageTitle(title: "Notifications", subtitle: subtitle, titleIdentifier: "notifications-title", subtitleIdentifier: "notifications-subtitle")
+                    .padding(.bottom, 14)
                 if !available {
                     // Permission names what is missing (design.thorbis.com States).
                     ListRoomEmpty(title: "Your role can\u{2019}t see notices.", message: "Ask your office for access to job notices.")

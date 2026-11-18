@@ -206,12 +206,7 @@ struct LegalDocumentView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text(verbatim: document.title)
-                    .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("legal-title")
+                PaperPageTitle(title: document.title, columnInset: 20, titleIdentifier: "legal-title")
                 ForEach(document.parts) { part in
                     VStack(alignment: .leading, spacing: 8) {
                         if let heading = part.heading {
@@ -231,7 +226,7 @@ struct LegalDocumentView: View {
                 }
             }
             .textSelection(.enabled)
-            .padding(.horizontal, 20).padding(.top, 14).padding(.bottom, 32)
+            .padding(.horizontal, 20).padding(.bottom, 32)
             .frame(maxWidth: 640, alignment: .leading)
             .frame(maxWidth: .infinity)
         }

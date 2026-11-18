@@ -158,30 +158,16 @@ struct AccountGroup<Content: View>: View {
     }
 }
 
-/// The page title under the back circle: an optional 13 Semibold eyebrow, the 34/40 Bold title
-/// (-0.025em) and an optional 15/20 muted line, 4 in from the column (20 from the screen).
+/// The account pages' title: the shared `PaperPageTitle` inside their 16pt column. The parent
+/// page's name is never printed over it (a title names the thing).
 struct AccountPageTitle: View {
-    var eyebrow: String? = nil
     let title: String
     var subtitle: String? = nil
+    /// Settings draws its own back circle straight above the title; the pushed pages sit under the bar.
+    var underBar = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let eyebrow {
-                Text(eyebrow).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            }
-            Text(title).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            if let subtitle {
-                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, eyebrow == nil ? 0 : 4)
-            }
-        }
-        .padding(.horizontal, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        PaperPageTitle(title: title, subtitle: subtitle, columnInset: PaperCardMetrics.margin, underBar: underBar)
     }
 }
 

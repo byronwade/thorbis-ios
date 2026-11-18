@@ -47,14 +47,8 @@ struct NoticeSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 96: the title in 34 Bold, one muted line, then one card per group of switches.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Notification rules").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(managesRoles ? "Who hears when a job is booked, changed or canceled" : "What this phone tells you")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 16)
+                PaperPageTitle(title: "Notification rules", subtitle: managesRoles ? "Who hears when a job is booked, changed or canceled" : "What this phone tells you", columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 16)
                 if PushNotifications.receivesMorningDigest(session) {
                     // TG-11: one push at 6:30, the off switch lives here. Per phone, saved offline.
                     PaperSection("This phone", count: nil) {

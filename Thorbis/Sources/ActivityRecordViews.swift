@@ -454,11 +454,8 @@ struct ServiceLocationDetailView: View {
                 if loading { SkeletonRows(count: 3, inset: 0).padding(.horizontal, 4) }
                 if let error { ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin) }
                 if let location {
-                    Text(location.label).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(2).minimumScaleFactor(0.7)
-                        .foregroundStyle(Theme.foreground)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.bottom, 16)
+                    PaperPageTitle(title: location.label, columnInset: PaperCardMetrics.margin)
+                        .padding(.bottom, 16)
                     PaperCard(padding: PaperCardMetrics.inset) {
                         Text(location.address).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                             .textSelection(.enabled)
@@ -469,7 +466,7 @@ struct ServiceLocationDetailView: View {
                 }
             }
             .padding(.horizontal, PaperCardMetrics.margin)
-            .padding(.vertical, 16)
+            .padding(.bottom, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.canvas)

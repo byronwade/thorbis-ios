@@ -90,7 +90,7 @@ struct PurchaseOrderDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
@@ -196,15 +196,7 @@ struct PurchaseOrderDetailView: View {
     @ViewBuilder private func page(_ order: PurchaseOrderRecord) -> some View {
         let vendor = book.vendor(order.vendorID)
         let draft = order.status == .draft
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Purchase order").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            Text([order.numberLabel, order.note ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
-                .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 4)
+        PaperPageTitle(title: "Purchase order", subtitle: [order.numberLabel, order.note ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "), columnInset: PaperCardMetrics.margin)
         // Paper 41: the status, the vendor and the total as chips under the title.
         FlowRow(spacing: 8, lineSpacing: 8) {
             PlaceMetaPill(text: PurchaseOrderTone.word(order), glyph: .placeHalfRing)

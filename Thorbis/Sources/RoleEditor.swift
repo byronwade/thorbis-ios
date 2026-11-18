@@ -99,15 +99,8 @@ struct RoleEditorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 63: "Role · 2 members" small above the role's name in 34 Bold.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(roleLine).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    Text(name.isEmpty ? "Role" : name)
-                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(2).minimumScaleFactor(0.6)
-                        .accessibilityAddTraits(.isHeader)
-                    if let nameProblem { FieldProblem(message: nameProblem) }
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                PaperPageTitle(eyebrow: roleLine, title: name.isEmpty ? "Role" : name)
+                if let nameProblem { FieldProblem(message: nameProblem).padding(.horizontal, Theme.gutter).padding(.top, 2) }
 
                 if catalog == nil && error == nil {
                     SkeletonRows(count: 6, leading: false).padding(.top, 16)

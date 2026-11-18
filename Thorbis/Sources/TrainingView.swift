@@ -23,48 +23,18 @@ struct LearnIdentity: Equatable {
     var key: String { "\(actorID.lowercased())|\(organizationID.lowercased())" }
 }
 
-/// Paper 88B's sheet header: Cancel and Save in the title row.
+/// Paper 88B's sheet header: the shared task bar (`PaperTaskBar`), Cancel and Save in the title row.
 struct LearnEditorHeader: View {
     let title: String
     let saveIdentifier: String
     let onCancel: () -> Void
     let onSave: () -> Void
-    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Button(action: onCancel) {
-                    Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .padding(.horizontal, 16).frame(minHeight: 44)
-                        .background(Theme.card, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                Spacer(minLength: 8)
-                if !typeSize.isAccessibilitySize { titleText.layoutPriority(-1) }
-                Spacer(minLength: 8)
-                // Never pre-disabled: pressed with a required field empty, it says which under it.
-                Button(action: onSave) {
-                    Text("Save").font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier(saveIdentifier)
-            }
-            // At the largest text sizes the title takes its own line so Cancel and Save stay whole.
-            if typeSize.isAccessibilitySize { titleText.frame(maxWidth: .infinity, alignment: .leading) }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
-    }
-
-    private var titleText: some View {
-        Text(title).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityAddTraits(.isHeader)
+        // Never pre-disabled: pressed with a required field empty, it says which under it.
+        PaperTaskBar(title: title,
+                     commit: ThorbisSheetHeaderAction(title: "Save", identifier: saveIdentifier, action: onSave),
+                     onCancel: onCancel)
     }
 }
 
@@ -660,7 +630,8 @@ private struct TrainingCredentialDetail: View {
                     .foregroundStyle(statusColor(expiry))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.horizontal, 4)
+            // The shared title's place; the second line keeps its own colour (it is the licence's state).
+            .padding(.horizontal, 4).padding(.top, PaperHeaderMetrics.titleTopUnderBar)
             if let actionError {
                 Text(actionError).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 4)
@@ -737,7 +708,7 @@ private struct TrainingCredentialDetail: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)

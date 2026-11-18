@@ -28,14 +28,7 @@ struct MembershipPlanBody: View {
                 page(plan, sold: plans.first { $0.id == plan.planId })
             } else {
                 VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Membership").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
-                        Text(customerName).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, 4).padding(.top, 10)
+                    PaperPageTitle(title: "Membership", subtitle: customerName, columnInset: PaperCardMetrics.margin)
                     if loaded { CustomerMembershipSection(customerID: customerID) }
                 }
             }
@@ -47,15 +40,7 @@ struct MembershipPlanBody: View {
         let benefits = Self.benefits(membership, sold: sold)
         let billing = Self.billing(membership, sold: sold)
         return VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(membership.name).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                Text("PLAN-\(membership.id.suffix(4).uppercased()) \u{00B7} \(customerName)")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 4).padding(.top, 10)
+            PaperPageTitle(title: membership.name, subtitle: "PLAN-\(membership.id.suffix(4).uppercased()) \u{00B7} \(customerName)", columnInset: PaperCardMetrics.margin)
             // Paper 85's chips: 40 tall, 14 Medium on the card; "Active" on the success surface.
             FlowChips {
                 HStack(spacing: 6) {

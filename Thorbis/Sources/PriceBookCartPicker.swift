@@ -135,17 +135,9 @@ struct PriceBookCartPicker: View {
     }
 
     private var titleHeader: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("Add materials").font(Theme.font(34, weight: .bold)).tracking(-0.85).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-            // The estimate builder has several places a pick can go; Add materials has one.
-            if materialModes.isEmpty {
-                Text("To \(destination)").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .lineLimit(2)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // The estimate builder has several places a pick can go; Add materials has one.
+        PaperPageTitle(title: "Add materials", subtitle: materialModes.isEmpty ? "To \(destination)" : nil,
+                       columnInset: Theme.gutter, top: 0)
     }
 
     /// Scan · Paste · Price book, with Price book chosen (Paper 33).

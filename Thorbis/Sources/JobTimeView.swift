@@ -61,14 +61,7 @@ struct JobTimeView: View {
             let spans = JobTimeSpans.make(job, now: context.date)
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Time and profit").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
-                        Text(subtitle(now: context.date)).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, 4)
+                    PaperPageTitle(title: "Time and profit", subtitle: subtitle(now: context.date), columnInset: PaperCardMetrics.margin)
                     if spans.total == nil {
                         Text("Time shows here once the drive or the work starts.")
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)
@@ -92,7 +85,7 @@ struct JobTimeView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 28)
+                .padding(.horizontal, 16).padding(.bottom, 28)
             }
         }
         .background(Theme.canvas)

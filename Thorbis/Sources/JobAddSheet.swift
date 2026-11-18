@@ -26,10 +26,7 @@ struct JobAddSheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center) {
-                    Text("Add to job").font(Theme.font(22, weight: .bold)).tracking(-0.44)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 8)
+                    PaperSheetTitle(title: "Add to job")
                     Button { dismiss() } label: {
                         PaperIcon(.addClose, size: 18).frame(width: 44, height: 44).background(Theme.quietFill, in: Circle())
                     }

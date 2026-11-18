@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Cancel on the left, the title, and an optional brand commit on the right (Paper 27A / 27B).
+/// Paper 27A / 27B: the shared task bar (`PaperTaskBar`).
 private struct TimeClockSheetHeader: View {
     let title: String
     var commit: String? = nil
@@ -9,35 +9,9 @@ private struct TimeClockSheetHeader: View {
     var onCommit: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: onCancel) {
-                Text("Cancel").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .padding(.horizontal, 16).frame(minHeight: 44)
-                    .background(Theme.card, in: Capsule())
-                    .contentShape(Capsule())
-            }
-            .buttonStyle(PressStyle())
-            Text(title).font(Theme.font(17, weight: .semibold))
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity)
-                .accessibilityAddTraits(.isHeader)
-            if let commit {
-                Button(action: onCommit) {
-                    Text(commit).font(Theme.font(16, weight: .semibold)).foregroundStyle(Color.white)
-                        .padding(.horizontal, 18).frame(minHeight: 44)
-                        .background(Theme.brand, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .modifier(OptionalIdentifier(identifier: commitIdentifier))
-            } else {
-                // Keeps the title centred when there is no commit up here (Paper 27B).
-                Text("Cancel").font(Theme.font(16, weight: .medium)).padding(.horizontal, 16).hidden()
-                    .accessibilityHidden(true)
-            }
-        }
-        .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+        PaperTaskBar(title: title,
+                     commit: commit.map { ThorbisSheetHeaderAction(title: $0, identifier: commitIdentifier, action: onCommit) },
+                     onCancel: onCancel)
     }
 }
 

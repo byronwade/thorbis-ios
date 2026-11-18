@@ -58,10 +58,7 @@ private struct SearchRouteContent: View {
             // (34/40 Bold) 20 in; 14 under that the field.
             VStack(alignment: .leading, spacing: 14) {
                 PaperCircleButton(symbol: "xmark", label: "Close search", size: 44) { close() }
-                Text("Search").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .lineLimit(1).minimumScaleFactor(0.7)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, 4)
+                PaperPageTitle(title: "Search", columnInset: PaperCardMetrics.margin, top: 0)
                 field
             }
             .frame(maxWidth: .infinity, alignment: .leading)

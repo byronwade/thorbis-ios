@@ -211,9 +211,119 @@ struct PaperFilterCircle: View {
 
 // MARK: - Groups and cards
 
-/// A group's label (Paper 18 / 20): 13 Semibold muted, the count at the trailing edge in 13
-/// Regular, 4 in from the card's edge (20 from the screen) and 8 above the card. Paper leaves 20–22
-/// above the label: the caller adds that with `.padding(.top, 20)` (22 on Schedule).
+// MARK: - Headers and labels (consistency pass, 2026-11-18)
+
+/// Where a page's title sits (Paper 20 / 61A / 67 / 21J): the 44pt circles 2 under the status bar,
+/// then 14 to the 34/40 Bold title, so the title's box starts 60 under the status bar on every
+/// page, whether the circles are the header's own row or sit in the navigation bar.
+enum PaperHeaderMetrics {
+    /// Status bar to the title's box.
+    static let titleBelowStatusBar: CGFloat = 60
+    /// The navigation bar that carries the back or menu circle: 54 tall from iOS 26, 44 before.
+    static var barHeight: CGFloat { if #available(iOS 26.0, *) { 54 } else { 44 } }
+    /// The space above a title that follows the navigation bar.
+    static var titleTopUnderBar: CGFloat { titleBelowStatusBar - barHeight }
+    /// The space above a title that follows the header's own 44pt circle row.
+    static let titleTopUnderCircles: CGFloat = 14
+    /// The first label or card under a title block (Paper 61A / 96); a search field or tabs sit 14 under.
+    static let firstContent: CGFloat = 22
+}
+
+/// The title block every page shares (Paper 20 "Jobs", 61A "Hours, tax and terms", 67, 39H): the
+/// 34/40 Bold title (-0.025em) 20 from the screen's edge and, 2 under it, one 15/20 muted line.
+/// A long title wraps; it never truncates. The block ends at its last line: a label or a card
+/// follows `PaperHeaderMetrics.firstContent` under it, a search field or tabs 14.
+///
+///     PaperPageTitle(title: "Time and profit", subtitle: "AC repair · 2h 10m")   // full-width column
+///     PaperPageTitle(title: "Checklist", subtitle: line, columnInset: 16)         // inside a 16pt column
+struct PaperPageTitle: View {
+    /// Only where Paper prints a record's reference over its name (63 "Role · 2 members", 51
+    /// "CALL-0142 · (916) 555-0148"): one 15/20 muted line above the title. Never the parent page's name.
+    var eyebrow: String? = nil
+    let title: String
+    var subtitle: String? = nil
+    /// The space already between the screen's edge and this block: 0 in a full-width column,
+    /// `PaperCardMetrics.margin` inside a card column.
+    var columnInset: CGFloat = 0
+    /// False where the page draws its own 44pt circle row straight above the title.
+    var underBar = true
+    /// Only where a container already places the block (a list section's own inset): the space above.
+    var top: CGFloat? = nil
+    var titleIdentifier: String? = nil
+    var subtitleIdentifier: String? = nil
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if let eyebrow, !eyebrow.isEmpty {
+                Text(eyebrow).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(title).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                .foregroundStyle(Theme.foreground)
+                .lineLimit(typeSize.isAccessibilitySize ? 5 : 3)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .modifier(OptionalIdentifier(identifier: titleIdentifier))
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(minHeight: 20, alignment: .leading)
+                    .modifier(OptionalIdentifier(identifier: subtitleIdentifier))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, max(0, Theme.gutter - columnInset))
+        .padding(.top, top ?? (underBar ? PaperHeaderMetrics.titleTopUnderBar : PaperHeaderMetrics.titleTopUnderCircles))
+    }
+}
+
+/// A section's label (Paper 18 / 20 / 61A / 21E): 13/18 Semibold muted, the count at the trailing
+/// edge in 13 Regular, 4 in from the card's edge and 8 above the card. Paper leaves 22 above it:
+/// the caller's stack spacing or `.padding(.top, 22)` adds that. This is the one label; a column
+/// that already sits 16 from the screen uses it as is, a full-width column uses `PaperCardLabel`.
+///
+///     PaperSectionLabel(title: "Hours")
+///     PaperSectionLabel(title: "In progress", count: 2)
+///     PaperSectionLabel(title: "Contacts") { addButton }
+struct PaperSectionLabel<Trailing: View>: View {
+    let title: String
+    var count: Int? = nil
+    /// The count with its unit ("4 jobs", "4 · 7.5h"); wins over `count`.
+    var countText: String? = nil
+    /// Paper 79 prints today's and tomorrow's day label in the muted grey and a later day in ink.
+    var titleColor: Color = Theme.muted
+    /// The label's inset from its column: 4 beside a card, 0 inside a sheet (Paper 21E).
+    var inset: CGFloat = 4
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(titleColor)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let countText {
+                Text(countText).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            } else if let count, count > 0 {
+                Text("\(count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .accessibilityLabel("\(count)")
+            }
+            trailing
+        }
+        .frame(minHeight: 18)
+        .padding(.horizontal, inset)
+        .padding(.bottom, 8)
+    }
+}
+
+extension PaperSectionLabel where Trailing == EmptyView {
+    init(title: String, count: Int? = nil, countText: String? = nil, titleColor: Color = Theme.muted, inset: CGFloat = 4) {
+        self.init(title: title, count: count, countText: countText, titleColor: titleColor, inset: inset) { EmptyView() }
+    }
+}
+
+/// `PaperSectionLabel` for a full-width column: the same label, 20 from the screen's edge.
 ///
 ///     PaperCardLabel(title: "In progress", count: 2)
 ///     PaperCardLabel(title: "Later today", countText: "4 jobs")
@@ -227,21 +337,8 @@ struct PaperCardLabel<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(titleColor)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if let countText {
-                Text(countText).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-            } else if let count, count > 0 {
-                Text("\(count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-            }
-            trailing
-        }
-        .frame(minHeight: 18)
-        .padding(.horizontal, PaperCardMetrics.margin + 4)
-        .padding(.bottom, 8)
+        PaperSectionLabel(title: title, count: count, countText: countText, titleColor: titleColor) { trailing }
+            .padding(.horizontal, PaperCardMetrics.margin)
     }
 }
 

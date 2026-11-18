@@ -243,7 +243,7 @@ struct EstimateRevisionEditorView: View {
                 .padding(.horizontal, 4)
         }
         .padding(.horizontal, PaperCardMetrics.margin)
-        .padding(.top, 8)
+        .padding(.top, 0)
         .padding(.bottom, 24)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
@@ -274,16 +274,9 @@ struct EstimateRevisionEditorView: View {
         let customer = store.customerName(estimate.customerId)
         let status = DocumentStatus(estimateStatus: editor.estimate.status)
         return VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(editingDraft ? "Edit estimate" : "Revise estimate")
-                    .font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                Text("EST-\(editor.estimate.id.suffix(4).uppercased()) \u{00B7} \(customer) \u{00B7} Revision \(editor.estimate.currentRevisionNumber ?? 0) \u{00B7} \(editingDraft ? "Edit draft" : "New replacement draft")")
-                    .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 4)
+            PaperPageTitle(title: editingDraft ? "Edit estimate" : "Revise estimate",
+                           subtitle: "EST-\(editor.estimate.id.suffix(4).uppercased()) \u{00B7} \(customer) \u{00B7} Revision \(editor.estimate.currentRevisionNumber ?? 0) \u{00B7} \(editingDraft ? "Edit draft" : "New replacement draft")",
+                           columnInset: PaperCardMetrics.margin)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Title").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, 4).accessibilityHidden(true)

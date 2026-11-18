@@ -444,10 +444,8 @@ struct MediaCompareView: View {
                 .accessibilityLabel("Done")
                 .accessibilityIdentifier("media-compare-done")
                 .padding(.leading, -4)
-            Text("Before and after").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .lineLimit(1).minimumScaleFactor(0.7)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 4).padding(.top, 2)
+            // The stack's 12 plus 2: Paper's 14 under the circle.
+            PaperPageTitle(title: "Before and after", columnInset: PaperCardMetrics.margin, top: 2)
             GeometryReader { proxy in
                 Group {
                     if mode == "slider" { slider(size: proxy.size) } else { sideBySide(size: proxy.size) }

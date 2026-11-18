@@ -138,12 +138,7 @@ struct AddMaterialsSheet: View {
             PaperCircleButton(symbol: "xmark", label: "Close", size: 44, fill: Theme.card, action: { dismiss() })
                 .accessibilityIdentifier("materials-close")
                 .padding(.horizontal, PaperCardMetrics.margin)
-            Text("Add materials").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                .foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityAddTraits(.isHeader)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+            PaperPageTitle(title: "Add materials", underBar: false)
             if tabOptions.count > 1 {
                 PaperTabs(options: tabOptions, selection: $tab)
                     .padding(.top, 16)

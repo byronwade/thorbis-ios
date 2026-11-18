@@ -1277,9 +1277,7 @@ struct JobsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .center) {
-                        Text("Filters").font(Theme.font(22, weight: .bold)).tracking(-0.44).foregroundStyle(Theme.foreground)
-                            .accessibilityAddTraits(.isHeader)
-                        Spacer(minLength: 0)
+                        PaperSheetTitle(title: "Filters")
                         Button { withMotion { resetFilters() } } label: {
                             Text("Reset").font(Theme.font(15, weight: .semibold))
                                 .foregroundStyle(Theme.brandText.opacity(filterActive ? 1 : 0.4))

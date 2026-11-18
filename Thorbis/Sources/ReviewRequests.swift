@@ -255,14 +255,8 @@ struct ReviewRequestsView: View {
             // As Notification rules (Paper 96): the title in 34 Bold, one muted line, then cards
             // on the canvas with their 13 Semibold labels.
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Review requests").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("One text after an invoice is paid")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 16)
+                PaperPageTitle(title: "Review requests", subtitle: "One text after an invoice is paid", columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 16)
                 if let error = model.loadError {
                     InlineProblem(message: error).padding(.horizontal, 4).padding(.bottom, 12)
                 }

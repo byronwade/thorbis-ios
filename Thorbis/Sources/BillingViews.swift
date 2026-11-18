@@ -171,7 +171,7 @@ struct BillingScheduleDetailView: View {
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.top, 14).padding(.bottom, 20)
+                    .padding(.bottom, 20)
                     VStack(alignment: .leading, spacing: 20) {
                         billedCard(progress)
                         PaperSection("Stages") {
@@ -217,7 +217,7 @@ struct BillingScheduleDetailView: View {
                 }
                 if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter).padding(.top, 8) }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, Theme.gutter).padding(.top, PaperHeaderMetrics.titleTopUnderBar).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
@@ -391,15 +391,7 @@ struct JobDepositSheet: View {
             // arithmetic in one card, then what happens to it in 13 muted above the commit.
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Request a deposit").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
-                        Text(subtitle ?? "JOB-\(jobID.suffix(4).uppercased())").font(Theme.font(15)).monospacedDigit()
-                            .foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                    PaperPageTitle(title: "Request a deposit", subtitle: subtitle ?? "JOB-\(jobID.suffix(4).uppercased())")
                     VStack(spacing: 16) {
                         HStack(alignment: .firstTextBaseline, spacing: 2) {
                             Text("$").font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)

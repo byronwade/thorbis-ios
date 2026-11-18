@@ -282,14 +282,7 @@ struct OwnershipView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Ownership").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .accessibilityAddTraits(.isHeader)
-                    if let company = session.activeOrganization?.name {
-                        Text(company).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    }
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14)
+                PaperPageTitle(title: "Ownership", subtitle: session.activeOrganization?.name)
                 if let owner {
                     label("Owner")
                     HStack(alignment: .center, spacing: 12) {

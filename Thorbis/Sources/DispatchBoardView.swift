@@ -208,14 +208,8 @@ struct DispatchBoardView: View {
         let row = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12)) : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Schedule").font(Theme.font(34, weight: .bold)).tracking(-0.68)
-                        .accessibilityAddTraits(.isHeader)
-                        .accessibilityIdentifier("schedule-title")
-                    Text(out == 0 ? day : "\(day) · \(out) tech\(out == 1 ? "" : "s") out")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 12)
+                PaperPageTitle(title: "Schedule", subtitle: out == 0 ? day : "\(day) · \(out) tech\(out == 1 ? "" : "s") out",
+                               underBar: false, titleIdentifier: "schedule-title")
                 PaperTabs(options: PaperTabletSchedule.rangeOptions(board: true), selection: range)
                     .frame(maxWidth: 480, alignment: .leading)
                     .padding(.top, 12)

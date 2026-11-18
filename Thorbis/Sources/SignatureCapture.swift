@@ -143,10 +143,7 @@ struct SignatureCaptureSheet: View {
 
     /// Everything above the consent sentence: heading, summary, name, and the pad.
     @ViewBuilder private var form: some View {
-        Text(heading).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityAddTraits(.isHeader)
-            .padding(.horizontal, Theme.gutter).padding(.top, 14)
+        PaperPageTitle(title: heading)
         if !lines.isEmpty { summaryCard }
         VStack(alignment: .leading, spacing: 8) {
             Text("Customer's name").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)

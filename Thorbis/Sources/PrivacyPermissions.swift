@@ -148,9 +148,8 @@ struct PrivacyPermissionsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                AccountPageTitle(eyebrow: "Settings", title: "Privacy and permissions",
+                AccountPageTitle(title: "Privacy and permissions",
                                  subtitle: "Every permission is optional. Thorbis keeps working without them — you only lose the feature described.")
-                    .padding(.top, 14)
 
                 AccountGroup(title: "Device access", count: rows.isEmpty ? nil : "\(rows.count)") {
                     ForEach(rows) { row in

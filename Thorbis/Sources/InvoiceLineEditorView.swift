@@ -240,7 +240,7 @@ struct InvoiceLineEditorView: View {
             }
         }
         .padding(.horizontal, PaperCardMetrics.margin)
-        .padding(.top, 12)
+        .padding(.top, 0)
         .padding(.bottom, 24)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
@@ -535,15 +535,7 @@ struct InvoiceLineEditorView: View {
                                  "Revision \(editor.invoice.linesRevision)"]
         let parts = pieces.compactMap { $0 }
         return VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Edit invoice").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                Text(parts.joined(separator: " \u{00B7} "))
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 4)
+            PaperPageTitle(title: "Edit invoice", subtitle: parts.joined(separator: " \u{00B7} "), columnInset: PaperCardMetrics.margin)
             FlowRow(spacing: 8, lineSpacing: 8) {
                 headingPill(symbol: status.word == "Draft" ? "circle.dashed" : "circle", text: status.word)
                     .accessibilityLabel("Status, \(status.word)")

@@ -34,13 +34,8 @@ struct WorkspaceNoticesView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Notifications").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .lineLimit(1).minimumScaleFactor(0.7)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 4)
+                PaperPageTitle(title: "Notifications", subtitle: subtitle)
+                    .padding(.bottom, 4)
                 if !available && !calls {
                     // Permission names what is missing (design.thorbis.com States).
                     ListRoomEmpty(title: "Your role can\u{2019}t see notices.", message: "Ask your office for access to notifications.")

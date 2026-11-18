@@ -321,15 +321,7 @@ struct PropertyDetailView: View {
             VStack(alignment: .leading, spacing: 20) {
                 // Paper 87: the street as the 34 Bold title, then the place, its city and whose it
                 // is on one plain line 2 under it. Open customer is in Property actions.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(street).font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text([location.label, city, row.customer.name].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.top, 6)
+                PaperPageTitle(title: street, subtitle: [location.label, city, row.customer.name].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "), columnInset: PaperCardMetrics.margin)
                 if let mapsURL { placeCard(mapsURL) }
                 if !facts.isEmpty || canEdit {
                     PaperSection(title: "Access") {
@@ -385,7 +377,7 @@ struct PropertyDetailView: View {
                         .accessibilityIdentifier("property-new-job")
                 }
             }
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
