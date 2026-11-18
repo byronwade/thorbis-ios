@@ -90,7 +90,9 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertFalse(app.scrollViews["drawer-rows"].exists, "The drawer closes before the sheet opens")
     }
 
-    func testTopWorkspaceMenuOpensSettings() throws {
+    /// Paper 65 and 29A: the gear opens Settings directly; the workspace name opens Switch
+    /// workspace (the businesses and Add a business), with no Settings or Edit menu rows in it.
+    func testGearOpensSettingsAndWorkspaceNameSwitchesWorkspace() throws {
         guard !XCUIApplication().usesTabletLayout else { throw XCTSkip("Phone drawer only") }
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -101,18 +103,25 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(workspace.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(app.thorbisUsableFrame(of: workspace)?.height ?? 0, 44)
         app.thorbisTapCentre(workspace)
-        let settings = app.buttons.matching(NSPredicate(format: "label == %@", "Settings")).firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 5))
-        // At this size the rows outgrow the menu, so Settings starts below its fold.
-        let menu = app.popovers.firstMatch
-        for _ in 0..<6 where !settings.isHittable && menu.exists { menu.swipeUp() }
-        XCTAssertTrue(settings.isHittable, "Settings must be reachable by scrolling the menu")
-        settings.tap()
-        XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 10)
-                      || app.buttons["Sign out"].waitForExistence(timeout: 5),
-                      "Settings must open from the workspace menu")
+        let add = app.buttons.matching(NSPredicate(format: "label == %@", "Add a business")).firstMatch
+        XCTAssertTrue(add.waitForExistence(timeout: 5), "Switch workspace lists Add a business")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label == %@", "Edit menu")).firstMatch.exists,
+                       "The Edit menu sheet is gone; the menu is arranged in Settings")
+        XCTAssertFalse(app.thorbisFrontButton(matching: NSPredicate(format: "label == %@ AND identifier != %@", "Settings", "drawer-settings")).exists,
+                       "Settings is the gear's, not a row of the workspace menu")
+        // Close the menu, then the gear opens Settings.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.92)).tap()
+        let gear = app.drawerRow("settings")
+        if !gear.waitForExistence(timeout: 3) { app.openDrawer() }
+        XCTAssertGreaterThanOrEqual(app.thorbisUsableFrame(of: gear)?.height ?? 0, 44)
+        app.thorbisTapCentre(gear)
+        XCTAssertTrue(app.buttons["settings-account-data"].waitForExistence(timeout: 10), "The gear opens Settings directly")
         XCTAssertTrue(app.scrollViews["drawer-rows"].waitForNonExistence(timeout: 5),
                       "The drawer closes before Settings opens")
+        // Menu editing lives in Settings › Menu and start screen.
+        let menu = app.buttons["settings-menu"]
+        for _ in 0..<5 where !(menu.exists && menu.isHittable) { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(menu.isHittable)
     }
 
     func testOnlyPermittedWorkPlaceIsDirectlyReachable() throws {
@@ -132,7 +141,9 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Jobs"].waitForExistence(timeout: 10))
     }
 
-    func testWebAlignedPlacesAndDeviceOnlyDraftLabel() {
+    /// The menu is Paper's rows for the role (office, 57N): no Estimates, Invoices or Message drafts
+    /// rows. Estimates and Invoices open from Money.
+    func testMenuListsPapersRowsAndMoneyOpensEstimates() {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs", "--paper-preview-role", "office",
@@ -145,25 +156,27 @@ final class DrawerGearMenuUITests: XCTestCase {
             XCTAssertTrue(app.buttons["drawer-new-menu"].exists, "Paper's + circle opens New")
             XCTAssertTrue(app.buttons["drawer-settings"].exists)
         }
-        // Paper v2 office menu (57N): Schedule, Jobs, Money, Customers, Messages lead; places Paper
-        // reaches from a hub (Estimates, Invoices) follow under More.
         let schedule = app.buttons["\(prefix)-schedule"]
         let jobs = app.buttons["\(prefix)-jobs"]
-        let estimates = app.buttons["\(prefix)-estimates"]
-        let invoices = app.buttons["\(prefix)-invoices"]
+        let money = app.buttons["\(prefix)-money"]
         XCTAssertTrue(jobs.waitForExistence(timeout: 15))
-        XCTAssertTrue(estimates.exists)
-        XCTAssertTrue(invoices.exists)
+        XCTAssertTrue(money.exists)
         XCTAssertLessThan(schedule.frame.minY, jobs.frame.minY)
-        XCTAssertLessThan(jobs.frame.minY, estimates.frame.minY)
-        XCTAssertLessThan(estimates.frame.minY, invoices.frame.minY)
+        XCTAssertLessThan(jobs.frame.minY, money.frame.minY)
+        for gone in ["estimates", "invoices", "drafts", "billing", "attention", "scorecard", "priceBook", "local-team"] {
+            XCTAssertFalse(app.buttons["\(prefix)-\(gone)"].exists, "\(gone) is not one of Paper's office rows")
+        }
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Paper v2 drawer (office)"
         shot.lifetime = .keepAlways
         add(shot)
-        let drafts = app.buttons["\(prefix)-drafts"]
-        XCTAssertTrue(drafts.exists)
-        XCTAssertTrue(drafts.label.contains(app.usesTabletLayout ? "On this iPad" : "On this phone"), drafts.label)
+        money.tap()
+        let estimates = app.buttons["door-estimates"]
+        XCTAssertTrue(estimates.waitForExistence(timeout: 15), "Money links the Estimates list")
+        XCTAssertTrue(app.buttons["door-invoices"].exists, "Money links the Invoices list")
+        for _ in 0..<5 where !estimates.isHittable { app.swipeUp(velocity: .slow) }
+        estimates.tap()
+        XCTAssertTrue(app.staticTexts["Estimates"].waitForExistence(timeout: 10))
     }
 
     /// The seeded saved work belongs to this test: reset it so its banner never reaches later tests.
@@ -287,42 +300,34 @@ final class DrawerGearMenuUITests: XCTestCase {
             _ = XCTWaiter.wait(for: [rotated], timeout: 5)
         }
         if app.usesTabletLayout { return assertSidebarFootOnScreen(app, landscape: landscape) }
+        // The workspace name's menu (Paper 29A) stays on screen: the businesses and Add a business.
         app.openDrawer()
-        let gear = app.drawerRow("settings")
-        XCTAssertTrue(gear.waitForExistence(timeout: 5))
-        app.thorbisTapCentre(gear)
-        // "Saved on this phone" carries its count after a comma; the gear itself reads "Settings and
-        // businesses", so the other rows are matched exactly. The drawer's own "Saved on this phone"
-        // row (under On this phone) sits behind the open menu, so it is left out. The popover is the
-        // last match (JobOverviewUITests.menuRow).
-        let savedPred = NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Saved on this phone", "drawer-saved-work")
-        XCTAssertTrue(app.buttons.matching(savedPred).firstMatch.waitForExistence(timeout: 5), "Saved work shows in the gear menu")
+        let workspace = app.buttons["drawer-workspace-menu"]
+        XCTAssertTrue(workspace.waitForExistence(timeout: 5))
+        app.thorbisTapCentre(workspace)
+        let addBusiness = app.thorbisFrontButton(matching: NSPredicate(format: "label == %@", "Add a business"))
+        XCTAssertTrue(addBusiness.waitForExistence(timeout: 5))
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "menu fades in")], timeout: 1)
-        let rows = [app.thorbisFrontButton(matching: savedPred)]
-            + ["Add a business", "Settings", "Edit menu"].map {
-                app.thorbisFrontButton(matching: NSPredicate(format: "label == %@", $0))
-            }
         let screen = app.windows.firstMatch.frame
-        for row in rows {
-            XCTAssertTrue(row.exists, row.description)
-            let deadline = Date().addingTimeInterval(2)
-            while app.thorbisUsableFrame(of: row) == nil, Date() < deadline { usleep(200_000) }
-            let dump = app.thorbisFrameDump(row, name: "gear-menu")
-            XCTContext.runActivity(named: dump) { _ in }
-            XCTAssertNotNil(app.thorbisUsableFrame(of: row), "\(row.label) must be reachable. \(dump)")
-            XCTAssertTrue(screen.contains(row.frame), "\(row.label) must be fully on screen: \(dump)")
-        }
+        let dump = app.thorbisFrameDump(addBusiness, name: "workspace-menu")
+        XCTContext.runActivity(named: dump) { _ in }
+        XCTAssertNotNil(app.thorbisUsableFrame(of: addBusiness), "Add a business must be reachable. \(dump)")
+        XCTAssertTrue(screen.contains(addBusiness.frame), "Add a business must be fully on screen: \(dump)")
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = landscape ? "Gear menu landscape" : "Gear menu portrait"
+        shot.name = landscape ? "Workspace menu landscape" : "Workspace menu portrait"
         shot.lifetime = .keepAlways
         add(shot)
-        app.thorbisTapCentre(rows[2])
-        XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier CONTAINS %@", "Settings")).firstMatch.waitForExistence(timeout: 5)
-                      || app.staticTexts["Settings"].waitForExistence(timeout: 5), "Settings opens from the menu")
+        // Saved work is a row in Settings, which the gear opens directly.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        app.openSettingsFromDrawer()
+        let saved = app.buttons["settings-saved-work"]
+        for _ in 0..<5 where !(saved.exists && saved.isHittable) { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(saved.isHittable, "Saved on this phone is a row in Settings")
+        XCTAssertTrue((saved.value as? String)?.contains("saved item") == true, String(describing: saved.value))
     }
 
-    /// iPad: the gear's rows live in the sidebar — saved work, the business switcher (Add a business)
-    /// and Settings (Customize menu) — and every one can be brought fully on screen in both orientations.
+    /// iPad: saved work, the business switcher (Add a business) and Settings (where the menu is
+    /// arranged) live in the sidebar, and every one can be brought fully on screen in both orientations.
     private func assertSidebarFootOnScreen(_ app: XCUIApplication, landscape: Bool) {
         if landscape { XCTAssertGreaterThan(app.frame.width, app.frame.height, "Landscape must be exercised") }
         app.showSidebar()
@@ -332,8 +337,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         let rows = [saved, app.buttons["sidebar-settings"],
                     app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Business,")).firstMatch]
         let screen = app.windows.firstMatch.frame
-        // Cream sheet: the sidebar lists every place under Work, Money, Shop and On this iPad, so in
-        // landscape saved work and Settings can start below the fold; the list scrolls them up.
+        // In landscape saved work and Settings can start below the fold; the list scrolls them up.
         let column = app.buttons["sidebar-search"].frame.midX / screen.width
         for row in rows {
             XCTAssertTrue(row.exists, row.description)

@@ -533,14 +533,13 @@ extension LocalWorkspaceSection {
 
 /// More (redesign 2026-10-31, after Linear's sidebar): the business on top with its switcher, then
 /// every place that is not in the bar as a row with a coloured place mark and a count where the phone
-/// already knows one, then Settings and the bar editor. It is the bar's More tab, not a hidden menu.
+/// already knows one, then Settings (where the menu is arranged). It is the bar's More tab, not a hidden menu.
 struct MoreView: View {
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject private var store: Store
     @EnvironmentObject var api: APIClient
     @State private var showSettings = false
-    @State private var editing = false
 
     private var pinned: [MenuItem] { layout.visibleTabs(session) }
 
@@ -591,12 +590,6 @@ struct MoreView: View {
                                 MoreRow(title: "Settings", symbol: "gearshape", tint: Theme.markGrey,
                                         subtitle: "Account, company, payments, menu and appearance")
                             }
-                            WellDivider(leading: 54)
-                            Button { editing = true } label: {
-                                MoreRow(title: "Edit bar and menu", symbol: "slider.horizontal.3", tint: Theme.markGrey,
-                                        subtitle: "Choose the places in the bar and their order")
-                            }
-                            .accessibilityIdentifier("more-edit-menu")
                         }
                     }
                 }
@@ -610,15 +603,6 @@ struct MoreView: View {
         .background(Theme.canvas)
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showSettings) { SheetSurface { SettingsView() } }
-        .sheet(isPresented: $editing) {
-            AppMenuEditor { editing = false }
-                .padding(.top, 8)
-                .presentationDetents([.large])
-                .thorbisSheetSurface()
-        }
-        #if DEBUG
-        .task { if PaperPreview.enabled, PaperPreview.screen == "app-menu-edit" { editing = true } }
-        #endif
     }
 
     /// A place: its route under More (iPad; the sidebar opens Schedule, Jobs and Customers itself).

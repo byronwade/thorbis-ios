@@ -32,8 +32,6 @@ struct RootView: View {
     /// closed the moment that motion starts, so the drawer's contents stay built until it lands.
     @State private var drawerSettling = false
     @AccessibilityFocusState private var drawerTitleFocus: Bool
-    /// The drawer's Edit menu: the pinned places and their order.
-    @State private var editingMenu = false
     /// Whether Inbox holds unread notices, as the server last said. Unknown shows no dot.
     @State private var inboxUnread = false
     /// How many notices are unread, when one page holds them all; nil when only "some" is known.
@@ -223,12 +221,6 @@ struct RootView: View {
             pendingCreate = nil
             run?()
         }) { SheetSurface { createMenu } }
-        .sheet(isPresented: $editingMenu) {
-            AppMenuEditor { editingMenu = false }
-                .padding(.top, 8)
-                .presentationDetents([.large])
-                .thorbisSheetSurface()
-        }
         // Hardware keyboard (Slide Over, a narrow Split View, an iPhone with one): the scene's
         // ⌘F / ⌘K search, ⌘N new job and ⇧⌘N create (`KeyboardCommands`).
         .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
@@ -308,7 +300,8 @@ struct RootView: View {
             recents: drawerRecents,
             savedWork: barSync,
             create: drawerCreate,
-            settingsItems: settingsItems,
+            workspaceItems: workspaceItems,
+            openSettings: { closeDrawer(thenRun: { showSettings = true }) },
             showsClose: full,
             showsControls: visible,
             showsRows: rowsBuilt,
@@ -425,21 +418,12 @@ struct RootView: View {
 
     // MARK: - Drawer content
 
-    /// The places the person pinned (the layout's tabs) this role can open.
-    private var pinnedPlaces: [MenuItem] { layout.visibleTabs(session) }
-
-    private var menuPlaces: [MenuItem] {
-        AppMenuContent.places(tabs: pinnedPlaces, hidden: layout.hidden, order: layout.menuOrder,
-                              permitted: { $0.permitted(session) })
-    }
-
-    /// Every place this role can reach, grouped (Work, Money, Shop, On this phone); pins from Edit
-    /// menu lead in their own section.
+    /// Paper's rows for this role (29N / 57N / 58N). A company layout only hides places; the order
+    /// from Menu and start screen is this phone's own.
     private var drawerSections: DrawerSections {
-        DrawerSections.make(pins: pinnedPlaces,
-                            explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
-                            roleDefaults: layout.roleDefaultTabs, hidden: layout.hidden, order: layout.menuOrder,
-                            local: localSections, role: WorkRole(session)) { item in
+        let own = layout.source == .phone
+        return DrawerSections.make(hidden: own ? [] : layout.hidden, order: own ? layout.menuOrder : [],
+                                   local: localSections, role: WorkRole(session)) { item in
             switch item {
             case .schedule: primaryAccess.canOpen(.schedule)
             case .jobs: primaryAccess.canOpen(.jobs)
@@ -525,8 +509,9 @@ struct RootView: View {
         }
     }
 
-    /// The gear circle: every business (the current one checked), Add a business, Settings, Edit menu.
-    private var settingsItems: [ThorbisMenuItem] {
+    /// Paper 29A, from the workspace name: every business (the open one checked), then Add a
+    /// business (create one, or join another workspace). Settings is the gear's own.
+    private var workspaceItems: [ThorbisMenuItem] {
         let businesses = session.organizations.map { organization in
             let current = organization.id == session.activeOrganization?.id
             return ThorbisMenuItem(organization.name, icon: "building.2", isSelected: current) {
@@ -535,15 +520,8 @@ struct RootView: View {
                 Task { await session.selectOrganization(id: organization.id) }
             }
         }
-        // Saved work left the drawer's list; the gear wears its dot and opens the review.
-        let saved = barSync.map { sync in
-            [ThorbisMenuItem("Saved on this phone", icon: sync.needsPerson ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath",
-                             subtitle: sync.words) { closeDrawer(thenRun: { reviewScope = savedWorkScope }) }]
-        } ?? []
-        return businesses + saved + [
+        return businesses + [
             ThorbisMenuItem("Add a business", icon: "plus") { closeDrawer(thenRun: { workspace = true }) },
-            ThorbisMenuItem("Settings", icon: "gearshape") { closeDrawer(thenRun: { showSettings = true }) },
-            ThorbisMenuItem("Edit menu", icon: "slider.horizontal.3") { closeDrawer(thenRun: { editingMenu = true }) },
         ]
     }
 
@@ -612,8 +590,10 @@ struct RootView: View {
         SearchAction.standard(
             creates: createChoices.map { choice in (choice.title, choice.symbol, { closeBarSearch(); choice.run() }) },
             settings: { closeBarSearch(); showSettings = true },
-            places: menuPlaces,
-            openPlace: { place in closeBarSearch(); open(place) })
+            places: SearchAction.everyPlace(permitted: { $0.permitted(session) }),
+            openPlace: { place in closeBarSearch(); open(place) },
+            records: localSections,
+            openRecord: { section in closeBarSearch(); openLocal(section) })
     }
 
     private var savedWorkScope: SavedWorkScope? {
@@ -807,7 +787,8 @@ struct RootView: View {
             seedPreviewRecents()
             try? await Task.sleep(for: .seconds(1))
             openDrawer()
-        case "app-menu-edit": editingMenu = true
+        // The Edit menu sheet is gone: menu editing is Settings › Menu and start screen.
+        case "app-menu-edit": schedulePath.append(PaperRoute.customizeMenu)
         case "search", "search-typed", "search-customers":
             // `search-customers` opens the same search over Customers, where customers lead.
             if PaperPreview.screen == "search-customers" { primaryTab = .customers }
@@ -909,6 +890,8 @@ struct RootView: View {
         case "billing-detail": previewPlace(.billing, then: .billingSchedule("00000000-0000-4000-8000-000000009501"))
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
         case "revenue", "payments-list": previewPlace(.money)
+        // Estimates opened from Money's own row (Paper: "from Money").
+        case "money-estimates": previewPlace(.money, then: .estimates)
         case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
              "job-more", "job-time", "job-voice-note", "job-cancel", "job-add", "job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule", "job-unpaid", "job-contact",
              "job-history", "job-history-empty", "job-onsite",

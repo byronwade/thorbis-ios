@@ -1,9 +1,9 @@
 import SwiftUI
 import UserNotifications
 
-/// The one Settings: the person on top, then company, business setup, payments, menu, notification
-/// rules, appearance, notifications, What's new and sign-out. Opened from the bottom bar's menu,
-/// More, and the iPad sidebar.
+/// The one Settings (Paper 65, "just me"): the person on top, notifications, appearance and the
+/// menu, work preferences (with what is saved on this phone), the places no menu row leads to,
+/// help and sign-out. Opened from the menu's gear, Search, and the iPad sidebar.
 /// Native grouped lists per D-025 (Apple HIG for settings), Thorbis tokens for color.
 struct SettingsView: View {
     @AppStorage("thorbis.appearance") private var appearance = "system"
@@ -11,7 +11,10 @@ struct SettingsView: View {
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
     @EnvironmentObject private var pendingMedia: PendingMediaStore
+    @EnvironmentObject private var store: Store
     @State private var confirmSignOut = false
+    /// Saved on this phone: the review of what has not synced yet (it used to hang off the gear).
+    @State private var reviewScope: SavedWorkScope?
     @Environment(\.dismiss) private var dismiss
     @State private var notifications: UNAuthorizationStatus?
     /// Paper 65 "Saved signature · On file": whether this person has drawn one on this phone.
@@ -86,6 +89,24 @@ struct SettingsView: View {
                         }
                         .buttonStyle(RowPressStyle())
                         .accessibilityIdentifier("settings-saved-signature")
+                        // Work this phone still holds, with its review. Shown only while there is some.
+                        if let savedWork {
+                            WellDivider(leading: AccountRow<EmptyView>.dividerInset)
+                            Button { reviewScope = savedWorkScope } label: {
+                                AccountRow(symbol: savedWork.needsPerson ? "exclamationmark.triangle" : "arrow.triangle.2.circlepath",
+                                           glyphColor: savedWork.needsPerson ? Theme.warning : Theme.muted,
+                                           title: "Saved on this phone", subtitle: savedWork.words)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Saved on this phone")
+                            .accessibilityValue(savedWork.words)
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint("Review what is waiting to sync")
+                            .accessibilityIdentifier("settings-saved-work")
+                        }
+                        // Owners have Business settings in their menu; everyone else who may open
+                        // one of its pages gets the row here.
                         if reachesBusinessSettingsHere {
                             WellDivider(leading: AccountRow<EmptyView>.dividerInset)
                             NavigationLink(value: PaperRoute.businessSetup) {
@@ -98,6 +119,11 @@ struct SettingsView: View {
                     .padding(.top, 22)
                     // Coming back from the page shows what it left: On file, or Not set.
                     .onAppear { signatureOnFile = SavedSignatureStore.isOnFile(actorID: session.user?.id) }
+
+                    // Places this role's menu does not list and no other screen leads to. Paper
+                    // gives them no parent for this role, so they stay one row away here.
+                    PlaceDoorRows(door: .settings, title: "Other places")
+                        .padding(.top, 22)
 
                     AccountGroup(title: "App") {
                         NavigationLink(value: PaperRoute.help) {
@@ -132,6 +158,10 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
             .paperDestinations()
+            .sheet(item: $reviewScope) { value in SheetSurface { SavedWorkReviewView(scope: value) } }
+            .onChange(of: reviewScope?.isCurrent(session: session, api: api, media: pendingMedia, outbox: outbox) ?? true) { _, valid in
+                if !valid { reviewScope = nil }
+            }
             .sheet(isPresented: $confirmSignOut) {
                 SignOutSheet(company: session.activeOrganization?.name, warning: signOutWarning) {
                     Task { dismiss(); await session.signOut() }
@@ -146,6 +176,19 @@ struct SettingsView: View {
         }
         // Paper 65 is a page, not a panel: the page ground with cards on it.
         .paperPageGround()
+    }
+
+    private var savedWorkScope: SavedWorkScope? {
+        .capture(session: session, api: api, media: pendingMedia, outbox: outbox)
+    }
+
+    /// What the phone still holds, in the words the menu's gear reads out.
+    private var savedWork: AppBottomBar.Sync? {
+        guard let scope = savedWorkScope else { return nil }
+        return .savedWork(.make(scope: scope, entries: outbox.entries, media: pendingMedia.items,
+                                mediaErrors: pendingMedia.errors, unverifiedMediaIDs: pendingMedia.unverifiedIDs,
+                                uploadingMediaID: pendingMedia.uploadingID, commandsSyncing: outbox.syncing,
+                                jobs: store.jobs, listingWarning: pendingMedia.storageWarning))
     }
 
     private var signOutWarning: String {
