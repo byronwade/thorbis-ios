@@ -126,6 +126,88 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
         return true
     }
     func report(_ outcome: JobEstimateHandoffOutcome) { self.outcome = outcome; changed() }
+
+    enum Submission: Equatable { case submitted, notSubmitted, cannotSign }
+
+    /// This estimate's own in-person approval, exactly as the handoff sends it: the drawn path
+    /// (upload this context's signature asset, then POST /v1/estimates/{id}/approve with its revision)
+    /// or the package path (this context's minted link, nonce and option, typed-name consent).
+    /// Freezes the given ink only when this context has no frozen signature yet; an earlier frozen
+    /// signature is always the one sent again. `stillCurrent` is the caller's own screen check.
+    func submitApproval(api: APIClient, jobID: String, signer typed: String, png: () -> Data?, drawn: Bool,
+                        stillCurrent: @escaping @MainActor () -> Bool) async throws -> Submission {
+        let signer = signature?.signerName ?? typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard current(), canApprove() else { return .notSubmitted }
+        if signature == nil {
+            guard let data = png() else { return .notSubmitted }
+            _ = try freezeSignature(signerName: signer, png: data, signedAt: ISO8601DateFormatter().string(from: Date()))
+        }
+        try await validate()
+        if drawn {
+            let mediaID = try await uploadFrozenSignature(jobID: jobID, stillCurrent: stillCurrent)
+            try Task.checkCancellation()
+            guard stillCurrent(), current(), canApprove(), let intent = signature else { return .notSubmitted }
+            let input = FieldSignatureInput(signerName: signer, signedAt: intent.signedAt, imageMediaId: mediaID)
+            submissionStarted = true; retryVerified = false
+            let approved = try await api.approveFieldEstimate(reviewed.id, revisionNumber: reviewed.revision.revisionNumber, signature: input)
+            guard stillCurrent(), current() else { return .submitted }
+            guard canApprove() else { report(.unknown); return .submitted }
+            report(await confirmed(approved))
+            return .submitted
+        }
+        guard let link else { return .notSubmitted }
+        let action = link.action
+        guard let nonce = action.nonce, let consentVersion = action.consentVersion,
+              action.canApprove(signerName: signer, consent: true, selectedOptionID: reviewed.optionID) else { return .cannotSign }
+        // The drawing is kept with the job; the server records the typed name and option.
+        _ = try? await uploadFrozenSignature(jobID: jobID, stillCurrent: stillCurrent)
+        try Task.checkCancellation()
+        guard stillCurrent(), current(), canApprove() else { return .notSubmitted }
+        let decision = publicDecision ?? PublicEstimateActionDecision.approve(
+            revisionNumber: action.revisionNumber, nonce: nonce, contentHash: action.contentHash,
+            signerName: signer, consentVersion: consentVersion, consent: true, optionID: reviewed.optionID)
+        publicDecision = decision
+        submissionStarted = true; retryVerified = false
+        let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
+        guard stillCurrent(), current() else { return .submitted }
+        guard canApprove() else { report(.unknown); return .submitted }
+        report(await publicConfirmed(patch))
+        return .submitted
+    }
+
+    /// The frozen signature's one job media asset for this estimate (stable client asset ID, reused once stored).
+    func uploadFrozenSignature(jobID: String, stillCurrent: @escaping @MainActor () -> Bool) async throws -> String {
+        guard stillCurrent(), current(), canApprove(), let intent = signature else { throw CancellationError() }
+        if let id = uploadedMediaID { return id }
+        let asset = try await transfer.upload(jobID: jobID, clientAssetID: intent.clientAssetID, kind: "photo", mime: "image/png",
+            originalFilename: "signature.png", data: intent.png, tags: ["signature"],
+            expectedOrganizationID: reviewed.estimate.organizationId,
+            currentAuthority: { [weak self] in self?.current() == true && self?.canApprove() == true })
+        guard current(), canApprove() else { throw CancellationError() }
+        uploadedMediaID = asset.id
+        return asset.id
+    }
+
+    /// What an interrupted approval becomes: unknown once sent, otherwise retryable or for review.
+    func reportApprovalFailure(_ error: Error) {
+        guard current() else { return }
+        report(submissionStarted ? .unknown :
+            customerEstimatePreparationCanRetry(error)
+            ? .retryable("Preparing this approval was interrupted. Try again when connected.")
+            : .needsReview(error.customerSentence(.approve)))
+    }
+
+    /// Runs one approval and waits for it, under the same guard as `run`.
+    @discardableResult
+    func perform(_ operation: @escaping @MainActor () async -> Void) async -> Bool {
+        guard !running, current(), canApprove(), !submissionStarted || retryVerified else { return false }
+        running = true; changed()
+        let work = Task { @MainActor in await operation() }
+        task = work
+        await work.value
+        running = false; task = nil; changed()
+        return true
+    }
     func run(_ operation: @escaping @MainActor () async -> Void) {
         guard !running, current(), canApprove(), !submissionStarted || retryVerified else { return }
         running = true; changed()
@@ -160,6 +242,9 @@ final class JobEstimateHandoffModel: ObservableObject {
     @Published private(set) var selection = JobEstimateHandoffSelection()
     @Published private(set) var reviewed: [JobEstimateReviewedItem] = []
     @Published private(set) var contexts: [String: CustomerEstimateHandoffContext] = [:]
+    /// One signature for several estimates, alive only while its screen is open.
+    @Published fileprivate(set) var batch: JobEstimateBatchApproval?
+    fileprivate var batchSubscription: AnyCancellable?
     var selectedIDs: Set<String> { selection.selectedIDs }
     private let actorID: String
     private let sessionGeneration: UUID
@@ -203,6 +288,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             context.task?.cancel()
             context.report(context.submissionStarted ? .unknown : .needsReview("Your access no longer allows approving this estimate."))
         }
+        batch?.discard()
         reviewedGeneration = nil
     }
     var abilities: TechJobAbilities {
@@ -376,13 +462,13 @@ final class JobEstimateHandoffModel: ObservableObject {
         }
     }
     func setSelected(_ id: String, selected: Bool) {
-        guard isCurrent, !contexts.values.contains(where: \.running) else { return }
+        guard isCurrent, !contexts.values.contains(where: \.running), batch?.running != true else { return }
         let before = selection.generation
         selection.setSelected(id, selected: selected, eligibleIDs: eligibleIDs)
         if before != selection.generation { reviewed = []; reviewedGeneration = nil }
     }
     func chooseOption(estimateID: String, optionID: String) {
-        guard isCurrent, !contexts.values.contains(where: \.running) else { return }
+        guard isCurrent, !contexts.values.contains(where: \.running), batch?.running != true else { return }
         let before = selection.generation
         selection.chooseOption(estimateID: estimateID, optionID: optionID, allowedOptionIDs: Set(options(for: estimateID).map(\.id)))
         if before != selection.generation { reviewed = []; reviewedGeneration = nil }
@@ -666,8 +752,169 @@ final class JobEstimateHandoffModel: ObservableObject {
         records = []; freshIDs = []; unavailableIDs = []; reviewed = []; revisions = [:]
         overviewPriceReady = false; overviewPricesNeedRefresh = false; overviewReceipts = [:]; overviewPriceFailures = []; overviewRequests = [:]; overviewPriceGeneration = UUID()
         jobTitle = ""; customerName = ""; lastSignerName = nil; error = nil
+        endBatch()
         for context in contexts.values { context.retire() }
         contexts = [:]
+    }
+}
+
+/// Approving several estimates with one signature (Paper 38C). The customer signs once; each
+/// selected estimate is then approved by its own existing per-estimate approval, one at a time, in
+/// the order shown. The run stops at the first estimate that is not confirmed approved, or as soon
+/// as the session, workspace or approval access changes, and records what each one ended as.
+/// The captured ink lives only here, for a retry of the rest while the customer stays on the screen.
+@MainActor
+final class JobEstimateBatchApproval: ObservableObject {
+    enum ItemState: Equatable { case waiting, running, approved, stopped(String), notAttempted }
+    enum Step: Equatable { case approved, stopped(String) }
+    struct Capture: Equatable { let signerName: String; let png: Data }
+
+    let order: [String]
+    @Published private(set) var states: [String: ItemState]
+    @Published private(set) var running = false
+    @Published private(set) var stopReason: String?
+    private(set) var capture: Capture?
+
+    init(order: [String], capture: Capture) {
+        self.order = order; self.capture = capture
+        states = Dictionary(uniqueKeysWithValues: order.map { ($0, ItemState.waiting) })
+    }
+
+    var approvedKeys: [String] { order.filter { states[$0] == .approved } }
+    var remainingKeys: [String] { order.filter { states[$0] != .approved } }
+    var isComplete: Bool { !order.isEmpty && remainingKeys.isEmpty }
+    var started: Bool { states.values.contains { $0 != .waiting } }
+    /// A retry of the rest reuses the captured signature, so it exists only while that capture does.
+    var canRetry: Bool { !running && capture != nil && started && !isComplete }
+
+    /// Forgets the captured ink. Nothing more can be approved with it afterwards.
+    func discard() { capture = nil }
+
+    /// Approves the estimates not yet approved, in order, one at a time.
+    func run(stillCurrent: @MainActor () -> Bool, approveOne: @MainActor (String, Capture) async -> Step) async {
+        guard !running, capture != nil, !isComplete else { return }
+        running = true; stopReason = nil
+        defer { running = false }
+        for (index, key) in order.enumerated() where states[key] != .approved {
+            guard let capture, stillCurrent() else {
+                halt(after: index - 1, reason: "Your technician needs to reopen these estimates before anything else is approved.")
+                discard(); return
+            }
+            states[key] = .running
+            switch await approveOne(key, capture) {
+            case .approved: states[key] = .approved
+            case .stopped(let reason):
+                states[key] = .stopped(reason)
+                halt(after: index, reason: reason); return
+            }
+            if !stillCurrent() {
+                if index + 1 < order.count, order[(index + 1)...].contains(where: { states[$0] != .approved }) {
+                    halt(after: index, reason: "Your technician needs to reopen these estimates before anything else is approved.")
+                }
+                discard(); return
+            }
+        }
+    }
+
+    private func halt(after index: Int, reason: String) {
+        stopReason = reason
+        for key in order.dropFirst(index + 1) where states[key] != .approved { states[key] = .notAttempted }
+    }
+}
+
+extension JobEstimateHandoffModel {
+    /// Starts one signature for the reviewed estimates. Each still gets its own approval.
+    func beginBatch(signerName: String, png: Data) -> JobEstimateBatchApproval? {
+        let name = signerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard approvalAuthority, reviewed.count > 1, !name.isEmpty, name.count <= 120, !png.isEmpty,
+              !contexts.values.contains(where: \.running) else { return nil }
+        let batch = JobEstimateBatchApproval(order: reviewed.map(\.key), capture: .init(signerName: name, png: png))
+        self.batch = batch
+        batchSubscription = batch.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        return batch
+    }
+
+    /// Leaving the screen, a hand-back, a lock or a session change: the captured ink is forgotten.
+    func endBatch() {
+        batch?.discard(); batch = nil; batchSubscription = nil
+    }
+
+    func runBatch() async {
+        guard let batch else { return }
+        await batch.run(stillCurrent: { [weak self] in self?.approvalAuthority == true }) { [weak self] key, capture in
+            guard let self else { return .stopped("Your technician needs to reopen these estimates.") }
+            return await self.approveInBatch(key, capture: capture)
+        }
+        objectWillChange.send()
+    }
+
+    /// One estimate of the batch, through the same per-estimate approval and checks as signing it alone.
+    private func approveInBatch(_ key: String, capture: JobEstimateBatchApproval.Capture) async -> JobEstimateBatchApproval.Step {
+        let changed = "Your technician needs to reopen this estimate before it can be approved."
+        guard approvalAuthority, let context = contexts[key], context.current() else { return .stopped(changed) }
+        if context.outcome?.isApproved == true { return .approved }
+        switch context.outcome {
+        case .unknown?:
+            // Sent before and unconfirmed: read first, never send again unless the read proves it safe.
+            await reconcile(key)
+            if context.outcome?.isApproved == true { return .approved }
+            guard context.outcome == .unknown, context.retryVerified else { return .stopped(Self.batchReason(context.outcome)) }
+        case .retryable?:
+            await retryPreparation(key)
+            guard context.outcome == nil else { return .stopped(Self.batchReason(context.outcome)) }
+        case .needsReview(let reason)?: return .stopped(reason)
+        case .approved?, nil: break
+        }
+        guard approvalAuthority, context.canApprove() else { return .stopped(changed) }
+        let drawn = (context.reviewed.revision.options ?? []).isEmpty
+        final class Flag { var value = false }
+        let cannotSign = Flag()
+        let ran = await context.perform { [weak self, weak context] in
+            guard let self, let context else { return }
+            do {
+                let sent = try await context.submitApproval(api: self.api, jobID: self.scope.jobID, signer: capture.signerName,
+                                                            png: { capture.png }, drawn: drawn,
+                                                            stillCurrent: { [weak self] in self?.approvalAuthority == true })
+                cannotSign.value = sent == .cannotSign
+            } catch is CancellationError {
+            } catch { context.reportApprovalFailure(error) }
+        }
+        if context.outcome?.isApproved == true { return .approved }
+        if cannotSign.value { return .stopped("This estimate can't be signed here. Ask your technician.") }
+        return .stopped(ran ? Self.batchReason(context.outcome) : changed)
+    }
+
+    static func batchReason(_ outcome: JobEstimateHandoffOutcome?) -> String {
+        switch outcome {
+        case .unknown?: return "This approval may have been received. It needs to be checked before trying again."
+        case .retryable(let reason)?, .needsReview(let reason)?: return reason
+        case .approved?: return ""
+        case nil: return "This estimate wasn't approved."
+        }
+    }
+
+    /// Before anyone signs: each package estimate's own customer link, so its consent words, nonce
+    /// and content are known. The consent the customer reads is the links' one shared text.
+    func prepareBatch() async throws -> String? {
+        var consent: String?
+        for item in reviewed {
+            guard approvalAuthority, let context = contexts[item.key], context.canApprove() else { throw CancellationError() }
+            guard !(item.revision.options ?? []).isEmpty else { continue }
+            if context.link == nil {
+                try await context.validate()
+                let opened = try await api.openInPersonEstimateApproval(item.revision, currentAuthority: { [weak self, weak context] in
+                    self?.approvalAuthority == true && context?.canApprove() == true
+                })
+                try Task.checkCancellation()
+                guard approvalAuthority, context.canApprove() else { throw CancellationError() }
+                context.link = opened
+            }
+            guard let text = context.link?.action.consentText, consent == nil || consent == text else {
+                throw Problem(title: "These estimates can't be signed together. Approve them one at a time.", status: 409, detail: nil)
+            }
+            consent = text
+        }
+        return consent
     }
 }
 

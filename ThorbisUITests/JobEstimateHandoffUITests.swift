@@ -241,7 +241,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     private func visible(_ app: XCUIApplication, _ element: XCUIElement) {
         for _ in 0..<8 {
-            let actions = ["handoff-review-selected", "handoff-submit-approval", "handoff-continue-signatures"].flatMap {
+            let actions = ["handoff-review-selected", "handoff-submit-approval", "handoff-continue-signatures", "handoff-approve-selected", "handoff-batch-retry", "handoff-batch-done"].flatMap {
                 app.buttons.matching(identifier: $0).allElementsBoundByIndex.filter { $0.isHittable }
             }
             let bottom = actions.map { $0.frame.minY }.min() ?? app.frame.maxY - 40
@@ -897,13 +897,18 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         XCTAssertTrue(second.waitForExistence(timeout: 10)); selectEstimate(app, second)
         thorbisStableButton(app, "handoff-review-selected").tap()
-        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
-        let firstMore = app.buttons["Show more, Estimate 1, EST-8101, item 1"]
-        XCTAssertTrue(firstMore.waitForExistence(timeout: 5)); visible(app, firstMore); firstMore.tap()
+        XCTAssertTrue(app.buttons["handoff-approve-selected"].waitForExistence(timeout: 15))
+        // Before the one signature, each estimate's own full terms open from its row.
+        thorbisStableButton(app, "handoff-batch-details-00000000-0000-4000-8000-000000008101").tap()
+        let firstMore = app.buttons["Show more, Estimate EST-8101, item 1"]
+        XCTAssertTrue(firstMore.waitForExistence(timeout: 10)); visible(app, firstMore); firstMore.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
-        let secondMore = app.buttons["Show more, Estimate 2, EST-8102, item 1"]
-        XCTAssertTrue(secondMore.waitForExistence(timeout: 5)); visible(app, secondMore); secondMore.tap()
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        XCTAssertTrue(app.buttons["handoff-approve-selected"].waitForExistence(timeout: 10))
+        thorbisStableButton(app, "handoff-batch-details-00000000-0000-4000-8000-000000008102").tap()
+        let secondMore = app.buttons["Show more, Estimate EST-8102, item 1"]
+        XCTAssertTrue(secondMore.waitForExistence(timeout: 10)); visible(app, secondMore); secondMore.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final second estimate detail: verify the separate work.")).firstMatch.waitForExistence(timeout: 5))
     }
 
@@ -920,7 +925,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Final sample detail: return the area to its original condition.")).firstMatch.waitForExistence(timeout: 5))
     }
 
-    func testTwoSameTitleEstimatesApproveIndependentlyInOneProtectedHandoff() throws {
+    func testTwoSameTitleEstimatesApproveWithOneSignatureInOneProtectedHandoff() throws {
         let app = open(["--paper-preview-handoff-duplicate-titles", "--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
@@ -930,61 +935,69 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertLessThanOrEqual(second.frame.maxY, app.buttons["Review selected (1)"].frame.minY)
         selectEstimate(app, second)
         XCTAssertTrue(app.buttons["Review selected (2)"].waitForExistence(timeout: 5)); thorbisStableButton(app, "handoff-review-selected").tap()
-        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
-        capture(app, "Both same-title estimates reviewed by distinct reference")
-        thorbisStableButton(app, "handoff-continue-signatures").tap()
-        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
-        draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.buttons["Next estimate"].waitForExistence(timeout: 15))
-        XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
-        app.buttons["Next estimate"].tap()
-        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
-        XCTAssertEqual(app.descendants(matching: .any)["customer-estimate-signature-pad"].value as? String, "Signature required", "The second estimate needs fresh ink")
-        capture(app, "Second estimate requires its own fresh signature")
-        draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15)); app.buttons["See approvals"].tap()
-        XCTAssertTrue(app.staticTexts["handoff-results-summary"].waitForExistence(timeout: 10))
+        // Paper 38C: both rows, the total and one signature box before anything is signed.
+        XCTAssertTrue(app.buttons["handoff-approve-selected"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["handoff-approve-selected"].label.contains("Approve 2"))
+        XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008102"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-totals"].exists)
+        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "customer-estimate-signature-pad").count, 1)
+        capture(app, "Both same-title estimates with one signature box")
+        try approveTogether(app)
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 20))
+        for id in ["00000000-0000-4000-8000-000000008101", "00000000-0000-4000-8000-000000008102"] {
+            XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-row-\(id)"].label.contains("Approved"))
+        }
         let proof = try receipt(app)
         let approvals = try XCTUnwrap(proof["approvals"] as? [[String: Any]])
         XCTAssertEqual(approvals.count, 2)
         XCTAssertEqual(Set(approvals.compactMap { $0["estimateID"] as? String }).count, 2)
-        XCTAssertEqual(Set(approvals.compactMap { $0["mediaID"] as? String }).count, 2)
+        XCTAssertEqual(Set(approvals.compactMap { $0["mediaID"] as? String }).count, 2, "Each estimate keeps its own signature asset")
         XCTAssertEqual(proof["ownerAuthenticationAttempts"] as? Int, 0)
         XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
-        capture(app, "Two independent approvals before one technician handback")
+        capture(app, "Two approvals from one signature before one technician handback")
+        app.buttons["handoff-batch-done"].tap()
+        XCTAssertTrue(app.staticTexts["handoff-results-summary"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["handoff-results-summary"].label.contains("2 approved"))
         ownerExit(app).tap()
         waitForStaffDoor(app)
     }
-    private func reachSecondSignature(_ app: XCUIApplication, optionID: String? = nil, firstPrice: String = "$190.00") {
+    /// Selects the first two (choosing a package first when asked), opens 38C's signing screen and signs once.
+    private func reachSignTogether(_ app: XCUIApplication, optionID: String? = nil, third: Bool = false) {
         XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
         let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
         XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
         if let optionID { app.buttons[optionID].tap() }
         let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
         visible(app, second); selectEstimate(app, second)
-        XCTAssertTrue(app.buttons["Review selected (2)"].waitForExistence(timeout: 5)); thorbisStableButton(app, "handoff-review-selected").tap()
-        guard app.buttons["Continue to signatures"].waitForExistence(timeout: 10) else {
-            capture(app, "Selected review did not open — diagnostic evidence")
-            _ = try? receipt(app); XCTFail("The exact selected set must open its review"); return
+        if third {
+            let next = app.buttons["handoff-select-00000000-0000-4000-8000-000000008103"]
+            visible(app, next); selectEstimate(app, next)
         }
-        thorbisStableButton(app, "handoff-continue-signatures").tap()
-        XCTAssertTrue(app.scrollViews["customer-estimate-presentation-00000000-0000-4000-8000-000000008101"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10)); draw(app)
-        XCTAssertTrue(app.buttons["Approve \(firstPrice)"].exists)
-        thorbisStableButton(app, "handoff-submit-approval").tap()
-        guard app.buttons["Next estimate"].waitForExistence(timeout: 15) else {
-            capture(app, "First approval did not confirm — diagnostic evidence")
-            _ = try? receipt(app); XCTFail("The first canonical approval must confirm before continuing"); return
+        let count = third ? 3 : 2
+        XCTAssertTrue(app.buttons["Review selected (\(count))"].waitForExistence(timeout: 5)); thorbisStableButton(app, "handoff-review-selected").tap()
+        guard app.buttons["handoff-approve-selected"].waitForExistence(timeout: 15) else {
+            capture(app, "Signing screen did not open — diagnostic evidence")
+            _ = try? receipt(app); XCTFail("The exact selected set must open its one signature"); return
         }
-        app.buttons["Next estimate"].tap()
-        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.textFields["Your full name"].exists)
+        draw(app)
+    }
+    private func approveTogether(_ app: XCUIApplication) throws {
+        if app.descendants(matching: .any)["customer-estimate-signature-pad"].value as? String != "Signature entered" { draw(app) }
+        thorbisStableButton(app, "handoff-approve-selected").tap()
+    }
+    private func waitForBatchStop(_ app: XCUIApplication) -> XCUIElement {
+        let summary = app.descendants(matching: .any)["handoff-batch-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 20), "A stopped run must say what was and wasn't approved")
+        return summary
     }
     func testChangingThirdEstimateDoesNotStrandTheExactUnknownRetry() throws {
         let app = open(["--paper-preview-handoff-third-sent", "--paper-preview-handoff-fail-before-second", "--paper-preview-handoff-hide-controls"])
-        reachSecondSignature(app); draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.buttons["Check approval"].waitForExistence(timeout: 15))
+        reachSignTogether(app); try approveTogether(app)
+        XCTAssertTrue(waitForBatchStop(app).label.contains("1 of 2 approved"))
         let before = try receipt(app)
-        app.buttons["Back to selected work"].tap(); app.buttons["Back to estimates"].tap()
+        app.buttons["Back to estimates"].tap()
         let third = app.buttons["handoff-select-00000000-0000-4000-8000-000000008103"]
         for _ in 0..<8 {
             if third.isHittable && third.frame.midY < app.buttons["Review selected (2)"].frame.minY { break }
@@ -1006,6 +1019,40 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(new.filter { $0["estimateID"] as? String == "00000000-0000-4000-8000-000000008103" }.count, 0)
         XCTAssertEqual((after["registrationClientIDs"] as? [String])?.count, 2)
         capture(app, "Third selection preserves the original unknown approval retry")
+    }
+    func testSecondFailureShowsWhichApprovedAndRetryApprovesOnlyTheRest() throws {
+        let app = open(["--paper-preview-handoff-third-sent", "--paper-preview-handoff-fail-before-second", "--paper-preview-handoff-hide-controls"])
+        reachSignTogether(app, third: true); try approveTogether(app)
+        let summary = waitForBatchStop(app)
+        XCTAssertTrue(summary.label.contains("1 of 3 approved"), summary.label)
+        let rowA = app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"]
+        let rowB = app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008102"]
+        let rowC = app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008103"]
+        XCTAssertTrue(rowA.label.contains("Approved"))
+        XCTAssertFalse(rowB.label.contains("· Approved"))
+        XCTAssertTrue(rowC.label.contains("Not approved yet"))
+        let before = try receipt(app), old = try XCTUnwrap(before["approvals"] as? [[String: Any]])
+        XCTAssertEqual(old.count, 2, "The third is never attempted after the second stops")
+        XCTAssertEqual(old.filter { $0["estimateID"] as? String == "00000000-0000-4000-8000-000000008103" }.count, 0)
+        capture(app, "Second estimate stopped: first approved, third not attempted")
+        thorbisStableButton(app, "handoff-batch-retry").tap()
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 25))
+        let after = try receipt(app), new = try XCTUnwrap(after["approvals"] as? [[String: Any]])
+        XCTAssertEqual(new.filter { $0["estimateID"] as? String == "00000000-0000-4000-8000-000000008101" }.count, 1, "The approved estimate is never sent again")
+        XCTAssertEqual(new.filter { $0["estimateID"] as? String == "00000000-0000-4000-8000-000000008103" }.count, 1)
+        XCTAssertTrue(NSDictionary(dictionary: old[1]["body"] as! [String: Any]).isEqual(to: new[2]["body"] as! [String: Any]), "The unconfirmed one is resent exactly")
+        XCTAssertEqual(Set(new.compactMap { $0["mediaID"] as? String }).count, 3)
+        capture(app, "Retry approved only the remaining estimates")
+    }
+    func testOneSignatureAtLargestTextKeepsShortCommit() throws {
+        let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        reachSignTogether(app)
+        let commit = app.buttons["handoff-approve-selected"]
+        XCTAssertLessThan(commit.frame.height, 120, "The commit stays one short line at the largest size")
+        capture(app, "One signature for two estimates, largest text")
+        try approveTogether(app)
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 25))
+        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 2)
     }
     func testCommitSurfaceRespondsToTapAwayFromTheTitle() {
         let app = open(["--paper-preview-handoff-hide-controls"])
@@ -1044,40 +1091,50 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testMembershipInterruptionCanRecoverBeforeSubmissionWithoutNewSignature() throws { try interruptPreparation("Interrupt next membership read") }
     func testUploadInterruptionCanRecoverWithoutReplacingTheRegisteredAsset() throws { try interruptPreparation("Interrupt next signature upload") }
-    func testPushedCheckpointDenialThenAuthenticatedExitUsesTheSameProtectedOwner() throws {
+    func testDeniedUnlockOnSigningScreenKeepsLockThenHandBackForgetsTheSignature() throws {
         let app = open(["--paper-preview-handoff-denied-unlock"])
-        reachSecondSignature(app)
+        reachSignTogether(app)
         ownerExit(app).tap()
-        XCTAssertTrue(app.textFields["Your full name"].exists)
+        XCTAssertTrue(app.textFields["Your full name"].exists, "Staff screens stay locked until Technician: unlock succeeds")
         XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1)
         toggleSampleControls(app); app.buttons["Allow sample unlock"].tap(); toggleSampleControls(app)
         ownerExit(app).tap(); waitForStaffDoor(app)
+        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 0, "Nothing is approved before the customer commits")
         thorbisShowCustomerDoor(app).tap()
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 2)
-        XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists)
-        XCTAssertTrue(app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"].exists)
-        capture(app, "Authenticated checkpoint exit retires old handoff before a fresh review")
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        visible(app, second); selectEstimate(app, second)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        let pad = app.descendants(matching: .any)["customer-estimate-signature-pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 15))
+        XCTAssertEqual(pad.value as? String, "Signature required", "The earlier signature is never reused after a hand-back")
+        capture(app, "Authenticated exit forgot the captured signature")
     }
     func testProductionLookTwoSignaturesAndCompletedCardsStayClearWithoutDiagnosticControls() {
         let app = open(["--paper-preview-handoff-hide-controls", "--paper-preview-handoff-duplicate-titles"])
-        reachSecondSignature(app)
-        let pad = app.descendants(matching: .any)["customer-estimate-signature-pad"]
-        XCTAssertTrue(pad.waitForExistence(timeout: 10))
-        XCTAssertEqual(pad.value as? String, "Signature required")
-        capture(app, "Production layout second independent signature checkpoint")
-        draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15)); app.buttons["See approvals"].tap()
+        reachSignTogether(app)
+        capture(app, "Production layout one signature for two estimates")
+        try? approveTogether(app)
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 20))
+        capture(app, "Production layout both approved")
+        app.buttons["handoff-batch-done"].tap()
         XCTAssertTrue(app.staticTexts["handoff-results-summary"].waitForExistence(timeout: 10))
         capture(app, "Production layout two completed estimates and one handback")
         ownerExit(app).tap(); waitForStaffDoor(app)
     }
     func testPackageChoiceKeepsItsCanonicalConsentWhileAnotherEstimateApprovesIndependently() throws {
         let app = open(["--paper-preview-handoff-options", "--paper-preview-handoff-public-patch-no-acceptance", "--paper-preview-handoff-hide-controls"])
-        reachSecondSignature(app, optionID: "handoff-option-00000000-0000-4000-8000-000000008101-00000000-0000-4000-8000-000000008201", firstPrice: "$250.00")
-        draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15)); app.buttons["See approvals"].tap()
+        reachSignTogether(app, optionID: "handoff-option-00000000-0000-4000-8000-000000008101-00000000-0000-4000-8000-000000008201")
+        // The package's own consent words are shown before the one signature.
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "electronic signature")).firstMatch.exists
+                      || app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "I approve")).count >= 1)
+        XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"].label.contains("$250.00"))
+        try approveTogether(app)
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 20))
         let proof = try receipt(app), approvals = try XCTUnwrap(proof["approvals"] as? [[String: Any]])
         XCTAssertEqual(approvals.count, 2)
         let option = try XCTUnwrap(approvals.first { $0["estimateID"] as? String == "00000000-0000-4000-8000-000000008101" })
@@ -1096,15 +1153,15 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testLostSecondApprovalReconcilesWithoutResendingConfirmedEstimates() throws {
         let app = open(["--paper-preview-handoff-lose-second", "--paper-preview-handoff-hide-controls"])
-        reachSecondSignature(app); draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.buttons["Check approval"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["See approvals"].exists)
+        reachSignTogether(app); try approveTogether(app)
+        let summary = waitForBatchStop(app)
+        XCTAssertTrue(summary.label.contains("1 of 2 approved"), summary.label)
+        XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"].label.contains("Approved"))
+        XCTAssertFalse(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008102"].label.contains("Approved"))
         capture(app, "Lost response stays unconfirmed after first approval")
-        app.buttons["Back to selected work"].tap(); app.buttons["Back to estimates"].tap()
-        XCTAssertTrue(app.staticTexts["handoff-results-summary"].label.contains("1 approved · 1 needs confirmation"))
-        app.buttons["Check approval"].tap()
-        let resolved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "2 approved"), object: app.staticTexts["handoff-results-summary"])
-        XCTAssertEqual(XCTWaiter.wait(for: [resolved], timeout: 10), .completed)
+        // The retry reads first; the lost approval is confirmed without sending it again.
+        thorbisStableButton(app, "handoff-batch-retry").tap()
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 20))
         let proof = try receipt(app)
         XCTAssertEqual((proof["approvals"] as? [[String: Any]])?.count, 2, "Read reconciliation must never resend either approval")
         XCTAssertEqual((proof["confirmedMediaIDs"] as? [String])?.count, 2)
@@ -1113,20 +1170,15 @@ final class JobEstimateHandoffUITests: XCTestCase {
     }
     func testUnconfirmedRetryRetainsExactSignatureAcrossBackAndDeniedOwnerUnlock() throws {
         let app = open(["--paper-preview-handoff-fail-before-second", "--paper-preview-handoff-denied-unlock", "--paper-preview-handoff-hide-controls"])
-        reachSecondSignature(app); draw(app); thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.buttons["Check approval"].waitForExistence(timeout: 15))
+        reachSignTogether(app); try approveTogether(app)
+        _ = waitForBatchStop(app)
         let before = try receipt(app)
         ownerExit(app).tap()
-        XCTAssertTrue(app.buttons["Check approval"].exists)
+        XCTAssertTrue(app.buttons["handoff-batch-retry"].exists)
         XCTAssertEqual(try receipt(app)["ownerAuthenticationAttempts"] as? Int, 1, "A visible protected child exit must invoke the real owner boundary, not no-op")
         XCTAssertFalse(thorbisShowCustomerDoor(app).isHittable)
-        app.buttons["Back to selected work"].tap()
-        XCTAssertFalse(app.buttons["Continue to signatures"].exists, "There is no new signature checkpoint when every selected item is confirmed or unconfirmed")
-        app.buttons["Back to estimates"].tap(); app.buttons["Check approval"].tap()
-        XCTAssertTrue(app.buttons["Retry exact approval"].waitForExistence(timeout: 10)); app.buttons["Retry exact approval"].tap()
-        let retry = app.buttons.matching(identifier: "Retry exact approval").allElementsBoundByIndex.first { $0.isHittable }
-        try XCTUnwrap(retry).tap()
-        XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 15)); app.buttons["See approvals"].tap()
+        thorbisStableButton(app, "handoff-batch-retry").tap()
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 20))
         let after = try receipt(app)
         let old = try XCTUnwrap(before["approvals"] as? [[String: Any]]), new = try XCTUnwrap(after["approvals"] as? [[String: Any]])
         XCTAssertEqual(old.count, 2); XCTAssertEqual(new.count, 3)
@@ -1148,13 +1200,15 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Review selected (2)"].waitForExistence(timeout: 5))
         capture(app, "Largest text dark second estimate and review action")
         thorbisStableButton(app, "handoff-review-selected").tap()
-        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10)); thorbisStableButton(app, "handoff-continue-signatures").tap()
+        XCTAssertTrue(app.buttons["handoff-approve-selected"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10))
         _ = ownerExit(app)
-        capture(app, "Largest text dark required signature and protected exit")
-        let back = app.buttons.matching(identifier: "Back").allElementsBoundByIndex.first { $0.isHittable }
-        XCTAssertNotNil(back); back?.tap()
-        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        capture(app, "Largest text dark one signature and protected exit")
+        let back = app.buttons.matching(NSPredicate(format: "label == %@", "Back to estimates")).allElementsBoundByIndex.first { $0.isHittable }
+        if back == nil { for _ in 0..<6 { app.swipeUp() } }
+        let backAgain = back ?? app.buttons.matching(NSPredicate(format: "label == %@", "Back to estimates")).allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(backAgain); backAgain?.tap()
+        XCTAssertTrue(app.buttons["Review selected (2)"].waitForExistence(timeout: 10))
         ownerExit(app).tap()
         // At this size the door scrolls with the page, and both estimates sit above it again.
         let door = thorbisShowCustomerDoor(app)

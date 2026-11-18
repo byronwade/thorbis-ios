@@ -217,6 +217,13 @@ struct JobEstimateHandoffView: View {
     @State private var checkpointID: String?
     @State private var detailsID: String?
     @State private var footerHeight: CGFloat = 0
+    /// Approving several with one signature (Paper 38C): the name and ink, kept only on this screen.
+    @State private var batchName = ""
+    @State private var batchStrokes: [[CGPoint]] = []
+    @State private var batchConsent: String?
+    @State private var preparingBatch = false
+    @State private var batchError: String?
+    private var signsTogether: Bool { reviewing && model.reviewed.count > 1 }
     private var type: CustomerType { CustomerType(sizeClass) }
 
     var body: some View {
@@ -224,7 +231,7 @@ struct JobEstimateHandoffView: View {
             if model.isCurrent {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
-                        if reviewing { selectedReview } else {
+                        if signsTogether { batchSign } else if reviewing { selectedReview } else {
                             overview.task(id: model.overviewPriceGeneration) { await model.loadOverviewPrices() }
                         }
                     }
@@ -262,6 +269,9 @@ struct JobEstimateHandoffView: View {
         .onChange(of: model.approvalAuthority) { _, allowed in
             if !allowed { checkpointID = nil; reviewing = false; model.cancelApprovals() }
         }
+        // The one signature is never kept past this screen: leaving it, a lock or a hand-back forgets it.
+        .onChange(of: reviewing) { _, open in if !open { forgetBatchSignature() } }
+        .onDisappear { if detailsID == nil && checkpointID == nil { forgetBatchSignature() } }
         .thorbisDestination(item: $checkpointID) { id in checkpoint(id) }
         .thorbisDestination(item: $detailsID) { id in
             if let record = model.records.first(where: { $0.id == id }) {
@@ -304,6 +314,7 @@ struct JobEstimateHandoffView: View {
             }
             if model.hasResults { results }
             if let error = model.error { CustomerProblemBanner(message: error, actionTitle: "Try again") { await model.retryEstimateLoading() } }
+            if let batchError { CustomerProblemBanner(message: batchError) }
             if model.loading {
                 if model.records.isEmpty { CustomerSkeleton(caption: "Opening current job estimates…", lines: 2) }
                 else { Text("Opening current job estimates…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
@@ -678,7 +689,9 @@ struct JobEstimateHandoffView: View {
                     .accessibilityValue("count=\(model.records.count); loading=\(model.loading); complete=\(model.complete); more=\(model.canLoadMoreEstimates); error=\(model.error ?? "none"); requests=\(JobEstimateHandoffPreview.shared.receipt)")
             }
             #endif
-            if reviewing {
+            if signsTogether {
+                batchFooter
+            } else if reviewing {
                 if let next = nextPending(after: nil) {
                     CustomerPresentationCommit(title: "Continue to signatures", enabled: true, busy: false, type: type) { checkpointID = next }
                         .accessibilityIdentifier("handoff-continue-signatures")
@@ -694,8 +707,8 @@ struct JobEstimateHandoffView: View {
                 // Where the full words would wrap (accessibility sizes), "Review (2)" keeps the pinned commit one
                 // line tall so the estimates keep their room.
                 CustomerPresentationCommit(title: reviewCommitTitle, compactTitle: "Review (\(model.selectedIDs.count))",
-                                           enabled: model.canReview, busy: model.loading, type: type) {
-                    Task { await model.reviewSelected(); if !model.reviewed.isEmpty { reviewing = true } }
+                                           enabled: model.canReview && !preparingBatch, busy: model.loading || preparingBatch, type: type) {
+                    Task { await openSelectedReview() }
                 }
                 .accessibilityLabel("Review selected (\(model.selectedIDs.count))")
                 .accessibilityIdentifier("handoff-review-selected")
@@ -711,6 +724,252 @@ struct JobEstimateHandoffView: View {
         }
         return "Review \(count) \u{00B7} \(money(total.amount, currency: total.currency))"
     }
+    // MARK: One signature for several estimates (Paper 38C)
+
+    /// Reviewing several opens 38C's signing screen; one estimate keeps its own review and signature.
+    private func openSelectedReview() async {
+        batchError = nil
+        await model.reviewSelected()
+        guard !model.reviewed.isEmpty else { return }
+        if model.reviewed.count > 1 {
+            preparingBatch = true
+            defer { preparingBatch = false }
+            do {
+                // Package estimates get their customer links first, so their consent is read before signing.
+                batchConsent = try await model.prepareBatch()
+            } catch is CancellationError { return } catch {
+                batchError = error.customerSentence(.approve); return
+            }
+            batchStrokes = []
+            batchName = model.reviewed.first.flatMap { model.contexts[$0.key]?.initialSignerName } ?? model.customerName
+        }
+        reviewing = true
+    }
+
+    private func forgetBatchSignature() {
+        model.endBatch(); batchStrokes = []; batchConsent = nil
+    }
+
+    private var batch: JobEstimateBatchApproval? { model.batch }
+    private var batchLocked: Bool { batch != nil }
+
+    private var batchSign: some View {
+        // A plain VStack: a lazy one froze at the largest text size.
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Approve estimates").font(Theme.customerFont(type.total, weight: .bold)).tracking(-0.85)
+                    .accessibilityAddTraits(.isHeader)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Sign once for the \(model.reviewed.count) estimates below")
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, -6)
+            VStack(spacing: 0) {
+                ForEach(Array(model.reviewed.enumerated()), id: \.element.key) { index, item in
+                    if index > 0 { WellDivider() }
+                    batchRow(item)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
+            batchTotalsCard
+            if let summary = batchSummary {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(summary.title).font(Theme.customerFont(type.body, weight: .semibold))
+                    ForEach(summary.lines, id: \.self) { line in
+                        Text(line).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(PaperCardMetrics.inset)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("handoff-batch-summary")
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("By signing, I approve the \(model.reviewed.count) estimates above\(batchTotalText.map { " for \($0)" } ?? "") as shown. Each estimate stays separate.")
+                if let batchConsent { Text(batchConsent) }
+            }
+            .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 4)
+            signatureCard
+        }
+    }
+
+    /// Paper 38C's row: the check disc, the estimate's name over its number and chosen package,
+    /// the price at the trailing edge. "Approved" appears only once the server confirmed it.
+    private func batchRow(_ item: JobEstimateReviewedItem) -> some View {
+        let option = item.revision.options?.first(where: { $0.id == item.optionID })
+        let amount = money(option?.totalAmount ?? item.revision.totalAmount, currency: option?.currency ?? item.revision.currency)
+        let reference = "EST-\(item.id.suffix(4).uppercased())"
+        let status = batchStatus(item)
+        let detail = ([reference] + (option.map { [$0.title] } ?? []) + (status.map { [$0] } ?? [])).joined(separator: " \u{00B7} ")
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        return VStack(alignment: .leading, spacing: 0) {
+        HStack(alignment: .center, spacing: 12) {
+            CustomerRadio(selected: true)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(item.revision.title).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
+                Text(detail).font(type.regular ? Theme.customerFont(type.small) : Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if stacked { Text(amount).font(Theme.customerFont(type.body, weight: .medium)) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !stacked {
+                Text(amount).font(Theme.customerFont(type.body, weight: .medium)).lineLimit(1).fixedSize()
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("handoff-batch-row-\(item.id)")
+            // Reading the full terms before signing stays one tap away, as on the list.
+            if batch == nil, model.records.contains(where: { $0.id == item.id }) {
+                Button { detailsID = item.id } label: {
+                    Text("View details").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .padding(.leading, 36)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View details, \(reference)")
+                .accessibilityIdentifier("handoff-batch-details-\(item.id)")
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+    }
+
+    private func batchStatus(_ item: JobEstimateReviewedItem) -> String? {
+        if model.contexts[item.key]?.outcome?.isApproved == true { return "Approved" }
+        switch batch?.states[item.key] {
+        case .running?: return "Approving…"
+        case .stopped?: return model.contexts[item.key]?.outcome == .unknown ? "Needs checking" : "Not approved"
+        case .notAttempted?: return "Not approved yet"
+        default: return nil
+        }
+    }
+
+    private var batchTotalText: String? {
+        guard selectedTotals.count == 1, let total = selectedTotals.first else { return nil }
+        return money(total.amount, currency: total.currency)
+    }
+
+    private var batchTotalsCard: some View {
+        VStack(spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Selected").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 8)
+                Text("\(model.reviewed.count) estimates").font(Theme.customerFont(type.small))
+            }
+            WellDivider(leading: 0)
+            ForEach(selectedTotals, id: \.currency) { value in
+                HStack(alignment: .firstTextBaseline) {
+                    Text(selectedTotals.count == 1 ? "Total" : "Total \(value.currency)")
+                        .font(Theme.customerFont(type.body, weight: .semibold))
+                    Spacer(minLength: 8)
+                    Text(money(value.amount, currency: value.currency))
+                        .font(Theme.customerFont(type.regular ? type.heading : 22, weight: .bold)).tracking(-0.44)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .padding(PaperCardMetrics.inset)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground()
+        .accessibilityIdentifier("handoff-batch-totals")
+    }
+
+    /// Paper 38C's signature card: brand ink over a hairline, the signer's name under it and Clear.
+    private var signatureCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SignaturePad(strokes: $batchStrokes, ink: Theme.brand, surface: Theme.card)
+                .frame(height: type.regular ? 200 : 120)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Signature box. Sign with your finger.")
+                .accessibilityIdentifier("customer-estimate-signature-pad")
+                .accessibilityValue(SignatureInk.hasInk(batchStrokes) ? "Signature entered" : "Signature required")
+                .overlay {
+                    if !SignatureInk.hasInk(batchStrokes) {
+                        Text("Sign here with your finger").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                            .allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+                .allowsHitTesting(!batchLocked)
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            HStack(spacing: 12) {
+                TextField("Your full name", text: $batchName, prompt: .placeholder("Your full name"))
+                    .textContentType(.name)
+                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    .frame(minHeight: 44)
+                    .disabled(batchLocked)
+                if SignatureInk.hasInk(batchStrokes), !batchLocked {
+                    Button("Clear") { batchStrokes = [] }
+                        .font(Theme.customerFont(type.small, weight: .semibold))
+                        .foregroundStyle(Theme.brandText)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 12).padding(.bottom, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .panelBackground()
+    }
+
+    /// What happened, in words: which were approved and which were not, and why it stopped.
+    private var batchSummary: (title: String, lines: [String])? {
+        guard let batch, batch.started, !batch.running else { return nil }
+        let approved = model.reviewed.filter { model.contexts[$0.key]?.outcome?.isApproved == true }
+        if approved.count == model.reviewed.count { return ("All \(approved.count) estimates approved", []) }
+        var lines: [String] = []
+        for item in model.reviewed {
+            let reference = "EST-\(item.id.suffix(4).uppercased()) \(item.revision.title)"
+            if model.contexts[item.key]?.outcome?.isApproved == true { lines.append("\(reference): approved") }
+            else if case .stopped(let reason)? = batch.states[item.key] { lines.append("\(reference): not approved. \(reason)") }
+            else { lines.append("\(reference): not approved yet") }
+        }
+        return ("\(approved.count) of \(model.reviewed.count) approved", lines)
+    }
+
+    private var batchCommitTitle: String {
+        let count = model.reviewed.count
+        guard let total = batchTotalText else { return "Approve \(count)" }
+        return "Approve \(count) \u{00B7} \(total)"
+    }
+
+    @ViewBuilder private var batchFooter: some View {
+        let name = batchName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let batch, batch.isComplete {
+            CustomerPresentationCommit(title: "Done", enabled: true, busy: false, type: type) { reviewing = false }
+                .accessibilityIdentifier("handoff-batch-done")
+        } else if let batch, batch.started {
+            if batch.canRetry {
+                CustomerPresentationCommit(title: "Approve remaining (\(batch.remainingKeys.count))", enabled: model.approvalAuthority, busy: false, type: type) {
+                    Task { await model.runBatch() }
+                }
+                .accessibilityIdentifier("handoff-batch-retry")
+            } else if batch.running {
+                CustomerPresentationCommit(title: "Approving…", enabled: false, busy: true, type: type) {}
+            }
+            CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
+                .disabled(batch.running)
+        } else {
+            let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(batchStrokes))
+            CustomerPresentationCommit(title: batchCommitTitle, compactTitle: "Approve (\(model.reviewed.count))",
+                                       enabled: reason == nil && model.approvalAuthority, busy: false, type: type) {
+                guard let png = SignatureInk.png(batchStrokes), model.beginBatch(signerName: name, png: png) != nil else { return }
+                Task { await model.runBatch() }
+            }
+            .accessibilityLabel(batchCommitTitle)
+            .accessibilityIdentifier("handoff-approve-selected")
+            if let reason { Text(reason).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
+            CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
+        }
+    }
+
     private func nextPending(after current: String?) -> String? {
         model.reviewed.first { item in
             item.key != current && model.contexts[item.key]?.outcome == nil && model.contexts[item.key]?.running != true && model.contexts[item.key]?.canApprove() == true
