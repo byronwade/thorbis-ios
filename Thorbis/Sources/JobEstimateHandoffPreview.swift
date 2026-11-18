@@ -34,6 +34,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private var changedFirstRevision = false
     private var removedFirst = false
     private var slowed = false
+    private var slowedPost = false
     private var mintFailed = false
     private var flags: [String] { ProcessInfo.processInfo.arguments }
     private var org: String { workspaceChanged ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID }
@@ -182,6 +183,9 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         lock.withLock {
             if flags.contains("--paper-preview-handoff-slow-after-first-approval"), !slowed, !approved.isEmpty,
                request.httpMethod ?? "GET" == "GET", request.url?.path == "/v1/jobs/\(PaperPreview.jobID)" { slowed = true; value.delay = 8 }
+            // `--paper-preview-handoff-slow-first-approval-post`: the first approval is recorded, its answer waits 8 s.
+            if flags.contains("--paper-preview-handoff-slow-first-approval-post"), !slowedPost, request.httpMethod == "POST",
+               request.url?.path.hasSuffix("/approve") == true { slowedPost = true; value.delay = 8 }
         }
         return value
     }

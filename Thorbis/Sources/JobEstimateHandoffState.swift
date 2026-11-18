@@ -150,7 +150,9 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
             let input = FieldSignatureInput(signerName: signer, signedAt: intent.signedAt, imageMediaId: mediaID)
             submissionStarted = true; retryVerified = false
             let approved = try await api.approveFieldEstimate(reviewed.id, revisionNumber: reviewed.revision.revisionNumber, signature: input)
-            guard stillCurrent(), current() else { return .submitted }
+            guard current() else { return .submitted }
+            // A sent approval always ends visible. The returned record confirms without another request,
+            // so it is kept even when the screen was left; only lost access leaves it to be checked.
             guard canApprove() else { report(.unknown); return .submitted }
             report(await confirmed(approved))
             return .submitted
@@ -169,8 +171,10 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
         publicDecision = decision
         submissionStarted = true; retryVerified = false
         let patch = try await api.decidePublicDocumentAction(token: link.token, decision: decision)
-        guard stillCurrent(), current() else { return .submitted }
-        guard canApprove() else { report(.unknown); return .submitted }
+        guard current() else { return .submitted }
+        // Confirming a package may read again; after the screen was left nothing more is requested,
+        // so it is left "needs checking" for the existing read-before-resend path.
+        guard stillCurrent(), canApprove() else { report(.unknown); return .submitted }
         report(await publicConfirmed(patch))
         return .submitted
     }
@@ -195,6 +199,13 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
         signature = nil; uploadedMediaID = nil; publicDecision = nil
         if case .retryable? = outcome { outcome = nil }
         changed()
+    }
+
+    /// A send that was cancelled (the screen left mid-request) may still have reached the server:
+    /// it becomes "needs checking", never silently nothing.
+    func reportCancelledSend() {
+        guard current(), submissionStarted, outcome == nil else { return }
+        report(.unknown)
     }
 
     /// What an interrupted approval becomes: unknown once sent, otherwise retryable or for review.
@@ -930,6 +941,7 @@ extension JobEstimateHandoffModel {
                                                             stillCurrent: live)
                 cannotSign.value = sent == .cannotSign
             } catch is CancellationError {
+                context.reportCancelledSend()
             } catch { context.reportApprovalFailure(error) }
         }
         if context.outcome?.isApproved == true { return .approved }

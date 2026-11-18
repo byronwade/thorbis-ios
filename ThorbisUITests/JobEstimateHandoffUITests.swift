@@ -1139,8 +1139,49 @@ final class JobEstimateHandoffUITests: XCTestCase {
         thorbisStableButton(app, "customer-estimate-approve").tap()
         XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 15)); draw(app)
         thorbisStableButton(app, "handoff-submit-approval").tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "isn't the one reviewed")).firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "isn't the one you reviewed")).firstMatch.waitForExistence(timeout: 15))
         XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 0, "Another package than the one on screen is never sent")
+        // Nothing sticks: the reviewed package is back on screen and approves normally.
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "$250.00")).firstMatch.waitForExistence(timeout: 10))
+        thorbisStableButton(app, "customer-estimate-approve").tap()
+        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 15)); draw(app)
+        thorbisStableButton(app, "handoff-submit-approval").tap()
+        XCTAssertTrue(app.buttons["See approvals"].waitForExistence(timeout: 20))
+        let approvals = try XCTUnwrap(try receipt(app)["approvals"] as? [[String: Any]])
+        XCTAssertEqual(approvals.count, 1)
+        XCTAssertEqual((approvals.first?["body"] as? [String: Any])?["optionId"] as? String, "00000000-0000-4000-8000-000000008201")
+    }
+    func testLeavingByNavBackDuringASendLeavesItVisibleAndSendsNothingMore() throws {
+        let app = open(["--paper-preview-handoff-slow-first-approval-post", "--paper-preview-handoff-hide-controls"])
+        reachSignTogether(app); try approveTogether(app)
+        // The first approval is on its way (its answer is slow): the customer goes Back in the bar.
+        let busy = app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "handoff-approve-selected", "Approving")).firstMatch
+        _ = busy.waitForExistence(timeout: 5)
+        var sent = false
+        for _ in 0..<20 where !sent {
+            sent = ((try? receipt(app))?["approvals"] as? [[String: Any]])?.count == 1
+            if !sent { _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Wait for the approval to go out")], timeout: 0.5) }
+        }
+        XCTAssertTrue(sent, "The first approval must be in flight before leaving")
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+        let again = app.buttons["customer-view-approve-estimates"]
+        XCTAssertTrue(again.waitForExistence(timeout: 15))
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Let the slow answer land")], timeout: 9)
+        again.tap()
+        let summary = app.staticTexts["handoff-results-summary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 15), "A sent approval must end in a visible state")
+        XCTAssertTrue(summary.label.contains("needs confirmation") || summary.label.contains("1 approved"), summary.label)
+        XCTAssertFalse(app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"].exists, "Never offered for a fresh blind resend")
+        let proof = try receipt(app)
+        let posts = (proof["requests"] as? [[String: String]] ?? []).filter { $0["method"] == "POST" && ($0["path"] ?? "").hasSuffix("/approve") }
+        XCTAssertEqual(posts.map { $0["path"] ?? "" }, ["/v1/estimates/00000000-0000-4000-8000-000000008101/approve"], "Nothing is sent for estimate 2 after leaving")
+        // The existing check confirms it without sending again.
+        if summary.label.contains("needs confirmation") {
+            app.buttons["Check approval"].firstMatch.tap()
+            let resolved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "1 approved"), object: summary)
+            XCTAssertEqual(XCTWaiter.wait(for: [resolved], timeout: 15), .completed)
+        }
+        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 1)
     }
     func testOneSignatureAtLargestTextKeepsShortCommit() throws {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])

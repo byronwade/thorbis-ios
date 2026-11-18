@@ -795,7 +795,10 @@ struct CustomerEstimatePresentation: View {
             if let handoff, let jobID {
                 // Only the package the customer reviewed may be sent: if the screen now shows another one, refuse.
                 guard flow.selectedOptionID == handoff.reviewed.optionID else {
-                    handoff.report(.needsReview("The package on screen isn't the one reviewed. Hand the device back to your technician to review it again."))
+                    // Nothing is recorded on the estimate: the reviewed package is put back on screen to approve.
+                    if let reviewedOption = handoff.reviewed.optionID { flow.choose(reviewedOption) }
+                    flow.step = .review; strokes = []
+                    error = "That package isn't the one you reviewed. Your reviewed package is shown again."
                     return
                 }
                 // The handoff's one per-estimate approval, shared with approving several at once.
@@ -844,6 +847,7 @@ struct CustomerEstimatePresentation: View {
             signedAt = Date()
             if handoff == nil || handoff?.outcome?.isApproved == true { flow.step = .done }
         } catch is CancellationError {
+            handoff?.reportCancelledSend()
         } catch {
             handoff?.reportApprovalFailure(error)
             self.error = error.customerSentence(.approve)
