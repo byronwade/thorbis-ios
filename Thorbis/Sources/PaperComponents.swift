@@ -763,6 +763,9 @@ struct PaperDrawerControl: @unchecked Sendable {
     var hasNews = false
     /// Saved-work words for VoiceOver ("2 saved items waiting to sync"), when any is on the phone.
     var status: String? = nil
+    /// False while the iPhone's bottom bar is on: its More is the door to the drawer, so the menu
+    /// circle draws nothing and the header row keeps its 44pt height (titles stay where they were).
+    var showsCircle = true
 }
 
 private struct PaperDrawerKey: EnvironmentKey {

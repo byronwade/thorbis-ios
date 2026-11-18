@@ -280,8 +280,31 @@ final class MenuLayout: ObservableObject {
     private let defaults: UserDefaults
     private let key = "thorbis.menuLayout.v1"
 
-    init(defaults: UserDefaults = .standard) {
+    /// Bottom bar or sidebar on this iPhone (Paper 65A "Navigation"). Saved under its own key, never
+    /// through `changed()`: it is this device's choice, not part of a company layout.
+    @Published var navigationStyle: PhoneNavigationStyle {
+        didSet {
+            guard navigationStyle != oldValue, !isPad, !preview else { return }
+            defaults.set(navigationStyle.rawValue, forKey: PhoneNavigationStyle.key)
+        }
+    }
+    /// iPad keeps its sidebar and does not offer the choice.
+    let isPad: Bool
+    /// The design preview keeps its choice in memory so a test never changes the next one's.
+    private let preview: Bool
+
+    /// The bottom bar is on (an iPhone, or a narrow window that is not an iPad).
+    var usesBottomBar: Bool { navigationStyle == .bottomBar }
+
+    init(defaults: UserDefaults = .standard, isPad: Bool? = nil, preview: Bool? = nil, previewFlag: String? = nil) {
         self.defaults = defaults
+        let isPad = isPad ?? (UIDevice.current.userInterfaceIdiom == .pad)
+        let preview = preview ?? PhoneNavigationStyle.isPreview
+        self.isPad = isPad
+        self.preview = preview
+        self.navigationStyle = PhoneNavigationStyle.resolve(
+            saved: preview ? nil : defaults.string(forKey: PhoneNavigationStyle.key), isPad: isPad,
+            preview: preview, previewFlag: previewFlag ?? (preview ? PhoneNavigationStyle.previewFlag : nil))
         let stored = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Stored.self, from: $0) }
         // Unknown ids (from a newer or older app) are ignored rather than breaking the layout.
         let tabs = stored?.tabs.compactMap(MenuItem.init(rawValue:)) ?? Self.defaultTabs
@@ -436,6 +459,7 @@ struct CustomizeMenuView: View {
     @EnvironmentObject private var api: APIClient
     @State private var startupDestination: StartupDestination = .automatic
     @State private var showingWhatsNew = false
+    @State private var showingNavigation = false
 
     private var company: Bool { layout.source == .company }
     /// A company layout is set on the web for everyone; the order here is this phone's own.
@@ -465,6 +489,7 @@ struct CustomizeMenuView: View {
         .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .thorbisDestination(isPresented: $showingWhatsNew) { WhatsNewHistoryView() }
+        .thorbisDestination(isPresented: $showingNavigation) { NavigationChoiceView() }
         .task { await layout.refreshCompanyLayout(api: api) }
         .task(id: StartupDestination.scope(session: session, api: api)?.key) {
             startupDestination = StartupDestination.scope(session: session, api: api).map { StartupDestinationPreferences().get(for: $0) } ?? .automatic
@@ -613,10 +638,34 @@ struct CustomizeMenuView: View {
         }
     }
 
-    /// Paper 65A / T10B "More": what changed in the app, one tap away. (Paper's "Navigation ·
-    /// Sidebar" row has nothing to choose on a phone, so it is not drawn.)
+    /// Paper 65A / T10B "More": Navigation (bottom bar or sidebar, iPhone only: iPad keeps its
+    /// sidebar) and what changed in the app, one tap away.
     private var moreSection: some View {
         Section {
+            if !layout.isPad {
+                Button { showingNavigation = true } label: {
+                    HStack(spacing: 8) {
+                        Text("Navigation").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Text(layout.navigationStyle.title).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.trailing)
+                        PaperIcon(.acctChevron, size: 14, color: Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Navigation")
+                .accessibilityValue(layout.navigationStyle.title)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("menu-navigation")
+                .moveDisabled(true)
+                .deleteDisabled(true)
+                .listRowBackground(Theme.card)
+                .listRowInsets(Self.rowInsets)
+            }
             // A button, not a link: the phone's list is in edit mode, where row links don't open.
             Button { showingWhatsNew = true } label: {
                 HStack(spacing: 8) {
@@ -659,6 +708,70 @@ struct CustomizeMenuView: View {
 
     private func sectionNote(_ text: String) -> some View {
         Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
+    }
+}
+
+/// Paper 65 / 65A "Navigation": how this iPhone moves between places. Two radio rows in Menu and
+/// start screen's grammar; the choice is this device's own and applies at once.
+struct NavigationChoiceView: View {
+    @EnvironmentObject private var layout: MenuLayout
+
+    var body: some View {
+        List {
+            Section {
+                PaperPageTitle(title: "Navigation", subtitle: "Choose how you move around the app", columnInset: Theme.gutter, top: 0)
+                    .listRowBackground(Color.clear)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 14)
+                    .listRowInsets(EdgeInsets(top: PaperHeaderMetrics.titleTopUnderBar, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
+            }
+            Section {
+                ForEach(PhoneNavigationStyle.allCases) { style in
+                    row(style)
+                }
+                .listRowBackground(Theme.card)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            } footer: {
+                Text("The bottom bar keeps your main places one tap away; More opens the full menu. The sidebar opens from the menu button at the top of each place.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
+            }
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(22)
+        .listRowSeparatorTint(Theme.hairline)
+        .contentMargins(.horizontal, PaperCardMetrics.margin, for: .scrollContent)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .environment(\.defaultMinListRowHeight, 56)
+        .scrollContentBackground(.hidden)
+        .background(Theme.background.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("navigation-choice")
+    }
+
+    private func row(_ style: PhoneNavigationStyle) -> some View {
+        let chosen = layout.navigationStyle == style
+        return Button {
+            layout.navigationStyle = style
+        } label: {
+            HStack(spacing: 12) {
+                PaperIcon(style == .bottomBar ? .navBottomBar : .navSidebar, size: 18, color: Theme.muted)
+                Text(style.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                ZStack {
+                    Circle().strokeBorder(chosen ? Theme.brand : Theme.borderStrong, lineWidth: chosen ? 2 : 1.5)
+                    if chosen { Circle().fill(Theme.brand).frame(width: 10, height: 10) }
+                }
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityIdentifier("navigation-\(style.rawValue)")
     }
 }
 

@@ -31,6 +31,12 @@ struct RootView: View {
     /// True while the drawer slides shut (or springs back from a short edge drag). The state says
     /// closed the moment that motion starts, so the drawer's contents stay built until it lands.
     @State private var drawerSettling = false
+    /// Place roots on screen now (a pushed page, even one not in the path, takes its root off).
+    @State private var rootsShowing: Set<String> = []
+    /// The bottom bar's measured height, for the room place roots leave under their content.
+    @State private var tabBarHeight: CGFloat = 58
+    /// The software keyboard is up: the bar steps aside.
+    @State private var keyboardShown = false
     @AccessibilityFocusState private var drawerTitleFocus: Bool
     /// Whether Inbox holds unread notices, as the server last said. Unknown shows no dot.
     @State private var inboxUnread = false
@@ -221,6 +227,11 @@ struct RootView: View {
             pendingCreate = nil
             run?()
         }) { SheetSurface { createMenu } }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { note in
+            let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect) ?? .zero
+            keyboardShown = frame.height > 80
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in keyboardShown = false }
         // Hardware keyboard (Slide Over, a narrow Split View, an iPhone with one): the scene's
         // ⌘F / ⌘K search, ⌘N new job and ⇧⌘N create (`KeyboardCommands`).
         .onReceive(NotificationCenter.default.publisher(for: KeyboardCommand.notification)) { note in
@@ -257,6 +268,8 @@ struct RootView: View {
     /// The place showing, under the drawer's panel: it stays put and dims as the panel comes in.
     private func card(progress: CGFloat, width: CGFloat) -> some View {
         phonePlaces()
+            // Paper 18A: the bottom bar floats over the place, dims with it under the drawer.
+            .overlay(alignment: .bottom) { tabBarOverlay }
             .accessibilityHidden(drawerOpen)
             .overlay {
                 Color.black.opacity(DrawerPanel.scrim(dark: colorScheme == .dark) * progress)
@@ -413,7 +426,77 @@ struct RootView: View {
     private var drawerControl: PaperDrawerControl {
         PaperDrawerControl(open: { Task { @MainActor in openDrawer() } },
                            hasNews: showsInboxDot || (barSync?.needsPerson ?? false),
-                           status: barSync?.words)
+                           status: barSync?.words,
+                           showsCircle: !layout.usesBottomBar)
+    }
+
+    // MARK: - The bottom bar (Paper 18A)
+
+    /// The bar's places for this person: the role's set, each only when the drawer would open it.
+    private var phoneTabs: [MenuItem] {
+        PhoneTabs.tabs(role: WorkRole(session), opens: { placeOpens($0) && !menuHidden.contains($0) })
+    }
+
+    /// A sheet the shell itself presents is up.
+    private var shellSheetUp: Bool {
+        showSettings || search || newCustomer || newEstimate || reviewScope != nil || workspace || createJob
+            || createMenuOpen || whatsNew.showing != nil
+    }
+
+    /// The bar shows on a place's root only: never over a pushed page, Search, a shell sheet, or
+    /// the keyboard. Covers (field hand-off, cameras) and other sheets sit above it anyway.
+    private var tabBarShown: Bool {
+        layout.usesBottomBar && atTabRoot && rootsShowing.contains(selectedTab) && !barSearching
+            && !keyboardShown && !shellSheetUp
+    }
+
+    /// The room a place root leaves at its bottom for the bar: from the bar's top down to the
+    /// safe area's edge, and 8 more. Kept while a page is pushed so the root never jumps.
+    private func tabBarClearance(safeBottom: CGFloat) -> CGFloat {
+        guard layout.usesBottomBar, !keyboardShown else { return 0 }
+        return max(0, tabBarHeight + tabBarBottomGap(safeBottom: safeBottom) - safeBottom + 8)
+    }
+
+    /// Paper 18A: the pill sits 28 above the screen's bottom edge on a phone with a home indicator.
+    private func tabBarBottomGap(safeBottom: CGFloat) -> CGFloat { safeBottom > 0 ? 28 : 12 }
+
+    @ViewBuilder private var tabBarOverlay: some View {
+        if tabBarShown {
+            let safeBottom = windowSafeBottom
+            PhoneTabBar(tabs: phoneTabs, current: selectedTab,
+                        messagesUnread: showsInboxDot, messagesUnreadCount: inboxUnreadCount,
+                        moreHasNews: moreHasNews,
+                        select: selectTab,
+                        openMore: { Task { @MainActor in openDrawer() } })
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
+                // The overlay ends at the safe area; the pill sits its gap above the screen's edge.
+                .offset(y: safeBottom - tabBarBottomGap(safeBottom: safeBottom))
+                .transition(.opacity)
+        }
+    }
+
+    /// More's dot: what the menu circle's dot said, less the unread Messages its own tab shows.
+    private var moreHasNews: Bool {
+        (showsInboxDot && !phoneTabs.contains(.inbox)) || (barSync?.needsPerson ?? false)
+    }
+
+    /// A tab: picking another place selects it; the place showing goes back to its root, or to the
+    /// top of its list when already there.
+    private func selectTab(_ item: MenuItem) {
+        UISelectionFeedbackGenerator().selectionChanged()
+        if selectedTab == item.rawValue {
+            if atTabRoot { ScrollToTop.run() } else { popToRoot(item.rawValue) }
+        } else {
+            selectedTab = item.rawValue
+        }
+    }
+
+    /// Marks a place's root: it leaves room for the bar and reports when it is on screen.
+    private func placeRoot(_ id: String, _ content: some View) -> some View {
+        content
+            .phoneTabBarRoot()
+            .onAppear { rootsShowing.insert(id) }
+            .onDisappear { rootsShowing.remove(id) }
     }
 
     // MARK: - Drawer content
@@ -422,14 +505,20 @@ struct RootView: View {
     /// from Menu and start screen is this phone's own.
     private var drawerSections: DrawerSections {
         let own = layout.source == .phone
-        return DrawerSections.make(hidden: own ? [] : layout.hidden, order: own ? layout.menuOrder : [],
-                                   local: localSections, role: WorkRole(session)) { item in
-            switch item {
-            case .schedule: primaryAccess.canOpen(.schedule)
-            case .jobs: primaryAccess.canOpen(.jobs)
-            case .customers: primaryAccess.canOpen(.customers)
-            default: item.permitted(session)
-            }
+        return DrawerSections.make(hidden: menuHidden, order: own ? layout.menuOrder : [],
+                                   local: localSections, role: WorkRole(session), opens: placeOpens)
+    }
+
+    /// Places a company layout turned off (this phone's own layout hides none).
+    private var menuHidden: Set<MenuItem> { layout.source == .phone ? [] : layout.hidden }
+
+    /// Whether this person can open a place: one check for the drawer and the bottom bar.
+    private func placeOpens(_ item: MenuItem) -> Bool {
+        switch item {
+        case .schedule: primaryAccess.canOpen(.schedule)
+        case .jobs: primaryAccess.canOpen(.jobs)
+        case .customers: primaryAccess.canOpen(.customers)
+        default: item.permitted(session)
         }
     }
 
@@ -669,6 +758,13 @@ struct RootView: View {
         .environment(\.paperDrawer, atTabRoot && !barSearching ? drawerControl : nil)
         .environment(\.searchRouteHost, searchRouteHost)
         .environment(\.paperSearch, PaperSearchAction(run: { openBarSearch() }))
+        .environment(\.phoneTabBarClearance, tabBarClearance(safeBottom: windowSafeBottom))
+    }
+
+    /// The window's bottom safe area (the home indicator), for placing the bar.
+    private var windowSafeBottom: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets.bottom ?? 0
     }
 
     /// The selected place, with the sheets and request handlers every place shares.
@@ -1011,11 +1107,11 @@ struct RootView: View {
             tabRoot(item)
         } else if id.hasPrefix("local-"), let section = LocalWorkspaceSection(rawValue: String(id.dropFirst(6))) {
             NavigationStack(path: customPath(id)) {
-                PaperRouteView(route: .local(section)).modifier(DrawerCircleInBar()).paperDestinations()
+                placeRoot(id, PaperRouteView(route: .local(section)).modifier(DrawerCircleInBar())).paperDestinations()
             }
         } else if id == Self.notificationsPlace {
             NavigationStack(path: customPath(id)) {
-                PaperRouteView(route: .notifications).modifier(DrawerCircleInBar()).paperDestinations()
+                placeRoot(id, PaperRouteView(route: .notifications).modifier(DrawerCircleInBar())).paperDestinations()
             }
         } else {
             tabRoot(.schedule)
@@ -1024,16 +1120,16 @@ struct RootView: View {
 
     @ViewBuilder private func tabRoot(_ item: MenuItem) -> some View {
         switch item {
-        case .schedule: NavigationStack(path: $schedulePath) { gated(.schedule) { ScheduleView() }.paperDestinations() }
-        case .jobs: NavigationStack(path: $jobsPath) { gated(.jobs) { JobsView() }.paperDestinations() }
-        case .customers: NavigationStack(path: $customersPath) { gated(.customers) { CustomersView() }.paperDestinations() }
+        case .schedule: NavigationStack(path: $schedulePath) { placeRoot(item.rawValue, gated(.schedule) { ScheduleView() }).paperDestinations() }
+        case .jobs: NavigationStack(path: $jobsPath) { placeRoot(item.rawValue, gated(.jobs) { JobsView() }).paperDestinations() }
+        case .customers: NavigationStack(path: $customersPath) { placeRoot(item.rawValue, gated(.customers) { CustomersView() }).paperDestinations() }
         default:
             NavigationStack(path: customPath(item.rawValue)) {
                 if let route = item.route {
                     // Places whose root shows a navigation bar carry the menu circle there, and
                     // their Paper header (Estimates, Invoices) then leaves it out.
-                    PaperRouteView(route: route)
-                        .modifier(DrawerCircleInBar(enabled: !item.drawerCircleInHeader))
+                    placeRoot(item.rawValue, PaperRouteView(route: route)
+                        .modifier(DrawerCircleInBar(enabled: !item.drawerCircleInHeader)))
                         .paperDestinations()
                 }
             }
@@ -1141,12 +1237,15 @@ private struct DrawerCircleInBar: ViewModifier {
     @Environment(\.paperDrawer) private var drawer
 
     func body(content: Content) -> some View {
-        if enabled, let drawer {
+        if enabled, let drawer, drawer.showsCircle {
             content
                 .environment(\.paperDrawer, nil)
                 .toolbar {
                     ThorbisToolbarItem(placement: .topBarLeading) { DrawerMenuCircle(control: drawer) }
                 }
+        } else if enabled, drawer != nil {
+            // The bottom bar is on: More is the door, so the bar carries no circle.
+            content.environment(\.paperDrawer, nil)
         } else {
             content
         }
