@@ -242,7 +242,7 @@ struct JobEstimateHandoffView: View {
                     Text("Hand the device back to your technician").font(Theme.customerFont(type.heading, weight: .medium))
                     Text("This workspace or your access changed. Your technician needs to unlock and reopen the job.")
                         .font(Theme.customerFont(type.body))
-                    CustomerSecondaryButton(title: "Hand back to the technician", type: type, action: handBack)
+                    CustomerSecondaryButton(title: "Hand back to technician", type: type, action: handBack)
                 }.padding(Theme.gutter)
             }
         }
@@ -751,7 +751,7 @@ struct JobEstimateProtectedOwner: View {
                     presenter.active === model && model.isCurrentJob && session.can("customer.edit", feature: "core_crm")
                 }) { presenter.authenticatedExit(from: model, exit) }
             } else {
-                CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
+                CustomerModeContainer(onUnlocked: { leave(.done) }, ownerControlTitle: "Hand back to technician", authenticateOwner: authenticateOwner) { handBack in
                     JobCustomerDocumentsView(scope: model.scope, documents: model.documents, sourceGeneration: presenter.sourceGeneration,
                         jobTitle: model.jobTitle, customerName: model.customerName, handBack: handBack,
                         onUnlocked: { leave(.done) },

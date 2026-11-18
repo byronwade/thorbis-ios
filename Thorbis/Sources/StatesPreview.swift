@@ -180,7 +180,7 @@ private struct CustomerStatesGallery: View {
                 label("Changed under the customer")
                 CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
                                      message: "Your technician needs to reload this job.",
-                                     actionTitle: "Hand back to the technician") {}
+                                     actionTitle: "Hand back to technician") {}
                 label("Public link ended")
                 CustomerStateMessage(symbol: "link.badge.exclamationmark", title: "This estimate link has ended",
                                      message: "This estimate link is expired, replaced, or no longer current. Ask the company for a new link.",

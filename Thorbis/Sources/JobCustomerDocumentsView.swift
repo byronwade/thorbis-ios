@@ -437,13 +437,13 @@ struct JobCustomerDocumentsView: View {
     }
 
     /// The session or workspace changed under the customer: only the technician can reopen it.
-    /// On the home the pinned "Hand back to the technician" is the one action, so the state is
+    /// On the home the pinned "Hand back to technician" is the one action, so the state is
     /// words only; pushed pages have no pinned bar and carry it themselves.
     private func customerHandBackState(withAction: Bool) -> some View {
         let handBack: (() -> Void)? = withAction ? { beginHandBack() } : nil
         return CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
                              message: "Your technician needs to reload this job.",
-                             actionTitle: withAction ? "Hand back to the technician" : nil,
+                             actionTitle: withAction ? "Hand back to technician" : nil,
                              action: handBack)
             .padding(.horizontal, Theme.gutter)
     }
@@ -646,7 +646,7 @@ private struct CustomerJobReadOnlyPaper: View {
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, Theme.gutter)
                 .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
             }
-            CustomerCommitButton(title: "Hand back to the technician", icon: "lock", busy: false, action: handBack)
+            CustomerCommitButton(title: "Hand back to technician", icon: "lock", busy: false, action: handBack)
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12)
         }
     }
@@ -815,7 +815,7 @@ private struct CustomerHandBackPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel("Hand back to the technician")
+        .accessibilityLabel("Hand back to technician")
         .disabled(busy)
     }
 }

@@ -173,6 +173,8 @@ struct EstimateDetailView: View {
     @State private var record: EstimateRecord?
     @State private var error: String?
     @State private var busy = false
+    /// "Show customer" in flight; leaving the estimate cancels its job lookup.
+    @State private var presentTask: Task<Void, Never>?
     @State private var confirm = false
     @State private var succeeded = 0
     @State private var showRevisionEditor = false
@@ -566,6 +568,7 @@ struct EstimateDetailView: View {
         } }
         .task { await loadAndMaybePresent() }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
+        .onDisappear { if busy { presentTask?.cancel() } }
     }
 
     private func customerMode(_ record: EstimateRecord, lease: LegacyCustomerHandoffLease) -> some View {
@@ -599,7 +602,7 @@ struct EstimateDetailView: View {
         } else if let record, record.status == "sent", canShowSent(record) {
             // On site, the next step is the customer's yes: hand them the options to choose and sign.
             // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { Task { await presentToCustomer() } }
+            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { presentTask?.cancel(); presentTask = Task { await presentToCustomer() } }
         }
     }
 
@@ -642,7 +645,21 @@ struct EstimateDetailView: View {
         guard let record else { return }
         guard let fallbackAuthority = CustomerHandoffExitAuthority.capture(api: api, session: session),
               let source = customerWindowAnchor.window else { return }
-        if let jobID {
+        var hostJobID = jobID
+        if hostJobID == nil, session.can("job.view", feature: "jobs"), session.can("estimate.view", feature: "estimates") {
+            // Opened without a job (the Estimates list): ask the customer's jobs, a few at most, whether
+            // one lists this estimate. The bar stays busy; nothing opens until the answer is in.
+            busy = true
+            let current: @MainActor () -> Bool = {
+                customerWindowAnchor.isAttached(to: source) && fallbackAuthority.isCurrent(api: api, session: session)
+            }
+            hostJobID = await EstimateJobLookup.jobID(for: record.id, customerID: record.customerId, jobs: store.jobs, isCurrent: current) { job in
+                try await api.fieldJobEstimateLinks(job, isCurrent: current).filter { $0.jobId == job }.map(\.estimateId)
+            }
+            busy = false
+            guard current(), !Task.isCancelled else { return }
+        }
+        if let jobID = hostJobID {
             busy = true
             let opened = await customerView.openCustomerView(jobID: jobID, customerID: record.customerId,
                 customerName: store.customerName(record.customerId), start: .estimate(record.id), api: api, session: session, sourceWindow: source,
