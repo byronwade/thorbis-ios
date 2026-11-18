@@ -306,7 +306,18 @@ struct JobEstimateHandoffView: View {
                 if model.records.isEmpty { CustomerSkeleton(caption: "Opening current job estimates…", lines: 2) }
                 else { Text("Opening current job estimates…").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
             }
-            ForEach(model.records) { record in estimateCard(record) }
+            // Paper 38C: the estimates are rows on one card, a hairline between them.
+            if !model.records.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(model.records.enumerated()), id: \.element.id) { index, record in
+                        if index > 0 { WellDivider() }
+                        estimateCard(record)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .panelBackground()
+            }
+            overviewTotals
             if model.canLoadMoreEstimates {
                 CustomerSecondaryButton(title: "Load more estimates", type: type) {
                     Task { await model.loadMoreEstimates() }
@@ -328,29 +339,31 @@ struct JobEstimateHandoffView: View {
     }
 
     private func estimateCard(_ record: EstimateRecord) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 4) {
             if model.eligibleIDs.contains(record.id) {
                 let selected = model.selectedIDs.contains(record.id)
                 Button { model.setSelected(record.id, selected: !selected) } label: {
-                    HStack(alignment: .top, spacing: 14) {
+                    HStack(alignment: .center, spacing: 12) {
                         // Paper 38C: a brand disc with a white check when chosen, an empty ring when not.
                         CustomerRadio(selected: selected)
-                            .frame(width: 30).frame(minHeight: 56)
-                        estimateSummary(record)
-                    }.frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading).contentShape(Rectangle())
+                        estimateSummary(record, dimmed: !selected)
+                    }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("\(selected ? "Deselect" : "Select") \(record.title), EST-\(record.id.suffix(4).uppercased())")
                 .accessibilityValue(selectionValue(record))
                 .accessibilityAddTraits(selected ? [.isSelected] : [])
                 .accessibilityIdentifier("handoff-select-\(record.id)")
-            } else { estimateSummary(record) }
+            } else { estimateSummary(record, dimmed: false) }
             if model.detailsCurrent(record, authority: session.authorityRevision) {
+                // Paper 38C draws no link here; reading an estimate before choosing it stays, as quiet
+                // brand words under the row, lined up with its name.
                 Button { detailsID = record.id } label: {
-                    Label("View details", systemImage: "doc.text")
-                        .font(Theme.customerFont(type.small, weight: .semibold))
+                    Text("View details")
+                        .font(Theme.font(14, weight: .semibold))
                         .foregroundStyle(Theme.brandText)
-                        .frame(maxWidth: .infinity, minHeight: type.target, alignment: .leading)
+                        .padding(.leading, model.eligibleIDs.contains(record.id) ? 38 : 0)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -406,10 +419,9 @@ struct JobEstimateHandoffView: View {
                     .font(Theme.customerFont(type.body)).foregroundStyle(Theme.muted)
             }
         }
-        // Paper v2: each estimate is its own card (radius 20) on the canvas; no rule between them.
-        .padding(PaperCardMetrics.inset)
+        // Paper 38C: a row on the shared card, 16 in, 12 above and below.
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .panelBackground()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("handoff-card-\(record.id)")
     }
@@ -435,40 +447,101 @@ struct JobEstimateHandoffView: View {
         return "\(state), \(record.status.capitalized), \(price)"
     }
 
-    private func estimateSummary(_ record: EstimateRecord) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let titleLayout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-            titleLayout {
+    /// Paper 38C's row: the estimate's name (16 Medium) over one quiet line (14), its price at the
+    /// trailing edge (16 Medium, muted until chosen). What can't be priced yet says so on the quiet line.
+    private func estimateSummary(_ record: EstimateRecord, dimmed: Bool) -> some View {
+        let facts = summaryFacts(record)
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let reference = "EST-\(record.id.suffix(4).uppercased())"
+        let words = ([record.status == "sent" ? reference : "\(reference) \u{00B7} \(record.status.statusLabel)"] + facts.notes)
+            .joined(separator: " \u{00B7} ")
+        return HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(record.title).font(Theme.customerFont(type.body, weight: .medium)).fixedSize(horizontal: false, vertical: true)
-                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
-                CustomerStatusWord(status: record.status, type: type)
+                Text(words).font(type.regular ? Theme.customerFont(type.small) : Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if stacked, let amount = facts.amount {
+                    Text(amount).font(Theme.customerFont(type.body, weight: .medium))
+                }
             }
-            Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.customerMonoFont(type.small)).foregroundStyle(Theme.muted)
-            if let context = model.context(for: record.id), context.outcome?.isApproved == true,
-               let action = context.acceptedAction, let accepted = action.acceptance,
-               let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
-                Text(option.title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-                Text(money(amount, currency: option.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if let receipt = model.overviewReceipt(for: record) {
-                if let title = receipt.optionTitle { Text(title).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted) }
-                Text(money(receipt.totalAmount, currency: receipt.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if record.status == "sent", let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
-                Text(money(revision.totalAmount, currency: revision.currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
-                      let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
-                Text(money(amounts.total, currency: currency)).font(Theme.customerFont(type.regular ? 34 : 28, weight: .medium)).monospacedDigit()
-            } else if (record.options ?? []).isEmpty {
-                Text(model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
-                     ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…")
-                    .font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-            } else if record.status == "approved" {
-                Text("Accepted package needs verification").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
-            } else {
-                Text("Choose a package").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !stacked, let amount = facts.amount {
+                Text(amount).font(Theme.customerFont(type.body, weight: .medium))
+                    .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
+                    .lineLimit(1).fixedSize()
             }
-        }.frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Theme.foreground)
+        }
+        .multilineTextAlignment(.leading)
+        .frame(maxWidth: .infinity, alignment: .leading).foregroundStyle(Theme.foreground)
+    }
+
+    /// The verified price of an estimate on the overview, or the words for why there is none yet.
+    private func summaryFacts(_ record: EstimateRecord) -> (amount: String?, notes: [String]) {
+        if let context = model.context(for: record.id), context.outcome?.isApproved == true,
+           let action = context.acceptedAction, let accepted = action.acceptance,
+           let amount = Int(exactly: accepted.totalAmount), let option = action.options?.first(where: { $0.id == accepted.optionId }) {
+            return (money(amount, currency: option.currency), [option.title])
+        } else if let receipt = model.overviewReceipt(for: record) {
+            return (money(receipt.totalAmount, currency: receipt.currency), receipt.optionTitle.map { [$0] } ?? [])
+        } else if record.status == "sent", let revision = model.revision(for: record.id), (revision.options ?? []).isEmpty {
+            return (money(revision.totalAmount, currency: revision.currency), [])
+        } else if record.status == "draft", (record.options ?? []).isEmpty, let currency = record.lines.first?.unitPrice.currency,
+                  let amounts = CustomerDocumentAmounts(lines: record.lines, currency: currency) {
+            return (money(amounts.total, currency: currency), [])
+        } else if (record.options ?? []).isEmpty {
+            return (nil, [model.overviewPricesNeedRefresh || !model.detailsCurrent(record, authority: session.authorityRevision)
+                          ? "Refresh to check price" : model.overviewPriceFailures.contains(record.id) ? "Price needs current terms" : "Checking price…"])
+        } else if record.status == "approved" {
+            return (nil, ["Accepted package needs verification"])
+        } else {
+            return (nil, ["Choose a package"])
+        }
+    }
+
+    /// The selected estimates' verified prices, per currency; nil while any chosen one has no verified price.
+    private var overviewSelectedTotals: [(currency: String, amount: Int)]? {
+        var values: [String: Int] = [:]
+        for id in model.selectedIDs {
+            guard let revision = model.revision(for: id) else { return nil }
+            let amount: Int, currency: String
+            if (revision.options ?? []).isEmpty { amount = revision.totalAmount; currency = revision.currency }
+            else if let option = revision.options?.first(where: { $0.id == model.selection.optionIDs[id] }) { amount = option.totalAmount; currency = option.currency }
+            else { return nil }
+            let sum = (values[currency] ?? 0).addingReportingOverflow(amount)
+            guard !sum.overflow else { return nil }
+            values[currency] = sum.partialValue
+        }
+        return values.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
+    }
+
+    /// Paper 38C's totals card under the list: how many are selected, then the total under a hairline.
+    @ViewBuilder private var overviewTotals: some View {
+        if !model.selectedIDs.isEmpty, let totals = overviewSelectedTotals, !totals.isEmpty {
+            VStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Selected").font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Text("\(model.selectedIDs.count) estimate\(model.selectedIDs.count == 1 ? "" : "s")")
+                        .font(Theme.customerFont(type.small))
+                }
+                WellDivider(leading: 0)
+                ForEach(totals, id: \.currency) { value in
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(totals.count == 1 ? "Total" : "Total \(value.currency)")
+                            .font(Theme.customerFont(type.body, weight: .semibold))
+                        Spacer(minLength: 8)
+                        Text(money(value.amount, currency: value.currency))
+                            .font(Theme.customerFont(type.regular ? type.heading : 22, weight: .bold)).tracking(-0.44)
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            }
+            .padding(PaperCardMetrics.inset)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .panelBackground()
+            .accessibilityIdentifier("handoff-overview-totals")
+        }
     }
 
     private var selectedReview: some View {
@@ -614,16 +687,24 @@ struct JobEstimateHandoffView: View {
                 }
                 CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
             } else {
-                CustomerPresentationCommit(title: "Review selected (\(model.selectedIDs.count))",
-                                           compactTitle: "Review (\(model.selectedIDs.count))",
-                                           enabled: model.canReview, busy: model.loading, type: type) {
+                // Paper 38C: the count and the total on the commit ("Approve 2 · $2,126.13"). Here it opens
+                // the review before any signature, so it says Review; its spoken name is unchanged.
+                CustomerPresentationCommit(title: reviewCommitTitle, enabled: model.canReview, busy: model.loading, type: type) {
                     Task { await model.reviewSelected(); if !model.reviewed.isEmpty { reviewing = true } }
                 }
+                .accessibilityLabel("Review selected (\(model.selectedIDs.count))")
                 .accessibilityIdentifier("handoff-review-selected")
             }
         }
         .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12).background(Theme.canvas)
         }
+    }
+    private var reviewCommitTitle: String {
+        let count = model.selectedIDs.count
+        guard count > 0, let totals = overviewSelectedTotals, totals.count == 1, let total = totals.first else {
+            return "Review selected (\(count))"
+        }
+        return "Review \(count) \u{00B7} \(money(total.amount, currency: total.currency))"
     }
     private func nextPending(after current: String?) -> String? {
         model.reviewed.first { item in

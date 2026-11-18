@@ -685,7 +685,9 @@ final class JobDocumentsUITests: XCTestCase {
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.waitForExistence(timeout: 10))
         let list = app.scrollViews["customer-job-documents-list"]
-        let top = app.navigationBars["Customer view"].frame.maxY
+        // Paper 38B: Customer view's home has no bar; the list starts under the status bar.
+        let bar = app.navigationBars["Customer view"]
+        let top = bar.exists ? bar.frame.maxY : 0
         let bottom = app.buttons["Hand back to the technician"].frame.minY
         // Large cards can report hittable while their center is still behind the fixed footer.
         for _ in 0..<10 {
