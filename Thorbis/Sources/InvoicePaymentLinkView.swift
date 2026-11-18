@@ -24,13 +24,13 @@ struct InvoicePaymentLinkView: View {
                 // customer in 15 muted, the code on a white card, the scan caption and the waiting line,
                 // then the link.
                 VStack(alignment: .center, spacing: 20) {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 0) {
                         Text(money(model.outstandingCents ?? 0, currency: model.invoice?.currency ?? "USD"))
-                            .font(Theme.font(34, weight: .bold)).monospacedDigit().tracking(-1)
-                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
+                            .lineLimit(1).minimumScaleFactor(0.5)
                             .accessibilityLabel("Balance due \(money(model.outstandingCents ?? 0, currency: model.invoice?.currency ?? "USD"))")
                         Text("\(invoiceReference) \u{00B7} \(customerName)")
-                            .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                            .font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -58,11 +58,13 @@ struct InvoicePaymentLinkView: View {
                     }
                 }
                 .frame(maxWidth: 520)
-                .padding(.horizontal, PaperCardMetrics.margin)
-                .padding(.top, 8).padding(.bottom, 20)
+                .padding(.horizontal, Theme.gutter)
+                .padding(.top, 20).padding(.bottom, 20)
                 .frame(maxWidth: .infinity)
             }
             .refreshable { await model.load() }
+            // Paper 39C: the link pill sits over the bottom edge, 16 from the sides.
+            .safeAreaInset(edge: .bottom, spacing: 0) { shareBar(at: context.date) }
         }
         .background(Theme.background)
         .foregroundStyle(Theme.foreground)
@@ -86,6 +88,11 @@ struct InvoicePaymentLinkView: View {
         }
     }
 
+    /// Paper 39C: the code's card is the light ink tone on the dark page; plain white on the light one.
+    private static let codeCard = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(white: 0.929, alpha: 1) : .white
+    })
+
     private var invoiceState: PaymentLinkInvoiceState {
         .init(status: model.invoice?.status, currency: model.invoice?.currency,
               balanceCents: model.outstandingCents, requestedBalanceCents: requestedBalanceCents)
@@ -104,11 +111,15 @@ struct InvoicePaymentLinkView: View {
             switch PaymentLinkPresentation(link: payLink, at: date) {
             case .ready(let url, let expiration):
                 if let renderedCode, renderedCode.url == url {
+                    // Paper 39C: the code on a 240 card in the light tone, 24 radius, 4 clear of the title block.
                     Image(uiImage: UIImage(cgImage: renderedCode.image))
                         .interpolation(.none).resizable().scaledToFit()
-                        .frame(maxWidth: 204)
-                        .padding(18)
-                        .background(.white, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        // The code's own white ground takes the card's tone.
+                        .blendMode(.multiply)
+                        .frame(width: 192, height: 192)
+                        .frame(width: 240, height: 240)
+                        .background(Self.codeCard, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                        .padding(.top, 4)
                         .frame(maxWidth: .infinity)
                         .accessibilityLabel("Payment QR code")
                         .accessibilityHint("The customer scans this with their phone camera")
@@ -131,18 +142,6 @@ struct InvoicePaymentLinkView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .accessibilityElement(children: .combine)
-                // Paper 39C: a pill on the field fill, the words alone in 16 Semibold, 50 tall.
-                ShareLink(item: url) {
-                    Text("Text the link instead")
-                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .lineLimit(1).minimumScaleFactor(0.8)
-                        .padding(.horizontal, 12)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.fill, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("share-invoice-payment-link")
                 Button(copiedURL == url ? "Link copied" : "Copy link") {
                     UIPasteboard.general.string = url.absoluteString
                     copiedURL = url
@@ -156,6 +155,32 @@ struct InvoicePaymentLinkView: View {
             case .unavailable:
                 recovery("Payment link unavailable", message: "Create a new secure link to continue.")
             }
+        }
+    }
+
+    /// Paper 39C: "Text the link instead" on the quiet fill, the words alone in 16 Semibold, 50 tall.
+    /// Only while the link can still be paid.
+    @ViewBuilder
+    private func shareBar(at date: Date) -> some View {
+        if model.loadError == nil, !model.isLoading, model.historyComplete,
+           model.paymentTotalCents == model.invoice?.amountPaid, invoiceState == .ready,
+           case .ready(let url, _) = PaymentLinkPresentation(link: payLink, at: date) {
+            ShareLink(item: url) {
+                Text("Text the link instead")
+                    .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Theme.quietFill, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityIdentifier("share-invoice-payment-link")
+            .frame(maxWidth: 520)
+            .padding(.horizontal, PaperCardMetrics.margin)
+            .padding(.top, 8).padding(.bottom, 8)
+            .frame(maxWidth: .infinity)
+            .background(Theme.background)
         }
     }
 

@@ -161,7 +161,7 @@ struct EstimateRevisionEditorView: View {
             #if DEBUG
             .task {
                 guard PaperPreview.enabled else { return }
-                if PaperPreview.screen == "builder-line" { expandedLine = editor.lines.first?.id ?? editor.options.first?.lines.first?.id }
+                if PaperPreview.screen == "builder-line" || PaperPreview.screen == "builder-text" { expandedLine = editor.lines.first?.id ?? editor.options.first?.lines.first?.id }
                 if PaperPreview.screen == "builder-picker" {
                     try? await Task.sleep(for: .milliseconds(400))
                     picker = EstimateBuilderTarget(optionID: editor.options.first?.id)
