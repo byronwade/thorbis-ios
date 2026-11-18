@@ -1500,7 +1500,6 @@ struct JobDetailView: View {
             let assignee = assignedDisplayName(for: job).flatMap { $0 == "Assigned" ? nil : $0 }
             Button { showAssign = true } label: { assigneeChip(job) }
                 .buttonStyle(PressStyle())
-                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician")
                 .accessibilityValue(assignee ?? "Unassigned")
                 .accessibilityIdentifier("job-assignee")

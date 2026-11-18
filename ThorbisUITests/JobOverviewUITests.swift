@@ -414,19 +414,21 @@ final class JobOverviewUITests: XCTestCase {
             XCTAssertFalse(button(startingWith: title, in: app).exists, "\(title) moved out of More (Paper 21K)")
         }
         capture(app, name: "Job More menu")
-        app.buttons["Close"].firstMatch.tap()
+        closeSheet(app)
 
         // The Share circle's sheet.
         let share = app.buttons["job-share"]
         XCTAssertTrue(share.waitForExistence(timeout: 5)); share.tap()
+        XCTAssertTrue(app.buttons["Copy job ID"].waitForExistence(timeout: 5), "The Share sheet opens")
         for title in ["Share job", "Customer view", "Add to Calendar", "Copy job ID"] {
-            let action = button(startingWith: title, in: app)
+            // The circle itself is also "Share job": the sheet's row is the last match.
+            let action = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", title, "job-share")).firstMatch
             XCTAssertTrue(action.waitForExistence(timeout: 5), "Missing Share row: \(title)")
             revealMenuRow(action, in: app)
             XCTAssertTrue(action.isHittable, "Share row is unreachable: \(title)")
         }
         capture(app, name: "Job Share sheet")
-        app.buttons["Close"].firstMatch.tap()
+        closeSheet(app)
 
         // The person chip assigns.
         let assignee = app.buttons["job-assignee"]
@@ -687,6 +689,14 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(collect.waitForExistence(timeout: 15), "The invoice's card must offer Collect payment")
         app.scrollClearOfFoot(collect)
         return collect
+    }
+
+    /// Closes an open menu sheet (its Close pill, else a swipe down) and waits for the page to answer.
+    private func closeSheet(_ app: XCUIApplication) {
+        let close = app.buttons.matching(NSPredicate(format: "label == %@", "Close")).firstMatch
+        if close.exists && close.isHittable { close.tap() } else { app.swipeDown(velocity: .fast) }
+        let back = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: app.buttons["Job actions"])
+        XCTAssertEqual(XCTWaiter.wait(for: [back], timeout: 10), .completed, "The sheet closes")
     }
 
     private func button(startingWith title: String, in app: XCUIApplication) -> XCUIElement {
