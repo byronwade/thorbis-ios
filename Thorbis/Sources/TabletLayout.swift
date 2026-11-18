@@ -808,7 +808,7 @@ struct TabletRoot: View {
         case "search", "search-typed": search = true
         case "invoice-editor", "invoice-editor-line": show(.schedule); previewInvoiceEditor = true
         case "invoice-detail", "invoice-payment": show(.schedule); previewInvoiceDetail = true
-        case "estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line":
+        case "estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line", "builder-text":
             show(.schedule); previewEstimateRevision = true
         case "new-customer": show(.customers); previewNewCustomer = true
         case "new-estimate": previewNewEstimate = true

@@ -795,7 +795,7 @@ struct RootView: View {
         }
         if ["invoice-editor", "invoice-editor-line"].contains(PaperPreview.screen) { previewInvoiceEditor = true; return }
         if PaperPreview.screen == "invoice-detail" || PaperPreview.screen == "invoice-payment" || PaperPreview.isPaymentRefundPreview { previewInvoiceDetail = true; return }
-        if ["estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line"].contains(PaperPreview.screen) { previewEstimateRevision = true; return }
+        if ["estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line", "builder-text"].contains(PaperPreview.screen) { previewEstimateRevision = true; return }
         switch PaperPreview.screen {
         case "jobs", "jobs-filters": primaryTab = .jobs
         // The owner's layout leads with Home, where owners open.
@@ -890,7 +890,7 @@ struct RootView: View {
         case "owner-home":
             layout.tabs = [.home, .schedule, .money, .customers]
             selectedTab = MenuItem.home.rawValue
-        case "estimate-detail", "estimate-draft-detail": previewPlace(.estimates, then: .estimate(PaperPreview.estimate.id))
+        case "estimate-detail", "estimate-draft-detail", "estimate-revisions": previewPlace(.estimates, then: .estimate(PaperPreview.estimate.id))
         case "reports": previewPlace(.reports)
         case "scorecard": previewPlace(.scorecard)
         case "team-goals": previewPlace(.team, then: .teamGoals)

@@ -151,7 +151,8 @@ struct PublicEstimateActionView: View {
     private func estimateContent(_ action: PublicEstimateAction) -> some View {
         // Paper 39E: a centred hero. The quiet label, the price in the largest Bold, what it is for.
         VStack(alignment: .center, spacing: 2) {
-            statusLabel(action.status)
+            // Paper 39E shows no status over an estimate still waiting on the customer.
+            if action.status != .sent { statusLabel(action.status) }
             // MF-01/CP-02: the price is the biggest thing on the estimate, labelled.
             VStack(alignment: .center, spacing: 2) {
                 Text("Total").font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.muted)

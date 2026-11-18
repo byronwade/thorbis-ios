@@ -1011,6 +1011,12 @@ struct BuilderLineRow: View {
             .padding(10)
             .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(.bottom, 12)
+            #if DEBUG
+            .task {
+                // `builder-text` (Paper TE1): the open line's wording in the full editor.
+                if PaperPreview.enabled, PaperPreview.screen == "builder-text" { fullEditor = true }
+            }
+            #endif
             .fullScreenCover(isPresented: $fullEditor) {
                 LineDescriptionEditor(text: $description, subtitle: editorSubtitle,
                                       totalText: lineTotal == nil ? nil : totalText,

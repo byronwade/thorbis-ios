@@ -614,6 +614,9 @@ struct EstimateDetailView: View {
 
     private func loadAndMaybePresent() async {
         await load()
+        #if DEBUG
+        if PaperPreview.enabled, PaperPreview.screen == "estimate-revisions", record != nil { showRevisions = true }
+        #endif
         guard presentsOnOpen, !autoPresented, let record, TechJobFlow.canShow(record, can: estimateAbilities) else { return }
         autoPresented = true
         await handToCustomer()
@@ -2274,7 +2277,7 @@ struct EstimateRevisionsView: View {
                 .fixedSize()
         }
         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
-        .frame(minHeight: 56)
+        .frame(minHeight: 64)
         .overlay(alignment: .top) { if divided { WellDivider() } }
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
@@ -2289,14 +2292,28 @@ struct EstimateRevisionsView: View {
         }
     }
 
-    /// "Sent Jul 18, 9:12 a.m. · first estimate", or what it changed from the one before.
+    /// Paper 35B: the newest reads "Sent today, 9:12 AM · added contactor"; a replaced one reads the
+    /// day alone, "Jul 17 · first estimate".
     private func detail(_ revision: EstimateRevisionRecord) -> String {
         var parts: [String] = []
-        if let sent = JobFiltering.date(revision.issuedAt) { parts.append("Sent \(sent.stampLabel(year: false))") }
+        if let sent = JobFiltering.date(revision.issuedAt) {
+            if revision.revisionNumber == newest?.revisionNumber {
+                parts.append(Calendar.current.isDateInToday(sent) ? "Sent today, \(sent.tradeTime)" : "Sent \(sent.stampLabel(year: false))")
+            } else {
+                parts.append(sent.formatted(.dateTime.month(.abbreviated).day()))
+            }
+        }
         if revision.revisionNumber == 1 {
             parts.append("first estimate")
         } else if let before = previous(of: revision), comparable(revision, before) {
-            parts.append(EstimateRevisionChange.summary(EstimateRevisionChange.compare(before.lines, with: revision.lines)))
+            let changes = EstimateRevisionChange.compare(before.lines, with: revision.lines).filter { $0.kind != .same }
+            // One change is named ("added contactor"); several are counted.
+            if changes.count == 1, let only = changes.first {
+                let verb = only.kind == .added ? "added" : only.kind == .removed ? "removed" : "changed"
+                parts.append("\(verb) \(only.name.prefix(1).lowercased() + only.name.dropFirst())")
+            } else {
+                parts.append(EstimateRevisionChange.summary(changes))
+            }
         }
         return parts.joined(separator: " \u{00B7} ")
     }

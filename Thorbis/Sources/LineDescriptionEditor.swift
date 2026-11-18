@@ -32,7 +32,7 @@ struct LineDescriptionEditor: View {
         VStack(spacing: 0) {
             header
                 .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .padding(.top, 2)
                 .padding(.bottom, 12)
             PaperTabs(options: [Self.writeTab, Self.customerTab], selection: $tab)
             if tab == Self.customerTab {
@@ -71,7 +71,7 @@ struct LineDescriptionEditor: View {
                 Text("Description").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
                     .accessibilityAddTraits(.isHeader)
                 if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle).font(Theme.font(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(subtitle).font(Theme.font(12)).foregroundStyle(Theme.subtleForeground).lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -94,10 +94,10 @@ struct LineDescriptionEditor: View {
         VStack(alignment: .leading, spacing: 4) {
             if let note, !note.isEmpty {
                 HStack(spacing: 6) {
-                    Text(note).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(note).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
                         .fixedSize(horizontal: false, vertical: true)
                     if let reset, let resetTitle {
-                        Text("·").font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        Text("·").font(Theme.font(13)).foregroundStyle(Theme.subtleForeground).accessibilityHidden(true)
                         Button {
                             reset()
                             // Reset is its own decision: Cancel afterwards keeps it.
@@ -123,7 +123,7 @@ struct LineDescriptionEditor: View {
                 TextEditor(text: $text)
                     .font(Theme.font(17))
                     .foregroundStyle(Theme.foreground)
-                    .lineSpacing(4)
+                    .lineSpacing(5)
                     .scrollContentBackground(.hidden)
                     .focused($writing)
                     .padding(.horizontal, 17)
@@ -131,7 +131,7 @@ struct LineDescriptionEditor: View {
                     .accessibilityIdentifier("description-editor-text")
             }
         }
-        .padding(.top, 10)
+        .padding(.top, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
