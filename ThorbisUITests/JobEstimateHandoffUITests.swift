@@ -19,11 +19,16 @@ func thorbisOpenJobMore(_ app: XCUIApplication, unless row: XCUIElement) {
 /// Brings a row of the open job menu (a `ThorbisMenu` sheet) into reach. Short, slow drags inside
 /// the sheet, up for a row below the fold and down for one scrolled past the top, so no row is
 /// stepped over and the sheet is never flung away. The first drag up also grows a half-height sheet.
+/// The drags start in the sheet's margin beside the rows' card, never on a row: a press that
+/// lingers on a row before the drag (a slow run) is that row's tap when the finger lifts, and the
+/// longer menu (Add to job, Time and profit) has a row under every point of the card.
 @MainActor
 func thorbisRevealJobMenuRow(_ row: XCUIElement, in app: XCUIApplication) {
     for _ in 0..<16 where row.exists && !row.isHittable {
         let up = row.frame.midY > app.frame.height * 0.3
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: up ? 0.7 : 0.4))
+        let margin = min(row.frame.maxX + 14, app.frame.maxX - 4)
+        let start = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: margin, dy: app.frame.height * (up ? 0.7 : 0.4)))
         start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: up ? -220 : 220)),
                     withVelocity: .slow, thenHoldForDuration: 0.3)
     }

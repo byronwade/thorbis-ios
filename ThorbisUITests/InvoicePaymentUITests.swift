@@ -149,7 +149,15 @@ final class InvoicePaymentUITests: XCTestCase {
         XCTAssertTrue(app.buttons["share-invoice-payment-link"].exists)
         app.buttons["Copy link"].tap()
         XCTAssertTrue(app.buttons["Link copied"].waitForExistence(timeout: 3))
-        app.buttons["check-invoice-payment-status"].tap()
+        // Paper 39C pins "Text the link instead" over the bottom edge. Check payment status is the
+        // last thing on the page and starts under that pill, so bring it clear before tapping.
+        let check = app.buttons["check-invoice-payment-status"]
+        let share = app.buttons["share-invoice-payment-link"]
+        let content = app.scrollViews.containing(.image, identifier: "invoice-payment-qr").firstMatch
+        func clear() -> Bool { check.isHittable && check.frame.maxY <= share.frame.minY }
+        for _ in 0..<5 where !clear() { content.swipeUp() }
+        XCTAssertTrue(clear(), "Check payment status must scroll clear of the pinned link pill")
+        check.tap()
         XCTAssertTrue(code.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Invoice paid"].exists)
         capture(app, "Invoice scan to pay")

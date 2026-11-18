@@ -71,6 +71,13 @@ struct InvoiceLineEditorView: View {
                     guard let id else { return }
                     withAnimation { proxy.scrollTo(id, anchor: .center) }
                 }
+                // Focus centres the line before the keyboard has taken its room. Centre it again
+                // in what is left, or the line's Done and Remove can end level with the keyboard's
+                // Done bar, which takes every tap across its width.
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                    guard let id = focus?.lineID else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                }
         }
         .environment(\.builderDocumentLabel, "INV-\(invoice.id.suffix(4).uppercased())")
         .background(Theme.canvas)

@@ -180,6 +180,19 @@ struct SignOutSheet: View {
     private var unsynced: Bool { warning.contains("Signing out deletes") }
 
     var body: some View {
+        // The sheet is as tall as its words. A long warning at the largest text sizes is taller than
+        // the screen, so the words scroll and Cancel and Sign out can always be reached.
+        ScrollView {
+            content
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .presentationDetents([.height(height)])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Sign out of \(company ?? "Thorbis")?")
@@ -219,10 +232,6 @@ struct SignOutSheet: View {
         }
         .padding(.horizontal, 20).padding(.top, 26).padding(.bottom, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-        .presentationDetents([.height(height)])
-        .presentationDragIndicator(.visible)
-        .presentationCornerRadius(28)
     }
 }
 

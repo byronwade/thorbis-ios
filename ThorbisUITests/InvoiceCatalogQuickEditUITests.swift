@@ -119,7 +119,11 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap(); search.typeText("Camera sewer inspection")
         let done = app.buttons["price-book-done"]
-        XCTAssertTrue(done.isHittable, "The catalog action must be reachable after the keyboard settles")
+        // The commit rides up with the keyboard; on a slow run it is still moving when typing ends.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: done)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 5), .completed, "The catalog action must be reachable after the keyboard settles")
+        XCTAssertLessThanOrEqual(done.frame.maxY, app.keyboards.firstMatch.frame.minY, "The keyboard must not cover the catalog action")
         done.tap()
         XCTAssertTrue(app.textFields["invoice-catalog-search"].waitForNonExistence(timeout: 10))
         if !quantity.exists { first.tap() }
@@ -240,10 +244,14 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let keyboardDone = app.buttons["Done"].firstMatch
         XCTAssertTrue(keyboardDone.exists)
         XCTAssertFalse(close.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover the line's Done control")
+        // The keyboard's Done bar takes taps across its whole width, not only on its pill, so the
+        // line's own actions have to sit above it.
+        XCTAssertLessThanOrEqual(close.frame.maxY, keyboardDone.frame.minY, "The line's Done control must sit above the keyboard's Done bar")
         let remove = app.buttons["Remove"].firstMatch
         XCTAssertTrue(remove.isHittable, "Remove remains available while editing")
         XCTAssertGreaterThanOrEqual(remove.frame.minX - close.frame.maxX, 20, "Separate the destructive action from Done")
         XCTAssertFalse(remove.frame.intersects(keyboardDone.frame), "Keyboard Done must not cover Remove")
+        XCTAssertLessThanOrEqual(remove.frame.maxY, keyboardDone.frame.minY, "Remove must sit above the keyboard's Done bar")
         XCTAssertFalse(remove.frame.intersects(app.keyboards.firstMatch.frame), "The keyboard must not cover Remove")
         let saveWhileTyping = app.buttons["Save draft"]
         if saveWhileTyping.exists && saveWhileTyping.isHittable {
@@ -490,6 +498,16 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
     private func replaceQuantity(_ quantity: XCUIElement, with text: String, in app: XCUIApplication) {
         // Select the existing digits with the native touch interaction, then type through the app
         // so XCTest does not move the caret.
+        // The editor centres the open line again once the keyboard is up. Select only when the
+        // field has stopped moving, or the double tap lands where the field was.
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        var last = quantity.frame
+        for _ in 0..<10 {
+            usleep(250_000)
+            let now = quantity.frame
+            if now == last { break }
+            last = now
+        }
         quantity.doubleTap()
         app.typeText(text)
     }
