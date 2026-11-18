@@ -28,7 +28,7 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
             XCTAssertTrue(app.buttons["customer-invoice-\(id)"].exists)
         }
         XCTAssertFalse(app.buttons["customer-invoice-00000000-0000-4000-8000-000000002241"].exists)
-        let handBack = app.buttons["Hand back to the technician"]
+        let handBack = app.buttons["Hand back to technician"]
         XCTAssertTrue(handBack.exists)
         handBack.tap()
         // The customer is thanked first; the technician unlocks from there (the fixture approves it).

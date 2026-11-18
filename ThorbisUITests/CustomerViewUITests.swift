@@ -154,6 +154,44 @@ final class CustomerViewUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["customer-view-title"].exists)
     }
 
+    /// From the Estimates side (no job id): the estimate's job is found among the customer's jobs and
+    /// the job's Customer view opens on that estimate, with the job's other estimate one step away.
+    func testShowCustomerWithoutAJobIDOpensTheJobsCustomerViewWhenAJobListsTheEstimate() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        // An estimate opened without a job is signed through an issued link, which needs estimate.send.
+        app.launchArguments = ["--paper-preview", "--paper-preview-estimate-send", "--paper-preview-screen", "estimate-detail",
+                               "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"]
+        app.launch()
+        let door = detailDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 30)); door.tap()
+        XCTAssertTrue(app.navigationBars["EST-2218"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
+        let next = app.buttons["Next document"].firstMatch
+        XCTAssertTrue(next.waitForExistence(timeout: 5)); next.tap()
+        XCTAssertTrue(app.navigationBars["EST-2238"].waitForExistence(timeout: 10), "The job's other estimate must be reachable")
+        back(app)
+        let estimates = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "customer-estimate-"))
+        XCTAssertGreaterThanOrEqual(estimates.count, 2, "Customer view lists every estimate on the job")
+        ownerExit(app)
+        XCTAssertTrue(detailDoor(app).waitForExistence(timeout: 15))
+    }
+
+    /// No job lists the estimate: the single presentation opens, as before.
+    func testShowCustomerWithoutAJobIDKeepsTheSinglePresentationWhenNoJobMatches() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-estimate-send", "--paper-preview-screen", "estimate-detail", "--paper-preview-estimate-without-job",
+                               "--paper-preview-owner-auth", "approved"]
+        app.launch()
+        let door = detailDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 30)); door.tap()
+        XCTAssertTrue(app.scrollViews["customer-estimate-presentation-\(estimateA)"].waitForExistence(timeout: 30))
+        XCTAssertFalse(app.staticTexts["customer-document-position"].exists)
+        XCTAssertFalse(app.staticTexts["customer-view-title"].exists)
+        XCTAssertTrue(app.buttons["lock"].exists, "The single presentation keeps its technician lock")
+    }
+
     private func launch(screen: String = "job") -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -175,7 +213,7 @@ final class CustomerViewUITests: XCTestCase {
         if lock.exists { lock.tap(); return }
         // Paper 38B: Customer view's home has no bar. Handing back is the pill at its foot, then the
         // technician's unlock on the hand-back screen.
-        app.buttons["Hand back to the technician"].tap()
+        app.buttons["Hand back to technician"].tap()
         let unlock = app.buttons["Technician: unlock"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 10)); unlock.tap()
     }
@@ -202,7 +240,7 @@ final class CustomerViewUITests: XCTestCase {
     /// Large cards can report hittable while their centre is still behind the fixed hand-back footer.
     private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         let list = documentsList(in: app)
-        let footer = app.buttons["Hand back to the technician"].firstMatch
+        let footer = app.buttons["Hand back to technician"].firstMatch
         for _ in 0..<12 {
             let top = app.navigationBars.firstMatch.frame.maxY
             let bottom = footer.exists ? footer.frame.minY : app.frame.maxY

@@ -245,12 +245,12 @@ struct LegacyCustomerProtectedView: View {
             if handoff.isCurrent(api: api, session: session), let content = handoff.content {
                 content
             } else {
-                CustomerModeContainer(onUnlocked: { presenter.authenticatedExit(for: handoff.lease) }, ownerControlTitle: "Hand back", authenticateOwner: authenticateOwner) { handBack in
+                CustomerModeContainer(onUnlocked: { presenter.authenticatedExit(for: handoff.lease) }, ownerControlTitle: "Hand back to technician", authenticateOwner: authenticateOwner) { handBack in
                     VStack(spacing: 20) {
                         Image(systemName: "lock.shield").font(.system(size: 44)).accessibilityHidden(true)
                         Text("Please hand the device back to your technician.")
                             .font(Theme.customerFont(CustomerModeStyle.body)).multilineTextAlignment(.center)
-                        CustomerCommitButton(title: "Hand back", icon: "hand.wave") { handBack() }
+                        CustomerCommitButton(title: "Hand back to technician", icon: "hand.wave") { handBack() }
                     }.padding(24)
                 }
             }

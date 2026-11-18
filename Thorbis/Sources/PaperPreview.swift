@@ -1131,6 +1131,10 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 return object
             }
         }
+        // `--paper-preview-estimate-without-job`: no job lists the sample estimate, so "Show customer"
+        // from an estimate opened without a job keeps the single presentation.
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-without-job"),
+           path.hasPrefix("/v1/jobs/"), path.hasSuffix("/estimates") { return ["items": [Any]()] }
         if PaperPreview.isJobDocumentsPreview {
             let estimates = PaperPreview.jobDocumentEstimates
             let invoices = PaperPreview.jobDocumentInvoices
@@ -1594,6 +1598,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         case "/v1/query/catalog":
             var capabilities = ["job.view", "job.create", "job.edit", "job.note", "job.assign", "customer.view", "customer.create", "customer.edit", "estimate.view", "estimate.create", "estimate.approve", "estimate.discount", "invoice.view", "invoice.edit", "invoice.issue", "pricebook.view"]
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-invoice-discount-authorized") { capabilities.append("invoice.discount") }
+            // Showing an estimate opened without a job needs estimate.send (it is signed through an issued link).
+            if ProcessInfo.processInfo.arguments.contains("--paper-preview-estimate-send") { capabilities.append("estimate.send") }
             // The archive captures (48A's Record rows, 48B, 48H) need the archive capability.
             if ["customer-archive", "customers-archived", "customer-record", "customer-edit"].contains(where: PaperPreview.opensSheet) { capabilities.append("customer.archive") }
             if ProcessInfo.processInfo.arguments.contains("--paper-preview-deny-document-edit") {

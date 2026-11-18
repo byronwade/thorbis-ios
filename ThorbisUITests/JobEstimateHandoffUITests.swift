@@ -87,7 +87,7 @@ func thorbisJobBalanceLoaded(_ app: XCUIApplication, _ amount: String) -> XCUIEl
 func thorbisRevealInCustomerView(_ element: XCUIElement, in app: XCUIApplication) {
     XCTAssertTrue(element.waitForExistence(timeout: 10))
     let list = app.scrollViews["customer-job-documents-list"]
-    let footer = app.buttons["Hand back to the technician"].firstMatch
+    let footer = app.buttons["Hand back to technician"].firstMatch
     for _ in 0..<8 where !(element.isHittable && (!footer.exists || element.frame.maxY <= footer.frame.minY)) {
         list.swipeUp(velocity: .slow)
     }
@@ -229,7 +229,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         // back with the pill at the foot and unlocks on the hand-back screen.
         if !app.buttons.matching(identifier: "customer-mode-owner-exit").firstMatch.waitForExistence(timeout: 5),
            app.staticTexts["customer-view-title"].exists {
-            app.buttons["Hand back to the technician"].tap()
+            app.buttons["Hand back to technician"].tap()
             let unlock = app.buttons["Technician: unlock"]
             XCTAssertTrue(unlock.waitForExistence(timeout: 10))
             return unlock

@@ -636,10 +636,10 @@ struct CustomerEstimatePresentation: View {
                 if let returnToDocuments {
                     CustomerPresentationCommit(title: "Back to job documents", enabled: true, busy: false, type: type, action: returnToDocuments)
                         .disabled(actionBusy)
-                    CustomerSecondaryButton(title: "Hand back to the technician", type: type, action: onDone)
+                    CustomerSecondaryButton(title: "Hand back to technician", type: type, action: onDone)
                         .disabled(actionBusy)
                 } else {
-                    CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type, action: onDone)
+                    CustomerPresentationCommit(title: "Hand back to technician", enabled: true, busy: false, type: type, action: onDone)
                 }
             }
             } else {
@@ -1239,7 +1239,7 @@ struct CustomerInvoicePresentation: View {
     @ViewBuilder private var bottomBar: some View {
         VStack(spacing: 10) {
             if sent != nil {
-                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
+                CustomerPresentationCommit(title: "Hand back to technician", enabled: true, busy: false, type: type) { onDone() }
             } else if let choice = payChoice {
                 let phone = typedPhone
                 let enabled = choice.selected != nil && (choice.selected != .overTime || phone.valid)
@@ -1270,7 +1270,7 @@ struct CustomerInvoicePresentation: View {
                 CustomerPresentationCommit(title: "Pay \(dueText)", enabled: true, busy: false, type: type) { pay() }
                 CustomerSecondaryButton(title: "Done", type: type) { onDone() }
             } else {
-                CustomerPresentationCommit(title: "Hand back to the technician", enabled: true, busy: false, type: type) { onDone() }
+                CustomerPresentationCommit(title: "Hand back to technician", enabled: true, busy: false, type: type) { onDone() }
             }
         }
         .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12).padding(.bottom, 8)

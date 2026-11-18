@@ -688,7 +688,7 @@ final class JobDocumentsUITests: XCTestCase {
         // Paper 38B: Customer view's home has no bar; the list starts under the status bar.
         let bar = app.navigationBars["Customer view"]
         let top = bar.exists ? bar.frame.maxY : 0
-        let bottom = app.buttons["Hand back to the technician"].frame.minY
+        let bottom = app.buttons["Hand back to technician"].frame.minY
         // Large cards can report hittable while their center is still behind the fixed footer.
         for _ in 0..<10 {
             if element.isHittable && element.frame.midY > top && element.frame.midY < bottom { break }

@@ -234,7 +234,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         let app = jobEstimateFixture()
         signFirstEstimate(app)
         XCTAssertTrue(app.buttons["Back to job documents"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.buttons["Hand back to the technician"].exists)
+        XCTAssertTrue(app.buttons["Hand back to technician"].exists)
         app.buttons["Back to job documents"].tap()
         let position = app.staticTexts["customer-document-position"]
         XCTAssertTrue(position.waitForExistence(timeout: 15))
@@ -405,7 +405,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         let before = membershipReads()
         XCTAssertGreaterThan(before, 0)
         signFirstEstimate(app)
-        let handBack = app.buttons["Hand back to the technician"]
+        let handBack = app.buttons["Hand back to technician"]
         XCTAssertTrue(handBack.waitForExistence(timeout: 10)); handBack.tap()
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["Go back"].exists)
@@ -485,7 +485,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         changeSampleStatuses(app)
         thorbisStableButton(app, "customer-book-review-sign").tap()
         XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForNonExistence(timeout: 5), "The review must replace the document pages")
-        let handBack = app.buttons["Hand back to the technician"]
+        let handBack = app.buttons["Hand back to technician"]
         XCTAssertTrue(handBack.waitForExistence(timeout: 10)); handBack.tap()
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
     }
@@ -501,7 +501,7 @@ final class CustomerDocumentBookUITests: XCTestCase {
         changeSampleStatuses(app)
         sign.tap()
         XCTAssertTrue(app.collectionViews["customer-document-pages"].waitForNonExistence(timeout: 5), "The review must replace the document pages")
-        let handBack = app.buttons["Hand back to the technician"]
+        let handBack = app.buttons["Hand back to technician"]
         XCTAssertTrue(handBack.waitForExistence(timeout: 10)); handBack.tap()
         XCTAssertTrue(app.buttons["Technician: unlock"].waitForExistence(timeout: 10))
     }

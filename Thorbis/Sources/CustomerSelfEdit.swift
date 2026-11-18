@@ -441,7 +441,7 @@ struct CustomerModeOwnerUnlockButton: View {
             busy = true
             Task { await unlock(); busy = false }
         } label: {
-            HStack(spacing: 8) { Image(systemName: "lock"); Text("Hand back") }
+            HStack(spacing: 8) { Image(systemName: "lock"); Text("Hand back to technician").lineLimit(1).minimumScaleFactor(0.8) }
                 .font(Theme.customerFont(17, weight: .medium)).frame(minHeight: CustomerModeStyle.target)
         }
         .accessibilityLabel("Hand back")
@@ -957,7 +957,7 @@ struct CustomerSelfEditForm: View {
                 Spacer()
                 Text("Your technician needs to check a previous change.")
                     .font(Theme.customerFont(CustomerModeStyle.body)).multilineTextAlignment(.center)
-                CustomerCommitButton(title: "Hand back to the technician", icon: "hand.wave", action: done)
+                CustomerCommitButton(title: "Hand back to technician", icon: "hand.wave", action: done)
                 Spacer()
             }.padding(Theme.gutter)
         } else if let draft = Binding($model.draft) {
