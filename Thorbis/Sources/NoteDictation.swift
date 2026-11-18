@@ -103,7 +103,9 @@ final class NoteDictation: ObservableObject {
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
     }
 
-    private static func authorize() async -> Bool {
+    /// Not on the main actor: Speech calls the handler on a background queue, and a main-actor
+    /// closure there fails Swift 6's queue check and ends the app (as PrivacyPermissions does).
+    private nonisolated static func authorize() async -> Bool {
         let speech: SFSpeechRecognizerAuthorizationStatus = await withCheckedContinuation { done in
             let current = SFSpeechRecognizer.authorizationStatus()
             guard current == .notDetermined else { done.resume(returning: current); return }

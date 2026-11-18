@@ -267,6 +267,22 @@ struct PaperRowsCard<Content: View>: View {
     }
 }
 
+extension View {
+    /// One row of a `PaperRowsCard` drawn on its own, for long lists: the rows sit directly in the
+    /// page's lazy stack, so only the rows on screen are built. Same fill, radius and margin as
+    /// the card; the first row carries the top corners and the last the bottom ones.
+    func paperRowsCardSlice(first: Bool, last: Bool) -> some View {
+        let r = Theme.cardRadius
+        let shape = UnevenRoundedRectangle(topLeadingRadius: first ? r : 0, bottomLeadingRadius: last ? r : 0,
+                                           bottomTrailingRadius: last ? r : 0, topTrailingRadius: first ? r : 0,
+                                           style: .continuous)
+        return frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: shape)
+            .clipShape(shape)
+            .paperCardMargin()
+    }
+}
+
 /// A person's initials (Paper 20's avatar chip): 11 Semibold brand text on the brand surface, 28pt.
 struct PaperInitials: View {
     let name: String

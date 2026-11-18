@@ -99,11 +99,14 @@ struct CustomersView: View {
                     PaperCardLabel(title: section.0, count: section.1.count)
                         .padding(.top, index == 0 ? 22 : 16)
                     // Clipped to the card, so a swiped row's Archive cell keeps the card's corners.
-                    PaperRowsCard {
-                        ForEach(Array(section.1.enumerated()), id: \.element.id) { rowIndex, customer in
+                    // Row by row in the lazy stack: one card of every customer built at once stalls
+                    // a large book.
+                    ForEach(Array(section.1.enumerated()), id: \.element.id) { rowIndex, customer in
+                        VStack(alignment: .leading, spacing: 0) {
                             if rowIndex > 0 { WellDivider(leading: typeSize.isAccessibilitySize ? 16 : 60) }
                             customerRow(customer, jobs: jobGroups.jobs(for: customer.id))
                         }
+                        .paperRowsCardSlice(first: rowIndex == 0, last: rowIndex == section.1.count - 1)
                     }
                 }
                 if items.isEmpty && !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recordsLoading {
@@ -1729,7 +1732,8 @@ struct CustomerDetailView: View {
         // Keep history approachable and avoid constructing every old row at once.
         let shownPast = Array(past.prefix(visiblePastCount))
         let recordsByID = CustomerJobHistory.firstByID(jobRecords, id: \.id)
-        let figures = Dictionary(uniqueKeysWithValues: past.compactMap { job in jobInvoiced(job.id).map { (job.id, $0) } })
+        // A job can be listed twice (paged reads overlap); uniqueKeysWithValues would crash on that.
+        let figures = Dictionary(past.compactMap { job in jobInvoiced(job.id).map { (job.id, $0) } }, uniquingKeysWith: { first, _ in first })
         let lifetime = figures.values.reduce(0, +)
         var days: [String] = []
         for job in open where !days.contains(openDay(job)) { days.append(openDay(job)) }
@@ -1971,9 +1975,9 @@ struct CustomerDetailView: View {
         let scope = recordsScope
         let visible = visibleRecords
         let visibleError = scope != nil && recordsRequestedScope == scope ? recordsError : nil
-        let days = Dictionary(uniqueKeysWithValues: jobs.compactMap { job in
+        let days = Dictionary(jobs.compactMap { job in
             JobFiltering.date(job.scheduledFor ?? job.updatedAt).map { (job.id, Calendar.current.isDateInToday($0) ? "today" : CustomerTabDates.full($0)) }
-        })
+        }, uniquingKeysWith: { first, _ in first })
         return VStack(alignment: .leading, spacing: 10) {
             if scope == nil {
                 emptyText("You don’t have access to this customer’s records.")

@@ -13,6 +13,20 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-crash-fixes",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "person.2", title: "Customer page crash fixed",
+                      detail: "Opening a customer could close the app when one of their jobs was listed twice. Fixed."),
+                .init(symbol: "mic", title: "First voice note crash fixed",
+                      detail: "Answering the speech permission prompt the first time you tap a microphone no longer closes the app."),
+                .init(symbol: "list.bullet", title: "Long lists open faster",
+                      detail: "Customers and Jobs build only the rows on screen, so large books no longer stall or run out of memory."),
+                .init(symbol: "briefcase", title: "Job page stays steady",
+                      detail: "A job page returns to the top when its visit steps appear or go, instead of risking a freeze."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-menu-and-sign-out-fixes",
             date: "2026-11-18",
             highlights: [

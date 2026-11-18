@@ -301,7 +301,8 @@ struct JobDetailView: View {
                     // Due on site far down Overview) had the lazy stack measure its content short, then
                     // long, then short again every frame, never settling (the app hung). A scrollTo
                     // from there did not help: the offset never moved.
-                    .id(selectedTab)
+                    // The field steps coming or going changes the height the same way, so that resets it too.
+                    .id("\(selectedTab)-\(inField(job))")
                     // A section opened while the tabs are pinned (the pinned tabs, or Due on site, Open
                     // and See all far down the page) starts at its top, with the tabs still pinned.
                     .onChange(of: selectedTab) {

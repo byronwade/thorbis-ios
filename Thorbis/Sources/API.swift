@@ -261,16 +261,24 @@ final class APIClient: ObservableObject {
     struct EmptyResponse: Decodable { init(from decoder: Decoder) throws {} }
     private struct AuthError: Decodable { let code: String?; let message: String? }
 
+    private static func pageKey<R: Identifiable>(_ record: R) -> AnyHashable { AnyHashable(record.id) }
+
     private func allPages<T: Codable>(_ path: String) async throws -> [T] {
         let generation = requestGeneration
         var all: [T] = []
         var cursor: String?
         var seen: Set<String> = []
+        var ids: Set<AnyHashable> = []
         repeat {
             try Task.checkCancellation()
             guard generation == requestGeneration else { throw CancellationError() }
             let page: Items<T> = try await send("GET", path, cursor: cursor)
-            all.append(contentsOf: page.items)
+            // Pages can overlap when a record moves while the list is being read. Keep the first
+            // copy of each record so no list ever carries the same id twice.
+            for item in page.items {
+                if let record = item as? any Identifiable, !ids.insert(Self.pageKey(record)).inserted { continue }
+                all.append(item)
+            }
             cursor = page.nextCursor
             if let cursor, !seen.insert(cursor).inserted || cursor.isEmpty {
                 throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")

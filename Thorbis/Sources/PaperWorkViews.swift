@@ -1416,11 +1416,13 @@ struct JobsView: View {
         if !jobs.isEmpty {
             PaperCardLabel(title: title, count: jobs.count)
                 .padding(.top, 20)
-            PaperRowsCard {
-                ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
+            // Row by row in the lazy stack: one card of every job built at once stalls a long list.
+            ForEach(Array(jobs.enumerated()), id: \.element.id) { index, job in
+                VStack(alignment: .leading, spacing: 0) {
                     if index > 0 { WellDivider(leading: JobCardRow.dividerInset) }
                     jobRow(job)
                 }
+                .paperRowsCardSlice(first: index == 0, last: index == jobs.count - 1)
             }
         }
     }
