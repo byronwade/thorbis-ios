@@ -822,18 +822,24 @@ struct CommsRowTitle: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(name).font(Theme.font(16, weight: unread ? .semibold : .medium))
-                .foregroundStyle(Theme.foreground)
-                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-            if let count, count > 1 {
-                Text("\(count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+        // At the largest text sizes the time drops under the name, so the name keeps the row's width.
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        return layout {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(name).font(Theme.font(16, weight: unread ? .semibold : .medium))
+                    .foregroundStyle(Theme.foreground)
+                    .lineLimit(stacked ? 2 : 1)
+                if let count, count > 1 {
+                    Text("\(count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                if starred {
+                    Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
+                        .accessibilityHidden(true)
+                }
             }
-            if starred {
-                Image(systemName: "star.fill").font(.system(size: 11)).foregroundStyle(Theme.warning)
-                    .accessibilityHidden(true)
-            }
-            Spacer(minLength: 8)
+            if !stacked { Spacer(minLength: 8) }
             Text(time).font(Theme.font(13, weight: unread ? .semibold : .regular))
                 .foregroundStyle(unread ? Theme.brandText : Theme.subtleForeground)
                 .fixedSize()
@@ -927,12 +933,14 @@ struct CommsNoticeRow: View {
                 .background(unread ? Theme.brandSurface : Theme.fill, in: Circle())
                 .accessibilityHidden(true)
         } content: {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+            let head = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+            head {
                 Text(notice.title).font(Theme.font(16, weight: unread ? .semibold : .regular))
                     .foregroundStyle(unread ? Theme.foreground : Theme.muted)
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
+                if !stacked { Spacer(minLength: 8) }
                 Text(time).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted).fixedSize()
             }
             if !notice.meta.isEmpty {

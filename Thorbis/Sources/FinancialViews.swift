@@ -381,6 +381,7 @@ struct EstimateDetailView: View {
         let currency: String
         var extraRows: [(String, String)] = []
         var memberLine: String? = nil
+        @Environment(\.dynamicTypeSize) private var typeSize
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
@@ -424,7 +425,11 @@ struct EstimateDetailView: View {
             let text = LineText(line.description)
             let unit = money(line.unitPrice.amount, currency: line.unitPrice.currency)
             let amount = paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) }
-            return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            // At the largest text sizes the amount drops under the name, so a name never breaks mid-word.
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+            return layout {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(text.name).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)

@@ -354,13 +354,20 @@ struct DispatchBoardView: View {
                     PaperIcon(.chevronDown, size: 12, color: Theme.muted)
                         .rotationEffect(.degrees(isFolded ? -90 : 0))
                     InitialsAvatar(name: name, size: 24)
-                    Text(name).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .lineLimit(1)
-                    // Paper 53: what the tech is doing now, as a word beside the name.
-                    if let state {
-                        Text(state.word).font(Theme.font(13, weight: .semibold))
-                            .foregroundStyle(state.tone == .late ? Theme.destructive : Theme.success)
-                            .lineLimit(1)
+                    // At the largest text sizes the state drops under the name, so neither is cut to "Ra…".
+                    let words = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                        : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+                    words {
+                        Text(name).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                            .multilineTextAlignment(.leading)
+                        // Paper 53: what the tech is doing now, as a word beside the name.
+                        if let state {
+                            Text(state.word).font(Theme.font(13, weight: .semibold))
+                                .foregroundStyle(state.tone == .late ? Theme.destructive : Theme.success)
+                                .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                        }
                     }
                     Spacer(minLength: 8)
                     Text(count).font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -446,7 +453,10 @@ struct DispatchBoardView: View {
                     } else {
                         StatusGlyph(tone: StatusTone(jobStatus: job.status, hasTime: job.scheduledFor != nil),
                                     label: job.status.statusLabel, size: 22)
-                            .frame(width: 34, alignment: .leading)
+                            // The glyph grows with the text size; its slot grows with it instead of
+                            // letting it sit over the title.
+                            .frame(minWidth: 34, alignment: .leading)
+                            .padding(.trailing, typeSize.isAccessibilitySize ? 12 : 0)
                     }
                     VStack(alignment: .leading, spacing: 0) {
                         Text(title).font(Theme.font(16, weight: .medium)).tracking(-0.16)
