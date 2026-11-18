@@ -26,10 +26,9 @@ final class EstimateDraftAvailabilityUITests: XCTestCase {
         let warning = app.staticTexts["Draft changes can't be saved yet."]
         XCTAssertTrue(warning.waitForExistence(timeout: 30))
         // Since #183 the catalog is a sheet over the builder (behind "Add item"); it repeats the limit.
-        let add = app.buttons.matching(identifier: "estimate-add-item").firstMatch
-        XCTAssertTrue(add.waitForExistence(timeout: 10))
-        for _ in 0..<8 where !add.isHittable { app.swipeUp() }
-        add.tap()
+        // Every section has its own "Add item"; full swipes overshot the first one under the top
+        // bar, where the tap landed on the bar. The shared helper drags it just into view.
+        app.openPriceBook(from: app.buttons.matching(identifier: "estimate-add-item").firstMatch)
         let search = app.textFields["price-book-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap()

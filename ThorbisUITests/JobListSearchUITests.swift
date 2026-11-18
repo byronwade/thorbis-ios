@@ -82,7 +82,10 @@ final class JobListSearchUITests: XCTestCase {
         // Since #216 the commit is never pre-disabled ("Don't lock the commit"): pressed without a
         // caller it books nothing, stays on the sheet and says what is missing under the caller.
         commit.tap()
-        XCTAssertTrue(app.staticTexts["Pick who's calling, or add them as a new customer."].waitForExistence(timeout: 5))
+        // Paper 09A: the error is one `field-problem` element read as "Error: <message>".
+        let problem = app.descendants(matching: .any).matching(identifier: "field-problem")
+            .matching(NSPredicate(format: "label == %@", "Error: Pick who's calling, or add them as a new customer.")).firstMatch
+        XCTAssertTrue(problem.waitForExistence(timeout: 5))
         XCTAssertTrue(customer.exists)
         XCTAssertTrue(commit.exists)
     }

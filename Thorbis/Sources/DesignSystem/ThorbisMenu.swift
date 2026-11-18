@@ -273,12 +273,19 @@ struct AnchoredPopover<PopoverContent: View>: ViewModifier {
     var popoverContent: () -> PopoverContent
     @State private var inLowerHalf = false
 
+    private nonisolated static func globalMidY(_ proxy: GeometryProxy) -> CGFloat {
+        proxy.frame(in: .global).midY
+    }
+
     func body(content: Content) -> some View {
         content
-            .onGeometryChange(for: Bool.self) { proxy in
+            // The transform can run on SwiftUI's async render thread (mid push, say), so it only
+            // reads the proxy; the main-actor window is asked in the action. Reading it in the
+            // transform trapped the main-actor check and closed the app on opening a thread.
+            .onGeometryChange(for: CGFloat.self, of: Self.globalMidY) { midY in
                 let height = ThorbisMenuWindow.height
-                return height > 0 && proxy.frame(in: .global).midY > height / 2
-            } action: { inLowerHalf = $0 }
+                inLowerHalf = height > 0 && midY > height / 2
+            }
             .onAppear { ThorbisKeyboard.watch() }
             .popover(isPresented: $isPresented, arrowEdge: arrowEdge ?? (inLowerHalf ? .bottom : .top)) { popoverContent() }
     }

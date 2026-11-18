@@ -18,6 +18,18 @@ final class AdaptiveControlsUITests: XCTestCase {
         // showed form-to-keyboard pans leave the keyboard up. Done (and Hide keyboard on iPad)
         // puts it away without pulling the sheet.
         _ = app.keyboards.firstMatch.waitForExistence(timeout: 5)
+        // With the simulator's hardware keyboard connected, focus alone leaves the software keyboard
+        // off screen (the keyboard element exists below the window), so there is nothing to cover
+        // the form and no Done to show. Typing brings the software keyboard up, as a phone without
+        // a hardware keyboard shows it on focus, so Done is still checked over the real keyboard.
+        let name = app.textFields["Name"]
+        let up = Date().addingTimeInterval(3)
+        while !app.keyboardShowing && Date() < up { usleep(200_000) }
+        if !app.keyboardShowing, name.exists {
+            name.typeText("A")
+            name.typeText(XCUIKeyboardKey.delete.rawValue)
+        }
+        XCTAssertTrue(app.keyboardShowing, "The software keyboard covers the form at this size: \(app.keyboards.firstMatch.frame)")
         XCTAssertTrue(
             app.buttons["keyboard-done"].waitForExistence(timeout: 5)
                 || app.keyboards.buttons["Hide keyboard"].waitForExistence(timeout: 1),
