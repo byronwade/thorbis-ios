@@ -658,6 +658,7 @@ struct EquipmentDetailView: View {
     @State private var editing = false
     @State private var showNewJob = false
     @State private var openCustomer: Customer?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var shown: EquipmentRecord { current ?? unit }
     private var customer: Customer? { store.customers.first { $0.id == shown.customerId } }
@@ -701,7 +702,7 @@ struct EquipmentDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                     if !subtitle.isEmpty {
-                        Text(subtitle).font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                        Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -740,7 +741,8 @@ struct EquipmentDetailView: View {
                             .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
                     }
                 }
-                if canCreateJob, customer != nil {
+                // At accessibility sizes a pinned commit would cover the page, so it follows the facts.
+                if canCreateJob, customer != nil, typeSize.isAccessibilitySize {
                     Button { showNewJob = true } label: { Text("Start a job for this unit").inkCommit() }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("equipment-start-job")
@@ -750,6 +752,12 @@ struct EquipmentDetailView: View {
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
+        // Paper 86A: "+ Start a job for this unit" is the page's commit, pinned at the foot.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if canCreateJob, customer != nil, !typeSize.isAccessibilitySize {
+                PaperActionBar(title: "Start a job for this unit", symbol: "plus", identifier: "equipment-start-job") { showNewJob = true }
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             let items = menuItems
@@ -895,6 +903,10 @@ struct CompanyEquipmentBook: View {
             items = loaded
             onLoaded(!loaded.isEmpty)
             onCount(loaded.count)
+            #if DEBUG
+            // `--paper-preview-screen equipment-detail`: open the first unit once the book has loaded.
+            if PaperPreview.enabled, PaperPreview.screen == "equipment-detail", opened == nil { opened = loaded.first }
+            #endif
         } catch is CancellationError {
         } catch {
             items = nil

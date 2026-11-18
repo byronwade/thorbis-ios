@@ -34,6 +34,12 @@ enum PropertiesUnion {
     }
 }
 
+/// The customer a new address is being added to from Properties.
+private struct PropertyNewAddress: Identifiable {
+    let customerID: String
+    var id: String { customerID }
+}
+
 struct PropertiesView: View {
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var store: Store
@@ -51,6 +57,10 @@ struct PropertiesView: View {
     /// address. Both fill in after the list; either stays empty when this person can't read it.
     @State private var commercialIDs: Set<String> = []
     @State private var units: [String: Int] = [:]
+    /// Paper 87A's +: choose whose address it is, then the Add location sheet for that customer.
+    @State private var choosingCustomer = false
+    @State private var addingFor: PropertyNewAddress?
+    private var canAdd: Bool { session.can("customer.edit", feature: "core_crm") && !store.customers.isEmpty }
 
     private static let allFilter = "All"
     private static let openFilter = "With open work"
@@ -129,7 +139,9 @@ struct PropertiesView: View {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 87A: the place header, then the addresses on one card 16 from the edges.
                 PaperHeader(title: "Properties",
-                            subtitle: loaded ? (rows.count == 1 ? "1 address" : "\(rows.count) addresses") : "Every service address, across customers")
+                            subtitle: loaded ? (rows.count == 1 ? "1 address" : "\(rows.count) addresses") : "Every service address, across customers",
+                            showsCreate: canAdd)
+                    .environment(\.paperCreate, canAdd ? PaperCreateAction(label: "Add property", run: { choosingCustomer = true }) : nil)
                 // Paper 87A: the search on the card, then All / With open work / Commercial.
                 searchField
                 PaperTabs(options: [PropertiesView.allFilter, PropertiesView.openFilter, PropertiesView.commercialFilter],
@@ -169,6 +181,15 @@ struct PropertiesView: View {
             .padding(.bottom, 24)
         }
         .thorbisDestination(item: $opened) { PropertyDetailView(row: $0) }
+        .sheet(isPresented: $choosingCustomer) { SheetSurface {
+            CustomerPickerSheet(selectedID: "", canCreate: false, onNew: { _ in }) { id in
+                choosingCustomer = false
+                addingFor = PropertyNewAddress(customerID: id)
+            }
+        } }
+        .sheet(item: $addingFor) { new in SheetSurface {
+            ServiceLocationSheet(customerID: new.customerID, location: nil) { _ in Task { await load() } }
+        } }
         .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)

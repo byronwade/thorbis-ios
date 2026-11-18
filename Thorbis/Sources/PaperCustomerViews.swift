@@ -530,6 +530,11 @@ struct CustomerDetailView: View {
     @State private var openedJob: Job?
     /// An invoice or estimate opened from the Billing segment.
     @State private var openedRoute: PaperRoute?
+    /// Paper 85: the customer's one active plan (its page pins "Book covered visit"), the plan
+    /// being cancelled (85B), and a count that makes the page read the plan again.
+    @State private var plan: MembershipRecord?
+    @State private var cancellingPlan: MembershipRecord?
+    @State private var planReload = 0
     /// Billing lists five invoices until "See all".
     @State private var showsAllInvoices = false
     /// DEBUG previews open a hub page once.
@@ -702,6 +707,7 @@ struct CustomerDetailView: View {
                 if PaperPreview.screen == "customer-records" { openPart = .media }
                 if PaperPreview.screen == "customer-money" { openPart = .money }
                 if PaperPreview.screen == "customer-media" { openPart = .media }
+                if PaperPreview.screen == "customer-membership" { openPart = .membership }
                 if PaperPreview.screen == "customer-activity" { openPart = .activity }
                 if PaperPreview.screen == "customer-details" { openPart = .details }
             }
@@ -953,6 +959,13 @@ struct CustomerDetailView: View {
                     }
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 34)
+            } else if part == .membership {
+                VStack(alignment: .leading, spacing: 0) {
+                    OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
+                    MembershipPlanBody(customerID: customer.id, customerName: record?.name ?? customer.name,
+                                       plan: $plan, reload: planReload)
+                }
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
             } else {
             VStack(alignment: .leading, spacing: 20) {
                 OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
@@ -972,7 +985,7 @@ struct CustomerDetailView: View {
                 case .equipment:
                     CustomerEquipmentSection(customerID: customer.id, locations: locations.filter { $0.kind == "service" })
                 case .membership:
-                    CustomerMembershipSection(customerID: customer.id)
+                    EmptyView()
                 case .comms:
                     CustomerCommsSection(customerID: customer.id, customerName: record?.name ?? customer.name,
                                          numbers: customerNumbers, emails: customerEmails,
@@ -1003,6 +1016,11 @@ struct CustomerDetailView: View {
         .toolbar {
             // Paper 48D: the ⋯ circle stays on the tabbed page; New job moved into it from the
             // bar the Jobs page used to pin.
+            if part == .membership, let plan, canEdit {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    ThorbisMenu(items: planMenuItems(plan), accessibilityLabel: "Plan actions") { PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card) }
+                }
+            }
             if part.isTabbed {
                 let items = customerMenuItems(onPage: true)
                 if !items.isEmpty {
@@ -1012,9 +1030,27 @@ struct CustomerDetailView: View {
                 }
             }
         }
+        // Paper 85: "Book covered visit" is the plan page's commit, with the plan's menu beside it.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if part == .membership, let plan, session.can("job.create", feature: "jobs"), !typeSize.isAccessibilitySize {
+                PaperActionBar(title: "Book covered visit", symbol: "calendar", identifier: "membership-book-visit") { showNewJob = true } secondary: {
+                    if canEdit {
+                        ThorbisMenu(items: planMenuItems(plan), accessibilityLabel: "More plan actions", arrowEdge: .bottom) {
+                            PaperCircleLabel(symbol: "ellipsis", size: 50, fill: Theme.card)
+                        }
+                    }
+                }
+            }
+        }
+        .thorbisDestination(item: $cancellingPlan) { membership in
+            CancelMembershipView(customerID: customer.id, membership: membership,
+                                 customerName: record?.name ?? customer.name,
+                                 onCancelled: { planReload += 1 })
+        }
         .refreshable {
             await SavedCopies.$liveOnly.withValue(true) {
                 await load()
+                if part == .membership { planReload += 1 }
                 if part.isTabbed {
                     await loadSelectedRecords()
                     if tab == "Activity" { await loadActivity(reset: true) }
@@ -1210,6 +1246,16 @@ struct CustomerDetailView: View {
     /// Email and Directions (Paper 48N keeps only Call and Text on the page), Save to Contacts,
     /// Customer view and the record changes.
     private var customerMenuItems: [ThorbisMenuItem] { customerMenuItems(onPage: false) }
+
+    /// Paper 85 / 85B: the plan's menu. Cancel membership opens its own page.
+    private func planMenuItems(_ plan: MembershipRecord) -> [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if typeSize.isAccessibilitySize, session.can("job.create", feature: "jobs") {
+            items.append(ThorbisMenuItem("Book covered visit", icon: "calendar") { showNewJob = true })
+        }
+        items.append(ThorbisMenuItem("Cancel membership", icon: "xmark.circle", role: .destructive) { cancellingPlan = plan })
+        return items
+    }
 
     /// `onPage`: the tabbed page's menu. New job leads it; the timeline is a segment there, and the
     /// rows that open another page or a sheet of the hub's stay on the hub.
