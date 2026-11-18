@@ -471,6 +471,15 @@ struct RootView: View {
                         moreHasNews: moreHasNews(tabs: tabs),
                         select: selectTab,
                         openMore: { Task { @MainActor in openDrawer() } })
+                // The page fades out behind the bar and is solid below it, so list rows never
+                // show as slivers under or beneath the floating pill.
+                .background {
+                    Rectangle().fill(Theme.canvas)
+                        .mask(LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.4)],
+                                             startPoint: .top, endPoint: .bottom))
+                        .padding(.top, -24).padding(.bottom, -80)
+                        .allowsHitTesting(false)
+                }
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
                 // The overlay ends at the safe area; the pill sits its gap above the screen's edge.
                 .offset(y: safeBottom - tabBarBottomGap(safeBottom: safeBottom))

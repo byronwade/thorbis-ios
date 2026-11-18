@@ -13,6 +13,34 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-bottom-bar",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "dock.rectangle", title: "Bottom bar on iPhone",
+                      detail: "Your main places sit in a labelled bar at the bottom. More opens the full menu. Sidebar is still in Settings."),
+                .init(symbol: "rectangle.split.3x1", title: "Cleaner tabs",
+                      detail: "Today, Week and other tabs sit on a quiet track with the chosen one raised in white."),
+                .init(symbol: "bubble.left.and.bubble.right", title: "Simpler Messages",
+                      detail: "One row of filters: All, Unread, Calls, Texts, Email, Drafts. Folders moved to the menu beside +."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-18-real-data-fixes",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "calendar", title: "Schedule stays about the day",
+                      detail: "Schedule shows the three oldest waiting jobs and a See all row. The full queue has its own searchable page."),
+                .init(symbol: "lock.iphone", title: "Lock Screen card fits",
+                      detail: "The job card on the Lock Screen no longer cuts off its top or its button, and ends after 16 hours."),
+                .init(symbol: "clock", title: "Long times read in days",
+                      detail: "A job left open for days reads 19d 15h on timers and cards, not hundreds of hours."),
+                .init(symbol: "textformat", title: "Long names stay in place",
+                      detail: "Long job titles and customer names keep to their row and stay between the buttons in the top bar."),
+                .init(symbol: "list.bullet", title: "Big lists show a few first",
+                      detail: "Needs attention shows five per group with See all. Counts read 3,000, not 3000."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-one-look",
             date: "2026-11-18",
             highlights: [
