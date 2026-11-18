@@ -13,6 +13,38 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-paper-office",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "square.grid.2x2", title: "Dashboard and Money redrawn",
+                      detail: "Dashboards, Money and Reports follow the new design, with search at the top and only real figures."),
+                .init(symbol: "person.2", title: "Customers and Messages redrawn",
+                      detail: "A customer is one page with Jobs, Billing, Media and Activity. Messages is one list with filters."),
+                .init(symbol: "doc.text", title: "Estimates, invoices and payments",
+                      detail: "New estimate ends in Present to customer. Edit invoice and Collect payment follow the new design."),
+                .init(symbol: "gearshape", title: "Settings split in two",
+                      detail: "Settings is about you. Company profile, payments, reviews and rules moved to Business settings."),
+                .init(symbol: "list.bullet.rectangle", title: "Setup, step by step",
+                      detail: "Guided setup has a back button on every step and asks only what each step needs."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-18-paper-field",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "calendar", title: "Schedule redrawn",
+                      detail: "One Next up card with Navigate, call and text, then the rest of the day as a short list."),
+                .init(symbol: "briefcase", title: "Field mode on a job",
+                      detail: "Today's job opens on its step: Driving, Arrived, Working, Wrap up, Paid. More opens full details."),
+                .init(symbol: "sidebar.left", title: "A new menu",
+                      detail: "The menu floats over the screen as a panel, with new icons and an unread count on Messages."),
+                .init(symbol: "clock", title: "Times read 10:30 AM",
+                      detail: "Times across the app use AM and PM in capitals, and today's visits read Today, 2:30 PM."),
+                .init(symbol: "bell", title: "Notifications has its own place",
+                      detail: "The bell opens Notifications as its own screen, and Properties opens from the menu too."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-17-saved-views",
             date: "2026-11-17",
             highlights: [

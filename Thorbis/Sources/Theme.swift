@@ -88,6 +88,9 @@ enum Theme {
         case 20..<22: 20
         case 22..<24: 22
         case 24..<27: 24
+        // Paper draws record titles and totals at 28 and 30 (48D customer name, 35 estimate total).
+        case 27..<29: 28
+        case 29..<32: 30
         default: 34
         }
     }

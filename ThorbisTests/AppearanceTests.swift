@@ -51,7 +51,7 @@ final class AppearanceTests: XCTestCase {
     // Paper v2: Paper's own sizes (rows 16, subtitles 14, labels 13, sheet titles 17/22) and a
     // 34pt bold title on every screen; customer-facing presentation keeps its 17pt floor.
     func testEverySizeLandsOnTheRamp() {
-        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 22, 24, 34]
+        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 22, 24, 28, 30, 34]
         for size in stride(from: CGFloat(8), through: 40, by: 1) {
             XCTAssertTrue(ramp.contains(Theme.onRamp(size)), "\(size) snapped to \(Theme.onRamp(size))")
         }
@@ -60,7 +60,8 @@ final class AppearanceTests: XCTestCase {
         XCTAssertEqual(Theme.onRamp(16), 16)
         XCTAssertEqual(Theme.onRamp(17), 17)
         XCTAssertEqual(Theme.onRamp(22), 22)
-        XCTAssertEqual(Theme.onRamp(30), 34, "Record titles are 34 like list titles")
+        XCTAssertEqual(Theme.onRamp(30), 30, "Paper draws record titles at 30")
+        XCTAssertEqual(Theme.onRamp(28), 28)
         XCTAssertEqual(Theme.onRamp(34), 34)
         XCTAssertEqual(Theme.customerRamp(17), 17)
         XCTAssertEqual(Theme.customerRamp(34), 34)
