@@ -35,4 +35,6 @@ extension PaperGlyph {
     static let payCash = PaperGlyph(box: 19, [.rect(2, 5, 15, 9, rx: 1.5, 1.5), .circle(9.5, 9.5, 2, 1.4), .stroke("M4.6 7.4h.01M14.4 11.6h.01", 1.6)])
     /// 39: the 12pt up-and-down chevrons beside a value that opens a choice.
     static let upDown = PaperGlyph(box: 14, [.stroke("M4.2 5.6L7 2.8l2.8 2.8", 1.5), .stroke("M4.2 8.4L7 11.2l2.8-2.8", 1.5)])
+    /// 38: the cart in the bar under the options.
+    static let cart = PaperGlyph(box: 24, [.stroke("M3.5 5H5.5L7.5 15.5H17.5L19.5 8H6.5", 1.8), .circle(9, 19, 1.4), .circle(16.5, 19, 1.4)])
 }

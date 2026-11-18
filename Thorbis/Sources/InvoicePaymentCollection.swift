@@ -1099,12 +1099,9 @@ private struct InvoicePaymentRefundForm: View {
     private var refundIssued: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(spacing: 6) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(Theme.success)
+                PaperIcon(.check, size: 30, color: Theme.success)
                     .frame(width: 72, height: 72)
                     .background(Theme.successSurface, in: Circle())
-                    .accessibilityHidden(true)
                 Text(amountText)
                     .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
                     .lineLimit(1).minimumScaleFactor(0.5)
@@ -1939,12 +1936,9 @@ struct InvoicePaymentCollectionSheet: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(spacing: 4) {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(Theme.success)
+                    PaperIcon(.check, size: 30, color: Theme.success)
                         .frame(width: 72, height: 72)
                         .background(Theme.statusDone.opacity(0.22), in: Circle())
-                        .accessibilityHidden(true)
                     Text(money(paid.amountCents, currency: invoice.currency))
                         .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
                         .foregroundStyle(Theme.foreground)
@@ -1965,7 +1959,9 @@ struct InvoicePaymentCollectionSheet: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 4)
-                PaperSection(jobDone ? "Job closed" : "Invoice") {
+                // Paper 39A has no invoice card: the line above names the invoice. One stays only while
+                // a balance is still due, so a part payment never reads as settled.
+                if !settled { PaperSection(jobDone ? "Job closed" : "Invoice") {
                     HStack(spacing: 12) {
                         Text("Invoice \(invoiceReference)")
                             .font(Theme.font(16, weight: .medium)).monospacedDigit()
@@ -1982,7 +1978,7 @@ struct InvoicePaymentCollectionSheet: View {
                     .padding(.horizontal, PaperCardMetrics.inset)
                     .frame(minHeight: 60)
                     .accessibilityElement(children: .combine)
-                }
+                } }
                 // Paper 39A: where the receipt goes, when the customer has an email on file.
                 if let receiptDestination { paidReceiptCard(receiptDestination) }
                 // Paper 39A "While you are here": what the job screen can open next.
@@ -2031,9 +2027,7 @@ struct InvoicePaymentCollectionSheet: View {
                         .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.muted)
-                        .accessibilityHidden(true)
+                    PaperIcon(.chevronRight, size: 16, color: Theme.muted)
                 }
                 .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 13)
                 .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)

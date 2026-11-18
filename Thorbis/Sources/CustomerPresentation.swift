@@ -8,16 +8,18 @@ import SwiftUI
 
 // MARK: - Sizes
 
-/// CP-05 sizes. iPad (regular width) steps up; Dynamic Type scales from these.
+/// The customer screens' sizes. On the phone they are Paper's own (37, 38, 38A, 36: 15 quiet
+/// lines, 16 rows, 20 prices, the 34 Bold title, 50pt commits); iPad (regular width) keeps the
+/// CP-05 step up for a screen read at arm's length. Dynamic Type scales from these.
 struct CustomerType {
     let regular: Bool
     init(_ sizeClass: UserInterfaceSizeClass?) { regular = sizeClass == .regular }
 
-    var small: CGFloat { 17 }
-    var body: CGFloat { regular ? 22 : 20 }
-    var heading: CGFloat { regular ? 28 : 24 }
+    var small: CGFloat { regular ? 17 : 15 }
+    var body: CGFloat { regular ? 22 : 16 }
+    var heading: CGFloat { regular ? 28 : 20 }
     var total: CGFloat { regular ? 40 : 34 }
-    var target: CGFloat { 56 }
+    var target: CGFloat { regular ? 56 : 50 }
 }
 
 // MARK: - Flow
@@ -290,11 +292,11 @@ struct CustomerEstimatePresentation: View {
                 // them in muted, then the "Choose this" pill ("In your cart" with a check once chosen).
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(option.title).font(Theme.customerFont(type.body, weight: .bold))
+                        Text(option.title).font(Theme.customerFont(type.body + 2, weight: .bold)).tracking(-0.18)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text(total)
-                            .font(Theme.customerFont(type.body, weight: .bold)).monospacedDigit()
+                            .font(Theme.customerFont(type.heading, weight: .bold)).monospacedDigit().tracking(-0.2)
                             .minimumScaleFactor(0.6).lineLimit(1)
                     }
                     if let saved = customerSavingsText(option.lines, currency: option.currency) {
@@ -306,21 +308,10 @@ struct CustomerEstimatePresentation: View {
                         CustomerFinancingLine(example: example, type: type)
                             .padding(.top, 6)
                     }
-                    HStack(spacing: 6) {
-                        Image(systemName: selected ? "checkmark" : "plus")
-                            .font(.system(size: 15, weight: .semibold))
-                            .accessibilityHidden(true)
-                        Text(selected ? "In your cart" : "Choose this")
-                            .font(Theme.customerFont(type.small, weight: .semibold))
-                    }
-                    .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(selected ? Theme.brandSurface : Theme.fill, in: Capsule())
-                    .padding(.top, 12)
                 }
                 .foregroundStyle(Theme.foreground)
-                .frame(maxWidth: .infinity, minHeight: type.target, alignment: .topLeading)
-                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 16).padding(.top, 16)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -328,17 +319,34 @@ struct CustomerEstimatePresentation: View {
             .accessibilityLabel(selected ? "\(option.title), selected" : "Choose \(option.title)")
             .accessibilityValue("Total \(total)")
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+            // Paper 38: what the option is sits under its name, above the pill.
             if !option.description.isEmpty {
                 optionDescription(option)
                     .foregroundStyle(Theme.muted)
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                    .padding(.top, 2)
             }
+            // The pill is the same choice as the card's words; VoiceOver hears the one above.
+            Button { flow.choose(option.id) } label: {
+                HStack(spacing: 6) {
+                    if selected { PaperIcon(.check, size: 16, color: Theme.brandText) }
+                    else { PaperIcon(.stepPlus, size: 14, color: Theme.foreground) }
+                    Text(selected ? "In your cart" : "Choose this")
+                        .font(Theme.customerFont(type.small, weight: .semibold))
+                }
+                .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background(selected ? Theme.brandTint : Theme.quietFill, in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityHidden(true)
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // Selection is the brand ring and the chosen pill; the screen's only fill is the commit (CP-07).
-        .panelBackground(cornerRadius: Theme.cardRadius)
-        .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+        .panelBackground(cornerRadius: 22)
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
             .strokeBorder(Theme.brand, lineWidth: selected ? 1.5 : 0))
         .animation(.easeOut(duration: 0.15), value: selected)
     }
@@ -1458,14 +1466,14 @@ struct CustomerPresentationCommit: View {
                         Text(title).lineLimit(1)
                         Text(compactTitle).lineLimit(2).minimumScaleFactor(0.8)
                     }
-                    .font(Theme.customerFont(type.small, weight: .semibold)).multilineTextAlignment(.center)
+                    .font(Theme.customerFont(type.regular ? type.small : 16, weight: .semibold)).multilineTextAlignment(.center)
                     .accessibilityLabel(title)
                 } else {
-                    Text(title).font(Theme.customerFont(type.small, weight: .semibold)).lineLimit(2).multilineTextAlignment(.center)
+                    Text(title).font(Theme.customerFont(type.regular ? type.small : 16, weight: .semibold)).lineLimit(2).multilineTextAlignment(.center)
                         .minimumScaleFactor(0.8)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: type.regular ? CustomerModeStyle.regularCommitHeight : CustomerModeStyle.commitHeight)
+            .frame(maxWidth: .infinity, minHeight: type.regular ? CustomerModeStyle.regularCommitHeight : 50)
             .padding(.horizontal, 16)
             // Paper v2: the commit is a brand pill with white type; off is a quiet well.
             .foregroundStyle(enabled ? Color.white : Theme.muted)
@@ -1491,11 +1499,11 @@ struct CustomerCartBar: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            Image(systemName: "cart").font(.system(size: 22, weight: .medium)).foregroundStyle(Theme.foreground)
+            PaperIcon(.cart, size: 24, color: Theme.foreground)
                 .frame(width: 36, height: 36)
                 .overlay(alignment: .topTrailing) {
                     if count > 0 {
-                        Text("\(count)").font(Theme.font(12, weight: .bold)).monospacedDigit().foregroundStyle(Color.white)
+                        Text("\(count)").font(Theme.font(11, weight: .bold)).foregroundStyle(Color.white)
                             .padding(.horizontal, 5)
                             .frame(minWidth: 18, minHeight: 18)
                             .background(Theme.brand, in: Capsule())
@@ -1505,18 +1513,18 @@ struct CustomerCartBar: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 if let totalText {
-                    Text(totalText).font(Theme.customerMonoFont(type.small, weight: .bold))
+                    Text(totalText).font(Theme.customerMonoFont(type.regular ? type.small : 17, weight: .bold)).tracking(-0.17)
                         .foregroundStyle(Theme.foreground)
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
-                Text(detail).font(Theme.customerFont(type.small)).foregroundStyle(Theme.muted)
+                Text(detail).font(Theme.customerFont(type.regular ? type.small : 13)).foregroundStyle(Theme.muted)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             Button(action: action) {
-                Text("Review cart").font(Theme.customerFont(type.small, weight: .semibold))
+                Text("Review cart").font(Theme.customerFont(type.regular ? type.small : 16, weight: .semibold))
                     .foregroundStyle(enabled ? Color.white : Theme.muted)
                     .lineLimit(1)
                     .padding(.horizontal, 22)
@@ -1712,7 +1720,7 @@ struct CustomerIncludedLabel: View {
     let type: CustomerType
     var title = "What’s included"
     var body: some View {
-        Text(title).font(Theme.customerFont(type.small, weight: .semibold)).foregroundStyle(Theme.muted)
+        Text(title).font(Theme.customerFont(type.regular ? type.small : 13, weight: .semibold)).foregroundStyle(Theme.muted)
             .accessibilityAddTraits(.isHeader)
             .padding(.horizontal, 4)
             .padding(.bottom, -12)
@@ -1726,10 +1734,10 @@ struct CustomerSummaryLabel: View {
     var title = "Summary"
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title).font(Theme.customerFont(type.small, weight: .semibold))
+            Text(title).font(Theme.customerFont(type.regular ? type.small : 13, weight: .semibold))
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
-            Text("\(count) \(count == 1 ? "item" : "items")").font(Theme.customerFont(type.small)).monospacedDigit()
+            Text("\(count) \(count == 1 ? "item" : "items")").font(Theme.customerFont(type.regular ? type.small : 13))
         }
         .foregroundStyle(Theme.muted)
         .padding(.horizontal, 4)
