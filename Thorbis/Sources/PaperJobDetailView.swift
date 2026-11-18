@@ -179,11 +179,15 @@ struct JobDetailView: View {
     /// field mode was a screen of its own; `job-onsite`, `--paper-preview-field-mode` and
     /// `--paper-preview-field-step` open field mode. The app itself always starts in field mode.
     private static var opensInFieldMode: Bool {
+        #if DEBUG
         guard PaperPreview.enabled else { return true }
         let arguments = ProcessInfo.processInfo.arguments
         if arguments.contains("--paper-preview-full-details") { return false }
         return PaperPreview.screen == "job-onsite" || arguments.contains("--paper-preview-field-mode")
             || arguments.contains("--paper-preview-field-step")
+        #else
+        return true
+        #endif
     }
     /// Paper 21O "At this address", pushed from More.
     @State private var showAtAddress = false
