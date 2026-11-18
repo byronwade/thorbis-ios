@@ -13,6 +13,22 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-people-sheets",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "square.and.pencil", title: "New message finds customers",
+                      detail: "Type a name to pick a customer or a saved reply. It opens the conversation; nothing sends by itself."),
+                .init(symbol: "archivebox", title: "Archived customers",
+                      detail: "A customer's details page links to recently archived customers, where you can find and restore them."),
+                .init(symbol: "switch.2", title: "Texts consent is a switch",
+                      detail: "Job texts is a switch like Emails. It still asks before recording, and shows the day it was recorded."),
+                .init(symbol: "tray.and.arrow.down", title: "Import shows what the file has",
+                      detail: "Import customers lists only the columns your file fills; the rest sit behind one row."),
+                .init(symbol: "truck.box", title: "Vehicle details read cleaner",
+                      detail: "Mileage, registration and next service print as 84,210 mi and Jun 30, 2027, with a warning when due."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-job-sheets",
             date: "2026-11-18",
             highlights: [

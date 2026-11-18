@@ -1432,8 +1432,14 @@ struct CustomerDetailView: View {
         // Paper 48A: a switch like Emails. Flipping it asks first (the confirm below), because it
         // records what the customer said; the day it was recorded is read out with the switch.
         return Toggle(isOn: Binding(get: { smsConsent?.decision == "grant" }, set: { next in smsConsentChoice = next })) {
-            Text("Texts").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                .accessibilityLabel("Job texts")
+            // The recorded answer and its day stay visible: an off switch alone cannot tell
+            // "asked to stop" from "never asked".
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Texts").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                Text(smsConsentLabel).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Job texts")
         }
         .tint(Theme.brand)
         .disabled(!canEdit || session.isOffline)
