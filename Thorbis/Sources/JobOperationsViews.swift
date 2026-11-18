@@ -1145,6 +1145,10 @@ private struct ScheduleTextComposer: UIViewControllerRepresentable {
 
 struct JobScheduleView: View {
     let job: JobRecord
+    /// Paper 25 (the job's own "Schedule" sheet): day chips, four arrival windows on one radio
+    /// card and Save. Off, it is Paper 53B (Schedule's "Move visit"), which also carries the
+    /// assigned tech, the text to the customer and Cancel visit.
+    var compact = false
     var onSaved: (JobRecord) -> Void = { _ in }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
@@ -1175,8 +1179,9 @@ struct JobScheduleView: View {
         (8, 0), (10, 30), (13, 0), (15, 30)
     ]
 
-    init(job: JobRecord, onSaved: @escaping (JobRecord) -> Void = { _ in }) {
+    init(job: JobRecord, compact: Bool = false, onSaved: @escaping (JobRecord) -> Void = { _ in }) {
         self.job = job
+        self.compact = compact
         self.onSaved = onSaved
         _date = State(initialValue: JobFiltering.date(job.scheduledFor) ?? Date())
         let initialDate = JobFiltering.date(job.scheduledFor) ?? Date()
@@ -1228,6 +1233,156 @@ struct JobScheduleView: View {
     }
 
     var body: some View {
+        if compact { compactBody } else { fullBody }
+    }
+
+    /// Paper 25: "Schedule" at 22 Bold with the close circle, the day chips, the windows, Save.
+    private var compactBody: some View {
+        let canSave = session.can("job.assign", feature: "jobs")
+        let calendar = Calendar.current
+        let isToday = calendar.isDateInToday(date)
+        let isTomorrow = calendar.isDateInTomorrow(date)
+        let otherDay = !isToday && !isTomorrow
+        return VStack(spacing: 0) {
+            ThorbisSheetHeader(title: "Schedule", onClose: { dismiss() })
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 8) {
+                            PaperChoiceChip(title: "Today", isOn: isToday && !showsCalendar) {
+                                showsCalendar = false
+                                selectDay(offset: 0)
+                            }
+                            PaperChoiceChip(title: "Tomorrow", isOn: isTomorrow && !showsCalendar) {
+                                showsCalendar = false
+                                selectDay(offset: 1)
+                            }
+                            Button { showsCalendar.toggle() } label: {
+                                let on = showsCalendar || otherDay
+                                HStack(spacing: 6) {
+                                    Text(otherDay ? date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) : "Pick date")
+                                        .font(Theme.font(14, weight: on ? .semibold : .medium))
+                                        .foregroundStyle(on ? Theme.brandText : Theme.foreground)
+                                        .lineLimit(1)
+                                    PaperIcon(.chevronDown, size: 12, color: on ? Theme.brandText : Theme.muted)
+                                }
+                                .padding(.leading, 14).padding(.trailing, 12)
+                                .frame(minHeight: 40)
+                                .background(on ? Theme.brandTint : Theme.quietFill, in: Capsule())
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel(otherDay ? "Pick date, \(date.formatted(.dateTime.weekday(.wide).month(.wide).day()))" : "Pick date")
+                            .accessibilityAddTraits(showsCalendar || otherDay ? .isSelected : [])
+                        }
+                        .padding(.horizontal, PaperCardMetrics.margin)
+                    }
+                    .scrollIndicators(.hidden)
+                    .padding(.top, 6)
+                    if showsCalendar {
+                        DatePicker("Pick date", selection: calendarDateSelection, in: Date.distantPast..., displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .tint(Theme.brand)
+                            .padding(.horizontal, 8)
+                            .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
+                            .accessibilityLabel("Choose schedule date")
+                    }
+                    VStack(spacing: 0) {
+                        ForEach(Array(timeOptions.enumerated()), id: \.element.hour) { index, option in
+                            compactTimeRow(hour: option.hour, minute: option.minute, first: index == 0)
+                        }
+                        if showsCustomTime {
+                            // A time the office set outside the four windows stays chosen until another is picked.
+                            compactRow(label: date.tradeTime, note: "Current time", selected: true, first: false) {}
+                        }
+                    }
+                    .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14)
+                    if !canSave {
+                        Text("Your role can't schedule jobs. Ask your office to set the time.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, Theme.gutter).padding(.top, 10)
+                    }
+                    if let error { ErrorBanner(message: error).padding(.top, 8) }
+                }
+                .padding(.bottom, 8)
+            }
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
+            .disabled(busy)
+            Button { Task { await save() } } label: {
+                HStack(spacing: 8) {
+                    if busy { ProgressView().tint(.white) }
+                    Text(saved ? "Saved" : "Save").font(Theme.font(16, weight: .semibold))
+                }
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .background(Theme.brand.opacity(busy || saved || !canSave ? 0.5 : 1), in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PressStyle())
+            .disabled(busy || saved || !canSave)
+            .accessibilityLabel(saved ? "Schedule saved" : "Save schedule")
+            .accessibilityIdentifier("schedule-save")
+            .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
+        }
+        .foregroundStyle(Theme.foreground)
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize || showsCalendar ? [.large] : [.height(showsCustomTime ? 500 : 444), .large])
+        .interactiveDismissDisabled(busy)
+    }
+
+    private func compactTimeRow(hour: Int, minute: Int, first: Bool) -> some View {
+        let selected = JobScheduleSelection.matchesPreset(date, hour: hour, minute: minute)
+        return compactRow(label: presetLabel(hour: hour, minute: minute), note: "2 hr window", selected: selected, first: first) {
+            if let selectedDate = JobScheduleSelection.date(on: date, hour: hour, minute: minute) {
+                date = selectedDate
+                showsCustomTime = false
+                error = nil
+            } else {
+                error = invalidLocalTimeMessage
+            }
+        }
+    }
+
+    /// Paper 25's window row: a 22pt ring (brand with a white centre when chosen), the start at 16
+    /// Medium (Semibold brand text when chosen), "2 hr window" in 14 muted at the edge; 56 tall,
+    /// the rule from the words' edge.
+    private func compactRow(label: String, note: String, selected: Bool, first: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ZStack {
+                    if selected {
+                        Circle().fill(Color.white)
+                        Circle().strokeBorder(Theme.brand, lineWidth: 7)
+                    } else {
+                        Circle().strokeBorder(Theme.borderStrong, lineWidth: 1.5)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
+                HStack(spacing: 12) {
+                    Text(label).font(Theme.font(16, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(note).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                }
+                .padding(.trailing, 16)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .overlay(alignment: .top) { if !first { Rectangle().fill(Theme.border).frame(height: 1) } }
+            }
+            .padding(.leading, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityLabel("\(label), \(note)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var fullBody: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
@@ -1591,7 +1746,7 @@ struct JobScheduleView: View {
                 return
             case .applied, .superseded:
                 // Paper 53B "Let the customer know": Messages opens with the text; closing it closes this.
-                if notifyCustomer, textablePhone != nil { composing = true } else { dismiss() }
+                if !compact, notifyCustomer, textablePhone != nil { composing = true } else { dismiss() }
             }
         } catch is CancellationError {
         } catch let problem as Problem where problem.status == 409 {

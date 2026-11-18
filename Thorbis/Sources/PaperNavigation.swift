@@ -880,6 +880,7 @@ struct RootView: View {
         case "new-customer": primaryTab = .customers; previewNewCustomer = true
         case "revenue", "payments-list": previewPlace(.money)
         case "job", "job-invoice", "job-estimates", "job-activity", "job-notes", "job-media", "job-closeout", "job-invoice-empty", "job-assign", "job-followups",
+             "job-more", "job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule", "job-unpaid", "job-contact",
              "job-history", "job-history-empty", "job-onsite",
              "customer-view", "customer-view-estimates", "customer-view-invoice", "customer-view-details":
             // Another preview refresh may supersede the one awaited above. Wait for its real
@@ -894,7 +895,7 @@ struct RootView: View {
                 if PaperPreview.screen == "job-media", ProcessInfo.processInfo.arguments.contains("--paper-preview-media-detail-test") {
                     jobsPath.append(PaperRoute.media(jobID: job.id, assetID: "00000000-0000-4000-8000-000000009301"))
                 }
-                if PaperPreview.screen == "job-closeout" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
+                if PaperPreview.screen == "job-closeout" || PaperPreview.screen == "job-unpaid" { jobsPath.append(PaperRoute.closeout(jobID: job.id)) }
                 // v2: Assign tech is a sheet over the job (`--paper-preview-screen job-assign` opens it there).
                 if PaperPreview.screen == "job-followups" { jobsPath.append(PaperRoute.followUps(jobID: job.id)) }
             }
