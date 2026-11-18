@@ -355,6 +355,34 @@ final class CommsInboxTests: XCTestCase {
         XCTAssertTrue(CommsInboxAccess(workspace: false, notices: true, calls: false).visible)
     }
 
+    /// Messages' chips: at most six, in Paper's order, each a lens over the section, folder and
+    /// quick filter the list already understood; the rest of the old menu sits behind "…".
+    func testFilterChipsAndTheMoreMenuCoverTheOldMenu() {
+        let everything = CommsInboxAccess(notices: true, calls: true)
+        XCTAssertEqual(CommsInboxFilter.available(everything), [.all, .unread, .calls, .texts, .email, .drafts])
+        XCTAssertEqual(CommsInboxFilter.available(CommsInboxAccess(notices: true, calls: false)), [.all, .unread, .texts, .email, .drafts],
+                       "No call log, no Calls chip")
+        XCTAssertEqual(CommsInboxFilter.available(CommsInboxAccess(workspace: false, notices: true, calls: false)), [.all, .unread])
+        XCTAssertLessThanOrEqual(CommsInboxFilter.allCases.count, 6)
+
+        XCTAssertEqual(CommsInboxFilter.all.section, .all); XCTAssertEqual(CommsInboxFilter.all.folder, .inbox); XCTAssertEqual(CommsInboxFilter.all.quick, .all)
+        XCTAssertEqual(CommsInboxFilter.unread.quick, .unread)
+        XCTAssertEqual(CommsInboxFilter.calls.section, .calls)
+        XCTAssertEqual(CommsInboxFilter.texts.section, .texts)
+        XCTAssertEqual(CommsInboxFilter.email.section, .email)
+        XCTAssertEqual(CommsInboxFilter.drafts.folder, .drafts); XCTAssertEqual(CommsInboxFilter.drafts.section, .all)
+
+        XCTAssertEqual(CommsInboxMoreFilter.available(everything), [.needsReply, .starred, .sent, .archive, .bin])
+        XCTAssertEqual(Set(CommsInboxMoreFilter.allCases.filter(\.isFolder).map(\.folder)), [.sent, .archive, .bin])
+        XCTAssertEqual(CommsInboxMoreFilter.needsReply.quick, .needsReply)
+        XCTAssertEqual(CommsInboxMoreFilter.starred.quick, .starred)
+        // Every folder and quick filter the old menu offered is a chip or a "…" lens.
+        let folders = Set(CommsInboxFilter.allCases.map(\.folder) + CommsInboxMoreFilter.allCases.map(\.folder))
+        XCTAssertEqual(folders, Set(CommsFolder.allCases))
+        let quick = Set(CommsInboxFilter.allCases.map(\.quick) + CommsInboxMoreFilter.allCases.map(\.quick))
+        XCTAssertEqual(quick, Set(CommsQuickFilter.allCases))
+    }
+
     // MARK: Folders and filters
 
     private func notice(_ id: String, read: Bool, at: String = "2026-11-05T12:00:00Z") -> StaffNotice {

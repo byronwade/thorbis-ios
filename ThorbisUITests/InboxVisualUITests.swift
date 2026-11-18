@@ -18,11 +18,11 @@ final class InboxVisualUITests: XCTestCase {
         screenshot.name = "Inbox grouped by received date"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        // The quick filters sit behind the search field's filter circle.
-        app.buttons["inbox-section-menu"].tap()
-        let unreadOnly = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Unread only")).firstMatch
+        // Unread is a chip in the one row under the search field.
+        let unreadOnly = app.buttons["inbox-filter-unread"]
         XCTAssertTrue(unreadOnly.waitForExistence(timeout: 5))
         unreadOnly.tap()
+        XCTAssertTrue(unreadOnly.isSelected)
         XCTAssertTrue(notice.exists)
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "A visit was updated")).firstMatch.exists)
         notice.tap()
