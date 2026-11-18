@@ -23,6 +23,25 @@ final class TabBarUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: 5), "Found \(element)", file: file, line: line)
     }
 
+    /// Every slot carries its word (the label drawn under the icon), sits in the full-width bar in
+    /// equal slots at least 56 tall, and is wholly on screen.
+    private func assertLabelledSlots(_ app: XCUIApplication, _ words: [String: String],
+                                     file: StaticString = #filePath, line: UInt = #line) {
+        let screen = app.windows.firstMatch.frame
+        var widths: [CGFloat] = []
+        for (id, word) in words {
+            let item = tab(app, id)
+            XCTAssertEqual(item.label, word, "Tab \(id) says \(word)", file: file, line: line)
+            XCTAssertTrue(item.isHittable, "\(id) is visible", file: file, line: line)
+            XCTAssertGreaterThanOrEqual(item.frame.height, 56, file: file, line: line)
+            XCTAssertTrue(screen.contains(item.frame), "\(id) is fully on screen", file: file, line: line)
+            widths.append(item.frame.width)
+        }
+        // Equal slots across the width less the 16pt margins and the pill's inset.
+        let expected = (screen.width - 32 - 8 - CGFloat(words.count - 1) * 2) / CGFloat(words.count)
+        for width in widths { XCTAssertEqual(width, expected, accuracy: 2, "Equal full-width slots", file: file, line: line) }
+    }
+
     private func attach(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
@@ -44,6 +63,8 @@ final class TabBarUITests: XCTestCase {
         let app = launch("my-day")
         assertTabs(app, ["schedule", "jobs", "customers", "inbox"])
         XCTAssertTrue(tab(app, "schedule").isSelected)
+        assertLabelledSlots(app, ["schedule": "Schedule", "jobs": "Jobs", "customers": "Customers", "inbox": "Messages", "more": "More"])
+        attach(app, "default-text")
         tab(app, "jobs").tap()
         XCTAssertTrue(tab(app, "jobs").waitForSelected())
     }
@@ -57,6 +78,7 @@ final class TabBarUITests: XCTestCase {
         let app = launch("schedule", role: "owner")
         assertTabs(app, ["home", "schedule", "jobs", "money"])
         XCTAssertTrue(tab(app, "home").isSelected, "Owners open on their Dashboard")
+        assertLabelledSlots(app, ["home": "Dashboard", "schedule": "Schedule", "jobs": "Jobs", "money": "Money", "more": "More"])
     }
 
     func testMoreOpensTheDrawer() {
@@ -146,8 +168,8 @@ final class TabBarUITests: XCTestCase {
         for id in ["schedule", "jobs", "customers", "inbox", "more"] {
             let item = tab(app, id)
             XCTAssertTrue(item.isHittable, "\(id) can be tapped")
-            XCTAssertGreaterThanOrEqual(item.frame.height, 44)
-            XCTAssertGreaterThanOrEqual(item.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(item.frame.height, 56)
+            XCTAssertGreaterThanOrEqual(item.frame.width, 56)
         }
         attach(app, "largest-text")
         let bar = tab(app, "more").frame

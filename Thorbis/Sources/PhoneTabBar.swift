@@ -108,10 +108,13 @@ extension PaperGlyph {
 
 // MARK: - The bar
 
-/// Paper 18A's dock: a floating pill (card at 92% over a blur, 1pt border, deep shadow), 6 in, its
-/// 52×44 items 4 apart. The active item sits on the foreground at 16% with a foreground glyph; the
-/// others are muted. Icons only, as Paper draws it; at accessibility sizes each item shows its
-/// word under the icon (capped) and a long press shows the large content viewer at every size.
+/// The phone's bottom bar. Paper 18A draws an icon-only floating pill; on the owner's instruction
+/// (people should not have to guess what a briefcase or three dots means, and Jobber, Housecall
+/// Pro and ServiceTitan all label their tabs) every item shows its word under the icon at every
+/// text size. It keeps 18A's pill look (radius, 1pt border, deep shadow) on an opaque card ground
+/// so list text scrolling underneath never shows through, spans the screen 16 in from each edge,
+/// and splits it into equal slots, each wholly tappable. The selected slot sits on the brand
+/// surface with a brand icon and word; the others are muted ink.
 struct PhoneTabBar: View {
     let tabs: [MenuItem]
     /// The place showing (a MenuItem id, "local-…" or "notifications").
@@ -123,15 +126,16 @@ struct PhoneTabBar: View {
     let moreHasNews: Bool
     let select: (MenuItem) -> Void
     let openMore: () -> Void
-    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorScheme) private var colorScheme
 
-    private var labelled: Bool { typeSize.isAccessibilitySize }
+    /// The side margins: the standard 16.
+    static let margin: CGFloat = 16
+
     /// A place not in the bar (opened from the drawer, a link or a notification) lights More.
     private var moreActive: Bool { !tabs.contains { $0.rawValue == current } }
 
     var body: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             ForEach(tabs) { item in
                 let unread = item == .inbox && messagesUnread
                 itemButton(title: item.title, glyph: .tab(item), active: current == item.rawValue, dot: unread,
@@ -141,14 +145,11 @@ struct PhoneTabBar: View {
             itemButton(title: "More", glyph: .tabMore, active: moreActive, dot: moreHasNews,
                        value: moreHasNews ? "New items" : nil, id: "tabbar-more", action: openMore)
         }
-        .padding(6)
-        .background {
-            Capsule().fill(.ultraThinMaterial)
-                .overlay { Capsule().fill(Theme.card.opacity(0.92)) }
-        }
+        .padding(4)
+        .background(Theme.card, in: Capsule())
         .overlay { Capsule().strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
         .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.14), radius: 12, y: 8)
-        .padding(.horizontal, labelled ? 8 : 0)
+        .padding(.horizontal, Self.margin)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isTabBar)
         .accessibilityLabel("Tab bar")
@@ -157,27 +158,30 @@ struct PhoneTabBar: View {
 
     private func itemButton(title: String, glyph: PaperGlyph, active: Bool, dot: Bool, value: String?,
                             id: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Group {
-                if labelled {
-                    VStack(spacing: 2) {
-                        icon(glyph, active: active, dot: dot)
-                        Text(title)
-                            .font(Theme.font(11, weight: .medium))
-                            .foregroundStyle(active ? Theme.foreground : Theme.muted)
-                            .lineLimit(1).minimumScaleFactor(0.8)
-                            // iOS tab bars cap their words, every item at one size; the large
-                            // content viewer (a long press) shows them bigger.
-                            .dynamicTypeSize(...DynamicTypeSize.xLarge)
+        let ink = active ? Theme.brandText : Theme.muted
+        return Button(action: action) {
+            VStack(spacing: 3) {
+                PaperIcon(glyph, size: 22, color: ink)
+                    .frame(width: 28, height: 24)
+                    .overlay(alignment: .topTrailing) {
+                        if dot {
+                            Circle().fill(Theme.brand).frame(width: 8, height: 8)
+                                .padding(1.5).background(Theme.card, in: Circle())
+                                .offset(x: 4, y: -2)
+                                .accessibilityHidden(true)
+                        }
                     }
-                    .padding(.horizontal, 4).padding(.vertical, 6)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                } else {
-                    icon(glyph, active: active, dot: dot)
-                        .frame(width: 52, height: 44)
-                }
+                Text(title)
+                    .font(Theme.font(11, weight: active ? .semibold : .medium))
+                    .foregroundStyle(ink)
+                    // One line, never "…": a long word steps down a little instead. Words stop
+                    // growing at xLarge, as iOS tab bars do; a long press shows them bigger.
+                    .lineLimit(1).minimumScaleFactor(0.75).allowsTightening(true)
+                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
             }
-            .background { if active { Capsule().fill(Theme.foreground.opacity(0.16)) } }
+            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background { if active { Capsule().fill(Theme.brandSurface) } }
             .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
@@ -185,23 +189,10 @@ struct PhoneTabBar: View {
         .accessibilityValue(value ?? "")
         .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
         .accessibilityShowsLargeContentViewer {
-            PaperIcon(glyph, size: 20)
+            PaperIcon(glyph, size: 22)
             Text(title)
         }
         .accessibilityIdentifier(id)
-    }
-
-    /// The 20pt glyph in a 52×44 slot, with Paper's 8pt brand dot at (32, 9).
-    private func icon(_ glyph: PaperGlyph, active: Bool, dot: Bool) -> some View {
-        PaperIcon(glyph, size: 20, color: active ? Theme.foreground : Theme.muted)
-            .frame(width: 52, height: labelled ? 28 : 44)
-            .overlay(alignment: .topLeading) {
-                if dot {
-                    Circle().fill(Theme.brand).frame(width: 8, height: 8)
-                        .offset(x: 32, y: labelled ? 2 : 9)
-                        .accessibilityHidden(true)
-                }
-            }
     }
 }
 

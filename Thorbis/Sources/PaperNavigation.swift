@@ -34,7 +34,7 @@ struct RootView: View {
     /// Place roots on screen now (a pushed page, even one not in the path, takes its root off).
     @State private var rootsShowing: Set<String> = []
     /// The bottom bar's measured height, for the room place roots leave under their content.
-    @State private var tabBarHeight: CGFloat = 58
+    @State private var tabBarHeight: CGFloat = 64
     /// The software keyboard is up: the bar steps aside.
     @State private var keyboardShown = false
     @AccessibilityFocusState private var drawerTitleFocus: Bool
