@@ -13,6 +13,18 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-job-money-guards",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "creditcard", title: "Collect payment stays on Money",
+                      detail: "Collect payment opens only while you are still on the job's Money section, never over another one."),
+                .init(symbol: "lock.shield", title: "Job invoices close on sign-in change",
+                      detail: "An invoice opened from a job closes if your sign-in or permissions change while it is open."),
+                .init(symbol: "trash", title: "Remove is harder to hit by mistake",
+                      detail: "On the invoice line editor, the gap between Done and Remove is back to its full size."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-paper-office",
             date: "2026-11-18",
             highlights: [
