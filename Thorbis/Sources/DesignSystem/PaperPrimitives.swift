@@ -560,8 +560,7 @@ struct PaperPillLabel: View {
 }
 
 /// A tappable row's trailing chevron (Paper 21 / 52 / 65): the 16pt drawn chevron in the muted
-/// tone. Every row that opens something ends in this, never an SF Symbol at its own size. (Record
-/// lists keep Paper 86 / 87A's 14pt `PaperRowChevron`.)
+/// tone. Every row that opens something ends in this, never an SF Symbol at its own size.
 struct PaperChevron: View {
     var body: some View {
         PaperIcon(.chevronRight, size: 16, color: Theme.muted).accessibilityHidden(true)

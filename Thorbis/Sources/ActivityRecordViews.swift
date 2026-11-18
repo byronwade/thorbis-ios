@@ -32,10 +32,7 @@ struct ActivityLink<Content: View>: View {
             content()
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             if destination != nil && showsChevron {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
+                PaperChevron()
             }
         }
         .contentShape(Rectangle())

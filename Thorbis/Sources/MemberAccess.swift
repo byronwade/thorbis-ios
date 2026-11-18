@@ -153,7 +153,7 @@ struct MemberAccessView: View {
                             Text("Permissions").font(Theme.font(16)).foregroundStyle(Theme.foreground)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text(member.roleLabel).font(Theme.font(16)).foregroundStyle(Theme.muted).lineLimit(1)
-                            PaperIcon(.chevronRight, size: 16, color: Theme.subtleForeground).accessibilityHidden(true)
+                            PaperChevron()
                         }
                         .padding(.horizontal, PaperCardMetrics.inset)
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)

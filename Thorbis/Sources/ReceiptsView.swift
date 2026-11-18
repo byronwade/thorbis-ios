@@ -425,7 +425,7 @@ private struct ReceiptDetailView: View {
         Button { editor = ReceiptEditorRequest(record: receipt) } label: {
             HStack(alignment: .center, spacing: 12) {
                 content()
-                PaperIcon(.chevronRightSmall, size: 14, color: Theme.subtleForeground).accessibilityHidden(true)
+                PaperChevron()
             }
             .padding(.horizontal, 16).padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)

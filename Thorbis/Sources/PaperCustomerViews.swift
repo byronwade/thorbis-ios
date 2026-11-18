@@ -816,7 +816,7 @@ struct CustomerDetailView: View {
                         Text("Archive customer").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        PaperIcon(.chevronRightSmall, size: 16, color: Theme.muted).accessibilityHidden(true)
+                        PaperChevron()
                     }
                     .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 9)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
@@ -831,7 +831,7 @@ struct CustomerDetailView: View {
                         Text("Recently archived customers").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        PaperIcon(.chevronRightSmall, size: 16, color: Theme.muted).accessibilityHidden(true)
+                        PaperChevron()
                     }
                     .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 9)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)

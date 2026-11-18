@@ -1135,8 +1135,8 @@ struct FloatingCreateButton: View {
 /// Row disclosure chevron: one size, weight and colour for every tappable row.
 struct PaperDisclosure: View {
     var body: some View {
-        // Paper 76 / 67: the 14pt chevron, 1.5 stroke, muted.
-        PaperIcon(.chevronRightSmall, size: 14, color: Theme.muted)
+        // The one row chevron (PaperChevron, 16 muted) on every tappable row.
+        PaperChevron()
     }
 }
 
