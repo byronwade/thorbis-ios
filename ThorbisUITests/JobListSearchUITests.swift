@@ -50,8 +50,9 @@ final class JobListSearchUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
         app.launch()
-        // The Jobs list's subtitle, on the phone layout and the iPad's list column alike.
-        XCTAssertTrue(app.staticTexts["5 active"].waitForExistence(timeout: 30))
+        // The Jobs list's subtitle, on the phone layout and the iPad's list column alike. Later in
+        // the day it adds "· 4 need attention" (the sample visits are past their times).
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "5 active")).firstMatch.waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["New job"].exists, "No hidden shortcut button may be in the tree")
         XCTAssertTrue(app.pressShortcut("n", .command, expecting: app.descendants(matching: .any)["book-job-caller"], timeout: 10),
                       "⌘N opens New job")

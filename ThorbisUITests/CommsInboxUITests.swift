@@ -142,7 +142,8 @@ final class CommsInboxUITests: XCTestCase {
     func testContactEmailOpensPreaddressedInboxComposer() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer", "--paper-preview-scroll", "center"]
+        // Paper 27: the customer page is a hub; its contacts sit on Contacts and details.
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "customer-details"]
         app.launch()
         let actions = app.buttons["Contact actions for Danielle Marlowe"]
         XCTAssertTrue(actions.waitForExistence(timeout: 20))

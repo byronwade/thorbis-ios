@@ -103,9 +103,18 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         replaceQuantity(quantity, with: "2", in: app)
         XCTAssertEqual(quantity.value as? String, "2")
         app.buttons["Done"].firstMatch.tap()
+        XCTAssertTrue(app.waitForKeyboardToHide())
+        // Paper 40: Add item is a field above "Line items", and opening a line scrolls it under the
+        // page's pinned circle row, where it still reports hittable. Scroll back until it is clear.
         let add = app.buttons["invoice-add-item"]
-        for _ in 0..<8 where !add.isHittable { app.swipeDown() }
-        XCTAssertTrue(add.isHittable); add.tap()
+        let bar = app.buttons["invoice-more"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        func reachable() -> Bool { add.isHittable && add.frame.minY >= bar.frame.maxY }
+        for _ in 0..<8 where !reachable() {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7)))
+        }
+        XCTAssertTrue(reachable(), "Add item must be reachable above the lines"); add.tap()
         let search = app.textFields["invoice-catalog-search"]
         XCTAssertTrue(search.waitForExistence(timeout: 10))
         search.tap(); search.typeText("Camera sewer inspection")
@@ -257,7 +266,18 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let identity = openLineIdentity(app)
         let price = app.textFields["invoice-line-price-" + identity]
         XCTAssertTrue(price.waitForExistence(timeout: 10))
-        reveal(price, in: app); price.tap(); price.doubleTap(); app.typeText("12.5")
+        reveal(price, in: app); price.tap()
+        // Focus brings the keyboard up and centres the line; a double tap sent while the page is
+        // still moving lands on whatever has slid under it (the next line's minus).
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        settle(price)
+        // Replace the amount with the keyboard's own delete key, wherever the caret landed.
+        price.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        let existing = (price.value as? String) ?? ""
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count))
+        // An empty field reads as its "0.00" placeholder.
+        XCTAssertTrue(["", "0.00"].contains(price.value as? String ?? ""), "The old amount is cleared before typing")
+        app.typeText("12.5")
         XCTAssertEqual(price.value as? String, "12.5")
         let close = app.buttons["Close line"].firstMatch
         reveal(close, in: app)
@@ -453,6 +473,18 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         reviewProof.name = "Largest text return to invoice review actions"
         reviewProof.lifetime = .keepAlways
         add(reviewProof)
+    }
+
+    /// Waits until `element` has stopped moving (keyboard avoidance and the scroll to the open line).
+    private func settle(_ element: XCUIElement, timeout: TimeInterval = 4) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = element.frame
+        while Date() < deadline {
+            usleep(300_000)
+            let now = element.frame
+            if now == last { return }
+            last = now
+        }
     }
 
     private func replaceQuantity(_ quantity: XCUIElement, with text: String, in app: XCUIApplication) {

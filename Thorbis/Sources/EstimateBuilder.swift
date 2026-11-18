@@ -987,8 +987,10 @@ struct BuilderLineRow: View {
                     .padding(.horizontal, 4)
                 }
                 if lineActionsLeading {
-                    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                         : AnyLayout(HStackLayout(spacing: 16))
+                    // Keyboard up: Done leads, with Remove a clear gap away (24 across, 16 when
+                    // stacked) so a thumb aiming at Done never lands on the destructive action.
+                    let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 16))
+                                         : AnyLayout(HStackLayout(spacing: 24))
                     layout {
                         closeLineButton
                         removeLineButton

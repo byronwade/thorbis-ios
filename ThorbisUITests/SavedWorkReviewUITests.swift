@@ -185,7 +185,10 @@ final class SavedWorkReviewUITests: XCTestCase {
         // be tapped in that second races the sheet leaving.
         XCTAssertTrue(app.discardQuestion.waitForExistence(timeout: 5))
         XCTAssertTrue(app.savedWorkReview.waitForNonExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["Discard"].exists)
+        // The question is its own sheet over the review: it leaves with the review, one sheet
+        // animation later, so it is waited out rather than read in the same instant.
+        XCTAssertTrue(app.buttons["Discard"].waitForNonExistence(timeout: 3), "The stale question must retire with the review")
+        XCTAssertTrue(app.discardQuestion.waitForNonExistence(timeout: 1))
         XCTAssertFalse(app.buttons["saved-work-summary"].exists)
         let originalScreen = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: app.scheduleTitle)
         XCTAssertEqual(XCTWaiter.wait(for: [originalScreen], timeout: 5), .completed, "The entire modal must retire, not leave a blank blocking sheet")
