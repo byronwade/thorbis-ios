@@ -569,7 +569,7 @@ final class JobDocumentsUITests: XCTestCase {
         let app = preview()
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
-        more.tap()
+        app.buttons["job-share"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         for identifier in ["customer-estimate-\(estimateA)", "customer-estimate-\(addonA)",
@@ -907,7 +907,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(thorbisJobBalanceLoaded(app, "$340.00").waitForExistence(timeout: 15))
     }
     private func handToCustomer(_ app: XCUIApplication) {
-        app.buttons["Job actions"].tap()
+        app.buttons["job-share"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
     }
