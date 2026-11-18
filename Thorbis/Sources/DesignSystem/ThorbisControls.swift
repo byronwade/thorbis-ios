@@ -94,8 +94,8 @@ struct ThorbisSegmented<Value: Hashable>: View {
                 }
             }
         }
-        .padding(2)
-        .background(Theme.quietFill, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .padding(3)
+        .background(Theme.segmentTrack, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
     }
@@ -118,7 +118,7 @@ struct ThorbisSegmented<Value: Hashable>: View {
                     .background {
                         if isOn {
                             RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedSegment)
-                                .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+                                .shadow(color: Theme.segmentShadow, radius: 2.5, y: 1)
                                 .matchedGeometryEffect(id: "pill", in: pill)
                         }
                     }

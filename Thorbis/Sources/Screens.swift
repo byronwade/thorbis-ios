@@ -121,7 +121,7 @@ struct CustomerPickerSheet: View {
                     .font(Theme.font(14, weight: .semibold))
                     .foregroundStyle(chosen ? Theme.brandText : Theme.subtle)
                     .frame(width: 40, height: 40)
-                    .background(chosen ? Theme.brandSurface : Theme.selectedSegment, in: Circle())
+                    .background(chosen ? Theme.brandSurface : Theme.quietFill, in: Circle())
                     .accessibilityHidden(true)
                 Text(highlighted(customer.name))
                     .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)

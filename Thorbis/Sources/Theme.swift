@@ -205,7 +205,11 @@ enum Theme {
     static let destructiveFill = adaptive(light: 0xDC2626, dark: 0xC81E1E)
     /// The chosen segment's raised pill. In dark it sits lighter than the panel so the choice shows.
     /// Paper: ink at 16% over the card track (#434343 dark, #DADADA light), with a short shadow.
-    static let selectedSegment = adaptive(light: 0xDADADA, dark: 0x434343)
+    /// Segmented tabs (Today | Week | Map): a quiet track with the chosen segment raised on it,
+    /// white in light mode and a lighter grey in dark, under a soft shadow. One look everywhere.
+    static let selectedSegment = adaptive(light: 0xFFFFFF, dark: 0x4A4A4A)
+    static let segmentTrack = adaptive(light: 0xE7E5E0, dark: 0x262626)
+    static let segmentShadow = Color.black.opacity(0.12)
     /// Paper's AI accent: the AI help button, suggestions and drafts. Never for status.
     static let ai = adaptive(light: 0x7757BA, dark: 0x9D7FD1)
     static let aiSurface = adaptive(light: 0xEEE8FA, dark: 0x241B33)

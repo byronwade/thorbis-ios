@@ -310,7 +310,7 @@ struct JobSectionControl: View {
                         .background {
                             if isOn {
                                 RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Theme.selectedSegment)
-                                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+                                    .shadow(color: Theme.segmentShadow, radius: 2.5, y: 1)
                                     .padding(.vertical, 3)
                                     .matchedGeometryEffect(id: "pill", in: pill)
                             }
@@ -323,8 +323,8 @@ struct JobSectionControl: View {
                 .accessibilityIdentifier("job-section-\(option.value.lowercased())")
             }
         }
-        .padding(.horizontal, 2)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .padding(.horizontal, 3)
+        .background(Theme.segmentTrack, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         // The pill glides on a small spring; the section below swaps with the existing snappy motion.
         .animation(Theme.selectionSpring(reduceMotion: reduceMotion), value: selection)
         .sensoryFeedback(.selection, trigger: selection)
