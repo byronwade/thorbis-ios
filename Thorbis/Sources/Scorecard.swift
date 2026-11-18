@@ -252,8 +252,9 @@ struct FilteredJobsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                // The one pushed-page header: the title on the page, not in the bar.
+                PaperPageTitle(title: "Jobs done", subtitle: filter.title)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(filter.title).font(Theme.font(15, weight: .medium))
                     let missing = filter.ids.count - jobs.count
                     if missing > 0 {
                         Text(missing == 1 ? "1 job isn't on this phone yet." : "\(missing) jobs aren't on this phone yet.")
@@ -274,7 +275,7 @@ struct FilteredJobsView: View {
         .background(Theme.background)
         .task { await load() }
         .refreshable { await load() }
-        .navigationTitle("Jobs done")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

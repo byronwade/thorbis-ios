@@ -170,7 +170,7 @@ struct PaperTaskBar: View {
     }
 
     private func row(titleInRow: Bool) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             Button(action: onCancel) {
                 Text(cancelTitle).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     .lineLimit(1).fixedSize()

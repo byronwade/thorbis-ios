@@ -997,7 +997,7 @@ struct CustomerDetailView: View {
                     MembershipPlanBody(customerID: customer.id, customerName: record?.name ?? customer.name,
                                        plan: $plan, reload: planReload)
                 }
-                .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             } else {
             VStack(alignment: .leading, spacing: 20) {
                 OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)

@@ -54,6 +54,8 @@ struct JobNoteDetailView: View {
         ScrollView {
             // Paper: the words on one card, radius 20, 16 from the edge; the time under it in 13 muted.
             VStack(alignment: .leading, spacing: 8) {
+                // The one pushed-page header: the title on the page, not in the bar.
+                PaperPageTitle(title: "Note", columnInset: PaperCardMetrics.margin).padding(.bottom, 8)
                 if loading { SkeletonRows(count: 3, inset: 0).padding(.horizontal, 4) }
                 if let error {
                     ErrorBanner(message: error) { await load() }.padding(.horizontal, -PaperCardMetrics.margin)
@@ -74,10 +76,10 @@ struct JobNoteDetailView: View {
                 }
             }
             .padding(.horizontal, PaperCardMetrics.margin)
-            .padding(.vertical, 16)
+            .padding(.bottom, 16)
         }
         .background(Theme.canvas)
-        .navigationTitle("Note")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
@@ -470,7 +472,7 @@ struct ServiceLocationDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.canvas)
-        .navigationTitle("Location")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }

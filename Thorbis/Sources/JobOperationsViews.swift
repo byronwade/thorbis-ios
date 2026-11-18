@@ -488,7 +488,7 @@ struct JobCloseoutView: View {
                 }
             }
             // Paper v2: cards 16 from the edges, titles and labels 20 (4 more inside).
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
