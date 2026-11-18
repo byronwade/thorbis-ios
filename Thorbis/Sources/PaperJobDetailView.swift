@@ -1117,11 +1117,15 @@ struct JobDetailView: View {
         var items: [ThorbisMenuItem] = []
         var pause: ThorbisMenuItem?
         var wrapUp: ThorbisMenuItem?
+        var deposit: ThorbisMenuItem?
         for action in menuGroups(job).flatMap({ $0 }) {
             if action == .transition("paused") {
                 pause = menuActionItem(action, job: job)
             } else if action == .wrapUp {
                 wrapUp = menuActionItem(action, job: job)
+            } else if action == .deposit, !session.can("invoice.view", feature: "invoicing") {
+                // Money's invoices card (the deposit's door) is locked without invoice.view.
+                deposit = menuActionItem(action, job: job)
             }
         }
         // Paper 21K's first card, in its order, wearing its glyphs.
@@ -1141,6 +1145,7 @@ struct JobDetailView: View {
             items.append(ThorbisMenuItem("Add to job", icon: "plus") { showAdd = true })
         }
         if let wrapUp { items.append(wrapUp) }
+        if let deposit { items.append(deposit) }
         var stops: [ThorbisMenuItem] = []
         if var pause {
             pause.glyph = .morePause
