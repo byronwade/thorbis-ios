@@ -154,7 +154,7 @@ struct ScorecardView: View {
     private func leaderRow(_ entry: Scorecard.LeaderboardRow) -> some View {
         let percent = ScorecardGoal.percent(entry.percentOfGoalBps)
         let name = entry.displayName.isEmpty ? "You" : entry.displayName
-        let showsYou = entry.me && !entry.displayName.isEmpty
+        let showsYou = entry.me && !entry.displayName.isEmpty && entry.displayName != "You"
         return HStack(alignment: .center, spacing: 12) {
             Text("\(entry.rank)").font(Theme.monoFont(15, weight: .semibold))
                 .foregroundStyle(entry.me ? Theme.brandText : Theme.muted)
