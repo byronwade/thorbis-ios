@@ -792,25 +792,30 @@ struct CustomerEstimatePresentation: View {
         defer { busy = false }
         error = nil
         do {
-            if let handoff, handoff.signature == nil {
-                guard let data = SignatureInk.png(strokes) else { return }
-                _ = try handoff.freezeSignature(signerName: signer, png: data, signedAt: ISO8601DateFormatter().string(from: Date()))
-            }
-            if let handoff { try await handoff.validate() }
-            if drawnApproval, let jobID {
+            if let handoff, let jobID {
+                // Only the package the customer reviewed may be sent: if the screen now shows another one, refuse.
+                guard flow.selectedOptionID == handoff.reviewed.optionID else {
+                    // Nothing is recorded on the estimate: the reviewed package is put back on screen to approve.
+                    if let reviewedOption = handoff.reviewed.optionID { flow.choose(reviewedOption) }
+                    flow.step = .review; strokes = []
+                    error = "That package isn't the one you reviewed. Your reviewed package is shown again."
+                    return
+                }
+                // The handoff's one per-estimate approval, shared with approving several at once.
+                let sent = try await handoff.submitApproval(api: api, jobID: jobID, signer: signer, png: { SignatureInk.png(strokes) },
+                                                            drawn: drawnApproval, stillCurrent: { currentAuthority() && generation == api.requestGeneration })
+                if sent == .cannotSign { error = "This estimate can't be signed here. Ask your technician."; return }
+                guard sent == .submitted else { return }
+            } else if handoff != nil {
+                return
+            } else if drawnApproval, let jobID {
                 let mediaID = try await uploadSignature(jobID: jobID)
                 try Task.checkCancellation()
                 guard currentAuthority(), generation == api.requestGeneration else { return }
-                guard handoff?.current() != false, handoff?.canApprove() != false else { return }
-                let input = FieldSignatureInput(signerName: signer, signedAt: handoff?.signature?.signedAt ?? ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
-                handoff?.submissionStarted = true; handoff?.retryVerified = false
+                let input = FieldSignatureInput(signerName: signer, signedAt: ISO8601DateFormatter().string(from: Date()), imageMediaId: mediaID)
                 let approved = try await api.approveFieldEstimate(flow.estimate.id, revisionNumber: revision.revisionNumber, signature: input)
                 guard currentAuthority(), generation == api.requestGeneration else { return }
-                if let handoff {
-                    guard handoff.current() else { return }
-                    guard handoff.canApprove() else { handoff.report(.unknown); return }
-                    handoff.report(await handoff.confirmed(approved))
-                } else { onApproved(approved) }
+                onApproved(approved)
             } else if let link {
                 let action = link.action
                 guard let nonce = action.nonce, let consentVersion = action.consentVersion,
@@ -842,13 +847,9 @@ struct CustomerEstimatePresentation: View {
             signedAt = Date()
             if handoff == nil || handoff?.outcome?.isApproved == true { flow.step = .done }
         } catch is CancellationError {
+            handoff?.reportCancelledSend()
         } catch {
-            if let handoff, handoff.current() {
-                handoff.report(handoff.submissionStarted ? .unknown :
-                    customerEstimatePreparationCanRetry(error)
-                    ? .retryable("Preparing this approval was interrupted. Try again when connected.")
-                    : .needsReview(error.customerSentence(.approve)))
-            }
+            handoff?.reportApprovalFailure(error)
             self.error = error.customerSentence(.approve)
         }
     }
