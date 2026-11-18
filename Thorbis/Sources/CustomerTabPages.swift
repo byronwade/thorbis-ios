@@ -214,6 +214,8 @@ struct CustomerBillingInvoice: Identifiable {
     let status: String
     let total: Int?
     let due: Int?
+    /// What has been paid toward it, in cents.
+    var paid = 0
     let currency: String
     let issuedAt: Date?
     let paidAt: Date?
@@ -222,11 +224,15 @@ struct CustomerBillingInvoice: Identifiable {
     var isVoid: Bool { status == "void" || status == "voided" }
     var heading: String { [reference, title].compactMap { $0 }.joined(separator: " · ") }
 
-    /// "Unpaid · sent Jul 21", "Paid Mar 12", "Paid Nov 4, 2025", "Draft", "Void".
+    /// "Unpaid · sent Jul 21", "Part paid $100 · sent Jul 21", "Paid Mar 12", "Paid Nov 4, 2025",
+    /// "Draft", "Void".
     func line(now: Date = .now) -> String {
         if isVoid { return "Void" }
         if status == "paid" { return paidAt.map { "Paid \(CustomerTabDates.short($0, now: now))" } ?? "Paid" }
-        if isOpen { return issuedAt.map { "Unpaid · sent \(CustomerTabDates.sent($0, now: now))" } ?? "Unpaid" }
+        if isOpen {
+            let word = paid > 0 ? "Part paid \(summaryMoney(paid, currency: currency))" : "Unpaid"
+            return issuedAt.map { "\(word) · sent \(CustomerTabDates.sent($0, now: now))" } ?? word
+        }
         return status.statusLabel
     }
 }

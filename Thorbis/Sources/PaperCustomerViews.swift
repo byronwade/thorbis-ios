@@ -1940,7 +1940,7 @@ struct CustomerDetailView: View {
         func make(_ invoice: InvoiceRecord, title: String?) -> CustomerBillingInvoice {
             let amounts = CustomerDocumentAmounts(lines: invoice.lines, currency: invoice.currency, amountPaid: invoice.amountPaid)
             return CustomerBillingInvoice(id: invoice.id, reference: "INV-\(invoice.id.suffix(4).uppercased())", title: title,
-                                          status: invoice.status, total: amounts?.total, due: amounts?.due, currency: invoice.currency,
+                                          status: invoice.status, total: amounts?.total, due: amounts?.due, paid: invoice.amountPaid, currency: invoice.currency,
                                           issuedAt: JobFiltering.date(invoice.issuedAt ?? invoice.createdAt), paidAt: JobFiltering.date(invoice.paidAt))
         }
         let all = compiled.invoices.flatMap { group in group.items.map { make($0, title: group.title) } }

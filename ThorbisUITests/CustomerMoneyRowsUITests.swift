@@ -13,10 +13,9 @@ final class CustomerMoneyRowsUITests: XCTestCase {
         XCTAssertTrue(invoice.waitForExistence(timeout: 30))
         for _ in 0..<15 where !invoice.isHittable { app.swipeUp() }
         XCTAssertTrue(invoice.isHittable)
-        XCTAssertTrue(invoice.label.contains("Last known: Part paid"))
-        XCTAssertTrue(invoice.label.contains("Last known paid $100.00"))
-        XCTAssertTrue(invoice.label.contains("$340.00"))
-        XCTAssertTrue(invoice.label.contains("Last known total"))
+        // Paper 48E: "INV-2209 · AC not cooling" over "Part paid $100 · sent …", the total trailing.
+        XCTAssertTrue(invoice.label.contains("Part paid $100"))
+        XCTAssertTrue(invoice.label.contains("$340"))
         invoice.tap()
         let title = app.staticTexts["invoice-detail-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 10))
@@ -60,9 +59,8 @@ final class CustomerMoneyRowsUITests: XCTestCase {
         for _ in 0..<8 where !invoice.exists { app.swipeUp() }
         XCTAssertTrue(invoice.waitForExistence(timeout: 10))
         XCTAssertTrue(invoice.label.contains("INV-2209"))
-        XCTAssertTrue(invoice.label.contains("Last known: Unpaid"))
-        XCTAssertTrue(invoice.label.contains("Last known total"))
-        XCTAssertTrue(invoice.label.contains("340.00"))
+        XCTAssertTrue(invoice.label.contains("Unpaid"))
+        XCTAssertTrue(invoice.label.contains("$340"))
 
         for _ in 0..<8 where !estimate.isHittable { app.swipeDown() }
         XCTAssertTrue(estimate.isHittable)
