@@ -238,7 +238,15 @@ final class CustomerDocumentBookUITests: XCTestCase {
         app.buttons["Back to job documents"].tap()
         let position = app.staticTexts["customer-document-position"]
         XCTAssertTrue(position.waitForExistence(timeout: 15))
-        XCTAssertTrue(app.staticTexts["Approved"].waitForExistence(timeout: 10))
+        // #536: an approved estimate shows its name and "Approved" only over its verified signed
+        // terms. This fixture's plain estimate has no signed receipt to read back, so its page says
+        // so and offers nothing to sign again (the receipt tests below cover the verified page).
+        let approved = app.staticTexts["Approved"]
+        let unavailable = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "signed estimate isn't available")).firstMatch
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in approved.exists || unavailable.exists }, object: app)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 15), .completed,
+                       "The approved estimate's page shows its signed terms or says they aren't available")
+        XCTAssertFalse(app.buttons["customer-book-review-sign"].exists, "An approved estimate can't be signed again")
         // Approval refreshes membership. Wait until both estimates are back in the book before
         // paging — tapping Next while the second id is still unavailable lands on the refresh
         // placeholder instead of "Sample additional work".

@@ -3093,16 +3093,6 @@ struct JobDetailView: View {
             let loading = (canEstimates && !estimatesLoaded) || (canInvoices && !invoicesLoaded)
             JobPanelSection(title: "Money", actionTitle: "Open", actionIdentifier: "job-money-open",
                             action: { withMotion(.snappy) { selectedTab = "Money" } }) {
-                #if DEBUG
-                if previewOverviewPaymentHold {
-                    Text("Preview payment loading").accessibilityIdentifier("job-overview-payment-hold")
-                }
-                if PaperPreview.isJobDocumentsPreview,
-                   ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload") {
-                    Button("Preview revalidate") { Task { await session.revalidate() } }
-                        .accessibilityIdentifier("job-overview-revalidate")
-                }
-                #endif
                 ForEach(estimates) { estimate in
                     let options = estimate.options ?? []
                     let (word, tint) = estimateWord(estimate.status)
@@ -3941,6 +3931,14 @@ struct JobDetailView: View {
                 Text(creatingInvoice ? "Pending" : "Finished")
                     .accessibilityIdentifier("preview-create-invoice-state")
             }
+            if previewOverviewPaymentHold {
+                Text("Preview payment loading").accessibilityIdentifier("job-overview-payment-hold")
+            }
+            if PaperPreview.isJobDocumentsPreview,
+               ProcessInfo.processInfo.arguments.contains("--paper-preview-overview-hold-reload") {
+                Button("Preview revalidate") { Task { await session.revalidate() } }
+                    .accessibilityIdentifier("job-overview-revalidate")
+            }
             #endif
             if !session.can("invoice.view", feature: "invoicing") {
                 emptyCard("Invoice access is unavailable.")
@@ -4002,6 +4000,18 @@ struct JobDetailView: View {
                                             canCollect: session.can("invoice.payment.create", feature: "payments"))
     }
 
+    /// Money's Collect payment pill. The payment details load first; the sheet opens only if the
+    /// person is still on Money on this screen when they arrive, and the pills stay busy until then.
+    private func collectFromMoney(_ step: TechJobStep) {
+        guard case .collect = step else { run(step); return }
+        guard !overviewPaymentRefreshing else { return }
+        overviewPaymentRefreshing = true
+        let navigationRevision = overviewNavigationRevision
+        run(step, current: { selectedTab == "Money" && overviewNavigationRevision == navigationRevision }) {
+            overviewPaymentRefreshing = false
+        }
+    }
+
     /// Paper 24: an invoice with a balance to collect is the balance card ("INV-2209 · Balance due",
     /// its status pill, the balance at 34 Bold, then Collect payment). Any other invoice is Paper
     /// 23's row (the reference over "Paid · $524.88", a chevron). Either opens the invoice; its
@@ -4011,10 +4021,12 @@ struct JobDetailView: View {
         let reference = jobInvoiceReference(invoice.id)
         let step = directPaymentStep(invoice, job: job)
         let due = step == nil ? nil : TechJobFlow.due(invoice)
+        // The card opens the invoice only from a read made under the authority still in force, and
+        // the opened invoice retires when the session or authority changes (as Overview's money rows did).
+        let current = overviewInvoicesAuthority?.isCurrent(api: api, session: session) == true
         return JobPanel {
             Button {
-                selectedInvoiceID = invoice.id
-                documentInvoiceID = invoice.id
+                openOverviewInvoice(invoice, job: job)
             } label: {
                 if let due {
                     JobInvoiceBalanceHeader(reference: reference,
@@ -4027,11 +4039,11 @@ struct JobDetailView: View {
             }
             .buttonStyle(RowPressStyle())
             .accessibilityIdentifier("job-invoice-\(invoice.id)")
-            .disabled(!fresh)
+            .disabled(!fresh || !current)
             .jobPanelJoinsNext(step != nil)
             if let step {
                 // Paper 24: Collect payment is a brand-surface pill in the invoice's card.
-                Button { run(step) } label: {
+                Button { collectFromMoney(step) } label: {
                     HStack(spacing: 8) {
                         PaperIcon(.jobCard, size: 18, color: Theme.brandText)
                         Text("Collect payment").font(Theme.font(16, weight: .semibold))
@@ -4048,6 +4060,7 @@ struct JobDetailView: View {
                 .accessibilityLabel(invoices.count == 1 ? "Collect payment" : "Collect payment for invoice \(reference)")
                 .accessibilityHint(invoices.count == 1 ? "For invoice \(reference)" : "")
                 .accessibilityIdentifier("job-invoice-collect-\(invoice.id)")
+                .disabled(overviewPaymentRefreshing)
             }
             if !invoice.lines.isEmpty, fresh, invoices.count > 1 {
                 JobInvoiceItemsDisclosure(invoice: invoice, reference: reference, startsExpanded: false)
