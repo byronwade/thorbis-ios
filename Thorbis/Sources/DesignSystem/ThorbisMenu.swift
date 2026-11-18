@@ -48,6 +48,9 @@ struct ThorbisMenuItem: Identifiable {
     var tintsTitle: Bool = false
     var startsGroup: Bool = false
     var detail: String? = nil
+    /// Paper's own glyph for the row's mark, drawn in place of `icon` (an SF symbol) when set.
+    /// Set after init (`item.glyph = .x`), so no call site changes.
+    var glyph: PaperGlyph? = nil
     var action: () -> Void
 
     init(_ title: String, icon: String? = nil, subtitle: String? = nil, tint: Color? = nil, status: StatusTone? = nil,
@@ -448,7 +451,7 @@ struct ThorbisMenuRows: View {
         Rectangle().fill(Theme.hairline).frame(height: 1).accessibilityHidden(true)
     }
     /// One row with a mark gives every row the slot, so the words share a lane.
-    private var hasMarks: Bool { items.contains { $0.icon != nil || $0.status != nil } }
+    private var hasMarks: Bool { items.contains { $0.icon != nil || $0.glyph != nil || $0.status != nil } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -548,6 +551,10 @@ struct ThorbisMenuRows: View {
     private func mark(_ item: ThorbisMenuItem, isDestructive: Bool) -> some View {
         if let status = item.status {
             StatusGlyph(tone: status, label: item.title, size: 18)
+                .accessibilityHidden(true)
+        } else if let glyph = item.glyph {
+            // Paper 21K: its own 22pt line glyphs in a 24pt slot, in the row's tone.
+            PaperIcon(glyph, size: 22, color: isDestructive ? Theme.destructive : (item.tint ?? Theme.foreground), scales: true)
                 .accessibilityHidden(true)
         } else if let icon = item.icon {
             Image(systemName: icon).font(.system(size: fieldMode ? 20 : 18, weight: .regular))

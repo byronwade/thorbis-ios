@@ -990,3 +990,20 @@ struct JobTimelineItem<Content: View>: View {
         .padding(.vertical, verticalPadding)
     }
 }
+
+/// Paper 21K "More": the eight rows' own 22pt line glyphs (stroke 1.6), from its SVGs.
+extension PaperGlyph {
+    static let moreTime = PaperGlyph(box: 22, [.rect(3.5, 4.5, 15, 14, rx: 3, 1.6), .stroke("M3.5 9h15M7.5 2.5v4M14.5 2.5v4", 1.6)])
+    static let morePerson = PaperGlyph(box: 22, [.circle(11, 8, 3.5, 1.6), .stroke("M4.5 18.5c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5", 1.6)])
+    static let moreEnvelope = PaperGlyph(box: 22, [.rect(3, 5, 16, 12, rx: 3, 1.6), .stroke("M4 7.5l7 5 7-5", 1.6)])
+    static let moreCamera = PaperGlyph(box: 22, [
+        .stroke("M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1.3-2h5l1.3 2h1.7A2.5 2.5 0 0 1 19 8.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 3 15.5z", 1.6),
+        .circle(11, 12, 3.2, 1.6),
+    ])
+    static let morePhone = PaperGlyph(box: 22, [
+        .stroke("M7.2 3.5H5.5a2 2 0 0 0-2 2.2c.6 6.5 5.3 11.2 11.8 11.8a2 2 0 0 0 2.2-2v-1.7a1.5 1.5 0 0 0-1.1-1.4l-2.6-.8a1.5 1.5 0 0 0-1.5.4l-.9.9a8 8 0 0 1-3.3-3.3l.9-.9a1.5 1.5 0 0 0 .4-1.5l-.8-2.6a1.5 1.5 0 0 0-1.4-1.1z", 1.6),
+    ])
+    static let moreBubble = PaperGlyph(box: 22, [.stroke("M4 7a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3h-4l-4 3.5V15a3 3 0 0 1-3-3z", 1.6)])
+    static let morePause = PaperGlyph(box: 22, [.circle(11, 11, 8, 1.6), .stroke("M9 8v6M13 8v6", 1.6)])
+    static let moreCancel = PaperGlyph(box: 22, [.circle(11, 11, 8, 1.6), .stroke("M8.2 8.2l5.6 5.6M13.8 8.2l-5.6 5.6", 1.6)])
+}

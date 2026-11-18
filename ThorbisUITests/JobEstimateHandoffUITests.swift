@@ -1,7 +1,8 @@
 import XCTest
 
-/// The job's More sheet (Paper 21K, F8), opened when it isn't already. Paper 21 keeps the job's
-/// customer doors in More, so the helpers below open it before they look for their row.
+/// The job's More sheet (Paper 21K, F8), opened when it isn't already. Since the 21K trim the
+/// customer doors are the Share circle's sheet and Money's estimates card; field mode (F8) keeps
+/// them in More, so the helpers below fall back to it.
 @MainActor
 func thorbisOpenJobMore(_ app: XCUIApplication, unless row: XCUIElement) {
     guard !row.exists else { return }
@@ -39,34 +40,83 @@ func thorbisWaitForStaffJob(_ app: XCUIApplication, timeout: TimeInterval = 20) 
     return XCTWaiter.wait(for: [reachable], timeout: timeout) == .completed
 }
 
-/// More › Customer view: the menu's row, found once the menu is open.
+/// Customer view's row, found once its sheet is open (the Share circle's sheet; More in field mode).
 @MainActor
 func thorbisCustomerViewMenuItem(_ app: XCUIApplication) -> XCUIElement {
     app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Customer view")).firstMatch
 }
 
-/// More › Customer view, opening More first when it is closed.
+/// Opens the header's Share circle sheet (Paper 21), unless `row` is already there. In field mode
+/// (Paper F2 to F8) the bar has no Share circle and the field menu keeps these rows: opens More.
+@MainActor
+func thorbisOpenJobShare(_ app: XCUIApplication, unless row: XCUIElement) {
+    guard !row.exists else { return }
+    let more = app.buttons["Job actions"]
+    guard more.waitForExistence(timeout: 30) else { return }
+    let share = app.buttons["job-share"]
+    guard share.exists else { return thorbisOpenJobMore(app, unless: row) }
+    let reachable = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: share)
+    guard XCTWaiter.wait(for: [reachable], timeout: 3) == .completed else { return }
+    share.tap()
+    if row.waitForExistence(timeout: 5) { thorbisRevealJobMenuRow(row, in: app) }
+}
+
+/// Share › Customer view (More › Customer view in field mode), opening the sheet first when closed.
 @MainActor
 func thorbisCustomerViewDoor(_ app: XCUIApplication) -> XCUIElement {
     let row = thorbisCustomerViewMenuItem(app)
-    thorbisOpenJobMore(app, unless: row)
+    thorbisOpenJobShare(app, unless: row)
     return row
 }
 
-/// More › Show estimates opens the estimates section of Customer view (it was Money's "Show
-/// customer" door). Opens More first when it is closed.
+/// Money › Show estimates, the estimates card's row (it was Money › Show estimates; field mode's
+/// menu still carries it). Opens Money and scrolls the row into reach.
 @MainActor
 func thorbisShowCustomerDoor(_ app: XCUIApplication) -> XCUIElement {
     let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show estimates")).firstMatch
-    thorbisOpenJobMore(app, unless: row)
+    if row.exists && row.isHittable { return row }
+    guard app.buttons["Job actions"].waitForExistence(timeout: 30) else { return row }
+    guard app.buttons["job-share"].exists else {
+        thorbisOpenJobMore(app, unless: row)
+        return row
+    }
+    if !row.waitForExistence(timeout: 3) {
+        let chooser = app.buttons["job-section-chooser"]
+        if chooser.exists {
+            if !chooser.label.contains("Money") {
+                for _ in 0..<5 where !chooser.isHittable { app.swipeDown(velocity: .slow) }
+                chooser.tap()
+                let money = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch
+                if money.waitForExistence(timeout: 5) { money.tap() }
+            }
+        } else if app.buttons["job-section-money"].exists {
+            thorbisTapStableButton(app, "job-section-money")
+        }
+        _ = row.waitForExistence(timeout: 30)
+    }
+    thorbisRevealOnJobPage(row, in: app)
     return row
 }
 
-/// More › Add to favorites / Remove from favorites (it was the bar's star).
+/// Scrolls the job page with short held drags until `element` sits clear of the bars, either way.
+@MainActor
+func thorbisRevealOnJobPage(_ element: XCUIElement, in app: XCUIApplication) {
+    for _ in 0..<12 where element.exists {
+        let frame = element.frame
+        let top = app.navigationBars.firstMatch.exists ? app.navigationBars.firstMatch.frame.maxY : app.frame.minY + 100
+        if element.isHittable && frame.minY > top && frame.maxY < app.frame.height - 130 { return }
+        let up = frame.midY > app.frame.height * 0.5
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.64 : 0.38))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.40 : 0.62))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+}
+
+/// Share › Add to favorites / Remove from favorites (it was the bar's star, then More's row).
 @MainActor
 func thorbisJobFavoriteRow(_ app: XCUIApplication) -> XCUIElement {
     let row = app.buttons.matching(NSPredicate(format: "label == %@ OR label == %@", "Add to favorites", "Remove from favorites")).firstMatch
-    thorbisOpenJobMore(app, unless: row)
+    thorbisOpenJobShare(app, unless: row)
     return row
 }
 
@@ -206,7 +256,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: timeout), .completed)
     }
     /// After the authenticated hand-back the staff job is back in reach: its More circle answers
-    /// and More › Show estimates can be used again (the door was Money's pinned "Show customer").
+    /// and Money › Show estimates can be used again (the door was Money's pinned "Show customer").
     private func waitForStaffDoor(_ app: XCUIApplication, timeout: TimeInterval = 20) {
         XCTAssertTrue(thorbisWaitForStaffJob(app, timeout: timeout), "The staff job must answer again after the hand-back")
         waitHittable(thorbisShowCustomerDoor(app))
@@ -1211,7 +1261,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(first.frame.minY, tabs.frame.maxY)
         XCTAssertLessThanOrEqual(first.frame.maxY, app.frame.maxY)
         capture(app, "Job estimates at largest text")
-        // Paper 23: the estimates' customer door is More › Show estimates, in reach at this size too.
+        // Paper 23: the estimates' customer door is Money › Show estimates, in reach at this size too.
         let present = thorbisShowCustomerDoor(app)
         XCTAssertTrue(present.waitForExistence(timeout: 10))
         XCTAssertTrue(present.isHittable)
@@ -1226,7 +1276,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(chooser.waitForExistence(timeout: 30))
         XCTAssertTrue(chooser.label.contains("Money"), chooser.label)
         for _ in 0..<6 { app.swipeUp() }
-        // Paper 23: the estimates' customer door is More › Show estimates, wherever Money is scrolled to.
+        // Paper 23: the estimates' customer door is Money › Show estimates, wherever Money is scrolled to.
         let present = thorbisShowCustomerDoor(app)
         XCTAssertTrue(present.waitForExistence(timeout: 30), "The estimate presentation action must stay reachable at large text")
         XCTAssertTrue(present.isHittable)
@@ -1234,24 +1284,26 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 15))
     }
 
-    /// The job's More menu is long enough to scroll (Add to job, Time and profit). A press that rests
-    /// on a row before it scrolls the menu must not choose that row when the finger lifts.
+    /// A press that rests on a row of the job's More sheet and then drags must not choose that row
+    /// when the finger lifts (Paper 21K's rows; the sheet scrolls when it cannot fit).
     func testScrollingTheJobMenuFromARowDoesNotChooseIt() {
         let app = open(["--paper-preview-handoff-hide-controls"])
         XCTAssertTrue(app.buttons["Add estimate"].waitForExistence(timeout: 30))
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 30)); more.tap()
-        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Follow-ups")).firstMatch
+        let row = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Time and profit")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5))
         let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.5, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)),
                     withVelocity: .slow, thenHoldForDuration: 0.3)
-        XCTAssertFalse(app.staticTexts["Book a follow-up"].waitForExistence(timeout: 2), "Scrolling the menu must not open the row under the finger")
+        XCTAssertFalse(app.staticTexts["Time and profit"].firstMatch.waitForExistence(timeout: 2) && !row.exists,
+                       "Scrolling the menu must not open the row under the finger")
         XCTAssertTrue(row.exists, "The menu stays open after a scroll")
         // A plain tap still chooses a row.
-        let door = thorbisShowCustomerDoor(app)
-        XCTAssertTrue(door.waitForExistence(timeout: 5)); door.tap()
-        XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
+        thorbisRevealJobMenuRow(row, in: app)
+        row.tap()
+        XCTAssertFalse(row.waitForExistence(timeout: 3) && row.isHittable, "The menu closes on a tap")
+        XCTAssertTrue(app.staticTexts["Time and profit"].firstMatch.waitForExistence(timeout: 10))
     }
 
     func testAllEstimatesUseOnePrimaryEntryAndKeepAddVisible() {

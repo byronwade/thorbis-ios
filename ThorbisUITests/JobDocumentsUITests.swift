@@ -342,7 +342,7 @@ final class JobDocumentsUITests: XCTestCase {
         // Paper 24: the $340 owed is collected from the invoice's own card.
         let collect = app.buttons["job-invoice-collect-\(invoiceA)"]
         XCTAssertTrue(collect.waitForExistence(timeout: 10))
-        // Paper 23: the estimates' customer door is More › Show estimates (checked in JobEstimateHandoffUITests).
+        // Paper 23: the estimates' customer door is Money › Show estimates (checked in JobEstimateHandoffUITests).
         for _ in 0..<5 where !first.isHittable { app.swipeUp() }
         XCTAssertTrue(first.isHittable)
         capture(app, "Job estimate cards")
@@ -394,7 +394,7 @@ final class JobDocumentsUITests: XCTestCase {
         second.tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "EST-2238")).firstMatch.waitForExistence(timeout: 10))
         app.navigationBars.buttons["Back"].firstMatch.tap()
-        // Back on Money, the estimates' customer door is still one menu away (More › Show estimates).
+        // Back on Money, the estimates' customer door is still one menu away (Money › Show estimates).
         let present = thorbisShowCustomerDoor(app)
         XCTAssertTrue(present.waitForExistence(timeout: 10))
         XCTAssertTrue(present.isHittable)
@@ -569,7 +569,7 @@ final class JobDocumentsUITests: XCTestCase {
         let app = preview()
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
-        more.tap()
+        app.buttons["job-share"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
         for identifier in ["customer-estimate-\(estimateA)", "customer-estimate-\(addonA)",
@@ -907,7 +907,7 @@ final class JobDocumentsSafetyUITests: XCTestCase {
         XCTAssertTrue(thorbisJobBalanceLoaded(app, "$340.00").waitForExistence(timeout: 15))
     }
     private func handToCustomer(_ app: XCUIApplication) {
-        app.buttons["Job actions"].tap()
+        app.buttons["job-share"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
     }

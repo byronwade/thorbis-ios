@@ -897,11 +897,13 @@ struct JobDetailView: View {
             // Paper 21: Share, then More. Field mode (F2) keeps More alone.
             if !inField(job) {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
-                    Button { shareJob = sharedJobText(job) } label: {
+                    // Paper 21's Share circle. Its sheet leads with Share job, then the other ways
+                    // the job goes out (Customer view, Email customer, Add to Calendar, Copy job ID)
+                    // and the favorite star, which Paper 21K's More no longer carries.
+                    ThorbisMenu(items: shareMenuItems(job), title: "Share", accessibilityLabel: "Share job",
+                                presentation: .sheet, subtitle: menuSubtitle(job)) {
                         PaperIcon(.share, size: 20).frame(width: 44, height: 44).background(Theme.card, in: Circle())
                     }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Share job")
                     .accessibilityIdentifier("job-share")
                 }
             }
@@ -1105,60 +1107,120 @@ struct JobDetailView: View {
         }
     }
 
-    /// Everything in •••. Paper 21K: the job's own actions, the device's, the office and Share job in
-    /// one card, then Pause job and Cancel job in a second. Paper F8 (on the visit): who to reach and
-    /// "Can't finish — pause this job" in the first card, everything else under it, Cancel job last.
+    /// Everything in •••. Paper 21K draws eight rows: Time and profit, Save customer to contacts,
+    /// At this address, Measure with camera, Call the office and Text the office in one card, then
+    /// Pause job and Cancel job in a second, each with Paper's own glyph. Every other action lives
+    /// at its door on the page (`jobDoors` below lists them). Paper F8 (on the visit) keeps its own
+    /// menu: who to reach and "Can't finish — pause this job" first, everything else under it.
     private func moreMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
-        var actions: [ThorbisMenuItem] = []
+        if inField(job) { return fieldMenuItems(job) }
+        var items: [ThorbisMenuItem] = []
         var pause: ThorbisMenuItem?
-        // Paper 22: what can be added to the job opens as its own sheet; "Create invoice" lives there.
-        let adds = addRows(job)
-        let showsAdd = !inField(job) && !(adds.billing.isEmpty && adds.onTheJob.isEmpty)
-        if showsAdd {
-            actions.append(ThorbisMenuItem("Add to job", icon: "plus") { showAdd = true })
-        }
+        var wrapUp: ThorbisMenuItem?
+        var deposit: ThorbisMenuItem?
         for action in menuGroups(job).flatMap({ $0 }) {
             if action == .transition("paused") {
                 pause = menuActionItem(action, job: job)
-            } else if action == .billWithoutEstimate, showsAdd {
-                continue
+            } else if action == .wrapUp {
+                wrapUp = menuActionItem(action, job: job)
+            } else if action == .deposit, !session.can("invoice.view", feature: "invoicing") {
+                // Money's invoices card (the deposit's door) is locked without invoice.view.
+                deposit = menuActionItem(action, job: job)
+            }
+        }
+        // Paper 21K's first card, in its order, wearing its glyphs.
+        let glyphs: [String: PaperGlyph] = [
+            "Time and profit": .moreTime, "Save customer to contacts": .morePerson, "At this address": .moreEnvelope,
+            "Measure with camera": .moreCamera, "Call the office": .morePhone, "Text the office": .moreBubble,
+        ]
+        for var item in deviceMenuItems(job) + reachMenuItems(job) {
+            item.glyph = glyphs[item.title]
+            items.append(item)
+        }
+        // Beyond Paper 21K, kept because Paper gives them no other door on Job details:
+        // "Add to job" opens Paper 22 (its sheet has no drawn entry), and Wrap up's closeout
+        // checklist when the bar at the bottom is not carrying it (Paper's home for it).
+        let adds = addRows(job)
+        if !(adds.billing.isEmpty && adds.onTheJob.isEmpty) {
+            items.append(ThorbisMenuItem("Add to job", icon: "plus") { showAdd = true })
+        }
+        if let wrapUp { items.append(wrapUp) }
+        if let deposit { items.append(deposit) }
+        var stops: [ThorbisMenuItem] = []
+        if var pause {
+            pause.glyph = .morePause
+            stops.append(pause)
+        }
+        if var cancel = cancelMenuItem(job, icon: "xmark.circle") {
+            cancel.glyph = .moreCancel
+            stops.append(cancel)
+        }
+        if !stops.isEmpty {
+            stops[0].startsGroup = true
+            items.append(contentsOf: stops)
+        }
+        return items
+    }
+
+    /// Paper F8, the field job menu: unchanged by the 21K trim (its own artboard). Who to reach
+    /// and the pause first, everything else under it, Cancel job last.
+    private func fieldMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
+        var actions: [ThorbisMenuItem] = []
+        var pause: ThorbisMenuItem?
+        for action in menuGroups(job).flatMap({ $0 }) {
+            if action == .transition("paused") {
+                pause = menuActionItem(action, job: job)
             } else {
                 actions.append(menuActionItem(action, job: job))
             }
         }
         actions.append(contentsOf: deviceMenuItems(job))
         let share = ThorbisMenuItem("Share job", icon: "square.and.arrow.up") { shareJob = sharedJobText(job) }
-        // The bar's star moved here (Paper 21's bar is Back, Share and More).
         if let favorite = favoriteMenuItem(job) { actions.append(favorite) }
-        // Money's "Show customer" door moved here (Paper 23 has no such row): the job's estimates,
-        // handed to the customer to choose from.
-        if !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") {
-            actions.append(ThorbisMenuItem("Show estimates", icon: "iphone", subtitle: "Hand the estimates to the customer",
-                                           isDisabled: !canOpenCustomerView) { openCustomerView(.estimates) })
-        }
-        let cancel = cancelMenuItem(job, icon: "xmark.circle")
-        var items: [ThorbisMenuItem] = []
-        if inField(job) {
-            items = reachMenuItems(job)
-            if let pause { items.append(pause) }
-            var rest = actions + [share]
-            rest[0].startsGroup = true
-            items.append(contentsOf: rest)
-            if var last = cancel {
-                last.startsGroup = true
-                items.append(last)
-            }
-        } else {
-            items = actions + reachMenuItems(job) + [share]
-            var stops: [ThorbisMenuItem] = []
-            if let pause { stops.append(pause) }
-            if let cancel { stops.append(cancel) }
-            if !stops.isEmpty {
-                stops[0].startsGroup = true
-                items.append(contentsOf: stops)
-            }
+        if let show = showEstimatesItem(job) { actions.append(show) }
+        var items = reachMenuItems(job)
+        if let pause { items.append(pause) }
+        var rest = actions + [share]
+        rest[0].startsGroup = true
+        items.append(contentsOf: rest)
+        if var last = cancelMenuItem(job, icon: "xmark.circle") {
+            last.startsGroup = true
+            items.append(last)
         }
         return items
+    }
+
+    /// The job's estimates, handed to the customer to choose from (the locked Customer view on its
+    /// estimates). Its door is the Money tab's estimates card (`showEstimatesRow`); field mode's menu.
+    private func showEstimatesItem(_ job: JobRecord) -> ThorbisMenuItem? {
+        guard !jobEstimates.isEmpty, session.can("estimate.view", feature: "estimates") else { return nil }
+        return ThorbisMenuItem("Show estimates", icon: "iphone", subtitle: "Hand the estimates to the customer",
+                               isDisabled: !canOpenCustomerView) { openCustomerView(.estimates) }
+    }
+
+    /// The header's Share circle (Paper 21): Share job, then what goes out to the customer or off
+    /// the job (Customer view, Email customer, Add to Calendar, Copy job ID) and the favorite star.
+    /// Each row is the action More carried, with the same permission and state gates.
+    private func shareMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
+        var items = [ThorbisMenuItem("Share job", icon: "square.and.arrow.up") { shareJob = sharedJobText(job) }]
+        let actions = menuGroups(job).flatMap { $0 }
+        for action in [JobMenuAction.customerView, .email, .addToCalendar, .copyID] where actions.contains(action) {
+            items.append(menuActionItem(action, job: job))
+        }
+        if let favorite = favoriteMenuItem(job) { items.append(favorite) }
+        return items
+    }
+
+    /// The header's clock chip: when the visit is (Paper 21), and the moves that change or explain
+    /// it: Schedule or Reschedule, Running late, Can't start, each with More's old gates.
+    private func whenMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
+        let actions = menuGroups(job).flatMap { $0 }
+        return [JobMenuAction.schedule, .runningLate, .cantStart].filter(actions.contains).map { menuActionItem($0, job: job) }
+    }
+
+    /// The header's person chip opens Assign (Paper 21's assignee chip), for whoever may assign.
+    private func canAssignHere(_ job: JobRecord) -> Bool {
+        menuGroups(job).contains { $0.contains(.assign) }
     }
 
     /// Paper 22's rows, each one only when this person can do it here. "Purchase order" is left
@@ -1383,8 +1445,8 @@ struct JobDetailView: View {
             if !barTitle {
             FlowRow(spacing: 8, lineSpacing: 8) {
                 statusControl(job)
-                whenChip(job)
-                assigneeChip(job)
+                whenControl(job)
+                assigneeControl(job)
                 if let estimate = estimateChipText { JobHeaderChip(text: estimate) { EmptyView() } }
             }
             // Paper: the chips sit 14 under the header's words.
@@ -1419,6 +1481,36 @@ struct JobDetailView: View {
         if customer != "Customer" { parts.append(customer) }
         if let street = street(job), street != job.title { parts.append(street) }
         return parts
+    }
+
+    /// The clock chip opens the visit's time moves (Reschedule, Running late, Can't start) as an
+    /// anchored menu, like the status chip beside it; a plain chip when there is none to make.
+    @ViewBuilder private func whenControl(_ job: JobRecord) -> some View {
+        let items = whenMenuItems(job)
+        if items.isEmpty {
+            whenChip(job)
+        } else {
+            // A finished job with no time still keeps its door (it reads "Not scheduled").
+            let text = whenText(job) ?? "Not scheduled"
+            ThorbisMenu(items: items, title: "Visit time", accessibilityLabel: "Visit time, \(text). Change time") {
+                JobHeaderChip(text: text) { PaperIcon(.jobClock, size: 14, color: Theme.muted) }
+            }
+            .accessibilityIdentifier("job-when")
+        }
+    }
+
+    /// The person chip opens Assign (Paper 53A) for whoever may assign; a plain chip otherwise.
+    @ViewBuilder private func assigneeControl(_ job: JobRecord) -> some View {
+        if canAssignHere(job) {
+            let assignee = assignedDisplayName(for: job).flatMap { $0 == "Assigned" ? nil : $0 }
+            Button { showAssign = true } label: { assigneeChip(job) }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician")
+                .accessibilityValue(assignee ?? "Unassigned")
+                .accessibilityIdentifier("job-assignee")
+        } else {
+            assigneeChip(job)
+        }
     }
 
     /// Paper 21's clock chip: "Today · 10:30 AM", "Arrived 9:12 AM", or when it isn't booked yet.
@@ -3855,6 +3947,9 @@ struct JobDetailView: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("job-estimate-unavailable-\(id)")
             }
+            // The estimates' customer door (it was More › Show estimates): after the estimates it
+            // hands over, before "Add an estimate".
+            if !jobEstimates.isEmpty { showEstimatesRow }
             if canBuildEstimate { addEstimateRow }
         }
     }
@@ -3877,17 +3972,29 @@ struct JobDetailView: View {
         .accessibilityIdentifier("job-add-estimate-row")
     }
 
-    /// A quiet text button: the screen's one commit stays the bar at the bottom.
-    private var showCustomerEstimatesButton: some View {
+    /// "Show estimates": the job's estimates in the locked Customer view, as a row of Paper 23's
+    /// estimates card (56 tall, its mark in the status column, the hint under the words).
+    private var showEstimatesRow: some View {
         Button { openCustomerView(.estimates) } label: {
-            Label("Show customer", systemImage: "iphone")
-                .font(Theme.font(15, weight: .medium))
-                .foregroundStyle(Theme.foreground)
-                .padding(.horizontal, 4)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+            HStack(spacing: 12) {
+                Image(systemName: "iphone").font(.system(size: 17, weight: .regular))
+                    .foregroundStyle(Theme.foreground).frame(width: 20)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Show estimates").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text("Hand the estimates to the customer").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(PressStyle())
+        .buttonStyle(RowPressStyle())
+        .disabled(!canOpenCustomerView)
+        .opacity(canOpenCustomerView ? 1 : 0.4)
+        .accessibilityElement(children: .combine)
         .accessibilityHint("Shows this job's estimates to the customer")
         .accessibilityIdentifier("job-money-customer-view")
     }
