@@ -267,7 +267,8 @@ struct JobEstimateHandoffView: View {
             if !current { detailsID = nil; checkpointID = nil; reviewing = false; model.retire() }
         }
         .onChange(of: model.approvalAuthority) { _, allowed in
-            if !allowed { checkpointID = nil; reviewing = false; model.cancelApprovals() }
+            // A started one-signature run stays on screen to say which were approved; its ink is already gone.
+            if !allowed { checkpointID = nil; if model.batch?.started != true { reviewing = false }; model.cancelApprovals() }
         }
         // The one signature is never kept past this screen: leaving it, a lock or a hand-back forgets it.
         .onChange(of: reviewing) { _, open in if !open { forgetBatchSignature() } }

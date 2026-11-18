@@ -134,13 +134,13 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
     /// or the package path (this context's minted link, nonce and option, typed-name consent).
     /// Freezes the given ink only when this context has no frozen signature yet; an earlier frozen
     /// signature is always the one sent again. `stillCurrent` is the caller's own screen check.
-    func submitApproval(api: APIClient, jobID: String, signer typed: String, png: () -> Data?, drawn: Bool,
+    func submitApproval(api: APIClient, jobID: String, signer typed: String, png: () -> Data?, signedAt: String? = nil, drawn: Bool,
                         stillCurrent: @escaping @MainActor () -> Bool) async throws -> Submission {
         let signer = signature?.signerName ?? typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard current(), canApprove() else { return .notSubmitted }
         if signature == nil {
             guard let data = png() else { return .notSubmitted }
-            _ = try freezeSignature(signerName: signer, png: data, signedAt: ISO8601DateFormatter().string(from: Date()))
+            _ = try freezeSignature(signerName: signer, png: data, signedAt: signedAt ?? ISO8601DateFormatter().string(from: Date()))
         }
         try await validate()
         if drawn {
@@ -186,6 +186,15 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
         guard current(), canApprove() else { throw CancellationError() }
         uploadedMediaID = asset.id
         return asset.id
+    }
+
+    /// Leaving the one-signature screen: ink that was never sent for this estimate is forgotten, so any
+    /// later attempt needs fresh ink. A sent (unconfirmed) approval keeps its exact signature for its exact retry.
+    func forgetUnsentSignature() {
+        guard !submissionStarted, outcome?.isApproved != true, !running else { return }
+        signature = nil; uploadedMediaID = nil; publicDecision = nil
+        if case .retryable? = outcome { outcome = nil }
+        changed()
     }
 
     /// What an interrupted approval becomes: unknown once sent, otherwise retryable or for review.
@@ -767,7 +776,11 @@ final class JobEstimateHandoffModel: ObservableObject {
 final class JobEstimateBatchApproval: ObservableObject {
     enum ItemState: Equatable { case waiting, running, approved, stopped(String), notAttempted }
     enum Step: Equatable { case approved, stopped(String) }
-    struct Capture: Equatable { let signerName: String; let png: Data }
+    struct Capture: Equatable {
+        let signerName: String; let png: Data
+        /// When the customer signed, the same for every estimate however late its own approval runs.
+        var signedAt = ISO8601DateFormatter().string(from: Date())
+    }
 
     let order: [String]
     @Published private(set) var states: [String: ItemState]
@@ -836,6 +849,7 @@ extension JobEstimateHandoffModel {
 
     /// Leaving the screen, a hand-back, a lock or a session change: the captured ink is forgotten.
     func endBatch() {
+        if let batch { for key in batch.order { contexts[key]?.forgetUnsentSignature() } }
         batch?.discard(); batch = nil; batchSubscription = nil
     }
 
@@ -873,7 +887,7 @@ extension JobEstimateHandoffModel {
             guard let self, let context else { return }
             do {
                 let sent = try await context.submitApproval(api: self.api, jobID: self.scope.jobID, signer: capture.signerName,
-                                                            png: { capture.png }, drawn: drawn,
+                                                            png: { capture.png }, signedAt: capture.signedAt, drawn: drawn,
                                                             stillCurrent: { [weak self] in self?.approvalAuthority == true })
                 cannotSign.value = sent == .cannotSign
             } catch is CancellationError {

@@ -1044,6 +1044,22 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(Set(new.compactMap { $0["mediaID"] as? String }).count, 3)
         capture(app, "Retry approved only the remaining estimates")
     }
+    func testLeavingAfterAnInterruptedRunForgetsTheUnsentSignature() throws {
+        let app = open()
+        reachSignTogether(app)
+        toggleSampleControls(app); app.buttons["Interrupt next signature upload"].tap(); toggleSampleControls(app)
+        try approveTogether(app)
+        XCTAssertTrue(waitForBatchStop(app).label.contains("0 of 2 approved"))
+        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 0)
+        app.buttons["Back to estimates"].tap()
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        let pad = app.descendants(matching: .any)["customer-estimate-signature-pad"]
+        XCTAssertTrue(pad.waitForExistence(timeout: 15))
+        XCTAssertEqual(pad.value as? String, "Signature required", "Ink is never reused after leaving the signing screen")
+        try approveTogether(app)
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 25))
+        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 2)
+    }
     func testOneSignatureAtLargestTextKeepsShortCommit() throws {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         reachSignTogether(app)
