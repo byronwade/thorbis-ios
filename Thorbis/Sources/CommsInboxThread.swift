@@ -208,7 +208,7 @@ private struct CommsThreadHeader: View {
                 .lineLimit(1).minimumScaleFactor(0.8)
                 .accessibilityAddTraits(.isHeader)
             if !line.isEmpty {
-                Text(line).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                Text(line).font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .lineLimit(1).minimumScaleFactor(0.8)
             }
         }
@@ -265,6 +265,21 @@ struct CommsCallThreadView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
                 if let thread {
+                    // Paper 51's title block: "CALL-0142 · (916) 555-0148" (14 muted) over the
+                    // caller (34 Bold, -0.025em), 20 from the edge; the chips sit 14 under it.
+                    VStack(alignment: .leading, spacing: 2) {
+                        let place = local.flags(threadID).place
+                        Text(([thread.calls.first.map { "CALL-\($0.id.suffix(4).uppercased())" },
+                               thread.displayNumber == thread.name ? nil : thread.displayNumber,
+                               place == .inbox ? nil : "In \(place.title)"] as [String?]).compactMap { $0 }.joined(separator: " \u{00B7} "))
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(thread.name).font(Theme.font(34, weight: .bold)).tracking(-0.85).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                    .padding(.horizontal, 4).padding(.top, 2).padding(.bottom, -14)
+                    .accessibilityIdentifier("inbox-call-title")
                     ForEach(thread.calls, id: \.id) { call in
                         CommsCallCard(call: call, model: model, player: player,
                                       canLink: session.can("job.edit") && session.can("customer.view"))
@@ -284,9 +299,6 @@ struct CommsCallThreadView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if let thread {
-                ThorbisToolbarItem(placement: .principal) {
-                    CommsThreadHeader(name: thread.name, detail: thread.displayNumber, place: local.flags(threadID).place)
-                }
                 if let call = CommsCallCircle.url(thread.number) {
                     ThorbisToolbarItem(placement: .topBarTrailing) {
                         CommsCallCircle(url: call, name: thread.name)
@@ -600,6 +612,64 @@ struct CommsLocalThreadView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var mail: CommsMailDraft?
     @State private var recoveredThreadID: String?
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var work: Store
+    /// The customer this thread's number belongs to, once the server has matched it. Their open
+    /// job is Paper 49C's strip over the conversation.
+    @State private var customer: Customer?
+    /// The strip's job, pushed by state so it opens from the inbox and from a customer's page alike.
+    @State private var openedJobID: String?
+
+    /// The matched customer's open job, if there is one.
+    private var linkedJob: Job? {
+        customer.flatMap { JobFiltering.customerJobSummary(work.jobs, customerID: $0.id)?.job }
+    }
+
+    /// Paper 49C's job strip: the status dot, "AC not cooling · JOB-2214" (15 Semibold) over where
+    /// the job stands (13 muted), a chevron. On a card, radius 16, 52 tall, 16 from the edges.
+    private func jobStrip(_ job: Job) -> some View {
+        let tone = StatusTone(jobStatus: job.status, hasTime: job.scheduledFor != nil)
+        let when = JobFiltering.date(job.scheduledFor).map { $0.visitLabel() }
+        return Button { openedJobID = job.id } label: {
+            HStack(spacing: 10) {
+                Circle().fill(tone.hue).frame(width: 8, height: 8).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("\(job.title) \u{00B7} \(job.shortRef)").font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text([job.status.statusLabel, when].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                PaperIcon(.chevronRight, size: 16, color: Theme.muted)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(RowPressStyle())
+        .padding(.horizontal, 16).padding(.top, 12)
+        .background(Theme.canvas)
+        .accessibilityHint("Opens the job")
+        .accessibilityIdentifier("inbox-thread-job")
+    }
+
+    /// "Today", "Yesterday", "Jul 21", or with its year before this one.
+    private func dayLabel(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInYesterday(date) { return "Yesterday" }
+        return Calendar.current.isDate(date, equalTo: .now, toGranularity: .year)
+            ? date.formatted(.dateTime.month(.abbreviated).day())
+            : date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+
+    /// True when this message opens a new day in the conversation (Paper 49C's centred day label).
+    private func startsDay(_ index: Int, in messages: [CommsLocalMessage]) -> Date? {
+        guard let date = JobFiltering.date(messages[index].at) else { return nil }
+        if index > 0, let before = JobFiltering.date(messages[index - 1].at), Calendar.current.isDate(before, inSameDayAs: date) { return nil }
+        return date
+    }
 
     var body: some View {
         let thread = store.thread(threadID)
@@ -612,7 +682,13 @@ struct CommsLocalThreadView: View {
                                 .font(Theme.font(14)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        ForEach(thread.messages) { message in
+                        ForEach(Array(thread.messages.enumerated()), id: \.element.id) { index, message in
+                            if thread.channel == .sms, let day = startsDay(index, in: thread.messages) {
+                                Text(dayLabel(day)).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.subtleForeground)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.top, index == 0 ? 0 : 6)
+                                    .accessibilityAddTraits(.isHeader)
+                            }
                             if message.channel == .email { emailCard(message, thread: thread) } else { bubble(message, thread: thread) }
                         }
                         Color.clear.frame(height: 1).id("end")
@@ -620,7 +696,7 @@ struct CommsLocalThreadView: View {
                         ListRoomEmpty(title: "This conversation is gone.", message: "It may have been discarded on this device.")
                     }
                 }
-                .padding(.horizontal, 16).padding(.vertical, 12)
+                .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 12)
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear { proxy.scrollTo("end", anchor: .bottom) }
@@ -628,8 +704,19 @@ struct CommsLocalThreadView: View {
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
-        .safeAreaInset(edge: .top) {
-            if store.storageBlocked && thread?.channel == .email { CommsThreadStorageWarning() }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                if store.storageBlocked && thread?.channel == .email { CommsThreadStorageWarning() }
+                if thread?.channel == .sms, let job = linkedJob { jobStrip(job) }
+            }
+        }
+        .task(id: thread?.phone) {
+            guard let phone = thread?.phone, thread?.channel == .sms else { return }
+            if case .found(let match)? = try? await api.lookupCustomer(phone: phone) { customer = match }
+            #if DEBUG
+            // The design preview has no phone index: its sample thread belongs to the sample customer.
+            if PaperPreview.enabled, customer == nil { customer = work.customers.first { $0.name == thread?.contactName } }
+            #endif
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
@@ -670,6 +757,7 @@ struct CommsLocalThreadView: View {
         .thorbisDestination(item: $recoveredThreadID) { id in
             CommsLocalThreadView(threadID: id, store: store).tabletReadable()
         }
+        .thorbisDestination(item: $openedJobID) { JobDetailView(jobId: $0).tabletReadable() }
         .onAppear { if thread?.unread == true { store.setUnread(threadID, false) } }
     }
 
@@ -724,7 +812,7 @@ struct CommsLocalThreadView: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if let status = statusLine(message) { StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet, size: 12) }
                 if let when = JobFiltering.date(message.at) {
-                    Text(when.tradeTime).font(Theme.font(12)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(when.tradeTime).font(Theme.font(12)).foregroundStyle(Theme.subtleForeground)
                 }
                 let items = messageMenu(message, thread: thread)
                 if !items.isEmpty {
@@ -809,13 +897,12 @@ struct CommsTextComposer: View {
         VStack(alignment: .leading, spacing: 8) {
             if stacked { capsule(actions: false) }
             HStack(alignment: .bottom, spacing: 8) {
-                ThorbisMenu(items: cannedItems, title: "Canned replies", accessibilityLabel: "Canned replies", arrowEdge: .bottom) {
+                ThorbisMenu(items: plusItems(ready: ready), title: "Add to this text", accessibilityLabel: "Canned replies and schedule", arrowEdge: .bottom) {
                     CreamCircleLabel(symbol: "plus")
                 }
                 .accessibilityIdentifier("inbox-canned")
                 if stacked {
                     Spacer(minLength: 0)
-                    scheduleButton(ready: ready)
                     sendButton(ready: ready)
                 } else {
                     capsule(actions: true)
@@ -866,7 +953,7 @@ struct CommsTextComposer: View {
     }
 
     private var field: some View {
-        TextField("Message", text: $body_, prompt: .placeholder("Text \(thread.contactName)\u{2026}"), axis: .vertical)
+        TextField("Message", text: $body_, prompt: .placeholder("Text \(thread.contactName.split(separator: " ").first.map(String.init) ?? thread.contactName)\u{2026}"), axis: .vertical)
             .lineLimit(1...6)
             .font(Theme.font(16))
             .focused($focused)
@@ -881,25 +968,17 @@ struct CommsTextComposer: View {
         let ready = !body_.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return HStack(alignment: .bottom, spacing: 2) {
             field
-            if actions {
-                scheduleButton(ready: ready)
-                sendButton(ready: ready)
-            }
+            if actions { sendButton(ready: ready) }
         }
         .padding(.leading, 16).padding(.trailing, actions ? 2 : 16)
         .frame(minHeight: 48)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
-    private func scheduleButton(ready: Bool) -> some View {
-        Button { scheduling = true } label: {
-            Image(systemName: "clock").font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.muted)
-                .frame(width: 36, height: 44).contentShape(Rectangle())
-        }
-        .buttonStyle(PressStyle())
-        .disabled(!ready)
-        .opacity(ready ? 1 : 0.4)
-        .accessibilityLabel("Schedule draft")
+    /// Paper 49C keeps the field to the words and the send circle, so Schedule draft leads the
+    /// plus menu, over the canned replies.
+    private func plusItems(ready: Bool) -> [ThorbisMenuItem] {
+        [ThorbisMenuItem("Schedule draft", icon: "clock", isDisabled: !ready) { scheduling = true }] + cannedItems
     }
 
     /// Saves the text as a draft (nothing sends): the brand circle with an up arrow.
