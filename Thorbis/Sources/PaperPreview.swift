@@ -1636,8 +1636,8 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         // Like the server, list items carry no allowedTransitions; only GET /v1/jobs/{id} does.
         case "/v1/jobs":
             let items = jobs().map { $0.filter { $0.key != "allowedTransitions" } }
-            return ["items": matchingCustomer(items, queryItems: queryItems)]
-        case "/v1/customers": return ["items": customers()]
+            return ["items": matchingCustomer(scaled(items), queryItems: queryItems)]
+        case "/v1/customers": return ["items": scaled(customers())]
         case "/v1/search":
             // The Search Gateway over the sample rows: titles and names, and phone digits.
             let words = (queryItems.first { $0.name == "q" }?.value ?? "").lowercased()
@@ -2295,6 +2295,38 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
              "createdAt": when, "updatedAt": when, "allowedTransitions": [String]()] as [String: Any]
         }
     }
+    /// `--paper-preview-scale N`: the sample book N times over (fresh ids each copy), to see how
+    /// lists and the first screen hold up with a real company's thousands of records.
+    private static func scaled(_ rows: [[String: Any]]) -> [[String: Any]] {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--paper-preview-scale"), args.indices.contains(index + 1),
+              let copies = Int(args[index + 1]), copies > 1 else { return rows }
+        return (0..<min(copies, 2000)).flatMap { copy -> [[String: Any]] in
+            guard copy > 0 else { return rows }
+            let prefix = String(format: "%08x-", copy)
+            return rows.map { row in
+                var next = row
+                for key in ["id", "customerId"] {
+                    if let value = next[key] as? String, value.hasPrefix("00000000-") { next[key] = prefix + value.dropFirst(9) }
+                }
+                if let name = next["name"] as? String { next["name"] = "\(name) \(copy)" }
+                // Jobs: like a real book, the copies are history. Most are finished on an earlier
+                // day; every tenth copy still waits for a time.
+                if next["customerId"] != nil, next["status"] != nil {
+                    if copy % 10 == 0 {
+                        next["scheduledFor"] = NSNull()
+                        next["status"] = "scheduled"
+                    } else {
+                        let day = Date().addingTimeInterval(-Double(copy) * 86_400)
+                        next["scheduledFor"] = ISO8601DateFormatter().string(from: day)
+                        next["status"] = "completed"
+                    }
+                }
+                return next
+            }
+        }
+    }
+
     private static func customers() -> [[String: Any]] {
         let shortName = ProcessInfo.processInfo.arguments.contains("--paper-preview-short-customer-name")
         let longName = ProcessInfo.processInfo.arguments.contains("--paper-preview-customer-name-long")

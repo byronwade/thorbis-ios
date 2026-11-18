@@ -38,8 +38,21 @@ enum JobFiltering {
     /// formatters are made once (ISO8601DateFormatter is thread-safe; their options never change).
     static func date(_ raw: String?) -> Date? {
         guard let raw else { return nil }
-        return isoFractional.date(from: raw) ?? isoPlain.date(from: raw)
+        // Lists filter and sort on these on every redraw; parsing a few thousand timestamps each
+        // time was most of the wait when opening a large company. Each string is parsed once.
+        parsedLock.lock()
+        if let known = parsed[raw] { parsedLock.unlock(); return known.date }
+        parsedLock.unlock()
+        let date = isoFractional.date(from: raw) ?? isoPlain.date(from: raw)
+        parsedLock.lock()
+        if parsed.count >= 60_000 { parsed.removeAll(keepingCapacity: true) }
+        parsed[raw] = Parsed(date: date)
+        parsedLock.unlock()
+        return date
     }
+    private struct Parsed { let date: Date? }
+    nonisolated(unsafe) private static var parsed: [String: Parsed] = [:]
+    private static let parsedLock = NSLock()
     nonisolated(unsafe) static let isoFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

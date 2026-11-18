@@ -45,19 +45,16 @@ struct DispatchBoardView: View {
 
     private var canAssign: Bool { session.can("job.assign", feature: "jobs") }
 
+    /// The day's two lists, worked out once per change to the jobs or the day. They are read many
+    /// times while the board draws (once per waiting row, once per tech); filtering and sorting
+    /// the whole book on every read froze the app on a company with thousands of jobs.
+    @State private var lists = BoardLists()
+
     /// Oldest waiting first: the queue is worked from the top.
-    var unscheduled: [Job] {
-        JobFiltering.schedule(store.jobs, range: .unscheduled)
-            .sorted { (JobFiltering.date($0.createdAt) ?? .distantFuture) < (JobFiltering.date($1.createdAt) ?? .distantFuture) }
-    }
+    var unscheduled: [Job] { lists.resolve(store.jobs, day: day).unscheduled }
 
     /// Today's visits, finished ones included (dimmed) so each tech's day reads whole.
-    var today: [Job] {
-        store.jobs.filter { job in
-            job.status != "canceled" && (JobFiltering.date(job.scheduledFor).map { Calendar.current.isDate($0, inSameDayAs: day) } ?? false)
-        }
-        .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
-    }
+    var today: [Job] { lists.resolve(store.jobs, day: day).today }
 
     /// design.thorbis.com Rooms, "Board: Open, en route, on site. Compact cards." Today's work in
     /// columns by where it stands, plus Done; the Unscheduled queue sits at the foot of Open.
@@ -161,9 +158,13 @@ struct DispatchBoardView: View {
                 Text("Everything has a time.").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 56, alignment: .leading)
             } else {
-                ForEach(unscheduled) { job in
-                    if job.id != unscheduled.first?.id { WellDivider() }
-                    waitingRow(job)
+                // Lazy: a long queue builds only the rows on screen.
+                let waiting = unscheduled
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(waiting) { job in
+                        if job.id != waiting.first?.id { WellDivider() }
+                        waitingRow(job)
+                    }
                 }
             }
         }
@@ -599,4 +600,25 @@ extension PaperGlyph {
                                                    .stroke("M6.2 14C6.8 12.5 8.2 11.7 10 11.7C11.8 11.7 13.2 12.5 13.8 14", 1.3)])
     /// Paper 53's toast arrow (undo).
     static let undoArrow = PaperGlyph(box: 20, [.stroke("M7.5 5L4 8.5L7.5 12M4.5 8.5H12C14.2 8.5 16 10.3 16 12.5C16 14.7 14.2 16.5 12 16.5H9.5", 1.7)])
+}
+
+/// `DispatchBoardView`'s day, kept between redraws. Held in `@State` as a reference so reading it
+/// while the view draws never invalidates the view.
+final class BoardLists {
+    private var jobs: [Job] = []
+    private var day: Date?
+    private(set) var today: [Job] = []
+    private(set) var unscheduled: [Job] = []
+
+    /// Recomputes only when the jobs or the day changed (comparing the same array is immediate).
+    func resolve(_ jobs: [Job], day: Date, calendar: Calendar = .current) -> BoardLists {
+        if let last = self.day, calendar.isDate(last, inSameDayAs: day), jobs == self.jobs { return self }
+        self.jobs = jobs
+        self.day = day
+        unscheduled = JobFiltering.schedule(jobs, range: .unscheduled).sortedByDate(\.createdAt, missing: .distantFuture)
+        today = jobs.filter { job in
+            job.status != "canceled" && (JobFiltering.date(job.scheduledFor).map { calendar.isDate($0, inSameDayAs: day) } ?? false)
+        }.sortedByDate(\.scheduledFor, missing: .distantFuture)
+        return self
+    }
 }

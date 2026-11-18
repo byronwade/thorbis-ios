@@ -13,6 +13,16 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-opening-workspace-fix",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "hourglass", title: "No more stuck on opening",
+                      detail: "The app could freeze on Opening your workspace for a company with many jobs. The Schedule board is fixed."),
+                .init(symbol: "bolt", title: "Faster with a large company",
+                      detail: "Schedule, Jobs, Customers and Search open in seconds with thousands of jobs and customers."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-crash-fixes",
             date: "2026-11-18",
             highlights: [

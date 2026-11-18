@@ -375,7 +375,11 @@ final class Store: ObservableObject {
     @Published var requestedSearch: String? {
         didSet { if requestedSearch != nil { openedForRecord = true } }
     }
-    @Published var customers: [Customer] = []
+    @Published var customers: [Customer] = [] {
+        didSet { customerNames = Dictionary(customers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
+    }
+    /// Names by id, so each row's lookup does not walk the whole customer list.
+    private var customerNames: [String: String] = [:]
     @Published var error: String?
     @Published var loading = false
     /// When the shown jobs came from the on-device copy instead of the server.
@@ -490,7 +494,7 @@ final class Store: ObservableObject {
     }
 
     func customerName(_ id: String?) -> String {
-        customers.first { $0.id == id }?.name ?? "Customer"
+        id.flatMap { customerNames[$0] } ?? "Customer"
     }
 }
 
