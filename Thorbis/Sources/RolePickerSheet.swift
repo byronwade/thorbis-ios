@@ -13,16 +13,17 @@ struct RolePickerSheet: View {
         let detail: String
     }
 
-    /// Paper 14B's order and words. "Office" is the server's office manager and "Manager" its admin.
+    /// Paper 14B's order and words. "Office" is the server's office manager. Paper's "Manager" has no server role, so the
+    /// server's admin is offered under its own name: it grants full control and must say so.
     static let roles: [Role] = [
         Role(id: "owner", serverID: nil, name: "Owner", detail: "Everything, including billing and payouts. Ownership is transferred, not invited."),
-        Role(id: "office_manager", serverID: "office_manager", name: "Office", detail: "Customers, scheduling, invoices and payroll"),
+        Role(id: "office_manager", serverID: "office_manager", name: "Office", detail: "Customers, scheduling, estimates, invoices and collections"),
         Role(id: "dispatcher", serverID: "dispatcher", name: "Dispatcher", detail: "Schedule and assign jobs, talk to customers"),
-        Role(id: "admin", serverID: "admin", name: "Manager", detail: "Runs the team day to day: approves estimates, timesheets and time off; sees reports."),
+        Role(id: "admin", serverID: "admin", name: "Admin", detail: "Full control of the workspace, including members and permissions."),
         Role(id: "csr", serverID: "csr", name: "CSR", detail: "Answers calls and texts, books jobs and appointments, and updates customers."),
         Role(id: "technician", serverID: "technician", name: "Technician", detail: "Their own jobs, time clock and payments"),
         Role(id: "apprentice", serverID: "apprentice", name: "Apprentice", detail: "Rides along. Photos and notes, no prices"),
-        Role(id: "accountant", serverID: "accountant", name: "Accountant", detail: "Money, reports and QuickBooks only"),
+        Role(id: "accountant", serverID: "accountant", name: "Accountant", detail: "Money and reports only"),
     ]
 
     /// The picker's name for a server role id ("office_manager" reads "Office").
