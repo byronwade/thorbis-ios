@@ -13,8 +13,8 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
-            id: "2026-11-19-one-look",
-            date: "2026-11-19",
+            id: "2026-11-18-one-look",
+            date: "2026-11-18",
             highlights: [
                 .init(symbol: "rectangle.3.group", title: "One look for every screen",
                       detail: "Page titles, section labels, buttons, chips and fields now share one size and spacing on every screen."),
@@ -25,8 +25,8 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
-            id: "2026-11-19-simpler-menu",
-            date: "2026-11-19",
+            id: "2026-11-18-simpler-menu",
+            date: "2026-11-18",
             highlights: [
                 .init(symbol: "sidebar.left", title: "A shorter menu",
                       detail: "The menu lists only your main places. Everything else opens from Search, Money, Team or Settings."),
@@ -39,8 +39,8 @@ enum ReleaseNotes {
             ]
         ),
         ReleaseNote(
-            id: "2026-11-19-present-estimates",
-            date: "2026-11-19",
+            id: "2026-11-18-present-estimates",
+            date: "2026-11-18",
             highlights: [
                 .init(symbol: "doc.on.doc", title: "Present all of a job's estimates",
                       detail: "Show customer on an estimate opens every estimate on its job, starting with the one you tapped."),
