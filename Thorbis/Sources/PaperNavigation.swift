@@ -36,6 +36,8 @@ struct RootView: View {
     @State private var editingMenu = false
     /// Whether Inbox holds unread notices, as the server last said. Unknown shows no dot.
     @State private var inboxUnread = false
+    /// How many notices are unread, when one page holds them all; nil when only "some" is known.
+    @State private var inboxUnreadCount: Int?
     /// iPhone search: a field floats low on the screen and results rise in a card above it.
     /// True while the Search route is the screen showing (v2: Search is a pushed route).
     @State private var barSearching = false
@@ -181,34 +183,35 @@ struct RootView: View {
 
     // MARK: - The drawer shell
 
-    /// The phone's navigation: the drawer underneath, and the place showing as a card on top. Opening
-    /// the drawer slides the card right, where it waits with rounded corners and a soft shadow; a tap
-    /// or a drag on the card closes it. Reduce Motion keeps the card still and fades the drawer in.
+    /// The phone's navigation (Paper 29N / 57N / 58N): the place stays where it is and the drawer
+    /// floats over it as a rounded panel, 8 from the left and bottom edges, sliding in from the
+    /// left while the place dims. A tap or a drag on the dimmed place closes it. Reduce Motion
+    /// fades the panel in. At accessibility sizes the drawer is the whole screen.
     private func phoneShell() -> some View {
         GeometryReader { geometry in
-            let width = DrawerMotion.width(screen: geometry.size.width, accessibilitySize: typeSize.isAccessibilitySize)
-            let progress = DrawerMotion.progress(open: drawerOpen, drag: drawerDrag, width: width)
-            let insets = geometry.safeAreaInsets
+            let full = typeSize.isAccessibilitySize
+            let width = DrawerMotion.panelWidth(screen: geometry.size.width, accessibilitySize: full)
+            // How far the panel travels: its width and its 8pt gap from the edge.
+            let travel = full ? width : width + DrawerPanel.inset
+            let progress = DrawerMotion.progress(open: drawerOpen, drag: drawerDrag, width: travel)
             ZStack(alignment: .leading) {
-                // The drawer's frame stays under the card so opening (from a root or a pushed
-                // screen) only slides; its contents are built only while it can be seen — open, under
-                // a finger, or sliding shut — so a closed drawer leaves nothing in the accessibility
-                // tree (not even its empty scroll view). The edge swipe lives on the card, so it
-                // still opens a drawer whose contents are not built yet.
+                card(progress: progress, width: travel)
+                // The panel's contents are built only while it can be seen — open, under a finger,
+                // or sliding shut — so a closed drawer leaves nothing in the accessibility tree (not
+                // even its empty scroll view). The edge swipe lives on the place, so it still opens
+                // a drawer whose contents are not built yet.
                 if !reduceMotion {
-                    drawer(width: width, full: typeSize.isAccessibilitySize,
-                           rowsBuilt: drawerOpen || drawerDrag != 0 || drawerSettling,
-                           visible: drawerOpen || drawerDrag != 0)
-                        .frame(width: width)
-                        .simultaneousGesture(closeDrag(width: width))
+                    drawerPanel(drawer(width: width, full: full,
+                                       rowsBuilt: drawerOpen || drawerDrag != 0 || drawerSettling,
+                                       visible: drawerOpen || drawerDrag != 0),
+                                width: width, full: full)
+                        .offset(x: -travel * (1 - progress))
+                        .simultaneousGesture(closeDrag(width: travel))
                         .opacity(progress > 0 ? 1 : 0)
                         .accessibilityHidden(!drawerOpen)
                         .allowsHitTesting(drawerOpen)
-                }
-                card(progress: progress, width: width, insets: insets)
-                if reduceMotion, drawerOpen {
-                    drawer(width: width, full: typeSize.isAccessibilitySize)
-                        .frame(width: width)
+                } else if drawerOpen {
+                    drawerPanel(drawer(width: width, full: full), width: width, full: full)
                         .transition(.opacity)
                 }
             }
@@ -242,30 +245,36 @@ struct RootView: View {
         reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.9)
     }
 
-    /// The place showing, as the drawer's card.
-    private func card(progress: CGFloat, width: CGFloat, insets: EdgeInsets) -> some View {
-        let shape = DrawerCardShape(radius: DrawerMotion.cornerRadius(topInset: insets.top) * progress,
-                                    top: insets.top, bottom: insets.bottom)
-        return phonePlaces()
+    /// The drawer as Paper's panel: radius 30 on its own fill, a 1pt border and a deep shadow,
+    /// under the status bar and 8 from the left and bottom edges of the screen.
+    @ViewBuilder private func drawerPanel(_ content: some View, width: CGFloat, full: Bool) -> some View {
+        if full {
+            content.frame(width: width)
+        } else {
+            content
+                .frame(width: width)
+                .background(DrawerPanel.fill)
+                .clipShape(DrawerPanel.shape)
+                .overlay { DrawerPanel.shape.strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.22), radius: 25, y: 20)
+                .padding(.leading, DrawerPanel.inset).padding(.bottom, DrawerPanel.inset)
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
+    }
+
+    /// The place showing, under the drawer's panel: it stays put and dims as the panel comes in.
+    private func card(progress: CGFloat, width: CGFloat) -> some View {
+        phonePlaces()
             .accessibilityHidden(drawerOpen)
-            // C-Nav: the pushed place reads as the panel beside the drawer's canvas, a step lighter
-            // in both themes, so the drawer is the thing being used.
             .overlay {
-                Color.white.opacity((colorScheme == .dark ? 0.05 : 0.45) * progress)
+                Color.black.opacity(DrawerPanel.scrim(dark: colorScheme == .dark) * progress)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }
-            .clipShape(shape)
-            // A hairline edge keeps the card's outline in dark mode, where the shadow vanishes.
-            .overlay { shape.strokeBorder(Color.white.opacity(colorScheme == .dark ? 0.10 * progress : 0), lineWidth: 1).allowsHitTesting(false) }
-            .background {
-                shape.fill(Theme.background)
-                    .shadow(color: .black.opacity(0.18 * progress), radius: 30, x: -8)
-            }
             .overlay {
-                // While open the card only closes the drawer: a tap, or a drag back to the left.
+                // While open the place only closes the drawer: a tap, or a drag back to the left.
                 if drawerOpen {
-                    Color.black.opacity(reduceMotion ? 0.18 : 0.001)
+                    Color.black.opacity(0.001)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture { closeDrawer() }
@@ -284,7 +293,6 @@ struct RootView: View {
                         .accessibilityHidden(true)
                 }
             }
-            .offset(x: reduceMotion ? 0 : width * progress)
     }
 
     /// `rowsBuilt`: the rows stay through the slide shut so nothing pops. `visible`: the UIKit-hosted
@@ -324,7 +332,7 @@ struct RootView: View {
             // Paper 77: the bell opens Notifications over the place showing. Without access to job
             // notices there is nothing to show there, so the bell keeps opening Messages.
             openNotifications: CommsInboxAccess(session).notices
-                ? { closeDrawer(thenRun: { pushOnCurrent(PaperRoute.notifications) }) } : nil
+                ? { closeDrawer(thenRun: nil); openNotifications() } : nil
         )
         // VoiceOver: the drawer is a modal group while open; the escape gesture closes it. Closed, it
         // stays built under the card but is out of the accessibility tree: no modal trait to trap
@@ -454,7 +462,13 @@ struct RootView: View {
         case .jobs:
             let open = TodayNumbers.open(store.jobs)
             return PlaceCount.number(open, spoken: "\(open) open")
-        case .inbox: return showsInboxDot ? .unread : nil
+        case .inbox:
+            guard showsInboxDot else { return nil }
+            // Paper 57N: the brand badge with the number when it is known; the dot otherwise.
+            if let unread = inboxUnreadCount, unread > 0 {
+                return PlaceCount.badge(unread, spoken: "\(unread) unread")
+            }
+            return .unread
         case .money:
             guard let due = dayMoney.totalDue, due > 0 else { return nil }
             return PlaceCount(text: compactMoney(due), spoken: "\(money(due, currency: "USD")) due")
@@ -495,10 +509,20 @@ struct RootView: View {
                                            identity: "\(session.user?.id ?? "")|\(session.activeOrganization?.id ?? "")|\(session.generation)")
     }
 
-    /// Asks the server whether Inbox holds unread notices (one row is enough to know).
+    /// Asks the server whether Inbox holds unread notices, and how many when one page shows them all.
     private func refreshInboxDot() async {
-        guard session.can("job.view", feature: "job_booking_notices") else { inboxUnread = false; return }
-        if let page = try? await api.staffNotices(limit: 1) { inboxUnread = page.unreadState == .present }
+        guard session.can("job.view", feature: "job_booking_notices") else {
+            inboxUnread = false
+            inboxUnreadCount = nil
+            return
+        }
+        // One page: the server says whether anything is unread; the count is exact only when the
+        // page is the whole feed (no cursor), so a longer feed keeps the dot.
+        if let page = try? await api.staffNotices(limit: 50) {
+            inboxUnread = page.unreadState == .present
+            let unread = page.items.filter { !$0.read }.count
+            inboxUnreadCount = page.nextCursor == nil && unread > 0 ? unread : nil
+        }
     }
 
     /// The gear circle: every business (the current one checked), Add a business, Settings, Edit menu.
@@ -838,8 +862,9 @@ struct RootView: View {
         case "team", "role-editor", "member-access": previewPlace(.team)
         case "payouts": previewPlace(.money, then: .payments)
         case "customize-menu": schedulePath.append(PaperRoute.customizeMenu)
-        case "properties", "property-detail": schedulePath.append(PaperRoute.properties)
-        case "notifications": schedulePath.append(PaperRoute.notifications)
+        // Paper 87A / 77: top-level places, so they open as roots with the menu circle.
+        case "properties", "property-detail": previewPlace(.properties)
+        case "notifications": openNotifications()
         case "signature": previewSignature = true
         case "job-schedule", "equipment-editor", "equipment-sections": primaryTab = .jobs; previewFormSheet = PaperPreview.screen
         case "new-job", "book-job", "book-job-filled": createJob = true
@@ -956,6 +981,14 @@ struct RootView: View {
         selectedTab = item.rawValue
     }
 
+    /// Paper 77: Notifications is a top-level place (the menu circle, never Back). It has no drawer
+    /// row of its own; the drawer's bell opens it.
+    static let notificationsPlace = "notifications"
+    private func openNotifications() {
+        if selectedTab == Self.notificationsPlace { popToRoot(Self.notificationsPlace) }
+        selectedTab = Self.notificationsPlace
+    }
+
     private func openLocal(_ section: LocalWorkspaceSection) {
         let id = "local-\(section.rawValue)"
         if selectedTab == id { popToRoot(id) }
@@ -987,6 +1020,10 @@ struct RootView: View {
         } else if id.hasPrefix("local-"), let section = LocalWorkspaceSection(rawValue: String(id.dropFirst(6))) {
             NavigationStack(path: customPath(id)) {
                 PaperRouteView(route: .local(section)).modifier(DrawerCircleInBar()).paperDestinations()
+            }
+        } else if id == Self.notificationsPlace {
+            NavigationStack(path: customPath(id)) {
+                PaperRouteView(route: .notifications).modifier(DrawerCircleInBar()).paperDestinations()
             }
         } else {
             tabRoot(.schedule)
