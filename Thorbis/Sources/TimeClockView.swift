@@ -360,7 +360,7 @@ struct TimeClockView: View {
             #if DEBUG
             if PaperPreview.enabled {
                 switch PaperPreview.screen {
-                case "time-clock-timeoff": sheet = .timeOff(nil)
+                case "time-clock-timeoff", "time-clock-date": sheet = .timeOff(nil)
                 case "time-clock-fix": if let open = model.active { sheet = .fix(open) }
                 case "time-clock-timesheet": route = .timesheet
                 default: break

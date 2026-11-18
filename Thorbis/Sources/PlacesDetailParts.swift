@@ -71,6 +71,8 @@ struct PlaceSummaryTile: View {
 struct PlaceSegments<Value: Hashable>: View {
     let options: [(value: Value, label: String)]
     @Binding var selection: Value
+    /// Paper 92D rounds the track and the plate all the way and tints the plate with 12% ink.
+    var pill = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -83,7 +85,12 @@ struct PlaceSegments<Value: Hashable>: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 6).padding(.vertical, 4)
                         .frame(maxWidth: .infinity, minHeight: 38)
-                        .background { if on { RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Theme.sidebarAccent) } }
+                        .background {
+                            if on {
+                                RoundedRectangle(cornerRadius: pill ? 19 : 11, style: .continuous)
+                                    .fill(pill ? Theme.foreground.opacity(0.12) : Theme.sidebarAccent)
+                            }
+                        }
                         .contentShape(Rectangle().inset(by: -3))
                 }
                 .buttonStyle(PressStyle())
@@ -91,7 +98,7 @@ struct PlaceSegments<Value: Hashable>: View {
             }
         }
         .padding(3)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: pill ? 22 : 14, style: .continuous))
         .sensoryFeedback(.selection, trigger: selection)
     }
 }

@@ -430,6 +430,14 @@ struct TimeClockTimeOffEditor: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background.ignoresSafeArea())
         .onChange(of: from) { _, start in if to < start { to = start } }
+        #if DEBUG
+        .task {
+            // Design preview: Paper P1's picker, opened over the request it answers.
+            guard PaperPreview.enabled, PaperPreview.screen == "time-clock-date" else { return }
+            try? await Task.sleep(for: .milliseconds(700))
+            picking = PlaceDatePick(id: "from", title: "From", date: from, includesTime: true) { from = $0 }
+        }
+        #endif
         .placeDatePicker($picking)
         .thorbisConfirm("Delete this request?", message: "It was never sent, so nobody else is told.",
                         isPresented: $confirmDelete,

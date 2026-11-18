@@ -115,33 +115,45 @@ struct LearnField: View {
 struct LearnDateRow: View {
     let title: String
     @Binding var date: Date?
+    @State private var picking: PlaceDatePick?
+
+    private func pick() {
+        picking = PlaceDatePick(id: title, title: title, date: date ?? .now) { date = $0 }
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(title).font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            if let chosen = date {
-                DatePicker(title, selection: Binding(get: { chosen }, set: { date = $0 }), displayedComponents: .date)
-                    .labelsHidden()
-                    .tint(Theme.brand)
+        HStack(spacing: 4) {
+            Button(action: pick) {
+                HStack(spacing: 8) {
+                    Text(title).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    if let chosen = date {
+                        Text(chosen.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year()))
+                            .font(Theme.font(16)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.trailing)
+                    } else {
+                        Text("Add").font(Theme.font(16)).foregroundStyle(Theme.brandText)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel(date == nil ? "Add \(title.lowercased())" : "\(title), \(date?.formatted(date: .abbreviated, time: .omitted) ?? "")")
+            .accessibilityHint("Opens the calendar")
+            if date != nil {
                 Button { date = nil } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.subtle)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                    PaperIcon(.close, size: 14, color: Theme.subtle)
+                        .frame(width: 36, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("Clear \(title.lowercased())")
-            } else {
-                Button { date = .now } label: {
-                    Text("Add").font(Theme.font(16)).foregroundStyle(Theme.brandText)
-                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Add \(title.lowercased())")
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 6)
+        .padding(.leading, 16).padding(.trailing, date == nil ? 16 : 6).padding(.vertical, 6)
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .placeDatePicker($picking)
     }
 }
 
