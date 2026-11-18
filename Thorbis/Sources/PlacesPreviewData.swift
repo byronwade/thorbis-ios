@@ -21,7 +21,8 @@ enum PlacesPreviewData {
     static func timeClock(userID: String, organizationID: String) throws -> TimeClockStore {
         let store = try TimeClockStore(userID: userID, organizationID: organizationID, directory: folder("timeclock"))
         let now = Date()
-        for days in [2, 1] {
+        // The fix preview leaves yesterday open, so only the day before is finished there.
+        for days in (PaperPreview.screen == "time-clock-fix" ? [2] : [2, 1]) {
             let lunch = TimeClockBreak(start: at(days, 12, 0), end: at(days, 12, 30))
             let entry = TimeClockEntry(clockIn: at(days, 7, 20), clockOut: at(days, 15, 45), breaks: [lunch])
             try? store.save(entry, now: now)
