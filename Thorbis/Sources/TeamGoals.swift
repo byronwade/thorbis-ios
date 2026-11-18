@@ -298,72 +298,118 @@ struct TeamGoalsView: View {
     private var actor: String? { session.user?.id }
     private var org: String? { session.activeOrganization?.id }
 
+    /// This week's numbers for the people the viewer may see (`GET /v1/reports/scorecard`). Nil
+    /// offline or when the read is refused: the page then shows the goals without the standings.
+    @State private var card: Scorecard?
+
+    /// Paper 91: "This week · Jul 20 – 26".
+    private var weekLine: String {
+        let start = ScorecardPeriod.week.range(now: .now).from
+        guard let end = Calendar.current.date(byAdding: .day, value: 6, to: start) else { return "This week" }
+        let sameMonth = Calendar.current.component(.month, from: start) == Calendar.current.component(.month, from: end)
+        let last = sameMonth ? end.formatted(.dateTime.day()) : end.formatted(.dateTime.month(.abbreviated).day())
+        return "This week \u{00B7} \(start.formatted(.dateTime.month(.abbreviated).day())) \u{2013} \(last)"
+    }
+
+    /// A person on the leaderboard: their goal settings with this week's numbers when known.
+    private struct Standing: Identifiable {
+        let person: TeamGoalsSettings.Person
+        let numbers: Scorecard.Person?
+        var id: String { person.userId }
+    }
+
+    /// Most sold first; people whose numbers aren't known follow by name.
+    private func standings(_ screen: TeamGoalsSettings) -> [Standing] {
+        let numbers = Dictionary((card?.people ?? []).map { ($0.userId, $0) }, uniquingKeysWith: { first, _ in first })
+        return screen.people.map { Standing(person: $0, numbers: numbers[$0.userId]) }.sorted { first, second in
+            let a = first.numbers?.sold ?? -1, b = second.numbers?.sold ?? -1
+            if a != b { return a > b }
+            return first.person.displayName.localizedStandardCompare(second.person.displayName) == .orderedAscending
+        }
+    }
+
+    private func whole(_ cents: Int, currency: String) -> String {
+        (Decimal(cents) / 100).formatted(.currency(code: currency).precision(.fractionLength(0)))
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                // Paper 91: the title in 34 Bold with one muted line under it.
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Team goals").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Weekly sold goals for each role and person").font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 16)
+                // Paper 91: the title in 34 Bold with the week under it.
+                PaperHeader(title: "Team goals", subtitle: weekLine)
+                    .environment(\.paperMenuButton, false)
+                    .environment(\.paperDrawer, nil)
 
                 if let error = model.loadError {
                     InlineProblem(message: error).padding(.horizontal, Theme.gutter).padding(.bottom, 12)
                 }
                 if let screen = model.screen {
-                    PaperSection("Leaderboard", count: nil) {
-                        Toggle(isOn: Binding(get: { screen.leaderboardEnabled }, set: { on in
-                            Task { await model.edit(.leaderboard(on), api: api, actorID: actor, organizationID: org) }
-                        })) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Show leaderboard to the team").font(Theme.font(16, weight: .medium))
-                                status(for: TeamGoalEdit.leaderboard(true).key,
-                                       fallback: screen.leaderboardEnabled ? "Ranked by percent of goal. Nobody sees anyone's dollars." : "Off")
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let card { hero(card) }
+                        // Paper 91's Leaderboard: rank, initials, the name over jobs done and the
+                        // goal that applies, and what they sold. A row opens that person's goal.
+                        label("Leaderboard", top: card == nil ? 0 : 22)
+                        let rows = standings(screen)
+                        VStack(spacing: 0) {
+                            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                                Button { target = GoalTarget(kind: .person(row.person)) } label: {
+                                    standingRow(row, rank: row.numbers?.sold == nil ? nil : index + 1,
+                                                divider: index > 0, currency: card?.currency ?? "USD")
+                                }
+                                .buttonStyle(RowPressStyle())
+                                .accessibilityHint("Sets this person's weekly goal")
                             }
                         }
-                        .tint(Theme.brand)
-                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
-                        .frame(minHeight: 52)
-                    }
-                    .paperCardMargin()
+                        .background(Theme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        if screen.truncated {
+                            footnote("Showing the first \(screen.people.count) people. Set a role goal to cover everyone else.")
+                        }
 
-                    PaperSection("Roles", count: screen.roles.count) {
-                        ForEach(screen.roles) { role in
-                            if role.id != screen.roles.first?.id { WellDivider() }
-                            Button { target = GoalTarget(kind: .role(role)) } label: {
-                                goalRow(title: role.name, detail: "\(role.people) \(role.people == 1 ? "person" : "people")",
-                                        value: TeamGoalsCopy.amount(role.weeklySold), key: TeamGoalEdit.role(key: role.roleKey, weeklySold: nil).key)
+                        label("Role goals", top: 22)
+                        VStack(spacing: 0) {
+                            ForEach(screen.roles) { role in
+                                if role.id != screen.roles.first?.id { WellDivider(leading: 16) }
+                                Button { target = GoalTarget(kind: .role(role)) } label: {
+                                    goalRow(title: role.name, detail: "\(role.people) \(role.people == 1 ? "person" : "people")",
+                                            value: TeamGoalsCopy.amount(role.weeklySold), key: TeamGoalEdit.role(key: role.roleKey, weeklySold: nil).key)
+                                }
+                                .buttonStyle(RowPressStyle())
                             }
-                            .buttonStyle(RowPressStyle())
+                            if !screen.roles.isEmpty { WellDivider(leading: 16) }
+                            Toggle(isOn: Binding(get: { screen.leaderboardEnabled }, set: { on in
+                                Task { await model.edit(.leaderboard(on), api: api, actorID: actor, organizationID: org) }
+                            })) {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text("Show leaderboard to the team").font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                                    status(for: TeamGoalEdit.leaderboard(true).key,
+                                           fallback: screen.leaderboardEnabled ? "Ranked by percent of goal. Nobody sees anyone's dollars." : "Off")
+                                }
+                            }
+                            .tint(Theme.brand)
+                            .padding(.horizontal, 16).padding(.vertical, 11)
+                            .frame(minHeight: 56)
+                        }
+                        .background(Theme.card)
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        footnote("Weekly sold goal. A month's goal is the weekly goal times the weeks in it.")
+                        if let asOf = model.asOf {
+                            footnote("As of \(asOf.formatted(date: .omitted, time: .shortened)). Changes send when you're back online.")
                         }
                     }
-                    .paperCardMargin().padding(.top, 20)
-                    footnote("Weekly sold goal. A month's goal is the weekly goal times the weeks in it.")
-
-                    PaperSection("People", count: screen.people.count) {
-                        ForEach(screen.people) { person in
-                            if person.id != screen.people.first?.id { WellDivider() }
-                            Button { target = GoalTarget(kind: .person(person)) } label: {
-                                goalRow(title: person.displayName, detail: person.roleName,
-                                        value: TeamGoalsCopy.person(person), key: TeamGoalEdit.person(userId: person.userId, weeklySold: nil).key)
-                            }
-                            .buttonStyle(RowPressStyle())
-                        }
-                    }
-                    .paperCardMargin().padding(.top, 20)
-                    if screen.truncated {
-                        footnote("Showing the first \(screen.people.count) people. Set a role goal to cover everyone else.")
-                    }
-                    if let asOf = model.asOf {
-                        footnote("As of \(asOf.formatted(date: .omitted, time: .shortened)). Changes send when you're back online.")
-                    }
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 6)
                 } else if model.loadError == nil {
                     SkeletonRows(count: 4, leading: false)
                 }
             }
             .padding(.bottom, 32)
+        }
+        .task(id: "card|\(session.generation)|\(session.isOffline)") {
+            guard !session.isOffline else { return }
+            let generation = session.generation
+            let value = try? await api.scorecard(.week)
+            guard session.generation == generation, !Task.isCancelled else { return }
+            if let value { card = value }
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.canvas)
@@ -380,34 +426,131 @@ struct TeamGoalsView: View {
 
     @ViewBuilder private func status(for key: String, fallback: String) -> some View {
         if let refusal = model.refused[key] {
-            Text(refusal).font(Theme.font(13)).foregroundStyle(Theme.destructive)
+            Text(refusal).font(Theme.font(14)).foregroundStyle(Theme.destructive)
         } else if model.waiting.contains(key) {
-            Text("Waiting to sync").font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text("Waiting to sync").font(Theme.font(14)).foregroundStyle(Theme.muted)
         } else {
-            Text(fallback).font(Theme.font(13)).foregroundStyle(Theme.muted)
+            Text(fallback).font(Theme.font(14)).foregroundStyle(Theme.muted)
         }
     }
 
     private func footnote(_ text: String) -> some View {
         Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, Theme.gutter).padding(.top, 10)
+            .padding(.horizontal, 4).padding(.top, 10)
     }
 
-    /// Paper 91 card row: the name in 16 Medium, its line under it, the goal at the trailing edge.
+    private func label(_ title: String, top: CGFloat) -> some View {
+        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, 4).padding(.top, top).padding(.bottom, 8)
+    }
+
+    /// Paper 91's hero: "Revenue" over the week's sold in 44 Bold with "of $25,000", an 8pt bar,
+    /// then "74% of goal" and what is left. The goal is the sum of the goals that apply to the
+    /// people counted; without one the card is the figure alone.
+    @ViewBuilder private func hero(_ card: Scorecard) -> some View {
+        let counted = card.people.filter { $0.sold != nil }
+        if !counted.isEmpty {
+            let sold = counted.reduce(0) { $0 + ($1.sold ?? 0) }
+            let goal = counted.reduce(0) { $0 + ($1.goal ?? 0) }
+            let fraction = goal > 0 ? min(1, max(0, Double(sold) / Double(goal))) : 0
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Revenue").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { heroFigure(sold, goal: goal, currency: card.currency) }
+                    VStack(alignment: .leading, spacing: 0) { heroFigure(sold, goal: goal, currency: card.currency) }
+                }
+                if goal > 0 {
+                    GeometryReader { proxy in
+                        Capsule().fill(Theme.brand).frame(width: (proxy.size.width * fraction).rounded())
+                    }
+                    .frame(height: 8)
+                    .background(Theme.quietFill, in: Capsule())
+                    .padding(.top, 10).padding(.bottom, 6)
+                    .accessibilityHidden(true)
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text("\(sold * 100 / goal)% of goal").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(sold >= goal ? "Goal met" : "\(whole(goal - sold, currency: card.currency)) to go")
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder private func heroFigure(_ sold: Int, goal: Int, currency: String) -> some View {
+        Text(whole(sold, currency: currency)).font(Theme.font(44, weight: .bold)).tracking(-1.32)
+            .foregroundStyle(Theme.foreground).lineLimit(1).minimumScaleFactor(0.6)
+        if goal > 0 {
+            Text("of \(whole(goal, currency: currency))").font(Theme.font(15)).foregroundStyle(Theme.muted)
+        }
+    }
+
+    /// Paper 91's leaderboard row: the rank in a 16pt slot, 36pt initials, the name in 16 Medium
+    /// over one 14 muted line, the week's sold in 16 Semibold. The viewer's own row is tinted.
+    private func standingRow(_ row: Standing, rank: Int?, divider: Bool, currency: String) -> some View {
+        let me = row.person.userId == (card?.me.userId ?? session.user?.id)
+        let jobs = row.numbers.map { "\($0.jobsDone) job\($0.jobsDone == 1 ? "" : "s")" }
+        let key = TeamGoalEdit.person(userId: row.person.userId, weeklySold: nil).key
+        let goal = row.person.override.map { "Own goal \(whole($0, currency: currency))" }
+            ?? row.person.weeklySold.map { "Role goal \(whole($0, currency: currency))" } ?? "No goal"
+        let detail = [jobs, goal].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        return HStack(alignment: .center, spacing: 12) {
+            Text(rank.map(String.init) ?? "").font(Theme.font(15, weight: .semibold))
+                .foregroundStyle(me ? Theme.brandText : Theme.muted)
+                .frame(width: 16)
+            Text(Self.initials(row.person.displayName)).font(Theme.font(13, weight: .semibold))
+                .foregroundStyle(me ? Theme.brandText : Theme.foreground)
+                .frame(width: 36, height: 36)
+                .background(me ? Theme.brandSurface : Theme.quietFill, in: Circle())
+                .accessibilityHidden(true)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 0) {
+                    (Text(row.person.displayName).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                     + Text(me ? " \u{00B7} You" : "").font(Theme.font(16)).foregroundStyle(Theme.muted))
+                        .tracking(-0.16)
+                        .fixedSize(horizontal: false, vertical: true)
+                    status(for: key, fallback: detail)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let sold = row.numbers?.sold {
+                    Text(whole(sold, currency: currency)).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                }
+            }
+            .padding(.vertical, 11).padding(.trailing, 16)
+            .overlay(alignment: .top) { if divider && !me { WellDivider(leading: 0) } }
+        }
+        .padding(.leading, 16)
+        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+        .background(me ? Theme.brand.opacity(0.12) : Color.clear)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private static func initials(_ name: String) -> String {
+        name.split(separator: " ").prefix(2).compactMap(\.first).map(String.init).joined().uppercased()
+    }
+
+    /// A role's row: the name in 16 Medium, its line under it, the goal at the trailing edge.
     private func goalRow(title: String, detail: String, value: String, key: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(Theme.font(16, weight: .medium)).tracking(-0.16).foregroundStyle(Theme.foreground)
                 status(for: key, fallback: detail)
             }
             Spacer(minLength: 8)
-            Text(value).font(Theme.font(16, weight: .semibold)).monospacedDigit()
+            Text(value).font(Theme.font(16, weight: .semibold))
                 .foregroundStyle(value == "No goal" ? Theme.muted : Theme.foreground)
                 .multilineTextAlignment(.trailing)
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 11)
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(.horizontal, 16).padding(.vertical, 11)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
         .contentShape(Rectangle())
     }
 }

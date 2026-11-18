@@ -1349,6 +1349,29 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                  "payments.method": "card", "payments.status": "refunded", "payments.refunded_amount": "9500", "payments.recorded_at": day(6)]],
             ] as [[String: Any]]]
         }
+        // Team goals (Paper 91): two role goals and four people, one with their own goal.
+        if path == "/v1/organization/team-goals" {
+            let person: (String, String, Int?, Int) -> [String: Any] = { id, name, own, goal in
+                ["userId": id, "displayName": name, "roleKey": "technician", "roleName": "Technician",
+                 "override": own.map { $0 as Any } ?? NSNull(), "weeklySold": goal]
+            }
+            return ["version": 1, "leaderboardEnabled": true, "truncated": false,
+                    "roles": [["roleKey": "technician", "name": "Technician", "weeklySold": 600_000, "people": 4],
+                              ["roleKey": "apprentice", "name": "Apprentice", "weeklySold": NSNull(), "people": 1]] as [[String: Any]],
+                    "people": [person("u2", "Jess Lin", nil, 600_000), person("preview-user", "Ramon Mendez", 700_000, 700_000),
+                               person("u3", "Luis Ortega", nil, 600_000), person("u4", "Ben Whitaker", nil, 600_000)]] as [String: Any]
+        }
+        if path == "/v1/reports/scorecard", PaperPreview.screen == "team-goals" {
+            let now = ISO8601DateFormatter().string(from: Date())
+            let row: (String, Int, Int, Int) -> [String: Any] = { id, sold, jobs, goal in
+                ["userId": id, "sold": sold, "collected": sold, "invoices": jobs, "averageTicket": sold / max(1, jobs), "jobsDone": jobs,
+                 "estimatesPresented": 4, "estimatesApproved": 2, "closeRateBps": 5000, "goal": goal]
+            }
+            let me = row("preview-user", 521_000, 9, 700_000)
+            return ["generatedAt": now, "reportVersion": 1, "from": now, "to": now, "currency": "USD", "me": me,
+                    "people": [row("u2", 594_000, 11, 600_000), me, row("u3", 413_000, 8, 600_000), row("u4", 314_000, 7, 600_000)],
+                    "truncated": false] as [String: Any]
+        }
         // A week on the scorecard: most of the way to goal, with a short leaderboard.
         if path == "/v1/reports/scorecard" {
             let now = ISO8601DateFormatter().string(from: Date())
@@ -1433,6 +1456,11 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                  "explanation": "Stripe sent this payout for arrival on 2026-10-24. Stripe marking it paid does not confirm your bank has posted it.", "responsibleActor": "none", "providerCode": NSNull()]]] as [String: Any]
         }
         if path == "/v1/organization/merchant-readiness" {
+            // Paper 90 "Payouts" shows once Stripe is set up; the setup page keeps its own sample.
+            if PaperPreview.screen == "payouts" {
+                return ["state": "ready", "chargesReady": true, "payoutsReady": true, "actionRequired": false,
+                        "requirements": ["eventuallyDueCount": 0, "currentlyDueCount": 0, "pastDueCount": 0]] as [String: Any]
+            }
             return ["state": "action_required", "chargesReady": false, "payoutsReady": false, "actionRequired": true,
                     "requirements": ["eventuallyDueCount": 1, "currentlyDueCount": 2, "pastDueCount": 0]] as [String: Any]
         }

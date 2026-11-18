@@ -31,10 +31,30 @@ struct JobSavedViewChips: View {
     let onPick: (JobSavedViewEntry) -> Void
     let onSave: () -> Void
     let onManage: () -> Void
+    /// Paper 20B: with saved views on screen the row leads with the built-in ones ("My jobs",
+    /// then All jobs and Recent) and the Assigned / All jobs / Recent segments step aside.
+    var builtIn: [(id: String, title: String)] = []
+    var selectedBuiltIn: String? = nil
+    var onBuiltIn: (String) -> Void = { _ in }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                ForEach(builtIn, id: \.id) { view in
+                    let selected = selectedID == nil && view.id == selectedBuiltIn
+                    Button { onBuiltIn(view.id) } label: {
+                        Text(view.title).font(Theme.font(14, weight: selected ? .semibold : .medium)).lineLimit(1)
+                            .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
+                            .padding(.horizontal, 14).frame(minHeight: 40)
+                            .background(selected ? Theme.brand.opacity(0.24) : Theme.card, in: Capsule())
+                            .frame(minHeight: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel(view.title)
+                    .accessibilityValue(selected ? "Showing" : "")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("jobviews-builtin-\(view.id)")
+                }
                 ForEach(entries) { entry in
                     chip(entry)
                 }

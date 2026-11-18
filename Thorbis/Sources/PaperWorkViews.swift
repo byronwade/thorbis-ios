@@ -93,6 +93,9 @@ struct ScheduleView: View {
     @StateObject private var swipes = JobRowSwipeBook()
     /// The day a Week tile was tapped for; the list scrolls to that day's group, then this clears.
     @State private var weekJump: Date?
+    /// Paper 53: the board's "Job reassigned to Mike Tran · Undo" at the foot of the screen.
+    @State private var boardToast: DispatchBoardView.BoardToast?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var range: ScheduleRange {
         switch tab {
@@ -109,7 +112,22 @@ struct ScheduleView: View {
     private var showsScope: Bool { range != .unscheduled && session.user?.id != nil }
     /// Finding a job is the bar's Search; this screen narrows by range and whose jobs only.
     private var jobs: [Job] {
-        JobFiltering.schedule(store.jobs, range: range, assignedTo: scope.assignee(session.user?.id, range: range))
+        let assignee = scope.assignee(session.user?.id, range: range)
+        // Paper 79: the Week strip starts today and runs seven days, so the list does too.
+        if range == .week, let span = Self.rollingWeek() {
+            return store.jobs.filter { job in
+                !["completed", "canceled"].contains(job.status) && (assignee == nil || job.assignedToUserId == assignee) &&
+                    (JobFiltering.date(job.scheduledFor).map(span.contains) ?? false)
+            }
+            .sorted { (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture) }
+        }
+        return JobFiltering.schedule(store.jobs, range: range, assignedTo: assignee)
+    }
+
+    /// Today and the six days after it (Paper 79 "Jul 21 – 27" with today's tile first).
+    static func rollingWeek(now: Date = .now, calendar: Calendar = .current) -> DateInterval? {
+        let start = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: .day, value: 7, to: start).map { DateInterval(start: start, end: $0.addingTimeInterval(-1)) }
     }
     private var canSchedule: Bool { session.can("job.assign", feature: "jobs") }
 
@@ -169,8 +187,8 @@ struct ScheduleView: View {
     /// "Jul 21 – 27" (or "Jul 28 – Aug 3" across a month): this week, as the Week range reads it.
     private var weekSpan: String {
         let calendar = Calendar.current
-        guard let week = calendar.dateInterval(of: .weekOfYear, for: .now),
-              let last = calendar.date(byAdding: .day, value: -1, to: week.end) else { return "This week" }
+        guard let week = Self.rollingWeek() else { return "This week" }
+        let last = week.end
         let start = week.start.formatted(.dateTime.month(.abbreviated).day())
         let sameMonth = calendar.component(.month, from: week.start) == calendar.component(.month, from: last)
         let end = sameMonth ? last.formatted(.dateTime.day()) : last.formatted(.dateTime.month(.abbreviated).day())
@@ -232,8 +250,8 @@ struct ScheduleView: View {
                 if store.loading && store.jobs.isEmpty {
                     SkeletonList(count: 4, leading: true).paperCardMargin()
                 } else if showsBoard {
-                    DispatchBoardView(day: boardDay)
-                        .padding(.top, 20)
+                    DispatchBoardView(toast: $boardToast, day: boardDay)
+                        .padding(.top, 22)
                 } else if jobs.isEmpty {
                     emptyState
                     if range == .today { doneToday }
@@ -255,6 +273,20 @@ struct ScheduleView: View {
           }
         }
         .refreshable { await store.refresh(api) }
+        .overlay(alignment: .bottom) {
+            if let boardToast, showsBoard {
+                ThorbisToast(symbol: "arrow.uturn.backward", message: boardToast.message,
+                             actionTitle: boardToast.undo == nil ? nil : "Undo",
+                             action: boardToast.undo.map { undo in { self.boardToast = nil; undo() } })
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 12)
+                    .transition(ThorbisToast.transition(reduceMotion: reduceMotion))
+                    .task(id: boardToast.id) {
+                        try? await Task.sleep(for: .seconds(6))
+                        if !Task.isCancelled { withMotion { self.boardToast = nil } }
+                    }
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: boardToast?.id)
         // An open row closes as soon as the list moves.
         .onScrollPhaseChange { _, phase in if phase != .idle { swipes.rows.close() } }
         .background(Theme.canvas)
@@ -432,10 +464,10 @@ struct ScheduleView: View {
         }
     }
 
-    /// The seven days of this week, as the Week range reads it.
+    /// Today and the six days after it, as the Week range reads it.
     private var weekDays: [Date] {
         let calendar = Calendar.current
-        guard let week = calendar.dateInterval(of: .weekOfYear, for: .now) else { return [] }
+        guard let week = Self.rollingWeek() else { return [] }
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: week.start) }
     }
 
@@ -1029,15 +1061,22 @@ struct JobsView: View {
                 }
                 .paperCardMargin()
                 // Paper 20B: saved views as chips under the field, then "Save this view".
+                // Paper shows one or the other: the view chips (leading with "My jobs", then All jobs
+                // and Recent so both stay a tap away) or, with no saved views, the segments.
                 if canUseViews && (!viewEntries.isEmpty || canSaveView) {
                     JobSavedViewChips(entries: viewEntries, favorites: savedViews.favorites,
                                       selectedID: selectedViewID, showsSave: canSaveView,
                                       onPick: { pick($0) }, onSave: { showSaveView = true },
-                                      onManage: { showSavedViews = true })
+                                      onManage: { showSavedViews = true },
+                                      builtIn: [(id: "Assigned", title: "My jobs"), (id: "All jobs", title: "All jobs"),
+                                                (id: "Recent", title: "Recent")],
+                                      selectedBuiltIn: tab,
+                                      onBuiltIn: { choice in withMotion { tab = choice } })
+                        .padding(.top, 16)
+                } else {
+                    PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
                         .padding(.top, 16)
                 }
-                PaperTabs(options: ["Assigned", "All jobs", "Recent"], selection: $tab)
-                    .padding(.top, 16)
                 OfflineBanner()
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let problem = swipes.problem { ErrorBanner(message: problem) }
@@ -1439,7 +1478,7 @@ private struct WeekDayStrip: View {
 
     private func tile(_ day: Date, count: Int, today: Bool) -> some View {
         // Paper 79: Saturday and Sunday read in the muted grey; today on brand at 24%.
-        let ink: Color = today ? Theme.brandText : (count > 0 && !Calendar.current.isDateInWeekend(day) ? Theme.foreground : Theme.muted)
+        let ink: Color = today ? Theme.brandText : (Calendar.current.isDateInWeekend(day) ? Theme.muted : Theme.foreground)
         let dot: Color = count == 0 ? Color.clear : (today ? Theme.brandText : Theme.muted)
         let ground: Color = today ? Theme.brandTint : Color.clear
         return Button { jump(day) } label: {

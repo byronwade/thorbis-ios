@@ -279,7 +279,7 @@ struct TeamView: View {
         .refreshable { await load() }
         .task {
             #if DEBUG
-            if PaperPreview.opensSheet("team-invite") { inviting = true }
+            if PaperPreview.opensSheet("team-invite") || PaperPreview.opensSheet("team-role-picker") { inviting = true }
             #endif
             await load()
             #if DEBUG

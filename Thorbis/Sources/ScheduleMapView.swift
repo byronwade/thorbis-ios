@@ -49,6 +49,11 @@ struct ScheduleMapView: View {
         let shownCustomerID = (stops.first(where: { $0.id == selectedID }) ?? stops.first)?.job.customerId
         VStack(alignment: .leading, spacing: 0) {
             Map(position: $position, selection: selectionBinding) {
+                // Paper 80: a dotted brand line joins the stops in the order they are driven.
+                if stops.count > 1 {
+                    MapPolyline(coordinates: stops.map(\.coordinate))
+                        .stroke(Theme.brand, style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [0.1, 8]))
+                }
                 ForEach(stops) { stop in
                     Annotation(stop.job.title, coordinate: stop.coordinate, anchor: .bottom) {
                         pin(stop, selected: stop.id == selectedID)
@@ -79,28 +84,6 @@ struct ScheduleMapView: View {
                 card(stop, next: next).padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
             }
 
-            // Every stop in route order, on one card; a tap picks it on the map.
-            HStack(alignment: .center, spacing: 8) {
-                Text("Stops").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if !stops.isEmpty {
-                    Text("\(stops.count)").font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
-                }
-            }
-            .padding(.horizontal, PaperCardMetrics.margin + 4)
-            .padding(.top, 22).padding(.bottom, 8)
-            if !stops.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
-                        if index > 0 { WellDivider(leading: 16 + 24 + 12) }
-                        Button { select(stop) } label: { stopRow(stop) }.buttonStyle(.plain)
-                    }
-                }
-                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-                .padding(.horizontal, PaperCardMetrics.margin)
-            }
             let missing = loaded ? jobs.count - stops.count : 0
             if missing > 0 {
                 Text("\(missing) job\(missing == 1 ? " has" : "s have") no mapped address yet.")
@@ -163,7 +146,6 @@ struct ScheduleMapView: View {
                             .lineLimit(2)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    StatusGlyph(jobStatus: stop.job.status, hasTime: stop.job.scheduledFor != nil)
                 }
                 .contentShape(Rectangle())
             }
@@ -246,34 +228,6 @@ struct ScheduleMapView: View {
         }
         guard !Task.isCancelled else { return }
         if let phone = NextStopPlace.phone(contacts: verified, account: account) { phones[customerID] = phone }
-    }
-
-    /// A stop in the card (Paper v2 rows): its number on the route (brand when chosen), the job in
-    /// 16 Medium over street · time, and the status circle trailing. One VoiceOver item.
-    private func stopRow(_ stop: Stop) -> some View {
-        let selected = stop.id == selectedID
-        let time = JobFiltering.date(stop.job.scheduledFor)?.clockTime
-        return HStack(alignment: .center, spacing: 12) {
-            Text("\(stop.number)")
-                .font(Theme.font(12, weight: .semibold))
-                .foregroundStyle(selected ? Color.white : Theme.foreground)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(selected ? Theme.brand : Theme.fill))
-            VStack(alignment: .leading, spacing: 0) {
-                Text(stop.job.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground).lineLimit(2)
-                Text([street(stop), time].compactMap { $0 }.joined(separator: " · "))
-                    .font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(2)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            StatusGlyph(jobStatus: stop.job.status, hasTime: stop.job.scheduledFor != nil)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 11)
-        .frame(minHeight: 56)
-        .background(Theme.card)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Stop \(stop.number), \(street(stop)), \(stop.job.title), \(JobFiltering.date(stop.job.scheduledFor)?.tradeTime ?? "no time"), \(stop.job.status.statusLabel)")
-        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
     private func select(_ stop: Stop) {

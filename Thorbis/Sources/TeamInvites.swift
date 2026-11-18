@@ -88,7 +88,10 @@ struct InviteMemberSheet: View {
         return trimmed.contains("@") && trimmed.contains(".") && trimmed.count <= 254
     }
 
-    private var roleLabel: String { roles.first { $0.id == role }?.label ?? role.statusLabel }
+    private var roleLabel: String {
+        RolePickerSheet.name(for: role) ?? roles.first { $0.id == role }?.label ?? role.statusLabel
+    }
+    @State private var pickingRole = false
     private var companyName: String { session.activeOrganization?.name ?? "your company" }
 
     /// Paper 62C: one card holding the address and the role (each label small above its answer),
@@ -114,22 +117,24 @@ struct InviteMemberSheet: View {
                     .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
                     .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
                     ThorbisSheetDivider()
-                    ThorbisMenu(items: roles.map { option in
-                        ThorbisMenuItem(option.label, isSelected: option.id == role) { role = option.id }
-                    }, title: "Role", accessibilityLabel: "Role, \(roleLabel)") {
+                    // Paper 14B: the role is chosen on its own sheet, each with what it can do.
+                    Button { ThorbisKeyboard.dismiss { pickingRole = true } } label: {
                         HStack(spacing: 8) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Role").font(Theme.font(13)).foregroundStyle(Theme.muted)
                                 Text(roleLabel).font(Theme.font(17, weight: .semibold)).foregroundStyle(Theme.foreground)
                             }
                             Spacer(minLength: 8)
-                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                            PaperIcon(.chevronRight, size: 16, color: Theme.muted).accessibilityHidden(true)
                         }
                         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
                         .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
                         .contentShape(Rectangle())
                     }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityLabel("Role, \(roleLabel)")
+                    .accessibilityHint("Chooses the role")
+                    .accessibilityIdentifier("team-invite-role")
                 }
                 if let emailProblem { FieldProblem(message: emailProblem).padding(.horizontal, 4) }
                 Text("They get an email to join \(companyName) and choose a password. It works for 7 days. You can change the role any time.")
@@ -139,7 +144,15 @@ struct InviteMemberSheet: View {
             }
             if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
         }
-        .onAppear { emailFocused = true }
+        .onAppear {
+            emailFocused = true
+            #if DEBUG
+            if PaperPreview.opensSheet("team-role-picker") { emailFocused = false; pickingRole = true }
+            #endif
+        }
+        .sheet(isPresented: $pickingRole) {
+            RolePickerSheet(current: role, allowed: Set(roles.map(\.id))) { role = $0 }
+        }
         // MA-16: a typed address is not lost to a stray swipe.
         .interactiveDismissDisabled(busy || !email.isEmpty)
     }
