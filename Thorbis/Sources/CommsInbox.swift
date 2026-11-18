@@ -4,7 +4,11 @@ import SwiftUI
 /// never hides the other. Shared with an open thread, so a link made there shows in the list.
 @MainActor
 final class CommsInboxModel: ObservableObject {
-    @Published private(set) var calls: [BookingCallRecord] = []
+    @Published private(set) var calls: [BookingCallRecord] = [] {
+        didSet { threads = CommsCallGrouping.threads(calls) }
+    }
+    /// The calls grouped by caller, kept beside them so the list never regroups the log on a read.
+    @Published private(set) var threads: [CommsCallThread] = []
     @Published private(set) var callsCursor: String?
     @Published private(set) var callsLoading = false
     @Published private(set) var callsLoaded = false
@@ -36,8 +40,6 @@ final class CommsInboxModel: ObservableObject {
         seen.markSeen(thread.calls)
         if seen.ids != seenIDs { seenIDs = seen.ids }
     }
-
-    var threads: [CommsCallThread] { CommsCallGrouping.threads(calls) }
 
     func thread(_ id: String) -> CommsCallThread? { threads.first { $0.id == id } }
 
@@ -149,10 +151,11 @@ final class CommsInboxModel: ObservableObject {
     var canMarkNoticesRead: Bool { unreadState == .present || readCursor != nil }
 }
 
-/// The Inbox (web apps/web features/inbox, phone layout; a beta there too): one list at a time.
-/// Its title is a menu of sections (All, Calls, Voicemail, Texts, Email, Job notices), the line
-/// under it a menu of folders, and the view bar the quick filters. A conversation opens on its
-/// own screen.
+/// Messages (web apps/web features/inbox, phone layout; a beta there too; Paper 49N): one list of
+/// customer conversations, calls and job notices. A single row of chips under the search field
+/// narrows it (All, Unread, Calls, Texts, Email, Drafts); the rarer lenses (Needs reply, Starred,
+/// Sent, Archive, Bin) and marking the notices read sit behind the header's "…". A conversation
+/// opens on its own screen.
 struct CommsInboxView: View {
     let access: CommsInboxAccess
     @EnvironmentObject private var api: APIClient
@@ -160,9 +163,11 @@ struct CommsInboxView: View {
     @ObservedObject private var local: CommsLocalStore
     @EnvironmentObject private var store: Store
 
-    @State private var section: CommsInboxSection
-    @State private var folder: CommsFolder = .inbox
-    @State private var filter = CommsQuickFilter.all.rawValue
+    /// The chip that is on. Plain view state, like the old menu's: it holds while the place lives
+    /// (opening a conversation and coming back keeps it) and starts at All on a fresh launch.
+    @State private var chip: CommsInboxFilter
+    /// A lens from the "…" menu; while set, no chip is lit.
+    @State private var moreFilter: CommsInboxMoreFilter?
     @State private var open: CommsOpen?
     @State private var openingJob: String?
     @State private var composing: CommsComposeKind?
@@ -176,17 +181,35 @@ struct CommsInboxView: View {
         _model = StateObject(wrappedValue: CommsInboxModel(seen: CommsCallSeen(defaults: Self.persistsSeen ? .standard : nil,
                                                                                 actorID: actorID, organizationID: organizationID)))
         _local = ObservedObject(wrappedValue: CommsLocalStore.shared(actorID: actorID, organizationID: organizationID))
-        _section = State(initialValue: Self.previewSection(access) ?? access.defaultSection)
-        _folder = State(initialValue: Self.previewFolder ?? .inbox)
+        let preview = Self.previewScope(access)
+        _chip = State(initialValue: preview.chip)
+        _moreFilter = State(initialValue: preview.more)
     }
 
-    private var quickFilter: CommsQuickFilter { CommsQuickFilter(rawValue: filter) ?? .all }
+    /// What the list shows: the chip's lens, or the "…" lens across everything.
+    private var section: CommsInboxSection { moreFilter == nil ? chip.section : .all }
+    private var folder: CommsFolder { moreFilter?.folder ?? chip.folder }
+    private var quickFilter: CommsQuickFilter { moreFilter?.quick ?? chip.quick }
+
+    private func choose(_ next: CommsInboxFilter) {
+        moreFilter = nil
+        chip = next
+        swipes.close()
+    }
+
+    private func choose(_ next: CommsInboxMoreFilter) {
+        moreFilter = moreFilter == next ? nil : next
+        chip = .all
+        swipes.close()
+    }
 
     var body: some View {
+        // Read the store once per update: the whole list and its unread count come from one pass.
+        let scope = scoped
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                header
-                content
+                header(unread: unreadSummary(scope))
+                content(scope.filter { matchesQuickFilter($0) })
             }
             .padding(.bottom, 24)
         }
@@ -195,17 +218,17 @@ struct CommsInboxView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if access.workspace {
-                ThorbisToolbarItem(placement: .topBarTrailing) { composeButton }
+            if access.workspace || (access.notices && model.canMarkNoticesRead) {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 8) {
+                        moreMenu
+                        if access.workspace { composeButton }
+                    }
+                }
             }
         }
         .refreshable { await model.refresh(api: api, access: access) }
         .onScrollPhaseChange { _, phase in if phase != .idle { swipes.close() } }
-        .onChange(of: section) { _, next in
-            filter = CommsQuickFilter.all.rawValue
-            if !CommsInboxScope.folders(next).contains(folder) { folder = .inbox }
-            swipes.close()
-        }
         .thorbisDestination(item: $openingJob) { JobDetailView(jobId: $0).tabletReadable() }
         .thorbisDestination(item: $open) { target in
             switch target {
@@ -231,87 +254,91 @@ struct CommsInboxView: View {
     // MARK: Header
 
     /// Paper 49N: "Messages" (34/40 Bold) 20 in, 2 under it one 15 muted line ("3 unread"), then
-    /// 14 to the search field. What the list shows (section, folder, quick filter) sits behind the
-    /// field's filter circle and shows inside the field as chips.
-    private var header: some View {
+    /// 14 to the search field, then 16 to the one row of filter chips (where Paper draws its
+    /// segments; there is no team chat, so there is no Team).
+    private func header(unread: String?) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            PaperPageTitle(title: "Messages", subtitle: unreadSummary ?? subtitle)
-            PaperSearchBar(placeholder: "Search or ask", chips: scopeChips) {
-                ThorbisMenu(items: scopeItems, title: "Show",
-                            accessibilityLabel: "\(section.menuTitle == "All" ? "Messages" : section.title), switch what Messages shows") {
-                    PaperFilterCircle(active: !scopeChips.isEmpty)
-                }
-                .accessibilityIdentifier("inbox-section-menu")
-            }
-            .paperCardMargin()
-            .padding(.top, 14)
+            PaperPageTitle(title: "Messages", subtitle: unread ?? moreFilter?.title)
+            PaperSearchBar(placeholder: "Search or ask", chips: moreChips) { EmptyView() }
+                .paperCardMargin()
+                .padding(.top, 14)
+            chipRow
+                .padding(.top, 14)
         }
     }
 
-    /// Everything the old title menu, folder menu and view bar chose, in one menu: what to show,
-    /// which folder, which conversations, and marking the job notices read.
-    private var scopeItems: [ThorbisMenuItem] {
-        var menu = access.sections.map { item in
-            ThorbisMenuItem(item.menuTitle, icon: item.symbol, isSelected: item == section) { section = item }
-        }
-        let folders = CommsInboxScope.folders(section)
-        if folders.count > 1 {
-            for (index, item) in folders.enumerated() {
-                menu.append(ThorbisMenuItem(item.title, icon: item.symbol, isSelected: item == folder, startsGroup: index == 0) { folder = item })
+    /// One row of chips, one on at a time; it scrolls sideways when large text needs the room.
+    private var chipRow: some View {
+        ScrollViewReader { reader in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(CommsInboxFilter.available(access)) { item in
+                        PaperChoiceChip(title: item.title, isOn: moreFilter == nil && chip == item) { choose(item) }
+                            .id(item)
+                            .accessibilityIdentifier("inbox-filter-\(item.rawValue)")
+                            .accessibilityHint("Shows \(item == .all ? "everything in Messages" : item.title.lowercased())")
+                    }
+                }
+                .padding(.horizontal, PaperCardMetrics.margin)
             }
+            .scrollClipDisabled()
+            // The chip that is on is always in sight, the last one included.
+            .onAppear { reader.scrollTo(chip) }
+            .onChange(of: chip) { _, next in withAnimation(.snappy) { reader.scrollTo(next) } }
         }
-        for (index, item) in CommsInboxScope.filters(section).enumerated() where item != .all {
-            menu.append(ThorbisMenuItem("\(item.rawValue) only", isSelected: item == quickFilter, startsGroup: index == 1) {
-                filter = item == quickFilter ? CommsQuickFilter.all.rawValue : item.rawValue
-            })
-        }
-        if access.notices && section.showsNotices && folder == .inbox && model.canMarkNoticesRead {
-            menu.append(ThorbisMenuItem(model.readCursor == nil ? "Mark all notices read" : "Continue marking read",
-                                        icon: "checkmark", isDisabled: model.noticesLoading, startsGroup: true) {
+        .accessibilityIdentifier("inbox-filters")
+    }
+
+    /// The "…" lens, inside the search field as a chip whose × goes back to All.
+    private var moreChips: [PaperFilterChip] {
+        guard let moreFilter else { return [] }
+        return [PaperFilterChip(id: "inbox-more-\(moreFilter.rawValue)", title: moreFilter.title) { choose(.all) }]
+    }
+
+    /// The header's "…": marking the job notices read, then the rarer lenses the chips leave out.
+    private var moreMenu: some View {
+        var items: [ThorbisMenuItem] = []
+        if access.notices && model.canMarkNoticesRead {
+            // The notices API acknowledges the job notices only; calls and texts keep their own
+            // read state on this phone, so the row says what it marks.
+            items.append(ThorbisMenuItem(model.readCursor == nil ? "Mark all notices read" : "Continue marking read",
+                                         icon: "checkmark", isDisabled: model.noticesLoading) {
                 Task { await model.markNoticesRead(api: api) }
             })
         }
-        return menu
-    }
-
-    /// What narrows the list, as chips in the search field; × goes back to everything in the Inbox.
-    private var scopeChips: [PaperFilterChip] {
-        var chips: [PaperFilterChip] = []
-        if section != .all, access.sections.contains(.all) {
-            chips.append(PaperFilterChip(id: "section", title: section.title) { section = .all })
+        let lenses = CommsInboxMoreFilter.available(access)
+        for item in lenses where !item.isFolder {
+            items.append(ThorbisMenuItem(item.title, icon: item.symbol, isSelected: moreFilter == item,
+                                         startsGroup: item == lenses.first && !items.isEmpty) { choose(item) })
         }
-        if folder != .inbox { chips.append(PaperFilterChip(id: "folder", title: folder.title) { folder = .inbox }) }
-        if quickFilter != .all {
-            chips.append(PaperFilterChip(id: "filter", title: quickFilter.rawValue) { filter = CommsQuickFilter.all.rawValue })
+        for item in lenses where item.isFolder {
+            items.append(ThorbisMenuItem(item.title, icon: item.symbol, isSelected: moreFilter == item,
+                                         startsGroup: item == lenses.first(where: \.isFolder) && !items.isEmpty) { choose(item) })
         }
-        return chips
+        return ThorbisMenu(items: items, title: "Messages", accessibilityLabel: "More for Messages", opensOnAppear: Self.previewOpensMore) {
+            CreamCircleLabel(symbol: "ellipsis")
+        }
+        .accessibilityIdentifier("inbox-more-menu")
     }
 
-    private var subtitle: String {
-        section == .notices ? "Booked, changed and assigned jobs" : section.title
-    }
-
-    /// "3 unread" across what this section and folder hold. While older pages are still on the
+    /// "3 unread" across what this chip and folder hold. While older pages are still on the
     /// server the count can only be a floor ("3+ unread"), and nothing unread is never claimed.
-    private var unreadSummary: String? {
+    private func unreadSummary(_ all: [CommsInboxItem]) -> String? {
         guard !loading else { return nil }
-        let all = CommsInboxScope.items(section: section, folder: folder, filter: .all,
-                                        calls: access.calls && !model.callsDenied ? model.threads : [],
-                                        local: access.workspace ? local.threads : [],
-                                        notices: access.notices ? model.notices : [],
-                                        callFlags: local.callFlags, seen: model.seenIDs)
-        let count = all.filter { item in
-            switch item {
-            case .calls(let thread):
-                CommsInboxScope.callUnread(thread, flags: local.callFlags[thread.id] ?? CommsThreadFlags(), seen: model.seenIDs)
-            case .local(let thread): thread.unread
-            case .notice(let notice): !notice.read
-            }
-        }.count
+        let count = all.filter(isUnread).count
         let more = folder == .inbox && ((section.showsCalls && access.calls && model.callsCursor != nil)
             || (section.showsNotices && access.notices && model.noticesCursor != nil))
         if count > 0 { return more ? "\(count)+ unread" : "\(count) unread" }
         return more || all.isEmpty ? nil : "All caught up"
+    }
+
+    private func isUnread(_ item: CommsInboxItem) -> Bool {
+        switch item {
+        case .calls(let thread):
+            CommsInboxScope.callUnread(thread, flags: local.callFlags[thread.id] ?? CommsThreadFlags(), seen: model.seenIDs)
+        case .local(let thread): thread.unread
+        case .notice(let notice): !notice.read
+        }
     }
 
     @ViewBuilder private var composeButton: some View {
@@ -332,7 +359,7 @@ struct CommsInboxView: View {
 
     // MARK: Content
 
-    @ViewBuilder private var content: some View {
+    @ViewBuilder private func content(_ list: [CommsInboxItem]) -> some View {
         if section.showsCalls, let error = model.callsError {
             ErrorBanner(message: error) { await model.refreshCalls(api: api) }
         }
@@ -345,7 +372,6 @@ struct CommsInboxView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, Theme.gutter).padding(.top, 12)
         }
-        let list = items
         if loading && list.isEmpty { ListRoomSkeleton(count: 6, threeLines: false) }
         rows(list)
         more
@@ -363,36 +389,74 @@ struct CommsInboxView: View {
         (section.showsCalls && access.calls && !model.callsLoaded) || (section.showsNotices && access.notices && !model.noticesLoaded)
     }
 
-    private var items: [CommsInboxItem] {
-        CommsInboxScope.items(section: section, folder: folder, filter: quickFilter,
+    /// Everything the chip's section and folder hold, newest first, before the quick filter; the
+    /// header's unread count and the list both come from this one read.
+    private var scoped: [CommsInboxItem] {
+        CommsInboxScope.items(section: section, folder: folder, filter: .all,
                               calls: access.calls && !model.callsDenied ? model.threads : [],
                               local: access.workspace ? local.threads : [],
                               notices: access.notices ? model.notices : [],
                               callFlags: local.callFlags, seen: model.seenIDs)
     }
 
+    /// `CommsInboxScope.items`' quick filter, applied to the already-scoped list.
+    private func matchesQuickFilter(_ item: CommsInboxItem) -> Bool {
+        switch (quickFilter, item) {
+        case (.all, _): true
+        case (.unread, _): isUnread(item)
+        case (.needsReply, .calls): true  // a call is from the caller: it waits on a reply (web threadNeedsReply)
+        case (.needsReply, .local(let thread)): thread.needsReply
+        case (.starred, .calls(let thread)): local.callFlags[thread.id]?.starredAt != nil
+        case (.starred, .local(let thread)): thread.flags.starredAt != nil
+        case (.needsReply, .notice), (.starred, .notice): false
+        }
+    }
+
     /// Paper 49N: one 13 Semibold label ("Recent") over one card of rows, a hairline between them;
-    /// each row carries its own day ("9:38 AM", "Mon", "Jul 28").
+    /// each row carries its own day ("9:38 AM", "Mon", "Jul 28"). The rows sit straight in the
+    /// page's lazy stack as slices of that card, so only the ones on screen are built.
     @ViewBuilder private func rows(_ list: [CommsInboxItem]) -> some View {
         if !list.isEmpty {
-            CommsDayCard(title: folder == .inbox ? "Recent" : folder.title) {
-                ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
+            PaperCardLabel(title: folder == .inbox ? "Recent" : folder.title)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("inbox-day-heading")
+                .padding(.top, 20)
+            let jobs = linkedJobs(list)
+            let last = list.count - 1
+            ForEach(Array(list.enumerated()), id: \.element.id) { index, item in
+                VStack(spacing: 0) {
                     if index > 0 { WellDivider(leading: 0) }
                     switch item {
-                    case .calls(let thread): callRow(thread)
+                    case .calls(let thread): callRow(thread, context: callContext(thread, jobs: jobs))
                     case .local(let thread): localRow(thread)
                     case .notice(let notice): noticeRow(notice)
                     }
                 }
+                .paperRowsCardSlice(first: index == 0, last: index == last)
             }
         }
     }
 
+    /// The jobs the listed calls are linked to, read from the store in one pass (never per row).
+    private func linkedJobs(_ list: [CommsInboxItem]) -> [String: Job] {
+        var wanted = Set<String>()
+        for item in list {
+            if case .calls(let thread) = item, let id = thread.calls.first(where: { $0.jobId != nil })?.jobId { wanted.insert(id) }
+        }
+        guard !wanted.isEmpty else { return [:] }
+        var found: [String: Job] = [:]
+        for job in store.jobs where wanted.contains(job.id) && found[job.id] == nil {
+            found[job.id] = job
+            if found.count == wanted.count { break }
+        }
+        return found
+    }
+
     /// Paper 49N's third line for a caller: the job the call is linked to and where it stands
     /// ("AC not cooling · On the way"); a number nobody knows yet says so.
-    private func callContext(_ thread: CommsCallThread) -> String? {
+    private func callContext(_ thread: CommsCallThread, jobs: [String: Job]) -> String? {
         if let id = thread.calls.first(where: { $0.jobId != nil })?.jobId {
-            guard let job = store.jobs.first(where: { $0.id == id }) else { return nil }
+            guard let job = jobs[id] else { return nil }
             return "\(job.title) \u{00B7} \(job.status.statusLabel)"
         }
         if thread.calls.allSatisfy({ ($0.customerId ?? "").isEmpty && ($0.callerName ?? "").isEmpty }) {
@@ -415,7 +479,7 @@ struct CommsInboxView: View {
         return ([move], [star])
     }
 
-    private func callRow(_ thread: CommsCallThread) -> some View {
+    private func callRow(_ thread: CommsCallThread, context: String?) -> some View {
         let flags = local.callFlags[thread.id] ?? CommsThreadFlags()
         let unread = CommsInboxScope.callUnread(thread, flags: flags, seen: model.seenIDs)
         let alert = thread.alert(seen: model.seenIDs, in: section)
@@ -424,7 +488,7 @@ struct CommsInboxView: View {
         return RowSwipeContainer(id: thread.id, leading: swipe.leading, trailing: swipe.trailing, state: swipes) {
             Button { open = .calls(thread.id) } label: {
                 CommsThreadRow(thread: thread, section: section, unread: unread, alert: alert, starred: flags.starredAt != nil,
-                               context: callContext(thread))
+                               context: context)
             }
             .buttonStyle(RowPressStyle())
             .background(Theme.card)
@@ -500,55 +564,51 @@ struct CommsInboxView: View {
         .padding(.top, 12)
     }
 
-    /// Each empty view says why it is empty (web inbox ListEmpty, one reason each).
+    /// Each empty view says why it is empty (web inbox ListEmpty, one reason each), with the
+    /// chip's own glyph.
     @ViewBuilder private var empty: some View {
-        let name = section == .all ? "Messages" : section.title
-        if section == .calls || section == .voicemail, model.callsDenied {
+        if section == .calls, model.callsDenied {
             ListRoomEmpty(symbol: "lock", title: "Calls are for the office",
                           message: "The call log needs access to every customer. A call linked to your job shows on the job.")
-        } else if (section == .calls || section == .voicemail), model.callsError != nil {
+        } else if section == .calls, model.callsError != nil {
             EmptyView()
-        } else if quickFilter != .all {
-            switch quickFilter {
-            case .unread: ListRoomEmpty(title: "Nothing unread", message: "All shows everything in \(folder.title).")
-            case .needsReply: ListRoomEmpty(title: "Nothing needs a reply", message: "You answered last everywhere in \(folder.title).")
-            default: ListRoomEmpty(title: "Nothing starred", message: "Star a conversation from its menu or by swiping left on it.")
-            }
-        } else {
-            switch folder {
-            case .drafts:
-                ListRoomEmpty(title: "No drafts", message: "A text or email you save without sending waits here, on this device.")
+        } else if let moreFilter {
+            switch moreFilter {
+            case .needsReply:
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing needs a reply", message: "You answered last everywhere in Messages.")
+            case .starred:
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing starred", message: "Star a conversation from its menu or by swiping left on it.")
             case .sent:
-                ListRoomEmpty(title: "Nothing sent yet",
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing sent yet",
                               message: "What you send collects here. Until a text or email provider is connected, a message waits instead of going out, and says so.")
             case .archive:
-                ListRoomEmpty(title: "Nothing archived", message: "Archived conversations in \(name) wait here until you move them back.")
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "Nothing archived", message: "Archived conversations wait here until you move them back.")
             case .bin:
-                ListRoomEmpty(title: "The bin is empty", message: "Binned conversations wait here. Nothing empties on its own.")
-            case .inbox:
-                switch section {
-                case .calls:
-                    ListRoomEmpty(title: "No calls yet", message: "Calls to your business number land here with a recording and a summary.")
-                case .voicemail:
-                    ListRoomEmpty(title: "No voicemail",
-                                  message: "Thorbis records calls from when they\u{2019}re answered, so it doesn\u{2019}t take voicemail yet. Calls nobody answered show as missed calls.")
-                case .texts:
-                    ListRoomEmpty(title: "No texts", message: "Start a text from a customer or with the + above. Drafts stay on this device.",
+                ListRoomEmpty(symbol: moreFilter.symbol, title: "The bin is empty", message: "Binned conversations wait here. Nothing empties on its own.")
+            }
+        } else {
+            switch chip {
+            case .unread:
+                ListRoomEmpty(symbol: "checkmark.circle", title: "No unread messages", message: "You\u{2019}re all caught up. All shows everything in Messages.")
+            case .calls:
+                ListRoomEmpty(symbol: "phone", title: "No calls yet", message: "Calls to your business number land here with a recording and a summary.")
+            case .texts:
+                ListRoomEmpty(symbol: "bubble.left", title: "No texts yet", message: "Start a text from a customer or with the + above. Drafts stay on this device.",
+                              actionTitle: "New text") { composing = .text }
+            case .email:
+                ListRoomEmpty(symbol: "envelope", title: "No email yet", message: "New mail lands here when an email account is connected.",
+                              actionTitle: "New email") { composing = .email }
+            case .drafts:
+                ListRoomEmpty(symbol: "square.and.pencil", title: "No drafts",
+                              message: "A text or email you save without sending waits here, on this device.")
+            case .all:
+                // A first visit is usually empty: point at the way in rather than only explain.
+                if access.workspace {
+                    ListRoomEmpty(title: "Nothing waiting",
+                                  message: "Calls, texts, email and job notices land here. Text on a customer or job opens their conversation here too.",
                                   actionTitle: "New text") { composing = .text }
-                case .email:
-                    ListRoomEmpty(title: "No email waiting", message: "New mail lands here when an email account is connected.",
-                                  actionTitle: "New email") { composing = .email }
-                case .notices:
-                    ListRoomEmpty(title: "No notices yet", message: "New assignments and job changes land here.")
-                case .all:
-                    // A first visit is usually empty: point at the way in rather than only explain.
-                    if access.workspace {
-                        ListRoomEmpty(title: "Nothing waiting",
-                                      message: "Calls, texts, email and job notices land here. Text on a customer or job opens their conversation here too.",
-                                      actionTitle: "New text") { composing = .text }
-                    } else {
-                        ListRoomEmpty(title: "Nothing waiting", message: "Calls, texts, email and job notices land here as they come in.")
-                    }
+                } else {
+                    ListRoomEmpty(title: "Nothing waiting", message: "Calls, texts, email and job notices land here as they come in.")
                 }
             }
         }
@@ -593,15 +653,40 @@ struct CommsInboxView: View {
         #endif
     }
 
-    /// `--paper-preview-inbox-section calls|voicemail|texts|email|notices`.
-    private static func previewSection(_ access: CommsInboxAccess) -> CommsInboxSection? {
-        guard let raw = previewArgument("--paper-preview-inbox-section"), let section = CommsInboxSection(rawValue: raw),
-              access.sections.contains(section) else { return nil }
-        return section
+    /// `--paper-preview-inbox-section calls|voicemail|texts|email|notices` and
+    /// `--paper-preview-inbox-folder drafts|sent|archive|bin`, from before the chips: each opens
+    /// on the chip (or "…" lens) that shows the same rows. Voicemail is part of Calls; job notices
+    /// are part of All (their own list is Notifications).
+    private static func previewScope(_ access: CommsInboxAccess) -> (chip: CommsInboxFilter, more: CommsInboxMoreFilter?) {
+        let chips = CommsInboxFilter.available(access)
+        var chip = CommsInboxFilter.all
+        switch previewArgument("--paper-preview-inbox-section") {
+        case "calls", "voicemail": chip = .calls
+        case "texts": chip = .texts
+        case "email": chip = .email
+        default: break
+        }
+        if let raw = previewArgument("--paper-preview-inbox-filter"), let named = CommsInboxFilter(rawValue: raw) { chip = named }
+        var more: CommsInboxMoreFilter?
+        switch previewArgument("--paper-preview-inbox-folder").flatMap(CommsFolder.init(rawValue:)) {
+        case .drafts?: chip = .drafts
+        case .sent?: more = .sent
+        case .archive?: more = .archive
+        case .bin?: more = .bin
+        default: break
+        }
+        if more != nil && !CommsInboxMoreFilter.available(access).contains(more!) { more = nil }
+        return (chips.contains(chip) ? chip : .all, more)
     }
 
-    /// `--paper-preview-inbox-folder drafts|sent|archive|bin`.
-    private static var previewFolder: CommsFolder? { previewArgument("--paper-preview-inbox-folder").flatMap(CommsFolder.init(rawValue:)) }
+    /// `--paper-preview-inbox-more`: opens the header's "…" for a screenshot.
+    private static var previewOpensMore: Bool {
+        #if DEBUG
+        return PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-more")
+        #else
+        return false
+        #endif
+    }
 
     /// `--paper-preview-inbox-thread calls|text|email`: opens that sample conversation.
     private static func previewOpen(_ threads: [CommsCallThread]) -> CommsOpen? {

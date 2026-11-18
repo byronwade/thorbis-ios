@@ -1,7 +1,7 @@
 import XCTest
 
-/// The Inbox preview: switch to Calls from the title menu, open a caller's thread; and save a text
-/// as a draft (it never sends).
+/// The Inbox preview: narrow Messages with its chips (and the "…" menu's rarer lenses), open a
+/// caller's thread; and save a text as a draft (it never sends).
 @MainActor
 final class CommsInboxUITests: XCTestCase {
     /// Paper 48N keeps Call and Text on the customer page; Email lives in the ⋯ menu.
@@ -98,23 +98,134 @@ final class CommsInboxUITests: XCTestCase {
         add(shot)
     }
 
-    private func choose(_ app: XCUIApplication, menu: String, row: String) {
-        let button = app.buttons[menu]
-        XCTAssertTrue(button.waitForExistence(timeout: 20), app.debugDescription)
-        button.tap()
-        let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", row, menu)).firstMatch
+    /// Turns on one of Messages' filter chips and waits until it reads as chosen.
+    @discardableResult
+    private func pick(_ app: XCUIApplication, _ name: String) -> XCUIElement {
+        let chip = app.buttons["inbox-filter-\(name)"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 20), app.debugDescription)
+        chip.tap()
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: chip)
+        waitForExpectations(timeout: 10)
+        return chip
+    }
+
+    /// Opens the header's "…" and taps the row whose words begin with `row`.
+    private func more(_ app: XCUIApplication, _ row: String) {
+        let menu = app.buttons["inbox-more-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 20), app.debugDescription)
+        menu.tap()
+        let item = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", row, "inbox-more-menu")).firstMatch
         XCTAssertTrue(item.waitForExistence(timeout: 5), app.debugDescription)
         expectation(for: NSPredicate(format: "hittable == true"), evaluatedWith: item)
         waitForExpectations(timeout: 5)
         item.tap()
-        // The popover fades out before the choice lands; under load the first tap can be eaten.
-        let chosen = NSPredicate(format: "label BEGINSWITH %@", row)
-        if !chosen.evaluate(with: app.buttons[menu]) || item.exists {
-            _ = item.waitForNonExistence(timeout: 3)
-            if !chosen.evaluate(with: app.buttons[menu]), item.exists, item.isHittable { item.tap() }
-        }
-        expectation(for: chosen, evaluatedWith: app.buttons[menu])
+        _ = item.waitForNonExistence(timeout: 5)
+    }
+
+    private func row(_ app: XCUIApplication, _ identifier: String) -> XCUIElement { app.buttons[identifier] }
+    private var callThread: String { "inbox-call-call-thread-5550100100" }
+    private var noticeRows: NSPredicate { NSPredicate(format: "identifier BEGINSWITH %@", "inbox-row-") }
+
+    // MARK: Chips
+
+    /// One row of six chips, All on by default and one on at a time; each narrows the one list.
+    func testEachChipFiltersTheList() {
+        continueAfterFailure = false
+        let app = launch()
+        let names = ["all", "unread", "calls", "texts", "email", "drafts"]
+        for name in names { XCTAssertTrue(app.buttons["inbox-filter-\(name)"].waitForExistence(timeout: 20), name) }
+        XCTAssertFalse(app.buttons["inbox-section-menu"].exists, "The old filter menu is gone")
+        XCTAssertTrue(app.buttons["inbox-filter-all"].isSelected)
+        XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(row(app, "inbox-local-t-preview-text").exists)
+        XCTAssertTrue(row(app, "inbox-local-t-preview-email").exists)
+        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.exists, "All carries the job notices too")
+
+        pick(app, "unread")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "A visit is ready")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "A visit was updated")).firstMatch.exists)
+        XCTAssertFalse(row(app, "inbox-local-t-preview-email").exists, "The read email is not unread")
+
+        pick(app, "calls")
+        XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 5))
+        XCTAssertFalse(row(app, "inbox-local-t-preview-text").exists)
+        XCTAssertFalse(app.buttons.matching(noticeRows).firstMatch.exists, "Calls shows no job notices")
+
+        pick(app, "texts")
+        XCTAssertTrue(row(app, "inbox-local-t-preview-text").waitForExistence(timeout: 5))
+        XCTAssertFalse(row(app, "inbox-local-t-preview-email").exists)
+        XCTAssertFalse(row(app, callThread).exists)
+
+        pick(app, "email")
+        XCTAssertTrue(row(app, "inbox-local-t-preview-email").waitForExistence(timeout: 5))
+        XCTAssertFalse(row(app, "inbox-local-t-preview-text").exists)
+        XCTAssertFalse(row(app, callThread).exists)
+
+        let chosen = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND selected == true", "inbox-filter-"))
+        XCTAssertEqual(chosen.count, 1, "One chip is on at a time")
+        pick(app, "all")
+        XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 5))
+        attach(app, "Messages chips")
+    }
+
+    /// Drafts lists the conversations holding a draft saved on this phone, and says so on the row.
+    func testDraftsChipShowsLocalDrafts() {
+        continueAfterFailure = false
+        let app = launch()
+        pick(app, "drafts")
+        let text = row(app, "inbox-local-t-preview-text")
+        XCTAssertTrue(text.waitForExistence(timeout: 10), app.debugDescription)
+        XCTAssertTrue(text.label.contains("Draft:"), text.label)
+        XCTAssertFalse(row(app, "inbox-local-t-preview-email").exists, "A queued email is not a draft")
+        XCTAssertFalse(row(app, callThread).exists, "Calls are never drafts")
+        XCTAssertFalse(app.buttons.matching(noticeRows).firstMatch.exists)
+    }
+
+    /// Mark all read lives in the header's "…" and acknowledges the job notices.
+    func testMarkAllReadFromTheMoreMenu() {
+        continueAfterFailure = false
+        let app = launch()
+        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+        more(app, "Mark all notices read")
+        XCTAssertTrue(app.buttons["inbox-filter-all"].isSelected, "Marking read does not change the filter")
+        XCTAssertTrue(app.buttons.matching(noticeRows).firstMatch.waitForExistence(timeout: 10), "The notices stay listed")
+    }
+
+    /// The rarer lenses from the old menu stay one tap behind "…"; while one is on no chip is lit,
+    /// and its chip in the search field goes back to All.
+    func testMoreMenuKeepsFoldersAndQuickFiltersReachable() {
+        continueAfterFailure = false
+        let app = launch()
+        XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 20), app.debugDescription)
+        more(app, "Sent")
+        XCTAssertTrue(row(app, "inbox-local-t-preview-email").waitForExistence(timeout: 10), "The queued email is in Sent")
+        XCTAssertFalse(row(app, callThread).exists)
+        XCTAssertFalse(app.buttons["inbox-filter-all"].isSelected, "No chip is lit while a \"…\" lens is on")
+        let clear = app.buttons["Sent filter"]
+        XCTAssertTrue(clear.exists); clear.tap()
+        expectation(for: NSPredicate(format: "selected == true"), evaluatedWith: app.buttons["inbox-filter-all"])
         waitForExpectations(timeout: 10)
+        XCTAssertTrue(row(app, callThread).waitForExistence(timeout: 5))
+        for lens in ["Needs reply", "Starred", "Archive", "Bin"] {
+            more(app, lens)
+            XCTAssertTrue(app.buttons["\(lens) filter"].waitForExistence(timeout: 5), lens)
+        }
+    }
+
+    /// The chip is the place's own state, as the old menu's was: opening a conversation and coming
+    /// back keeps it (a fresh launch starts at All).
+    func testChipHoldsAfterOpeningAConversation() {
+        continueAfterFailure = false
+        let app = launch()
+        let calls = pick(app, "calls")
+        let thread = row(app, callThread)
+        XCTAssertTrue(thread.waitForExistence(timeout: 15)); thread.tap()
+        XCTAssertTrue(app.staticTexts["Inbound"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
+        let back = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 5)); back.tap()
+        XCTAssertTrue(calls.waitForExistence(timeout: 10))
+        XCTAssertTrue(calls.isSelected, "Calls is still on after coming back")
+        XCTAssertFalse(app.buttons["inbox-filter-all"].isSelected)
     }
 
     func testCustomerEmailOpensPreaddressedThorbisComposer() {
@@ -267,7 +378,7 @@ final class CommsInboxUITests: XCTestCase {
 
     func testSwitchToCallsAndOpenACallersThread() {
         let app = launch()
-        choose(app, menu: "inbox-section-menu", row: "Calls")
+        pick(app, "calls")
         let thread = app.buttons["inbox-call-call-thread-5550100100"]
         XCTAssertTrue(thread.waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertTrue(thread.label.contains("2 calls"), thread.label)
@@ -375,7 +486,7 @@ final class CommsInboxUITests: XCTestCase {
     func testCallArchiveFailureShowsStorageWarning() {
         continueAfterFailure = false
         let app = launch(["--paper-preview-inbox-storage-failure"])
-        choose(app, menu: "inbox-section-menu", row: "Calls")
+        pick(app, "calls")
         let thread = app.buttons["inbox-call-call-thread-5550100100"]
         XCTAssertTrue(thread.waitForExistence(timeout: 15)); thread.tap()
         let menu = app.buttons["inbox-thread-menu"]
