@@ -424,9 +424,11 @@ struct RootView: View {
     /// The menu circle: opens the drawer and wears its dot only for unread Inbox notices or saved
     /// work that needs the person.
     private var drawerControl: PaperDrawerControl {
-        PaperDrawerControl(open: { Task { @MainActor in openDrawer() } },
-                           hasNews: showsInboxDot || (barSync?.needsPerson ?? false),
-                           status: barSync?.words,
+        // One saved-work snapshot per read (it walks the outbox and the jobs).
+        let sync = barSync
+        return PaperDrawerControl(open: { Task { @MainActor in openDrawer() } },
+                           hasNews: showsInboxDot || (sync?.needsPerson ?? false),
+                           status: sync?.words,
                            showsCircle: !layout.usesBottomBar)
     }
 
@@ -463,9 +465,10 @@ struct RootView: View {
     @ViewBuilder private var tabBarOverlay: some View {
         if tabBarShown {
             let safeBottom = windowSafeBottom
-            PhoneTabBar(tabs: phoneTabs, current: selectedTab,
+            let tabs = phoneTabs
+            PhoneTabBar(tabs: tabs, current: selectedTab,
                         messagesUnread: showsInboxDot, messagesUnreadCount: inboxUnreadCount,
-                        moreHasNews: moreHasNews,
+                        moreHasNews: moreHasNews(tabs: tabs),
                         select: selectTab,
                         openMore: { Task { @MainActor in openDrawer() } })
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { tabBarHeight = $0 }
@@ -476,8 +479,8 @@ struct RootView: View {
     }
 
     /// More's dot: what the menu circle's dot said, less the unread Messages its own tab shows.
-    private var moreHasNews: Bool {
-        (showsInboxDot && !phoneTabs.contains(.inbox)) || (barSync?.needsPerson ?? false)
+    private func moreHasNews(tabs: [MenuItem]) -> Bool {
+        (showsInboxDot && !tabs.contains(.inbox)) || (barSync?.needsPerson ?? false)
     }
 
     /// A tab: picking another place selects it; the place showing goes back to its root, or to the

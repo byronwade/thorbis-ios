@@ -84,6 +84,15 @@ final class TabBarUITests: XCTestCase {
         let app = launch("create-menu")
         XCTAssertTrue(app.staticTexts["Create"].waitForExistence(timeout: 30))
         XCTAssertFalse(tab(app, "more").exists, "No bar under the create menu")
+        // A sheet a place opens itself (Jobs' display and filters) covers the bar too.
+        app.terminate()
+        let filters = launch("jobs-filters")
+        XCTAssertTrue(tab(filters, "more").waitForExistence(timeout: 30))
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline, tab(filters, "more").exists, tab(filters, "more").isHittable {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        }
+        XCTAssertFalse(tab(filters, "more").exists && tab(filters, "more").isHittable, "The bar is not reachable under the sheet")
     }
 
     func testRetappingTheActiveTabReturnsToTheTop() {
