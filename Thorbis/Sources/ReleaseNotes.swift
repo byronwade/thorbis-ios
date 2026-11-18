@@ -13,6 +13,42 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-19-one-look",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "rectangle.3.group", title: "One look for every screen",
+                      detail: "Page titles, section labels, buttons, chips and fields now share one size and spacing on every screen."),
+                .init(symbol: "exclamationmark.bubble", title: "Confirms and messages match",
+                      detail: "Every confirm is the same centred card. Error banners, empty lists and loading lines share one design."),
+                .init(symbol: "dock.rectangle", title: "Bottom bars and sheets line up",
+                      detail: "Pinned buttons sit at the same height everywhere, and sheets share one Cancel, title and action bar."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-19-simpler-menu",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "A shorter menu",
+                      detail: "The menu lists only your main places. Everything else opens from Search, Money, Team or Settings."),
+                .init(symbol: "gearshape", title: "Gear opens Settings",
+                      detail: "The gear goes straight to Settings. Tap the business name to switch business or add one."),
+                .init(symbol: "ellipsis.circle", title: "Shorter job More menu",
+                      detail: "More has eight rows. Scheduling is on the clock chip, assigning on the person chip, sharing on Share."),
+                .init(symbol: "dollarsign.circle", title: "Estimates and invoices in Money",
+                      detail: "Money links to the Estimates and Invoices lists. Show estimates is on the job's Money section."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-19-present-estimates",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "doc.on.doc", title: "Present all of a job's estimates",
+                      detail: "Show customer on an estimate opens every estimate on its job, starting with the one you tapped."),
+                .init(symbol: "person.crop.rectangle", title: "Cleaner customer view",
+                      detail: "The customer's page follows the new design, with one Hand back to technician button at the foot."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-opening-workspace-fix",
             date: "2026-11-18",
             highlights: [
