@@ -50,8 +50,8 @@ final class TruckStockTests: XCTestCase {
         XCTAssertEqual(list.map(\.needed), [2, 3, 2, 1])
         XCTAssertEqual(TruckStockRules.lowCount(items), 4)
         XCTAssertEqual(TruckStockFormat.summary(items), "5 items \u{00B7} 4 low")
-        XCTAssertEqual(TruckStockFormat.rowSubtitle(items[2]), "Out \u{00B7} keep 2")
-        XCTAssertEqual(TruckStockFormat.rowSubtitle(items[3]), "1 left \u{00B7} keep 4")
+        XCTAssertEqual(TruckStockFormat.rowSubtitle(items[2]), "Out \u{00B7} par 2")
+        XCTAssertEqual(TruckStockFormat.rowSubtitle(items[3]), "1 left \u{00B7} par 4")
 
         let text = TruckStockRules.restockText(items)
         XCTAssertEqual(text, """

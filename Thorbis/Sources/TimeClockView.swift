@@ -32,6 +32,12 @@ final class TimeClockModel: ObservableObject {
             return
         }
         do {
+            #if DEBUG
+            if PaperPreview.enabled, directory == nil {
+                store = try PlacesPreviewData.timeClock(userID: userID, organizationID: organizationID)
+                return
+            }
+            #endif
             store = try TimeClockStore(userID: userID, organizationID: organizationID, directory: directory)
         } catch {
             loadError = error.localizedDescription
@@ -189,7 +195,7 @@ struct TimeClockSectionLabel: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(title).font(Theme.font(13, weight: .semibold)).accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(Theme.font(13)).monospacedDigit() }
+            if let trailing { Text(trailing).font(Theme.font(13)) }
         }
         .foregroundStyle(Theme.muted)
         .padding(.horizontal, 4).padding(.bottom, 8)
@@ -220,7 +226,7 @@ struct TimeClockValueRow: View {
     }
 
     private var valueText: some View {
-        Text(value).font(Theme.font(16, weight: strong ? .bold : .medium)).monospacedDigit()
+        Text(value).font(Theme.font(16, weight: strong ? .bold : .medium))
             .foregroundStyle(Theme.foreground)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -257,7 +263,7 @@ struct TimeClockPill: View {
             .multilineTextAlignment(.center)
             .padding(.horizontal, 16).padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: height)
-            .background(primary ? Theme.brand : Theme.card, in: RoundedRectangle(cornerRadius: height / 2, style: .continuous))
+            .background(primary ? Theme.brand : Theme.card, in: Capsule())
             .contentShape(Rectangle())
     }
 }
@@ -307,9 +313,6 @@ struct TimeClockView: View {
     @StateObject private var model = TimeClockModel()
     @State private var sheet: TimeClockSheet?
     @State private var route: TimeClockRoute?
-    @Environment(\.paperDrawer) private var drawer
-    @Environment(\.paperMenuButton) private var menuButton
-    @Environment(\.paperShowMenu) private var openAccount
     @Environment(\.dynamicTypeSize) private var typeSize
 
     init() {}
@@ -327,6 +330,7 @@ struct TimeClockView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ThorbisToolbarItem(placement: .topBarTrailing) { moreMenu } }
         .safeAreaInset(edge: .bottom, spacing: 0) { if model.isBound { bar } }
         .task(id: identityKey) {
             sheet = nil
@@ -345,40 +349,27 @@ struct TimeClockView: View {
 
     // MARK: Header
 
-    /// Like the other places kept on this phone: the menu circle rides in the navigation bar, and
-    /// the title row carries the screen's one action, here the ••• menu.
+    /// Paper 27: the menu circle and the ••• circle share the top row (here the navigation bar);
+    /// under them the 34 Bold title, 4 in from the cards' edge and 14 above the first card.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            if drawer != nil || menuButton {
-                HStack(spacing: 8) {
-                    if let drawer {
-                        DrawerMenuCircle(control: drawer)
-                    } else {
-                        PaperCircleButton(symbol: "line.3.horizontal", label: "Menu", size: 44, fill: Theme.card, action: openAccount)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .frame(minHeight: 44)
-            }
-            HStack(alignment: .center, spacing: 12) {
-                Text("Time clock").font(Theme.font(34, weight: .bold)).tracking(-0.85)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("timeclock-root")
-                    .padding(.horizontal, 4)
-                Spacer(minLength: 0)
-                ThorbisMenu(items: [
-                    ThorbisMenuItem("Timesheet", icon: "calendar") { route = .timesheet },
-                    ThorbisMenuItem("Past entries", icon: "list.bullet") { route = .entries },
-                    ThorbisMenuItem("Time off", icon: "sun.max") { route = .timeOff },
-                    ThorbisMenuItem("Add missed punch", icon: "plus", startsGroup: true) { sheet = .add },
-                ], accessibilityLabel: "More for time clock") {
-                    PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
-                }
-                .accessibilityIdentifier("timeclock-more")
-            }
+        Text("Time clock").font(Theme.font(34, weight: .bold)).tracking(-0.85)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("timeclock-root")
+            .padding(.horizontal, 4)
+            .padding(.top, 2).padding(.bottom, 14)
+    }
+
+    private var moreMenu: some View {
+        ThorbisMenu(items: [
+            ThorbisMenuItem("Timesheet", icon: "calendar") { route = .timesheet },
+            ThorbisMenuItem("Past entries", icon: "list.bullet") { route = .entries },
+            ThorbisMenuItem("Time off", icon: "sun.max") { route = .timeOff },
+            ThorbisMenuItem("Add missed punch", icon: "plus", startsGroup: true) { sheet = .add },
+        ], accessibilityLabel: "More for time clock") {
+            PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
         }
-        .padding(.top, 2).padding(.bottom, 14)
+        .accessibilityIdentifier("timeclock-more")
     }
 
     // MARK: Page
@@ -406,8 +397,9 @@ struct TimeClockView: View {
                 todayCard(today, active: active, now: now).padding(.top, 22)
             }
             weekCard(days, now: now, calendar: calendar).padding(.top, 22)
-            placesCard(entries: entries.count, timeOff: model.timeOff.count).padding(.top, 22)
-            TimeClockPhoneNote(text: "Kept on this phone. The office and payroll don\u{2019}t see these hours.")
+            // Where Paper prints "Synced 2m ago": these hours are not synced.
+            PlacePhoneLine(text: "Kept on this phone \u{00B7} not sent to payroll")
+                .padding(.horizontal, -(PaperCardMetrics.margin + 4))
                 .padding(.top, 16)
         }
         .padding(.horizontal, PaperCardMetrics.margin)
@@ -462,7 +454,8 @@ struct TimeClockView: View {
                 guard let planned = pause.plannedMinutes else { return "Break\(TimeClockWords.dot)unpaid" }
                 return "Break\(TimeClockWords.dot)\(TimeClockMath.minutesLabel(planned)) unpaid"
             }
-            if active != nil { return "Worked today, breaks taken off" }
+            // Paper prints the job being worked; an entry carries no job, so the line is left out.
+            if active != nil { return "" }
             return worked > 0 ? "Worked today" : "Clock in to start today\u{2019}s hours"
         }()
         let status = chip(now: now, active: active)
@@ -473,12 +466,14 @@ struct TimeClockView: View {
             }
             // Paper 27: 52 Bold; 27C: 64 Bold while the break runs.
             Text(figure).font(Theme.font(pause == nil ? 52 : 64, weight: .bold)).tracking(pause == nil ? -1.56 : -2.56)
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+                .lineLimit(1).minimumScaleFactor(0.5)
                 .accessibilityLabel(pause == nil ? "Worked today, \(TimeClockMath.durationLabel(worked))"
                                                  : "On break for \(TimeClockMath.durationLabel(now.timeIntervalSince(pause?.start ?? now)))")
                 .accessibilityIdentifier("timeclock-running-total")
-            Text(line).font(Theme.font(15)).foregroundStyle(Theme.subtle)
-                .fixedSize(horizontal: false, vertical: true)
+            if !line.isEmpty {
+                Text(line).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let pause { breakProgress(pause, now: now).padding(.top, 10) }
         }
         .padding(18)
@@ -525,7 +520,7 @@ struct TimeClockView: View {
                     if let ending { Text(ending) }
                 }
             }
-            .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+            .font(Theme.font(13)).foregroundStyle(Theme.muted)
         }
     }
 
@@ -574,7 +569,7 @@ struct TimeClockView: View {
                 WellDivider(leading: 16)
                 Button { sheet = .add } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "plus").font(.system(size: 15, weight: .medium)).accessibilityHidden(true)
+                        PaperIcon(.placePlus, size: 18, color: Theme.brandText)
                         Text("Add missed punch").font(Theme.font(16, weight: .medium))
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 0)
@@ -595,18 +590,18 @@ struct TimeClockView: View {
         let live = isToday && day.isOpen
         let name = isToday ? "Today" : day.date.formatted(.dateTime.weekday(.abbreviated))
         let hours = "\(TimeClockMath.decimalHours(day.seconds))h"
-        return HStack(alignment: .firstTextBaseline, spacing: 12) {
+        return HStack(alignment: .center, spacing: 12) {
             Text(name).font(Theme.font(15, weight: isToday ? .semibold : .medium))
                 .foregroundStyle(isToday ? Theme.foreground : Theme.subtle)
                 .frame(minWidth: 52, alignment: .leading)
             Text(day.missedClockOut ? "No clock-out" : TimeClockWords.span(day))
-                .font(Theme.font(16, weight: .medium)).monospacedDigit()
+                .font(Theme.font(16, weight: .medium))
                 .foregroundStyle(day.missedClockOut ? Theme.warning : Theme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(hours).font(Theme.font(16, weight: live ? .semibold : .medium)).monospacedDigit()
+            Text(hours).font(Theme.font(16, weight: live ? .semibold : .medium))
                 .foregroundStyle(live ? Theme.brandText : Theme.foreground)
-                .fixedSize()
+                .fixedSize().frame(minWidth: 48, alignment: .trailing)
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
@@ -615,43 +610,13 @@ struct TimeClockView: View {
         .accessibilityLabel("\(name), \(day.missedClockOut ? "no clock-out" : TimeClockWords.span(day)), \(TimeClockMath.durationLabel(day.seconds))")
     }
 
-    // MARK: Places
-
-    private func placesCard(entries: Int, timeOff: Int) -> some View {
-        TimeClockCard {
-            placeRow("Timesheet", value: nil, identifier: "timeclock-open-timesheet") { route = .timesheet }
-            WellDivider(leading: 16)
-            placeRow("Past entries", value: entries == 0 ? nil : "\(entries)", identifier: "timeclock-open-entries") { route = .entries }
-            WellDivider(leading: 16)
-            placeRow("Time off", value: timeOff == 0 ? nil : "\(timeOff)", identifier: "timeclock-open-timeoff") { route = .timeOff }
-        }
-    }
-
-    private func placeRow(_ title: String, value: String?, identifier: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Text(title).font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 8)
-                if let value { Text(value).font(Theme.font(16)).monospacedDigit().foregroundStyle(Theme.muted) }
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            }
-            .padding(.horizontal, 16).padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(RowPressStyle())
-        .accessibilityIdentifier(identifier)
-    }
-
     // MARK: Bar
 
     /// Paper 27: Start break beside Clock out; 27C: Clock out beside End break. Clocked out, the
     /// one action is Clock in.
     @ViewBuilder private var bar: some View {
         let active = model.active
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(PlaceWeightedRow())
         layout {
             if let active {
                 if TimeClockMath.isMissedClockOut(active, now: Date()) {
@@ -687,8 +652,9 @@ struct TimeClockView: View {
                     .accessibilityIdentifier("timeclock-clock-in")
             }
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12).padding(.bottom, 8)
-        .background(Theme.background)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 28).padding(.bottom, 8)
+        .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0), .init(color: Theme.background, location: 0.34)],
+                                   startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
     }
 }
 
@@ -779,13 +745,13 @@ struct TimeClockEntriesView: View {
         let content = HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(TimeClockWords.longDay(entry.clockIn)).font(Theme.font(16, weight: .medium))
-                Text(parts.joined(separator: TimeClockWords.dot)).font(Theme.font(14)).monospacedDigit()
+                Text(parts.joined(separator: TimeClockWords.dot)).font(Theme.font(14))
                     .foregroundStyle(missed ? Theme.warning : Theme.muted)
             }
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(missed ? "Fix" : "\(TimeClockMath.decimalHours(TimeClockMath.workedSeconds(entry, now: now)))h")
-                .font(Theme.font(16, weight: .medium)).monospacedDigit()
+                .font(Theme.font(16, weight: .medium))
                 .foregroundStyle(missed ? Theme.brandText : Theme.foreground)
                 .fixedSize()
         }
@@ -861,7 +827,7 @@ struct TimeClockTimesheetView: View {
         HStack(spacing: 8) {
             PaperCircleButton(symbol: "chevron.left", label: "Week before", size: 40, fill: Theme.card) { offset -= 1 }
                 .accessibilityIdentifier("timeclock-timesheet-previous")
-            Text(TimeClockWords.weekRange(week)).font(Theme.font(15, weight: .semibold)).monospacedDigit()
+            Text(TimeClockWords.weekRange(week)).font(Theme.font(15, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
@@ -893,7 +859,7 @@ struct TimeClockTimesheetView: View {
     private func tile(_ label: String, _ value: String, warn: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(label).font(Theme.font(13)).foregroundStyle(warn ? Theme.warning : Theme.muted)
-            Text(value).font(Theme.font(22, weight: .bold)).monospacedDigit()
+            Text(value).font(Theme.font(22, weight: .bold))
                 .foregroundStyle(warn ? Theme.warning : Theme.foreground)
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -918,7 +884,7 @@ struct TimeClockTimesheetView: View {
             return [TimeClockWords.span(day), pause].filter { !$0.isEmpty }.joined(separator: TimeClockWords.dot)
         }()
         let content = HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(label).font(Theme.font(15, weight: .semibold)).monospacedDigit()
+            Text(label).font(Theme.font(15, weight: .semibold))
                 .frame(minWidth: 58, alignment: .leading)
             VStack(alignment: .leading, spacing: 0) {
                 if missed != nil {
@@ -929,13 +895,13 @@ struct TimeClockTimesheetView: View {
                         if day.isOpen {
                             Circle().fill(Theme.success).frame(width: 8, height: 8).accessibilityHidden(true)
                         }
-                        Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                        Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     }
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(hours).font(Theme.font(15, weight: .semibold)).monospacedDigit()
+            Text(hours).font(Theme.font(15, weight: .semibold))
                 .foregroundStyle(missed != nil ? Theme.warning : (day.entries.isEmpty ? Theme.muted : Theme.foreground))
                 .fixedSize()
         }
@@ -1016,7 +982,7 @@ struct TimeClockTimeOffView: View {
     private func row(_ request: TimeClockTimeOff) -> some View {
         Button { sheet = .timeOff(request) } label: {
             VStack(alignment: .leading, spacing: 2) {
-                Text(TimeClockWords.timeOffRange(request)).font(Theme.font(16, weight: .medium)).monospacedDigit()
+                Text(TimeClockWords.timeOffRange(request)).font(Theme.font(16, weight: .medium))
                 Text("\(request.kind.label)\(TimeClockWords.dot)\(TimeClockWords.timeOffLength(request))")
                     .font(Theme.font(14)).foregroundStyle(Theme.muted)
                 Text(TimeClockTimeOff.statusLabel).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.warning)

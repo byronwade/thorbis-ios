@@ -96,6 +96,9 @@ struct PurchaseOrderDetailView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let order { commit(order, vendor: book.vendor(order.vendorID)) }
+        }
         .toolbar {
             if let order {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -195,7 +198,7 @@ struct PurchaseOrderDetailView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Text([order.numberLabel, order.note ?? ""].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
-                .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.muted)
+                .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
@@ -243,7 +246,7 @@ struct PurchaseOrderDetailView: View {
                 }
             } accessory: {
                 Text(order.lines.count == 1 ? "1 item" : "\(order.lines.count) items")
-                    .font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
             if draft {
                 Text("Tap an item to edit its name or cost. At quantity 1, minus becomes remove.")
@@ -261,8 +264,9 @@ struct PurchaseOrderDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
-        commit(order, vendor: vendor)
-        SalesPhoneNote(text: "Saved on this phone only. Your team doesn\u{2019}t see this order.")
+        commitNote(order)
+        PlacePhoneLine(text: "Kept on this phone \u{00B7} your team doesn\u{2019}t see this order")
+            .padding(.horizontal, -(PaperCardMetrics.margin + 4))
     }
 
     private var totalLabel: some View {
@@ -271,7 +275,7 @@ struct PurchaseOrderDetailView: View {
 
     private func totalFigure(_ order: PurchaseOrderRecord) -> some View {
         Text(PurchaseOrderMath.money(order.totalCents, alwaysCents: true))
-            .font(Theme.font(24, weight: .bold)).monospacedDigit().foregroundStyle(Theme.foreground)
+            .font(Theme.font(24, weight: .bold)).foregroundStyle(Theme.foreground)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -324,7 +328,7 @@ struct PurchaseOrderDetailView: View {
     }
 
     private func fact(_ label: String, _ value: String, empty: String = "") -> some View {
-        PaperDetailRow(label: label) { Text(value.isEmpty ? empty : value).monospacedDigit() }
+        PaperDetailRow(label: label) { Text(value.isEmpty ? empty : value) }
             .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 56)
     }
 
@@ -336,7 +340,7 @@ struct PurchaseOrderDetailView: View {
                     Text(line.description).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(costLine(line)).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
+                    Text(costLine(line)).font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -367,12 +371,12 @@ struct PurchaseOrderDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text(line.received >= line.quantity ? "Ordered \(line.quantity) \u{00B7} all received"
                      : line.received > 0 ? "\(line.received) of \(line.quantity) received" : "Ordered \(line.quantity)")
-                    .font(Theme.font(14)).monospacedDigit()
+                    .font(Theme.font(14))
                     .foregroundStyle(line.received > 0 && line.received < line.quantity ? Theme.warning : Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text(PurchaseOrderMath.money(line.totalCents, alwaysCents: true)).font(Theme.font(16, weight: .medium)).monospacedDigit()
+            Text(PurchaseOrderMath.money(line.totalCents, alwaysCents: true)).font(Theme.font(16, weight: .medium))
                 .foregroundStyle(Theme.foreground).fixedSize()
         }
         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
@@ -402,31 +406,33 @@ struct PurchaseOrderDetailView: View {
     }
 
     /// Paper 41: the brand commit, with the vendor's phone on a 52 circle beside it.
+    /// Paper 41's foot: the brand commit, 50 tall, with the vendor's phone circle beside it.
     @ViewBuilder private func commit(_ order: PurchaseOrderRecord, vendor: VendorRecord?) -> some View {
         let callURL = vendor?.callURL
-        VStack(alignment: .leading, spacing: 10) {
+        if order.status != .received || callURL != nil {
             HStack(spacing: 8) {
                 switch order.status {
                 case .draft:
                     Button { markOrdered() } label: {
-                        SalesBrandCommit(title: "Mark as ordered", symbol: "checkmark.shield")
+                        PaperPillLabel(title: "Mark as ordered", symbol: "checkmark.shield", height: 50)
                             .opacity(order.lines.isEmpty ? 0.5 : 1)
                     }
                     .buttonStyle(PressStyle())
+                    .disabled(order.lines.isEmpty)
                     .accessibilityIdentifier("vendors-order-mark-ordered")
                 case .ordered:
                     Button { receiving = true } label: {
-                        SalesBrandCommit(title: "Receive items", symbol: "shippingbox")
+                        PaperPillLabel(title: "Receive items", symbol: "shippingbox", height: 50)
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityIdentifier("vendors-order-receive")
                 case .received:
-                    EmptyView()
+                    Spacer(minLength: 0)
                 }
                 if let callURL {
                     Button { openURL(callURL) } label: {
-                        Image(systemName: "phone").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .frame(width: 52, height: 52)
+                        PaperIcon(.phone, size: 20)
+                            .frame(width: 50, height: 50)
                             .background(Theme.card, in: Circle())
                             .contentShape(Circle())
                     }
@@ -434,20 +440,25 @@ struct PurchaseOrderDetailView: View {
                     .accessibilityLabel("Call \(order.vendorName)")
                     .accessibilityIdentifier("vendors-order-call")
                 }
-                if order.status == .received, callURL != nil { Spacer(minLength: 0) }
             }
-            if order.status == .draft {
-                Text(order.lines.isEmpty ? "Add an item before marking this ordered."
-                     : "Marking it ordered doesn\u{2019}t send anything. Share the order to send it to the vendor.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-            } else if order.isPartlyReceived {
-                Text("\(order.receivedUnits) of \(order.orderedUnits) received. The order stays open for the rest.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 4)
-            }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 28).padding(.bottom, 8)
+            .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0), .init(color: Theme.background, location: 0.34)],
+                                       startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
+        }
+    }
+
+    @ViewBuilder private func commitNote(_ order: PurchaseOrderRecord) -> some View {
+        if order.status == .draft {
+            Text(order.lines.isEmpty ? "Add an item before marking this ordered."
+                 : "Marking it ordered doesn\u{2019}t send anything. Share the order to send it to the vendor.")
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
+        } else if order.isPartlyReceived {
+            Text("\(order.receivedUnits) of \(order.orderedUnits) received. The order stays open for the rest.")
+                .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
         }
     }
 }
@@ -500,7 +511,7 @@ struct PurchaseOrderLineSheet: View {
                                          keyboard: .decimalPad)
                         if let lineTotal {
                             WellDivider(leading: 16)
-                            PaperDetailRow(label: "Line total") { Text(lineTotal).monospacedDigit() }
+                            PaperDetailRow(label: "Line total") { Text(lineTotal) }
                                 .padding(.horizontal, 16).frame(minHeight: 52)
                         }
                     }
@@ -571,7 +582,7 @@ struct PurchaseOrderReceiveSheet: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(order.vendorName).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text(summary).font(Theme.font(13)).monospacedDigit().foregroundStyle(Theme.muted)
+                        Text(summary).font(Theme.font(13)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(.horizontal, 4)
@@ -619,7 +630,7 @@ struct PurchaseOrderReceiveSheet: View {
                 Text(line.description).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(complete ? "Ordered \(line.quantity)" : "\(now) of \(line.quantity) received \u{00B7} back-ordered")
-                    .font(Theme.font(13, weight: complete ? .regular : .semibold)).monospacedDigit()
+                    .font(Theme.font(13, weight: complete ? .regular : .semibold))
                     .foregroundStyle(complete ? Theme.muted : Theme.warning)
                     .fixedSize(horizontal: false, vertical: true)
             }
