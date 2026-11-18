@@ -12,7 +12,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     static let b = "00000000-0000-4000-8000-000000008102"
     static let c = "00000000-0000-4000-8000-000000008103"
     static let d = "00000000-0000-4000-8000-000000008104"
-    struct Response { let status: Int; let payload: Any; var error: URLError? = nil }
+    struct Response { let status: Int; let payload: Any; var error: URLError? = nil; var delay: Double = 0 }
     private let lock = NSRecursiveLock()
     private var approved: [String: [String: Any]] = [:]
     private var acceptances: [String: [String: Any]] = [:]
@@ -33,6 +33,8 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     private var changedRevision = false
     private var changedFirstRevision = false
     private var removedFirst = false
+    private var slowed = false
+    private var mintFailed = false
     private var flags: [String] { ProcessInfo.processInfo.arguments }
     private var org: String { workspaceChanged ? "00000000-0000-4000-8000-000000000003" : PaperPreview.organizationID }
     private var now: String { ISO8601DateFormatter().string(from: Date()) }
@@ -48,6 +50,7 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
     func chooseWorkspace() { lock.withLock { choosingWorkspace = true } }
     func interruptNextMembership() { lock.withLock { interruptMembership = true } }
     func rejectNextMembership() { lock.withLock { rejectMembership = true } }
+    func failNextMint() { lock.withLock { mintFailed = true } }
     func interruptNextUpload() { lock.withLock { interruptUpload = true } }
     func allowUnlock() { lock.withLock { unlockAllowed = true } }
     func authenticate() -> Bool { lock.withLock { unlocks += 1; return unlockAllowed } }
@@ -172,7 +175,17 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
         while stream.hasBytesAvailable { let count = stream.read(&buffer, maxLength: buffer.count); if count <= 0 { break }; value.append(buffer, count: count) }
         return value
     }
-    func response(_ request: URLRequest) -> Response? { lock.withLock {
+    /// `--paper-preview-handoff-slow-after-first-approval`: once one approval is recorded, the next read waits 8 s
+    /// (time to leave the screen mid-run).
+    func response(_ request: URLRequest) -> Response? {
+        guard var value = answer(request) else { return nil }
+        lock.withLock {
+            if flags.contains("--paper-preview-handoff-slow-after-first-approval"), !slowed, !approved.isEmpty,
+               request.httpMethod ?? "GET" == "GET", request.url?.path == "/v1/jobs/\(PaperPreview.jobID)" { slowed = true; value.delay = 8 }
+        }
+        return value
+    }
+    private func answer(_ request: URLRequest) -> Response? { lock.withLock {
         guard let url = request.url else { return .init(status: 400, payload: [:]) }
         let path = url.path, method = request.httpMethod ?? "GET"
         requests.append(["method": method, "path": path, "query": url.query ?? ""])
@@ -258,6 +271,9 @@ final class JobEstimateHandoffPreview: @unchecked Sendable {
                         ["id": "private-material", "description": "Materials", "quantity": 1, "unitPrice": ["amount": 5000, "currency": "USD"]]]])
             }
             if method == "POST", path == "/v1/estimates/\(id)/commercial-documents" { return .init(status:200,payload:["source":["type":"estimate","id":id],"contentHash":String(repeating:id == Self.a ? "a":"b",count:64),"snapshot":["content":["revision":["number":1]]]]) }
+            if method == "POST", path == "/v1/estimates/\(id)/action-tokens", mintFailed {
+                mintFailed = false; return .init(status:409,payload:["status":409,"title":"Sample link unavailable"])
+            }
             if method == "POST", path == "/v1/estimates/\(id)/action-tokens" { return .init(status:200,payload:["token":"sample-\(id)"]) }
             if method == "GET", path == "/v1/public/document-actions/sample-\(id)" { return .init(status:200,payload:action(id)) }
             let direct = path == "/v1/estimates/\(id)/approve"
@@ -361,6 +377,7 @@ struct JobEstimateHandoffPreviewControls: View {
             Button("Choose sample workspace shortly") { delayed(restore: true) { JobEstimateHandoffPreview.shared.chooseWorkspace() } }
             Button("Interrupt next membership read") { JobEstimateHandoffPreview.shared.interruptNextMembership() }
             Button("Interrupt next signature upload") { JobEstimateHandoffPreview.shared.interruptNextUpload() }
+            Button("Fail next approval link") { JobEstimateHandoffPreview.shared.failNextMint() }
             Button("Allow sample unlock") { JobEstimateHandoffPreview.shared.allowUnlock() }
             Button("Refresh sample receipt") { proof = JobEstimateHandoffPreview.shared.receipt }
             Text("Sample approval receipt").accessibilityIdentifier("handoff-sample-receipt").accessibilityValue(proof)

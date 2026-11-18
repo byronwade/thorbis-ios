@@ -981,6 +981,11 @@ final class JobEstimateHandoffUITests: XCTestCase {
             _ = try? receipt(app); XCTFail("The exact selected set must open its one signature"); return
         }
         XCTAssertTrue(app.textFields["Your full name"].exists)
+        if optionID != nil {
+            // The server's own consent words for the package (not the app's sentence) are on screen before any ink.
+            XCTAssertEqual(app.descendants(matching: .any)["customer-estimate-signature-pad"].value as? String, "Signature required")
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "my typed name is my electronic signature")).firstMatch.exists)
+        }
         draw(app)
     }
     private func approveTogether(_ app: XCUIApplication) throws {
@@ -1059,6 +1064,83 @@ final class JobEstimateHandoffUITests: XCTestCase {
         try approveTogether(app)
         XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 25))
         XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 2)
+    }
+    func testEarlierFrozenUnsentSignatureIsReplacedByTheOneSignature() throws {
+        let app = open()
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10)); thorbisStableButton(app, "handoff-continue-signatures").tap()
+        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 10)); draw(app)
+        toggleSampleControls(app); app.buttons["Interrupt next signature upload"].tap(); toggleSampleControls(app)
+        thorbisStableButton(app, "handoff-submit-approval").tap()
+        XCTAssertTrue(app.buttons["Try again"].waitForExistence(timeout: 15), "The single approval froze its ink, then stopped before sending")
+        XCTAssertEqual((try receipt(app)["registrationClientIDs"] as? [String])?.count, 1)
+        app.buttons["Back to selected work"].tap(); app.buttons["Back to estimates"].tap()
+        let second = app.buttons["handoff-select-00000000-0000-4000-8000-000000008102"]
+        visible(app, second); selectEstimate(app, second)
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["handoff-approve-selected"].waitForExistence(timeout: 15))
+        draw(app); try approveTogether(app)
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 25))
+        let proof = try receipt(app)
+        XCTAssertEqual((proof["approvals"] as? [[String: Any]])?.count, 2)
+        XCTAssertEqual((proof["registrationClientIDs"] as? [String])?.count, 3, "The first estimate is sent with the new signature's own asset, never the earlier frozen one")
+        XCTAssertEqual((proof["confirmedMediaIDs"] as? [String])?.count, 2)
+    }
+    func testLeavingDuringARunSendsNothingAfterwards() throws {
+        let app = open(["--paper-preview-handoff-slow-after-first-approval", "--paper-preview-handoff-hide-controls"])
+        reachSignTogether(app); try approveTogether(app)
+        let firstApproved = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "Approved"),
+                                                      object: app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"])
+        XCTAssertEqual(XCTWaiter.wait(for: [firstApproved], timeout: 20), .completed)
+        // The second estimate's checks are now waiting on a slow read: the technician takes the device back.
+        ownerExit(app).tap(); waitForStaffDoor(app)
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "Let the slow read land")], timeout: 10)
+        thorbisShowCustomerDoor(app).tap()
+        XCTAssertTrue(app.navigationBars["Estimates"].waitForExistence(timeout: 10))
+        let proof = try receipt(app)
+        let approvals = try XCTUnwrap(proof["approvals"] as? [[String: Any]])
+        XCTAssertEqual(approvals.compactMap { $0["estimateID"] as? String }, ["00000000-0000-4000-8000-000000008101"], "Nothing is sent after leaving")
+        XCTAssertEqual((proof["registrationClientIDs"] as? [String])?.count, 1, "No signature upload after leaving")
+    }
+    func testDoubleTapApprovesEachEstimateOnce() throws {
+        let app = open(["--paper-preview-handoff-hide-controls"])
+        reachSignTogether(app)
+        thorbisStableButton(app, "handoff-approve-selected").doubleTap()
+        XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 25))
+        let proof = try receipt(app)
+        let ids = try XCTUnwrap(proof["approvals"] as? [[String: Any]]).compactMap { $0["estimateID"] as? String }
+        XCTAssertEqual(ids.sorted(), ["00000000-0000-4000-8000-000000008101", "00000000-0000-4000-8000-000000008102"])
+        XCTAssertEqual((proof["registrationClientIDs"] as? [String])?.count, 2)
+    }
+    func testPackageChangedAfterFailedLinkIsRefused() throws {
+        let app = open(["--paper-preview-handoff-options", "--paper-preview-handoff-receipt"])
+        XCTAssertTrue(thorbisShowCustomerDoor(app).waitForExistence(timeout: 10)); thorbisShowCustomerDoor(app).tap()
+        let first = app.buttons["handoff-select-00000000-0000-4000-8000-000000008101"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); selectEstimate(app, first)
+        let package = app.buttons["handoff-option-00000000-0000-4000-8000-000000008101-00000000-0000-4000-8000-000000008201"]
+        visible(app, package); package.tap()
+        thorbisStableButton(app, "handoff-review-selected").tap()
+        XCTAssertTrue(app.buttons["Continue to signatures"].waitForExistence(timeout: 10))
+        // The checkpoint opens its link on arrival; that link fails.
+        toggleSampleControls(app); app.buttons["Fail next approval link"].tap(); toggleSampleControls(app)
+        thorbisStableButton(app, "handoff-continue-signatures").tap()
+        // The link fails, so the screen stays on the review, where the package can be changed.
+        let change = app.buttons["Change option"]
+        let shown = change.waitForExistence(timeout: 15)
+        capture(app, "After the failed link")
+        XCTAssertTrue(shown); change.tap()
+        let other = app.buttons["Choose Other package"]
+        XCTAssertTrue(other.waitForExistence(timeout: 10)); other.tap()
+        let review = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Review Other package")).firstMatch
+        XCTAssertTrue(review.waitForExistence(timeout: 10)); review.tap()
+        thorbisStableButton(app, "customer-estimate-approve").tap()
+        XCTAssertTrue(app.textFields["Your full name"].waitForExistence(timeout: 15)); draw(app)
+        thorbisStableButton(app, "handoff-submit-approval").tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "isn't the one reviewed")).firstMatch.waitForExistence(timeout: 15))
+        XCTAssertEqual((try receipt(app)["approvals"] as? [[String: Any]])?.count, 0, "Another package than the one on screen is never sent")
     }
     func testOneSignatureAtLargestTextKeepsShortCommit() throws {
         let app = open(["--paper-preview-handoff-hide-controls", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
@@ -1145,9 +1227,6 @@ final class JobEstimateHandoffUITests: XCTestCase {
     func testPackageChoiceKeepsItsCanonicalConsentWhileAnotherEstimateApprovesIndependently() throws {
         let app = open(["--paper-preview-handoff-options", "--paper-preview-handoff-public-patch-no-acceptance", "--paper-preview-handoff-hide-controls"])
         reachSignTogether(app, optionID: "handoff-option-00000000-0000-4000-8000-000000008101-00000000-0000-4000-8000-000000008201")
-        // The package's own consent words are shown before the one signature.
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "electronic signature")).firstMatch.exists
-                      || app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "I approve")).count >= 1)
         XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"].label.contains("$250.00"))
         try approveTogether(app)
         XCTAssertTrue(app.buttons["handoff-batch-done"].waitForExistence(timeout: 20))
@@ -1171,7 +1250,7 @@ final class JobEstimateHandoffUITests: XCTestCase {
         let app = open(["--paper-preview-handoff-lose-second", "--paper-preview-handoff-hide-controls"])
         reachSignTogether(app); try approveTogether(app)
         let summary = waitForBatchStop(app)
-        XCTAssertTrue(summary.label.contains("1 of 2 approved"), summary.label)
+        XCTAssertTrue(summary.label.contains("1 of 2 approved · 1 needs confirmation"), summary.label)
         XCTAssertTrue(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008101"].label.contains("Approved"))
         XCTAssertFalse(app.descendants(matching: .any)["handoff-batch-row-00000000-0000-4000-8000-000000008102"].label.contains("Approved"))
         capture(app, "Lost response stays unconfirmed after first approval")
@@ -1201,6 +1280,13 @@ final class JobEstimateHandoffUITests: XCTestCase {
         XCTAssertEqual(new.filter { $0["estimateID"] as? String == "00000000-0000-4000-8000-000000008101" }.count, 1)
         XCTAssertTrue(NSDictionary(dictionary: old[1]["body"] as! [String: Any]).isEqual(to: new[2]["body"] as! [String: Any]))
         XCTAssertEqual((after["confirmedMediaIDs"] as? [String])?.count, 2, "Retry must not upload replacement ink")
+        // The unknown outcome is checked (a live read of that estimate) before anything is sent again.
+        let requests = try XCTUnwrap(after["requests"] as? [[String: String]])
+        let approvePath = "/v1/estimates/00000000-0000-4000-8000-000000008102/approve"
+        let posts = requests.indices.filter { requests[$0]["method"] == "POST" && requests[$0]["path"] == approvePath }
+        XCTAssertEqual(posts.count, 2)
+        let check = requests.indices.first { $0 > posts[0] && $0 < posts[1] && requests[$0]["method"] == "GET" && requests[$0]["path"] == "/v1/estimates/00000000-0000-4000-8000-000000008102" }
+        XCTAssertNotNil(check, "No resend before the check read")
         capture(app, "Only unconfirmed estimate retried with identical signature payload")
     }
     func testLargestTextDarkModeKeepsBothEstimatesAndProtectedNavigationReachable() {

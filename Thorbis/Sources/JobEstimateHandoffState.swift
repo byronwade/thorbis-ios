@@ -213,7 +213,8 @@ final class CustomerEstimateHandoffContext: ObservableObject, Identifiable {
         running = true; changed()
         let work = Task { @MainActor in await operation() }
         task = work
-        await work.value
+        // Cancelling the caller (leaving the one-signature screen) cancels this approval's work too.
+        await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
         running = false; task = nil; changed()
         return true
     }
@@ -254,6 +255,8 @@ final class JobEstimateHandoffModel: ObservableObject {
     /// One signature for several estimates, alive only while its screen is open.
     @Published fileprivate(set) var batch: JobEstimateBatchApproval?
     fileprivate var batchSubscription: AnyCancellable?
+    /// The one run of the batch in flight; cancelled when the screen is left.
+    fileprivate var batchTask: Task<Void, Never>?
     var selectedIDs: Set<String> { selection.selectedIDs }
     private let actorID: String
     private let sessionGeneration: UUID
@@ -297,7 +300,7 @@ final class JobEstimateHandoffModel: ObservableObject {
             context.task?.cancel()
             context.report(context.submissionStarted ? .unknown : .needsReview("Your access no longer allows approving this estimate."))
         }
-        batch?.discard()
+        batch?.discard(); batchTask?.cancel()
         reviewedGeneration = nil
     }
     var abilities: TechJobAbilities {
@@ -839,47 +842,83 @@ extension JobEstimateHandoffModel {
     /// Starts one signature for the reviewed estimates. Each still gets its own approval.
     func beginBatch(signerName: String, png: Data) -> JobEstimateBatchApproval? {
         let name = signerName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard approvalAuthority, reviewed.count > 1, !name.isEmpty, name.count <= 120, !png.isEmpty,
+        // Never a second batch beside a live one (a double tap), and never while any approval runs.
+        guard batch == nil, batchTask == nil, approvalAuthority, reviewed.count > 1, !name.isEmpty, name.count <= 120, !png.isEmpty,
               !contexts.values.contains(where: \.running) else { return nil }
+        let items = reviewed.compactMap { contexts[$0.key] }
+        // A sent, unconfirmed approval keeps its own signature for its exact retry: it is never re-signed here.
+        guard items.count == reviewed.count, !items.contains(where: { $0.submissionStarted || $0.outcome?.isApproved == true }) else { return nil }
+        // Ink frozen earlier (an interrupted single approval) was never sent: this signature replaces it.
+        for context in items { context.forgetUnsentSignature() }
         let batch = JobEstimateBatchApproval(order: reviewed.map(\.key), capture: .init(signerName: name, png: png))
         self.batch = batch
         batchSubscription = batch.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         return batch
     }
 
-    /// Leaving the screen, a hand-back, a lock or a session change: the captured ink is forgotten.
+    /// Leaving the screen, a hand-back, a lock or a session change: the run stops and the captured ink is forgotten.
     func endBatch() {
+        batchTask?.cancel(); batchTask = nil
         if let batch { for key in batch.order { contexts[key]?.forgetUnsentSignature() } }
         batch?.discard(); batch = nil; batchSubscription = nil
     }
 
-    func runBatch() async {
-        guard let batch else { return }
-        await batch.run(stillCurrent: { [weak self] in self?.approvalAuthority == true }) { [weak self] key, capture in
-            guard let self else { return .stopped("Your technician needs to reopen these estimates.") }
-            return await self.approveInBatch(key, capture: capture)
+    /// Starts (or retries) the run once; a second tap while it runs does nothing.
+    func startBatchRun() {
+        guard let batch, batchTask == nil, !batch.running, batch.capture != nil else { return }
+        batchTask = Task { @MainActor [weak self] in
+            await self?.runBatch(batch)
+            if let self, self.batch === batch { self.batchTask = nil }
+        }
+    }
+
+    /// Still this screen's run: the same batch, its ink still held, not cancelled, approval access unchanged.
+    private func batchLive(_ batch: JobEstimateBatchApproval) -> Bool {
+        self.batch === batch && batch.capture != nil && !Task.isCancelled && approvalAuthority
+    }
+
+    private func runBatch(_ batch: JobEstimateBatchApproval) async {
+        await batch.run(stillCurrent: { [weak self, weak batch] in
+            guard let self, let batch else { return false }
+            return self.batchLive(batch)
+        }) { [weak self, weak batch] key, capture in
+            guard let self, let batch else { return .stopped("Your technician needs to reopen these estimates.") }
+            return await self.approveInBatch(key, capture: capture, batch: batch)
         }
         objectWillChange.send()
     }
 
     /// One estimate of the batch, through the same per-estimate approval and checks as signing it alone.
-    private func approveInBatch(_ key: String, capture: JobEstimateBatchApproval.Capture) async -> JobEstimateBatchApproval.Step {
+    /// After every wait it stops unless this is still the screen's live run.
+    private func approveInBatch(_ key: String, capture: JobEstimateBatchApproval.Capture,
+                                batch: JobEstimateBatchApproval) async -> JobEstimateBatchApproval.Step {
         let changed = "Your technician needs to reopen this estimate before it can be approved."
-        guard approvalAuthority, let context = contexts[key], context.current() else { return .stopped(changed) }
+        let live: @MainActor () -> Bool = { [weak self, weak batch] in
+            guard let self, let batch else { return false }
+            return self.batchLive(batch)
+        }
+        guard live(), let context = contexts[key], context.current() else { return .stopped(changed) }
         if context.outcome?.isApproved == true { return .approved }
+        // Only this batch's own signature may be sent for this estimate.
+        if let frozen = context.signature,
+           frozen.signerName != capture.signerName || frozen.png != capture.png || frozen.signedAt != capture.signedAt {
+            return .stopped("This estimate holds an earlier signature. Check it with your technician before approving.")
+        }
         switch context.outcome {
         case .unknown?:
             // Sent before and unconfirmed: read first, never send again unless the read proves it safe.
             await reconcile(key)
+            guard live() else { return .stopped(changed) }
             if context.outcome?.isApproved == true { return .approved }
             guard context.outcome == .unknown, context.retryVerified else { return .stopped(Self.batchReason(context.outcome)) }
         case .retryable?:
             await retryPreparation(key)
+            guard live() else { return .stopped(changed) }
             guard context.outcome == nil else { return .stopped(Self.batchReason(context.outcome)) }
         case .needsReview(let reason)?: return .stopped(reason)
         case .approved?, nil: break
         }
-        guard approvalAuthority, context.canApprove() else { return .stopped(changed) }
+        guard live(), context.canApprove() else { return .stopped(changed) }
         let drawn = (context.reviewed.revision.options ?? []).isEmpty
         final class Flag { var value = false }
         let cannotSign = Flag()
@@ -887,13 +926,18 @@ extension JobEstimateHandoffModel {
             guard let self, let context else { return }
             do {
                 let sent = try await context.submitApproval(api: self.api, jobID: self.scope.jobID, signer: capture.signerName,
-                                                            png: { capture.png }, signedAt: capture.signedAt, drawn: drawn,
-                                                            stillCurrent: { [weak self] in self?.approvalAuthority == true })
+                                                            png: { live() ? capture.png : nil }, signedAt: capture.signedAt, drawn: drawn,
+                                                            stillCurrent: live)
                 cannotSign.value = sent == .cannotSign
             } catch is CancellationError {
             } catch { context.reportApprovalFailure(error) }
         }
         if context.outcome?.isApproved == true { return .approved }
+        guard live() else {
+            // Left mid-approval: ink this run froze but never sent is forgotten with the screen.
+            context.forgetUnsentSignature()
+            return .stopped(changed)
+        }
         if cannotSign.value { return .stopped("This estimate can't be signed here. Ask your technician.") }
         return .stopped(ran ? Self.batchReason(context.outcome) : changed)
     }

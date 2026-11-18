@@ -793,6 +793,11 @@ struct CustomerEstimatePresentation: View {
         error = nil
         do {
             if let handoff, let jobID {
+                // Only the package the customer reviewed may be sent: if the screen now shows another one, refuse.
+                guard flow.selectedOptionID == handoff.reviewed.optionID else {
+                    handoff.report(.needsReview("The package on screen isn't the one reviewed. Hand the device back to your technician to review it again."))
+                    return
+                }
                 // The handoff's one per-estimate approval, shared with approving several at once.
                 let sent = try await handoff.submitApproval(api: api, jobID: jobID, signer: signer, png: { SignatureInk.png(strokes) },
                                                             drawn: drawnApproval, stillCurrent: { currentAuthority() && generation == api.requestGeneration })

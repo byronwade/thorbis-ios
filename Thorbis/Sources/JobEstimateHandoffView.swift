@@ -268,7 +268,11 @@ struct JobEstimateHandoffView: View {
         }
         .onChange(of: model.approvalAuthority) { _, allowed in
             // A started one-signature run stays on screen to say which were approved; its ink is already gone.
-            if !allowed { checkpointID = nil; if model.batch?.started != true { reviewing = false }; model.cancelApprovals() }
+            if !allowed {
+                checkpointID = nil; batchStrokes = []
+                if model.batch?.started != true { reviewing = false }
+                model.cancelApprovals()
+            }
         }
         // The one signature is never kept past this screen: leaving it, a lock or a hand-back forgets it.
         .onChange(of: reviewing) { _, open in if !open { forgetBatchSignature() } }
@@ -932,7 +936,8 @@ struct JobEstimateHandoffView: View {
             else if case .stopped(let reason)? = batch.states[item.key] { lines.append("\(reference): not approved. \(reason)") }
             else { lines.append("\(reference): not approved yet") }
         }
-        return ("\(approved.count) of \(model.reviewed.count) approved", lines)
+        let unconfirmed = model.reviewed.filter { model.contexts[$0.key]?.outcome == .unknown }.count
+        return ("\(approved.count) of \(model.reviewed.count) approved" + (unconfirmed > 0 ? " \u{00B7} \(unconfirmed) needs confirmation" : ""), lines)
     }
 
     private var batchCommitTitle: String {
@@ -949,7 +954,7 @@ struct JobEstimateHandoffView: View {
         } else if let batch, batch.started {
             if batch.canRetry {
                 CustomerPresentationCommit(title: "Approve remaining (\(batch.remainingKeys.count))", enabled: model.approvalAuthority, busy: false, type: type) {
-                    Task { await model.runBatch() }
+                    model.startBatchRun()
                 }
                 .accessibilityIdentifier("handoff-batch-retry")
             } else if batch.running {
@@ -957,12 +962,17 @@ struct JobEstimateHandoffView: View {
             }
             CustomerSecondaryButton(title: "Back to estimates", type: type) { reviewing = false }
                 .disabled(batch.running)
+        } else if batch != nil {
+            // From the first tap until the run reports: one disabled commit, so a second tap sends nothing.
+            CustomerPresentationCommit(title: "Approving…", enabled: false, busy: true, type: type) {}
+                .accessibilityIdentifier("handoff-approve-selected")
         } else {
             let reason = customerSignatureHint(name: name, hasInk: SignatureInk.hasInk(batchStrokes))
             CustomerPresentationCommit(title: batchCommitTitle, compactTitle: "Approve (\(model.reviewed.count))",
                                        enabled: reason == nil && model.approvalAuthority, busy: false, type: type) {
-                guard let png = SignatureInk.png(batchStrokes), model.beginBatch(signerName: name, png: png) != nil else { return }
-                Task { await model.runBatch() }
+                guard model.batch == nil, let png = SignatureInk.png(batchStrokes),
+                      model.beginBatch(signerName: name, png: png) != nil else { return }
+                model.startBatchRun()
             }
             .accessibilityLabel(batchCommitTitle)
             .accessibilityIdentifier("handoff-approve-selected")

@@ -879,9 +879,15 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
         if PaperPreview.isJobEstimateHandoff, let response = JobEstimateHandoffPreview.shared.response(request) {
             if let error = response.error { client?.urlProtocol(self, didFailWithError: error); return }
             guard let url = request.url, let http = HTTPURLResponse(url: url, statusCode: response.status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type":"application/json"]) else { return }
-            client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
-            if let body = try? JSONSerialization.data(withJSONObject: response.payload, options: [.sortedKeys, .fragmentsAllowed]) { client?.urlProtocol(self, didLoad: body) }
-            client?.urlProtocolDidFinishLoading(self); return
+            let body = try? JSONSerialization.data(withJSONObject: response.payload, options: [.sortedKeys, .fragmentsAllowed])
+            let deliver: @Sendable () -> Void = { [weak self] in
+                guard let self else { return }
+                self.client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
+                if let body { self.client?.urlProtocol(self, didLoad: body) }
+                self.client?.urlProtocolDidFinishLoading(self)
+            }
+            if response.delay > 0 { DispatchQueue.global().asyncAfter(deadline: .now() + response.delay, execute: deliver) } else { deliver() }
+            return
         }
         if PaperPreview.isSavedWorkPreview, !["GET", "HEAD"].contains(request.httpMethod ?? "GET") {
             Self.scenario.lock.withLock { Self.scenario.savedWorkMutationCount += 1 }
