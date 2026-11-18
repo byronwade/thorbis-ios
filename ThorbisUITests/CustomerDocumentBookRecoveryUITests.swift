@@ -16,7 +16,8 @@ final class CustomerDocumentBookRecoveryUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [stale], timeout: 10), .completed)
 
         let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
-        reveal(invoice, in: overview)
+        // The card must be clear of the fixed hand-back footer: a tap through it would end Customer view.
+        thorbisRevealInCustomerView(invoice, in: app)
         invoice.tap()
         XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 10))
         choose("EST-2218", in: app)
@@ -142,15 +143,6 @@ final class CustomerDocumentBookRecoveryUITests: XCTestCase {
     private func choose(_ reference: String, in app: XCUIApplication) {
         app.buttons["Choose a job document"].tap()
         app.buttons[reference].tap()
-    }
-
-    private func reveal(_ element: XCUIElement, in scroll: XCUIElement) {
-        for _ in 0..<5 {
-            if element.exists && element.isHittable { return }
-            scroll.swipeUp()
-        }
-        XCTAssertTrue(element.exists)
-        XCTAssertTrue(element.isHittable)
     }
 
     private func capture(_ app: XCUIApplication, name: String) {
