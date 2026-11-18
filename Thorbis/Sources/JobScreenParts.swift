@@ -665,18 +665,22 @@ struct JobFieldSteps: View {
 enum JobOnSiteClock {
     static func line(arrived: Date, now: Date) -> String {
         let minutes = max(0, Int(now.timeIntervalSince(arrived) / 60))
+        if minutes >= 24 * 60 { return "On site \(minutes / 1440) d \((minutes / 60) % 24) h" }
         return minutes < 60 ? "On site \(minutes) min" : "On site \(minutes / 60) h \(minutes % 60) min"
     }
 
     /// Paper F4's timer card: hours, minutes and seconds since the arrival tap ("0:42:18").
     static func timer(arrived: Date, now: Date) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(arrived)))
+        // A job left on site for days (never wrapped up) reads as days, not "471:13:58".
+        if seconds >= 86_400 { return "\(seconds / 86_400)d \((seconds / 3600) % 24)h" }
         return String(format: "%d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
     }
 
     /// Paper F5's Summary row: "1h 12m" since the arrival tap; "12m" under an hour.
     static func short(arrived: Date, now: Date) -> String {
         let minutes = max(0, Int(now.timeIntervalSince(arrived) / 60))
+        if minutes >= 24 * 60 { return "\(minutes / 1440)d \((minutes / 60) % 24)h" }
         return minutes < 60 ? "\(minutes)m" : "\(minutes / 60)h \(minutes % 60)m"
     }
 }

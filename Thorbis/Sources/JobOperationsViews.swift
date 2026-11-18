@@ -603,6 +603,8 @@ struct JobCloseoutView: View {
                         .foregroundStyle(Theme.muted)
                         .lineLimit(1).minimumScaleFactor(0.8)
                 }
+                // Kept between the bar's circles; a long job name truncates instead of running off.
+                .frame(maxWidth: max(140, UIScreen.main.bounds.width - 184))
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             }
         }

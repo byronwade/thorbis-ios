@@ -25,6 +25,12 @@ struct DispatchBoardView: View {
     /// Paper 53: each technician's day folds behind the chevron by their name.
     @State private var folded: Set<String> = []
     @State private var attentionFolded = false
+    /// The whole waiting queue as its own page; the Schedule shows only the oldest few.
+    var waitingOnly = false
+    @State private var showsAllWaiting = false
+    @State private var waitingSearch = ""
+    /// How many waiting jobs the Schedule itself lists before "See all".
+    static let waitingPreview = 3
     /// Paper 53's toast after a one-tap move ("Job reassigned to Mike Tran · Undo"); the screen
     /// that hosts the board draws it at its foot.
     var toast: Binding<BoardToast?>? = nil
@@ -92,7 +98,9 @@ struct DispatchBoardView: View {
         let unassigned = today.filter { $0.assignedToUserId == nil && $0.status != "completed" }
         let elsewhere = today.filter { job in job.assignedToUserId.map { !rosterIDs.contains($0) } ?? false }
         Group {
-            if let tabletRange {
+            if waitingOnly {
+                waitingPage
+            } else if let tabletRange {
                 tabletBoard(range: tabletRange, roster: roster, names: names, unassigned: unassigned, elsewhere: elsewhere)
             } else {
                 VStack(alignment: .leading, spacing: 20) {
@@ -118,6 +126,40 @@ struct DispatchBoardView: View {
         .sheet(item: $scheduling) { value in SheetSurface { QuickScheduleSheet(jobID: value.id) } }
         .thorbisDestination(item: $assigning) { JobAssignmentView(jobID: $0.id) }
         .thorbisDestination(item: $opening) { JobDetailView(jobId: $0.id) }
+        .thorbisDestination(isPresented: $showsAllWaiting) { DispatchBoardView(waitingOnly: true) }
+    }
+
+    /// Every job that still needs a time, oldest first, with a filter by job or customer. Rows are
+    /// built as they scroll into view, so a queue of hundreds opens at once.
+    private var waitingPage: some View {
+        let all = unscheduled
+        let needle = waitingSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shown = needle.isEmpty ? all : all.filter {
+            $0.title.localizedCaseInsensitiveContains(needle) || store.customerName($0.customerId).localizedCaseInsensitiveContains(needle)
+        }
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                PaperPageTitle(title: "Waiting for a slot",
+                               subtitle: all.count == 1 ? "1 job needs a time" : "\(all.count) jobs need a time")
+                PaperSearchInput(text: $waitingSearch, label: "Search waiting jobs", placeholder: "Search") { EmptyView() }
+                    .paperCardMargin().padding(.top, 16).padding(.bottom, 16)
+                if let error { ErrorBanner(message: error) }
+                if shown.isEmpty {
+                    ListRoomEmpty(title: all.isEmpty ? "Everything has a time" : "No waiting jobs match",
+                                  message: all.isEmpty ? "New jobs without a time show up here." : "Try a job name or a customer.")
+                }
+                ForEach(Array(shown.enumerated()), id: \.element.id) { index, job in
+                    VStack(alignment: .leading, spacing: 0) {
+                        if index > 0 { WellDivider() }
+                        waitingRow(job)
+                    }
+                    .paperRowsCardSlice(first: index == 0, last: index == shown.count - 1)
+                }
+            }
+            .padding(.bottom, 24)
+        }
+        .background(Theme.canvas)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     /// The board's sections, in the phone's order: jobs no one has, each tech's day, the queue.
@@ -158,13 +200,28 @@ struct DispatchBoardView: View {
                 Text("Everything has a time.").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 56, alignment: .leading)
             } else {
-                // Lazy: a long queue builds only the rows on screen.
-                let waiting = unscheduled
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(waiting) { job in
-                        if job.id != waiting.first?.id { WellDivider() }
-                        waitingRow(job)
+                // Paper 53 keeps the Schedule to the day. The queue shows its oldest few here and
+                // the rest on its own page, so hundreds of waiting jobs never bury the techs.
+                let all = unscheduled
+                let waiting = Array(all.prefix(Self.waitingPreview))
+                ForEach(waiting) { job in
+                    if job.id != waiting.first?.id { WellDivider() }
+                    waitingRow(job)
+                }
+                if all.count > waiting.count {
+                    WellDivider()
+                    Button { showsAllWaiting = true } label: {
+                        HStack(spacing: 8) {
+                            Text("See all \(all.count)").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.brandText)
+                            Spacer(minLength: 8)
+                            PaperChevron()
+                        }
+                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityLabel("See all \(all.count) waiting jobs")
+                    .accessibilityIdentifier("board-waiting-all")
                 }
             }
         }
@@ -452,14 +509,14 @@ struct DispatchBoardView: View {
         return HStack(spacing: 8) {
             Button { menuJob = job } label: {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(job.title).font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
-                        .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                    Text(job.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                         .multilineTextAlignment(.leading)
                     Text([customer, waited].compactMap { $0 }.joined(separator: " · "))
                         .font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 }
-                .padding(.leading, PaperCardMetrics.inset).padding(.vertical, 12)
+                .padding(.leading, PaperCardMetrics.inset).padding(.vertical, 10)
                 .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -471,7 +528,7 @@ struct DispatchBoardView: View {
             .accessibilityHint("Assign, reschedule or open this job")
             .accessibilityIdentifier("board-row-\(job.id)")
             if canAssign {
-                Button { scheduling = job } label: { brandChip("Schedule") }
+                Button { scheduling = job } label: { Text("Schedule").paperButton(.compact, tone: .tinted) }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Schedule \(job.title)")
                     .padding(.trailing, 10)

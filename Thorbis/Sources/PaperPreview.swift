@@ -2325,7 +2325,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                 for key in ["id", "customerId"] {
                     if let value = next[key] as? String, value.hasPrefix("00000000-") { next[key] = prefix + value.dropFirst(9) }
                 }
-                if let name = next["name"] as? String { next["name"] = "\(name) \(copy)" }
+                // Real books carry long names and long job titles; the copies do too, so rows
+                // that only fit "AC not cooling" show their overflow here.
+                if let name = next["name"] as? String { next["name"] = "DEMO \(name) Household \(String(format: "%03d", copy))" }
+                if next["customerId"] != nil, let title = next["title"] as? String {
+                    next["title"] = "DEMO visit \(copy % 3 + 1) - \(title) - one fixture concern at the rear of the property"
+                }
                 // Jobs: like a real book, the copies are history. Most are finished on an earlier
                 // day; every tenth copy still waits for a time.
                 if next["customerId"] != nil, next["status"] != nil {

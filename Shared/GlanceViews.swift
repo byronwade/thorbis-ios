@@ -119,28 +119,26 @@ struct JobLockScreenView: View {
     let state: JobActivityAttributes.ContentState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // iOS gives a Lock Screen card 160pt and clips the rest. Four short rows fit: the job
+        // and its step, who and where, what is on record for the site, then the time in this
+        // step beside the one next step.
+        VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(attributes.jobNumber)
-                    .font(WidgetInk.font(13, weight: .semibold, relativeTo: .footnote))
-                    .foregroundStyle(WidgetInk.body)
-                    .lineLimit(1)
-                Spacer(minLength: 8)
-                Text(state.label)
-                    .font(WidgetInk.font(13, relativeTo: .footnote))
-                    .foregroundStyle(WidgetInk.body)
-                    .lineLimit(1)
-            }
-            VStack(alignment: .leading, spacing: 2) {
                 Text(attributes.cardTitle)
                     .font(WidgetInk.font(17, weight: .semibold, relativeTo: .headline))
                     .foregroundStyle(WidgetInk.ink)
                     .lineLimit(1)
-                Text(detailLine)
-                    .font(WidgetInk.font(14, relativeTo: .subheadline))
-                    .foregroundStyle(state.waitingToSync ? WidgetInk.warning : WidgetInk.subtle)
+                Spacer(minLength: 8)
+                Text(state.label)
+                    .font(WidgetInk.font(13, weight: .semibold, relativeTo: .footnote))
+                    .foregroundStyle(WidgetInk.tint(state.status))
                     .lineLimit(1)
+                    .layoutPriority(1)
             }
+            Text(detailLine)
+                .font(WidgetInk.font(14, relativeTo: .subheadline))
+                .foregroundStyle(state.waitingToSync ? WidgetInk.warning : WidgetInk.subtle)
+                .lineLimit(1)
             if state.isOnSite, let access = attributes.access {
                 Label(access, systemImage: "key")
                     .font(WidgetInk.font(14, weight: .medium, relativeTo: .subheadline))
@@ -148,10 +146,15 @@ struct JobLockScreenView: View {
                     .lineLimit(1)
                     .accessibilityLabel("On record for this site: \(access)")
             }
-            TimerRow(state: state, scheduledFor: attributes.scheduledFor)
-            NextStepButton(jobID: attributes.jobID, state: state)
+            HStack(alignment: .center, spacing: 12) {
+                TimerRow(state: state, scheduledFor: attributes.scheduledFor)
+                NextStepButton(jobID: attributes.jobID, state: state, compact: true)
+            }
+            .padding(.top, 4)
         }
-        .padding(16)
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        // Text never grows past what the card's fixed height can hold.
+        .dynamicTypeSize(...DynamicTypeSize.xLarge)
     }
 
     /// "Danielle Marlowe · 412 Birchwood Ln", or the sync warning in its place.
@@ -169,26 +172,19 @@ private struct TimerRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             ElapsedText(since: state.since, alignment: .leading)
-                .font(WidgetInk.number(28, weight: .bold, relativeTo: .title))
+                .font(WidgetInk.number(26, weight: .bold, relativeTo: .title))
                 .foregroundStyle(WidgetInk.ink)
-                .frame(maxWidth: 160, alignment: .leading)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .frame(maxWidth: 130, alignment: .leading)
                 .accessibilityLabel("Time in this step")
             Spacer(minLength: 0)
-            // "On site" is already the status word above while arrived; it adds something once
-            // the word above reads Working or Paused.
-            if state.isOnSite, state.status != "arrived" {
-                HStack(spacing: 6) {
-                    Circle().fill(WidgetInk.successMark).frame(width: 8, height: 8).accessibilityHidden(true)
-                    Text("On site")
-                        .font(WidgetInk.font(15, weight: .semibold, relativeTo: .subheadline))
-                        .foregroundStyle(WidgetInk.success)
-                        .lineLimit(1)
-                }
-            } else if state.status == "en_route", let scheduledFor {
-                Text("Booked \(scheduledFor.formatted(date: .omitted, time: .shortened))")
-                    .font(WidgetInk.font(15, relativeTo: .subheadline))
+            // While driving, when the visit is booked for; the step itself is the word on row one.
+            if state.status == "en_route", let scheduledFor {
+                Text(scheduledFor.formatted(date: .omitted, time: .shortened))
+                    .font(WidgetInk.font(14, relativeTo: .subheadline))
                     .foregroundStyle(WidgetInk.body)
                     .lineLimit(1)
+                    .accessibilityLabel("Booked \(scheduledFor.formatted(date: .omitted, time: .shortened))")
             }
         }
         .accessibilityElement(children: .combine)
@@ -200,8 +196,13 @@ struct ElapsedText: View {
     var alignment: TextAlignment = .trailing
 
     var body: some View {
-        Text(timerInterval: since...Date.distantFuture, countsDown: false)
-            .multilineTextAlignment(alignment)
+        // A step left open for more than a day reads "19 days, 15 hr", not "471:15:49".
+        if Date().timeIntervalSince(since) >= 86_400 {
+            Text(since, style: .relative).multilineTextAlignment(alignment)
+        } else {
+            Text(timerInterval: since...Date.distantFuture, countsDown: false)
+                .multilineTextAlignment(alignment)
+        }
     }
 }
 
@@ -212,6 +213,8 @@ struct NextStepButton: View {
     let jobID: String
     let state: JobActivityAttributes.ContentState
     var island = false
+    /// Beside the timer on the Lock Screen card: as wide as its words, not the whole row.
+    var compact = false
 
     var body: some View {
         if let next = state.nextStep {
@@ -232,7 +235,8 @@ struct NextStepButton: View {
             .font(WidgetInk.font(15, weight: .semibold, relativeTo: .subheadline))
             .foregroundStyle(island ? Color.black : WidgetInk.accent)
             .lineLimit(1)
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .padding(.horizontal, compact ? 18 : 0)
+            .frame(maxWidth: compact ? nil : .infinity, minHeight: 44)
             .background(Capsule().fill(island ? Color.white : WidgetInk.brandSurface))
             .contentShape(Capsule())
     }

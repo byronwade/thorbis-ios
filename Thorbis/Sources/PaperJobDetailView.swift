@@ -881,7 +881,7 @@ struct JobDetailView: View {
                     Text(menuTitle(job))
                         .font(Theme.font(17, weight: .semibold))
                         .foregroundStyle(Theme.foreground)
-                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .lineLimit(1).minimumScaleFactor(0.8).truncationMode(.tail)
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("job-title")
                     Text(barSubtitle(job))
@@ -890,6 +890,9 @@ struct JobDetailView: View {
                         .lineLimit(1).minimumScaleFactor(0.8)
                         .accessibilityIdentifier("job-number")
                 }
+                // The bar does not bound a custom title: a long job name ran under the back and
+                // More circles and off both edges. Keep it between them and let it truncate.
+                .frame(maxWidth: max(140, UIScreen.main.bounds.width - 184))
                 .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             }
         }

@@ -240,7 +240,8 @@ struct ScheduleView: View {
                 .paperCardMargin()
                 PaperTabs(options: tabOptions, selection: $tab)
                     .padding(.top, 16)
-                OfflineBanner()
+                // 12 between the segments and a banner, as between a banner and the content.
+                OfflineBanner().padding(.top, 12)
                 if let error = store.error { ErrorBanner(message: error) { _ = await store.refresh(api) } }
                 if let progressError { ErrorBanner(message: progressError) }
                 if let problem = swipes.problem { ErrorBanner(message: problem) }
@@ -251,7 +252,7 @@ struct ScheduleView: View {
                     SkeletonList(count: 4, leading: true).paperCardMargin()
                 } else if showsBoard {
                     DispatchBoardView(toast: $boardToast, day: boardDay)
-                        .padding(.top, 22)
+                        .padding(.top, 16)
                 } else if jobs.isEmpty {
                     emptyState
                     if range == .today { doneToday }
