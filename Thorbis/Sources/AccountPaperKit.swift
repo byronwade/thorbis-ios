@@ -8,8 +8,8 @@ import SwiftUI
 
 extension PaperGlyph {
     // 65 Settings (17pt box, 1.4 stroke).
-    static let acctChevron = PaperGlyph(box: 14, [.stroke("M5 3l4 4-4 4", 1.5)])
-    static let acctChevronLarge = PaperGlyph(box: 16, [.stroke("M6 3.5L10.5 8L6 12.5", 1.6)])
+    static let acctChevron = PaperGlyph.chevronRightSmall
+    static let acctChevronLarge = PaperGlyph.chevronRight
     static let rowArrowOut = PaperGlyph(box: 14, [.stroke("M4.2 9.8L9.8 4.2M5.1 4.2h4.7v4.7", 1.5)])
     static let setBell = PaperGlyph(box: 17, [.stroke("M8.5 2a4.2 4.2 0 00-4.2 4.2c0 3.4-1.3 4.6-1.3 4.6h11s-1.3-1.2-1.3-4.6A4.2 4.2 0 008.5 2zM7.2 13.3a1.4 1.4 0 002.6 0", 1.4)])
     static let setBubble = PaperGlyph(box: 17, [.stroke("M8.5 2.5c3.5 0 6.2 2.4 6.2 5.4 0 3-2.7 5.4-6.2 5.4-.7 0-1.3-.1-1.9-.3l-3.4 1.5.9-2.9c-1.1-1-1.8-2.3-1.8-3.7 0-3 2.7-5.4 6.2-5.4z", 1.4)])

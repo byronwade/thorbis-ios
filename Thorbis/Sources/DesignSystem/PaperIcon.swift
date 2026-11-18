@@ -113,6 +113,15 @@ extension PaperGlyph {
     static let more = PaperGlyph(box: 16, [.circle(3.5, 8, 1.2), .circle(8, 8, 1.2), .circle(12.5, 8, 1.2)])
     /// A chip's small down chevron (draw at 12).
     static let chevronDown = PaperGlyph(box: 12, [.stroke("M3 4.5L6 7.5L9 4.5", 1.5)])
+    /// A row's 16pt chevron (52 / 58 Needs attention, 21 Job details, 65 Settings). One drawing for
+    /// every kit: `rowChevron`, `jobChevronRight` and `acctChevronLarge` are this glyph.
+    static let chevronRight = PaperGlyph(box: 16, [.stroke("M6 3.5L10.5 8L6 12.5", 1.6)])
+    /// A row's 14pt chevron (76 Search results, 67 Account rows).
+    static let chevronRightSmall = PaperGlyph(box: 14, [.stroke("M5 3l4 4-4 4", 1.5)])
+    /// The close circle's × (76 Search: 20pt in a 44pt card circle).
+    static let closeLarge = PaperGlyph(box: 20, [.stroke("M5.5 5.5L14.5 14.5M14.5 5.5L5.5 14.5", 1.8)])
+    /// The check circle's mark (77 Notifications "Mark all read": drawn at 20).
+    static let check = PaperGlyph(box: 18, [.stroke("M4 9.5l3.25 3.25L14 5.75", 1.6)])
 
     /// Paper's glyph for a round chrome button, looked up by the SF Symbol call sites already pass
     /// to `PaperCircleButton` / `PaperCircleLabel`, so every "…", share, back, call and message
@@ -127,6 +136,9 @@ extension PaperGlyph {
         case "magnifyingglass": .search
         case "line.3.horizontal.decrease": .filter
         case "line.3.horizontal": .menu
+        case "xmark": .closeLarge
+        case "plus": .plus
+        case "checkmark": .check
         default: nil
         }
     }

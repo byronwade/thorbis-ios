@@ -88,6 +88,8 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(DrawerMotion.width(screen: 402, accessibilitySize: false), 322, "About 80% of the screen")
         XCTAssertEqual(DrawerMotion.width(screen: 375, accessibilitySize: false), 300)
         XCTAssertEqual(DrawerMotion.width(screen: 402, accessibilitySize: true), 402)
+        XCTAssertEqual(DrawerMotion.panelWidth(screen: 390, accessibilitySize: false), 306, "Paper 29N: the floating panel")
+        XCTAssertEqual(DrawerMotion.panelWidth(screen: 402, accessibilitySize: true), 402)
         XCTAssertEqual(DrawerMotion.cornerRadius(topInset: 62), 55)
         XCTAssertEqual(DrawerMotion.cornerRadius(topInset: 47), 44)
     }

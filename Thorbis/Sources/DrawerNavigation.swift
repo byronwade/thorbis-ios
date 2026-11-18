@@ -118,8 +118,9 @@ struct AppDrawer: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(Theme.foreground)
-        // Paper v2 (29N/57N/58N): the drawer is the sidebar surface; the place it pushed aside is the card.
-        .background(Theme.sidebar.ignoresSafeArea())
+        // Paper v2 (29N/57N/58N): the drawer is a panel floating over the place (`DrawerPanel`),
+        // which draws its ground; full width at accessibility sizes it is the sidebar surface.
+        .background { if showsClose { Theme.sidebar.ignoresSafeArea() } }
     }
 
     private var rows: some View {
@@ -127,7 +128,7 @@ struct AppDrawer: View {
             VStack(alignment: .leading, spacing: 0) {
                 PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: role) },
                            isCurrent: { current == $0.rawValue }, isCurrentLocal: { current == "local-\($0.rawValue)" },
-                           count: count, idPrefix: "drawer", savedWork: savedWork,
+                           count: count, idPrefix: "drawer", compactRows: role != .technician, savedWork: savedWork,
                            openPlace: openPlace, openLocal: openLocal, openSavedWork: openSavedWork,
                            openFavorite: openFavorite)
             }
@@ -284,6 +285,18 @@ struct AppDrawer: View {
     }
 }
 
+/// Paper 29N / 57N / 58N: the drawer is a panel floating over the dimmed place, 8 from the left
+/// and bottom edges and under the status bar: radius 30, a step lighter than the sidebar ground
+/// (#1B1B1B), a 1pt border and a deep soft shadow (0 20 50, black 50%).
+enum DrawerPanel {
+    static let radius: CGFloat = 30
+    static let inset: CGFloat = 8
+    static let fill = Theme.drawerPanel
+    static var shape: RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
+    /// How dark the place behind goes once the panel is fully open.
+    static func scrim(dark: Bool) -> Double { dark ? 0.5 : 0.28 }
+}
+
 /// The card's outline: a rounded rectangle grown past the view's frame by the safe areas, so the
 /// card's rounded top and bottom sit at the screen's edges rather than under the status bar.
 struct DrawerCardShape: InsettableShape {
@@ -316,6 +329,11 @@ struct DrawerMotion {
     /// at accessibility sizes, where the words need it.
     static func width(screen: CGFloat, accessibilitySize: Bool) -> CGFloat {
         accessibilitySize ? screen : (screen * 0.8).rounded()
+    }
+
+    /// Paper 29N: the floating panel is 306 on a 390 screen (84 short of it), never wider than 340.
+    static func panelWidth(screen: CGFloat, accessibilitySize: Bool) -> CGFloat {
+        accessibilitySize ? screen : min(340, max(260, screen - 84))
     }
 
     /// The card's corner once open, close to the screen's own corner: Dynamic Island phones (top

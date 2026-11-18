@@ -237,7 +237,7 @@ struct PlaceCountLabel: View {
         if let text = count.text {
             switch count.tone {
             case .badge:
-                Text(text).font(Theme.monoFont(12, weight: .bold)).foregroundStyle(.white)
+                Text(text).font(Theme.font(12, weight: .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 6).frame(minWidth: 20, minHeight: 20)
                     .background(Theme.brand, in: Capsule())
                     .fixedSize()
@@ -381,6 +381,9 @@ struct PlacesList: View {
     /// "drawer" or "sidebar": rows are `<prefix>-<place>` (`drawer-jobs`, `sidebar-local-fleet`).
     let idPrefix: String
     var phoneHeading = PlaceSection.phone.rawValue
+    /// Paper's office and owner menus (57N / 58N) draw 40pt rows under a 34pt heading; the
+    /// technician's (29N) draws 46 under 38. The iPad sidebar keeps the taller rows.
+    var compactRows = false
     var savedWork: AppBottomBar.Sync? = nil
     var savedWorkTitle = "Saved on this phone"
     let openPlace: (MenuItem) -> Void
@@ -503,7 +506,8 @@ struct PlacesList: View {
 
     private func place(_ item: MenuItem, prefix: String? = nil) -> some View {
         PlaceRow(title: item.sidebarTitle(title(item), localHeading: phoneHeading), symbol: item.symbol, tint: item.sidebarTint,
-                 here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)") { openPlace(item) }
+                 here: isCurrent(item), count: count(item), id: "\(prefix ?? idPrefix)-\(item.rawValue)",
+                 height: compactRows ? 40 : 46) { openPlace(item) }
     }
 
     private func disclosureHeading(_ text: String, collapsed: Binding<Bool>, id: String, forceExpanded: Bool = false) -> some View {
@@ -517,13 +521,13 @@ struct PlacesList: View {
         .accessibilityIdentifier("\(idPrefix)-\(id)-disclosure")
     }
 
-    /// Paper 29N: 13/18 Medium in `subtle-foreground`, 14 above and 6 below.
+    /// Paper 29N: 13/18 Medium in `subtle-foreground`, 14 above and 6 below (57N / 58N: 12 and 4).
     private func heading(_ text: String) -> some View {
         Text(text)
             .font(Theme.font(13, weight: .medium))
             .foregroundStyle(Theme.subtleForeground)
             .padding(.horizontal, 12)
-            .padding(.top, 14).padding(.bottom, 6)
+            .padding(.top, compactRows ? 12 : 14).padding(.bottom, compactRows ? 4 : 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityAddTraits(.isHeader)
     }
@@ -531,7 +535,8 @@ struct PlacesList: View {
     @ViewBuilder private func localRows(_ local: [LocalWorkspaceSection]) -> some View {
         ForEach(local, id: \.self) { section in
             PlaceRow(title: section.title, symbol: section.moreSymbol, tint: Theme.markGrey, here: isCurrentLocal(section),
-                     count: nil, id: "\(idPrefix)-local-\(section.rawValue)") { openLocal(section) }
+                     count: nil, id: "\(idPrefix)-local-\(section.rawValue)",
+                     height: compactRows ? 40 : 46) { openLocal(section) }
         }
     }
 
@@ -595,6 +600,8 @@ struct PlaceRow: View {
     let here: Bool
     let count: PlaceCount?
     let id: String
+    /// Paper 29N (technician) draws 46; 57N / 58N (office, owner) draw 40.
+    var height: CGFloat = 46
     let action: () -> Void
 
     var body: some View {
@@ -609,12 +616,12 @@ struct PlaceRow: View {
                 if let count { PlaceCountLabel(count: count) }
             }
             .padding(.horizontal, 12)
-            // Paper 29N draws 46 (57N / 58N draw 40; the app keeps the 44pt tap target there too).
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
             .background {
                 if here { RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.sidebarAccent) }
             }
-            .contentShape(Rectangle())
+            // A 40pt row still takes a 44pt touch: the target reaches 2pt past the row each way.
+            .contentShape(Rectangle().inset(by: min(0, (height - 44) / 2)))
         }
         .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .ignore)
@@ -639,8 +646,11 @@ struct CreamCircleLabel: View {
 
     var body: some View {
         Group {
-            if let glyph {
-                PaperIcon(glyph, size: glyphSize, color: ink ? .white : Theme.foreground)
+            // Paper's own mark wherever it draws one (share, search, back, "…", call, message), so
+            // this circle and `PaperCircleLabel` never draw the same button two ways.
+            if let glyph = glyph ?? PaperGlyph.chrome(symbol: symbol) {
+                PaperIcon(glyph, size: size >= 44 ? glyphSize : min(glyphSize, size >= 40 ? 18 : 16),
+                          color: ink ? .white : Theme.foreground)
             } else {
                 Image(systemName: symbol)
                     .font(.system(size: 17, weight: ink ? .semibold : .medium))

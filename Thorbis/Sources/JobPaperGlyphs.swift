@@ -5,7 +5,7 @@ import SwiftUI
 extension PaperGlyph {
     static let jobKey = PaperGlyph(box: 20, [.circle(6.5, 13.5, 3.5, 1.6), .stroke("M9 11L16.5 3.5M13.5 6.5L16 9M11.5 8.5L13.5 10.5", 1.6)])
     static let jobWarning = PaperGlyph(box: 20, [.stroke("M10 3L18 16.5H2L10 3Z", 1.6), .stroke("M10 8.5V11.5M10 14V14.1", 1.6)])
-    static let jobChevronRight = PaperGlyph(box: 16, [.stroke("M6 3.5L10.5 8L6 12.5", 1.6)])
+    static let jobChevronRight = PaperGlyph.chevronRight
     static let jobChevronRight18 = PaperGlyph(box: 18, [.stroke("M7 4.5L11.5 9L7 13.5", 1.6)])
     static let jobUpDown = PaperGlyph(box: 12, [.stroke("M3.5 4.5L6 2L8.5 4.5M3.5 7.5L6 10L8.5 7.5", 1.2)])
     static let jobArrowOut = PaperGlyph(box: 12, [.stroke("M4 3H9V8M9 3L3 9", 1.2)])

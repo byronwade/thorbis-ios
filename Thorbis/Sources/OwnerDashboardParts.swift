@@ -18,7 +18,7 @@ extension PaperGlyph {
     static let alertCalendar = PaperGlyph(box: 20, [.rect(3, 4.5, 14, 12.5, rx: 2, 1.6), .stroke("M3 8.5H17M7 3V6M13 3V6", 1.6)])
     static let alertSync = PaperGlyph(box: 20, [.stroke("M4 10a6 6 0 0 1 10.2-4.2L16 7.5M16 4v3.5h-3.5M16 10a6 6 0 0 1-10.2 4.2L4 12.5M4 16v-3.5h3.5", 1.6)])
     /// Paper's 16pt row chevron.
-    static let rowChevron = PaperGlyph(box: 16, [.stroke("M6 3.5L10.5 8L6 12.5", 1.6)])
+    static let rowChevron = PaperGlyph.chevronRight
     /// Paper 59/60: the bars before "Full P&L and trends" / "View full report".
     static let bars = PaperGlyph(box: 20, [.stroke("M5 16V9M10 16V4.5M15 16V11.5", 1.8)])
 }
@@ -322,32 +322,9 @@ enum DashboardBooks {
 struct DashboardHeader: View {
     let title: String
     let subtitle: String
-    @Environment(\.paperSearch) private var search
-    @Environment(\.paperDrawer) private var drawer
-    @Environment(\.paperMenuButton) private var menuButton
-
-    /// True when the header itself carries the menu circle (a tab root); otherwise the circles
-    /// sit in the navigation bar and Search joins them there.
-    private var inHeader: Bool { drawer != nil || menuButton }
 
     var body: some View {
-        PaperHeader(title: title, subtitle: subtitle)
-            .overlay(alignment: .topTrailing) {
-                if inHeader { circle.padding(.top, 2).padding(.trailing, PaperCardMetrics.margin) }
-            }
-            .toolbar {
-                if search != nil, !inHeader {
-                    ThorbisToolbarItem(placement: .topBarTrailing) { circle }
-                }
-            }
-    }
-
-    @ViewBuilder private var circle: some View {
-        if let search {
-            Button(action: search.run) { CreamCircleLabel(symbol: "magnifyingglass", glyph: .search) }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Search")
-                .accessibilityIdentifier("header-search")
-        }
+        // The shared header draws Search: in its own top row on a place root, in the bar otherwise.
+        PaperHeader(title: title, subtitle: subtitle, showsSearch: true)
     }
 }
