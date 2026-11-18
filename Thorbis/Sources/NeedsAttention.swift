@@ -8,7 +8,7 @@ enum NeedsAttention {
     static func unpaid(_ invoices: [InvoiceRecord]) -> [(InvoiceRecord, Int)] {
         invoices.compactMap { invoice in
             guard invoice.status == "issued" else { return nil }
-            let total = invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
+            let total = invoice.lines.reduce(0) { $0.addingClamped($1.quantity, times: $1.unitPrice.amount) }
             let balance = total - invoice.amountPaid
             return balance > 0 ? (invoice, balance) : nil
         }

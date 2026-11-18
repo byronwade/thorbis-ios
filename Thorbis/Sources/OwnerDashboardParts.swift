@@ -289,7 +289,7 @@ enum OfficePeriod: String, CaseIterable {
 
 /// Figures read from the invoice and estimate lists the dashboard already loads.
 enum DashboardBooks {
-    static func total(_ invoice: InvoiceRecord) -> Int { invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount } }
+    static func total(_ invoice: InvoiceRecord) -> Int { invoice.lines.reduce(0) { $0.addingClamped($1.quantity, times: $1.unitPrice.amount) } }
 
     /// Invoices sent in the interval (issued or paid; drafts and voids are not revenue).
     static func issued(_ invoices: [InvoiceRecord], in interval: DateInterval) -> [InvoiceRecord] {

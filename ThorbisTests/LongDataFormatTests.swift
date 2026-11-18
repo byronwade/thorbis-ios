@@ -39,3 +39,16 @@ final class LongDataFormatTests: XCTestCase {
         XCTAssertEqual(PaperCount.badge(1_284), "999+")
     }
 }
+
+final class ClampedSumTests: XCTestCase {
+    func testOrdinarySumsAreExact() {
+        XCTAssertEqual(100.addingClamped(3, times: 250), 850)
+        XCTAssertEqual(0.addingClamped(-2, times: 50), -100)
+    }
+    func testAbsurdNumbersClampInsteadOfTrapping() {
+        XCTAssertEqual(0.addingClamped(Int.max, times: 2), Int.max)
+        XCTAssertEqual(0.addingClamped(Int.max, times: -2), Int.min)
+        XCTAssertEqual(Int.max.addingClamped(1, times: 1), Int.max)
+        XCTAssertEqual(Int.min.addingClamped(1, times: -1), Int.min)
+    }
+}

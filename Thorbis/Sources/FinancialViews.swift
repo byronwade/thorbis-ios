@@ -490,7 +490,7 @@ struct EstimateDetailView: View {
     /// MF-05: a member's price is the supporting line under a total, never a second total.
     private func memberLine(_ lines: [FieldLine], currency: String) -> String? {
         guard let memberPricing, memberPricing.isMember, memberPricing.discountPercent > 0, !lines.isEmpty else { return nil }
-        let memberTotal = lines.reduce(0) { $0 + $1.quantity * memberPricing.memberPrice($1.unitPrice.amount) }
+        let memberTotal = lines.reduce(0) { $0.addingClamped($1.quantity, times: memberPricing.memberPrice($1.unitPrice.amount)) }
         return "Member price \(money(memberTotal, currency: currency)) · \(memberPricing.discountPercent)% off"
     }
 
@@ -1715,6 +1715,18 @@ struct LineText: Equatable {
 /// total. The server's PDF and approval link fold the same way.
 func customerEstimateLines(_ lines: [FieldLine]) -> [FieldLine] {
     customerEstimateProjection(lines, currency: lines.first?.unitPrice.currency ?? "USD") ?? []
+}
+
+extension Int {
+    /// `self + quantity × amount`, held at the largest or smallest Int instead of trapping when a
+    /// record carries an absurd number. Sums that only decorate a list must never close the app.
+    func addingClamped(_ quantity: Int, times amount: Int) -> Int {
+        let (product, o1) = quantity.multipliedReportingOverflow(by: amount)
+        let negative = (quantity < 0) != (amount < 0)
+        let term = o1 ? (negative ? Int.min : Int.max) : product
+        let (sum, o2) = addingReportingOverflow(term)
+        return o2 ? (term < 0 ? Int.min : Int.max) : sum
+    }
 }
 
 func paperLinesTotal(_ lines: [FieldLine]) -> Int? {

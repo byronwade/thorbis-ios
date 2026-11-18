@@ -39,7 +39,7 @@ struct MoneyOverviewView: View {
     }
 
     private static func total(_ invoice: InvoiceRecord) -> Int {
-        invoice.lines.reduce(0) { $0 + $1.quantity * $1.unitPrice.amount }
+        invoice.lines.reduce(0) { $0.addingClamped($1.quantity, times: $1.unitPrice.amount) }
     }
     /// Biggest balance first, as on the web.
     private var chasing: [(InvoiceRecord, Int)] { NeedsAttention.unpaid(invoices).sorted { $0.1 > $1.1 } }

@@ -150,7 +150,7 @@ enum PurchaseOrderMath {
     static func onOrder(_ orders: [PurchaseOrderRecord], vendorID: String) -> Int {
         orders.reduce(0) { sum, order in
             guard order.vendorID == vendorID, order.status == .ordered else { return sum }
-            return sum + order.lines.reduce(0) { $0 + $1.outstanding * $1.unitCostCents }
+            return sum + order.lines.reduce(0) { $0.addingClamped($1.outstanding, times: $1.unitCostCents) }
         }
     }
 
