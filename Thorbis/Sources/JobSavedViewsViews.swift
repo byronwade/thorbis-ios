@@ -243,7 +243,7 @@ struct JobSavedViewsSheet: View {
                     }
                     .padding(.horizontal, 4).padding(.top, 8)
                     if entries.isEmpty {
-                        Text(book.loaded ? "No saved views yet. Set filters on Jobs, then save them as a view." : "Loading your views.")
+                        Text(book.loaded ? "No saved views yet. Set filters on Jobs, then save them as a view." : "Loading…")
                             .font(Theme.font(15)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(16).frame(maxWidth: .infinity, alignment: .leading)

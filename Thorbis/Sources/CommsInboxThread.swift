@@ -464,7 +464,7 @@ struct CommsCallCard: View {
                     } else if segments.isEmpty && detail == nil {
                         SkeletonRows(count: 2, leading: false, inset: 0)
                     } else if segments.isEmpty {
-                        Text("No transcript was kept for this call.").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        PaperInlineEmpty("No transcript was kept for this call.")
                     } else {
                         ForEach(segments) { segment in
                             VStack(alignment: .leading, spacing: 2) {

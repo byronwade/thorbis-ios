@@ -136,7 +136,7 @@ struct TeamView: View {
     /// Paper 55: "Tue, Jul 21 · 5 people". Who is clocked in is not something the app can read
     /// for the whole team, so that part of Paper's line is left out.
     private var teamSubtitle: String {
-        if members.isEmpty { return loading ? "Loading your team…" : "People and what they can do" }
+        if members.isEmpty { return loading ? "Loading…" : "People and what they can do" }
         let date = Date.now.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
         let pending = canInvite && !invitations.isEmpty ? " · \(invitations.count) invited" : ""
         return "\(date) · \(members.count) \(members.count == 1 ? "person" : "people")\(pending)"

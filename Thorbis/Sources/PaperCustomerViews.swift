@@ -84,7 +84,7 @@ struct CustomersView: View {
         let jobGroups = CustomerJobGroups(jobs: store.jobs)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading customers…" : "\(active.count) \(active.count == 1 ? "customer" : "customers") · \(activeJobs) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
+                PaperHeader(title: "Customers", subtitle: recordsLoading && records.isEmpty ? "Loading…" : "\(active.count) \(active.count == 1 ? "customer" : "customers") · \(activeJobs) active \(activeJobs == 1 ? "job" : "jobs")", showsCreate: true)
                 // Paper 47: "Search or ask" on the card, the book's filter circle inside it.
                 searchBar
                 if let error = error ?? store.error {
@@ -2406,7 +2406,7 @@ struct CustomerDetailView: View {
         .accessibilityLabel("Warning, \(title): \(value)")
     }
 
-    private func emptyText(_ text: String) -> some View { Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.vertical, 6) }
+    private func emptyText(_ text: String) -> some View { PaperInlineEmpty(text).padding(.vertical, 6) }
     private func unavailable(_ title: String, _ message: String) -> some View { VStack(alignment: .leading, spacing: 6) { sectionTitle(title); emptyText(message) } }
     private func load(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
         guard currentAuthority() else { return }

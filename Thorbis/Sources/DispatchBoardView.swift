@@ -136,7 +136,7 @@ struct DispatchBoardView: View {
         if !rosterLoaded {
             SkeletonRows(count: 2, inset: 0)
         } else if canAssign && roster.isEmpty {
-            Text("No one can be assigned right now.").font(Theme.font(14)).foregroundStyle(Theme.muted)
+            PaperInlineEmpty("No one can be assigned right now.")
                 .padding(.horizontal, 4)
         }
         ForEach(roster) { person in

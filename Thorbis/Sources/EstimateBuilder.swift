@@ -379,13 +379,10 @@ struct PriceBookResultsList: View {
                 if !current || catalog.loading {
                     PaperCard { ForEach(0..<6, id: \.self) { _ in skeletonRow } }
                 } else if let error = catalog.error, !catalog.isPartial {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(catalog.needsScopedRefresh
-                             ? "The saved price book needs one online refresh after this update. \(error)"
-                             : "The price book didn't load. \(error)")
-                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                        Button("Try again", action: retry).font(Theme.font(15, weight: .medium)).frame(minHeight: 44)
-                    }
+                    ErrorBanner(message: catalog.needsScopedRefresh
+                                    ? "The saved price book needs one online refresh after this update. \(error)"
+                                    : "The price book didn’t load. \(error)",
+                                retry: { retry() }).flush()
                 }
             }
             if canUsePriceBook, current, catalog.isPartial {

@@ -2326,7 +2326,7 @@ struct EstimateRevisionsView: View {
             sectionLabel("What changed in revision \(revision.revisionNumber)")
             VStack(spacing: 0) {
                 if changes.isEmpty {
-                    Text("No line changes.").font(Theme.font(16)).foregroundStyle(Theme.muted)
+                    PaperInlineEmpty("No line changes.")
                         .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                         .padding(.horizontal, PaperCardMetrics.inset)
                 }

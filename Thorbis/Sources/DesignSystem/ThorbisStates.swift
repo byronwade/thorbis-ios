@@ -182,6 +182,19 @@ struct EmptyGlyph: View {
     }
 }
 
+/// "Nothing here" as one line inside a card or a section that still shows its heading ("No line
+/// items yet."): a 15/20 muted sentence, the same type as an empty state's sentence. A whole
+/// screen or a whole section with nothing uses `PaperEmptyState`.
+struct PaperInlineEmpty: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text).font(Theme.font(15)).foregroundStyle(Theme.muted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// The mark that leads a banner (Paper 73 / 74: offline, waiting to sync, a failed read): an 18pt
 /// glyph in the state's tone, no ground of its own; the strip behind it carries the tone.
 struct BannerGlyph: View {
@@ -289,17 +302,20 @@ struct ErrorBanner: View {
     var symbol: String = "exclamationmark.triangle"
     var tint: Color = Theme.warning
     var action: Action? = nil
+    /// The action's accessibility identifier, where a test finds it by one.
+    var actionIdentifier: String? = nil
     /// Side margin; zero when the parent already pads its content.
     var outer: CGFloat = Theme.gutter
     @State private var running = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     init(message: String, symbol: String = "exclamationmark.triangle", tint: Color = Theme.warning,
-         action: Action? = nil, outer: CGFloat = Theme.gutter) {
+         action: Action? = nil, actionIdentifier: String? = nil, outer: CGFloat = Theme.gutter) {
         self.message = message
         self.symbol = symbol
         self.tint = tint
         self.action = action
+        self.actionIdentifier = actionIdentifier
         self.outer = outer
     }
 
@@ -334,6 +350,7 @@ struct ErrorBanner: View {
                 .buttonStyle(PressStyle())
                 .disabled(running)
                 .fixedSize()
+                .modifier(BannerActionIdentifier(identifier: actionIdentifier))
             }
         }
         .padding(.horizontal, outer).padding(.top, 8)
@@ -342,6 +359,15 @@ struct ErrorBanner: View {
 
     /// The same strip without its own side margin, for parents that already pad.
     func flush() -> ErrorBanner { var copy = self; copy.outer = 0; return copy }
+}
+
+/// Sets an accessibility identifier only when there is one, so a control without one is still
+/// found by its label.
+private struct BannerActionIdentifier: ViewModifier {
+    let identifier: String?
+    func body(content: Content) -> some View {
+        if let identifier { content.accessibilityIdentifier(identifier) } else { content }
+    }
 }
 
 /// What a person turned off in iOS Settings, and why Thorbis asks for it.

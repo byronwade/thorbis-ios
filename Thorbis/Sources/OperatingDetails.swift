@@ -373,10 +373,7 @@ struct OperatingDetailsView: View {
                         }
                         if let error { InlineProblem(message: error).padding(.horizontal, 4) }
                     } else if let loadError = model.loadError {
-                        InlineProblem(message: loadError).padding(.horizontal, 4)
-                        Button("Try again") { Task { await load() } }
-                            .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText).frame(minHeight: 44)
-                            .padding(.horizontal, 4)
+                        ErrorBanner(message: loadError, retry: { await load() }).flush()
                     } else {
                         SkeletonSection(rows: 5)
                     }

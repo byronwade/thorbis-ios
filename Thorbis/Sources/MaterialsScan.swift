@@ -223,7 +223,7 @@ struct MaterialsScanView: View {
                     codeField
                 }
                 if catalog.loading, catalog.index.count == 0 {
-                    Text("Loading the price book\u{2026}").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    ThorbisLoadingLine(message: "Loading the price book\u{2026}")
                         .padding(.horizontal, Theme.gutter).padding(.top, 12)
                 }
                 if let problem {
