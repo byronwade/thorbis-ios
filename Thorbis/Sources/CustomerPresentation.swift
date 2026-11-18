@@ -234,6 +234,13 @@ struct CustomerEstimatePresentation: View {
         .toolbar {
             // PresentDetail.dc.html: a round back circle opposite the lock. Only where this screen is
             // the customer-mode root; pushed hosts (handoff, job documents) already show their back.
+            // Paper 37: "Presenting to customer" in the bar (14 Medium, muted) over a single estimate.
+            if handoff == nil && returnToDocuments == nil && !flow.hasOptions && flow.step == .review && reviewReady {
+                ThorbisToolbarItem(placement: .principal, customerFacing: true) {
+                    Text("Presenting to customer").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.muted)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
+            }
             if showsBackCircle {
                 ThorbisToolbarItem(placement: .topBarLeading, customerFacing: true) {
                     PaperCircleButton(symbol: "chevron.left", label: "Back to options", size: 44, fill: Theme.fill) { flow.back() }
@@ -381,8 +388,8 @@ struct CustomerEstimatePresentation: View {
                 header(eyebrow: "Option \((index ?? 0) + 1) of \(flow.options.count)", title: "Your cart")
                 cartRow(option)
             } else {
-                // Paper 37L "Your estimate": the estimate's number and who it is for under the title.
-                header(eyebrow: "EST-\(flow.estimate.id.suffix(4).uppercased()) \u{00B7} \(customerName)", title: "Your estimate")
+                // Paper 37: the business, who the estimate is for, its total as the hero, its number.
+                presentHero
             }
             if let projected = verifiedCustomerLines {
                 CustomerSummaryLabel(count: projected.count, type: type)
@@ -398,6 +405,44 @@ struct CustomerEstimatePresentation: View {
                 seeTerms
             }
         }
+    }
+
+    /// Paper 37 "Present to customer": the business mark and name, "Estimate for Danielle" (22 Bold),
+    /// the total (52 Bold) and the estimate's number, all centred. The title stays the page's header.
+    private var presentHero: some View {
+        VStack(alignment: .center, spacing: 0) {
+            PaperIcon(.customerHome, size: 24, color: Theme.brand)
+                .frame(width: 56, height: 56)
+                .background(Theme.brandSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .accessibilityHidden(true)
+                .padding(.top, 20)
+            if let business = session.activeOrganization?.name, !business.isEmpty {
+                Text(business).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.subtle)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+            }
+            Text(presentTitle).font(Theme.customerFont(type.regular ? type.heading : 22, weight: .bold)).tracking(-0.44)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.top, 24)
+            if flow.total != nil {
+                Text(flow.totalText).font(Theme.paymentAmountFont()).tracking(-1.56)
+                    .lineLimit(1).minimumScaleFactor(0.5)
+                    .padding(.top, 6)
+            }
+            Text("EST-\(flow.estimate.id.suffix(4).uppercased())").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
+    }
+
+    /// "Estimate for Danielle": the customer's first name, as Paper 37 says it.
+    private var presentTitle: String {
+        guard let first = customerName.split(separator: " ").first else { return "Your estimate" }
+        return "Estimate for \(first)"
     }
 
     /// Paper 38A's cart row: the chosen option (16 Semibold over its muted description), its price,
@@ -558,6 +603,12 @@ struct CustomerEstimatePresentation: View {
                     }
                 }
             case .review:
+                // Paper 37: one quiet line over the commit.
+                if !flow.hasOptions {
+                    Text("Have a question? Ask your technician").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 2)
+                }
                 CustomerPresentationCommit(title: flow.approveTitle, compactTitle: flow.approveShortTitle, enabled: verifiedCustomerLines != nil, busy: actionBusy, type: type) { Task { await startSigning() } }
                     .accessibilityIdentifier("customer-estimate-approve")
                 if let error { hint(error, danger: true) }
@@ -1574,12 +1625,12 @@ struct CustomerRadio: View {
         ZStack {
             if selected {
                 Circle().fill(Theme.brand)
-                Image(systemName: "checkmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                PaperIcon(.check, size: 14, color: .white)
             } else {
                 Circle().strokeBorder(Theme.foreground.opacity(0.3), lineWidth: 1.5)
             }
         }
-        .frame(width: 26, height: 26)
+        .frame(width: 24, height: 24)
         .accessibilityHidden(true)
     }
 }
@@ -1686,8 +1737,9 @@ struct CustomerIncludedLines: View {
                                         accessibilityContext: descriptionContext.map { "\($0), item \(index + 1)" })
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text(LineText(line.description).name).font(Theme.customerFont(type.small, weight: .semibold))
-                .lineSpacing(2)
+            // Paper 37: a line's name and its amount are 16 Medium.
+            Text(LineText(line.description).name).font(Theme.customerFont(type.regular ? type.small : 16, weight: .medium))
+                .tracking(-0.16).lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -1695,8 +1747,13 @@ struct CustomerIncludedLines: View {
 
     private func amount(_ line: FieldLine) -> some View {
         Text(paperLinesTotal([line]).map { money($0, currency: line.unitPrice.currency) } ?? "Amount unavailable")
-            .font(Theme.customerFont(type.small, weight: .bold)).monospacedDigit()
+            .font(Theme.customerFont(type.regular ? type.small : 16, weight: .medium))
     }
+}
+
+extension PaperGlyph {
+    /// Paper 37's business mark: a house, 24 box, 1.8 stroke.
+    static let customerHome = PaperGlyph(box: 24, [.stroke("M5 20V8.5L12 4l7 4.5V20", 1.8), .stroke("M9.5 20v-5h5v5", 1.8)])
 }
 
 /// A document's status as a word at customer size: a small dot carries the hue, the word stays ink.
@@ -1973,7 +2030,7 @@ struct CustomerPresentationPreview: View {
                 CustomerInvoicePresentation(invoice: PaperPreview.financingInvoice, customerName: "Danielle Marlowe", canSign: false,
                                             onPay: {}, financing: true, opensPayChoice: true, onSigned: { _ in }, onDone: handBack)
             default:
-                CustomerEstimatePresentation(estimate: PaperPreview.optionsEstimate, jobID: PaperPreview.jobID, customerName: "Danielle Marlowe",
+                CustomerEstimatePresentation(estimate: PaperPreview.presentEstimate, jobID: PaperPreview.jobID, customerName: "Danielle Marlowe",
                                              preselectedOptionID: screen == "present-estimate-review" ? PaperPreview.optionsEstimate.options?[1].id
                                                 : screen == "present-estimate-detail" ? PaperPreview.optionsEstimate.options?[0].id : nil,
                                              financing: screen == "present-estimate-financing",

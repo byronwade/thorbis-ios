@@ -225,6 +225,15 @@ final class JobEstimateHandoffUITests: XCTestCase {
     private func ownerExit(_ app: XCUIApplication) -> XCUIElement {
         // The DEBUG sample controls are stacked above the protected navigation stack, so they no
         // longer cover the Hand back pill when expanded; the real exit is tapped as it is.
+        // Paper 38B: Customer view's home has no bar, so no pill. From there the technician hands
+        // back with the pill at the foot and unlocks on the hand-back screen.
+        if !app.buttons.matching(identifier: "customer-mode-owner-exit").firstMatch.waitForExistence(timeout: 5),
+           app.staticTexts["customer-view-title"].exists {
+            app.buttons["Hand back to the technician"].tap()
+            let unlock = app.buttons["Technician: unlock"]
+            XCTAssertTrue(unlock.waitForExistence(timeout: 10))
+            return unlock
+        }
         return thorbisStableButton(app, "customer-mode-owner-exit")
     }
     private func draw(_ app: XCUIApplication) {

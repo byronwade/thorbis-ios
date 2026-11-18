@@ -336,6 +336,16 @@ enum PaperPreview {
                        createdAt: estimate.createdAt, updatedAt: estimate.updatedAt, sentAt: nil, approvedAt: nil, declinedAt: nil)
     }
     /// Good / better / best for the customer presentation screenshots.
+    /// `--paper-preview-single-scope`: the present-estimate sample as one scope (its first option's
+    /// lines, no options), so Paper 37 "Present to customer" can be opened directly.
+    static var presentEstimate: EstimateRecord {
+        let base = optionsEstimate
+        guard ProcessInfo.processInfo.arguments.contains("--paper-preview-single-scope"),
+              let lines = base.options?.first?.lines,
+              let encoded = try? JSONEncoder().encode(lines),
+              let json = try? JSONSerialization.jsonObject(with: encoded) else { return base }
+        return changed(base, ["lines": json, "options": [[String: Any]]()])
+    }
     static var optionsEstimate: EstimateRecord {
         // `list` marks a price book line the server member-priced, so the savings row shows.
         func line(_ id: Int, _ text: String, _ quantity: Int, _ cents: Int, list: Int? = nil) -> FieldLine {
@@ -1101,7 +1111,7 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                     "acknowledged": [], "requirements": [photos, notes], "unmet": [notes], "completable": false]
         }
         if PaperPreview.screen.hasPrefix("present-estimate") || PaperPreview.screen == "estimate-detail" {
-            let record = PaperPreview.optionsEstimate
+            let record = PaperPreview.screen.hasPrefix("present-estimate") ? PaperPreview.presentEstimate : PaperPreview.optionsEstimate
             if path == "/v1/estimates/\(record.id)" { return jsonObject(record) }
             if path == "/v1/estimates/\(record.id)/revisions/2" {
                 var object = reviewRevision(record)

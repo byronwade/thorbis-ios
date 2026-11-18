@@ -104,7 +104,7 @@ struct JobCustomerDocumentsView: View {
                     // grouped cards 16 from the edge, 22 apart, with the commit after the last card.
                     VStack(alignment: .leading, spacing: 22) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(eyebrow).font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.muted)
+                            Text(eyebrow).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text(greeting).font(Theme.font(34)).tracking(-0.85)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -112,7 +112,7 @@ struct JobCustomerDocumentsView: View {
                                 .accessibilityAddTraits(.isHeader)
                                 .accessibilityIdentifier("customer-view-title")
                             Text("Here is everything for your visit today")
-                                .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                                .font(Theme.font(15)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.horizontal, 4)
@@ -126,7 +126,8 @@ struct JobCustomerDocumentsView: View {
                         if canEditDetails { detailsRow }
                         if canViewEstimates { approveEstimates }
                     }
-                    .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 16)
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
+                    // Paper 38B: the commit sits 10 above the hand-back pill, which is pinned below.
                     .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
                 }
                 .accessibilityIdentifier("customer-job-documents-list")
@@ -137,19 +138,22 @@ struct JobCustomerDocumentsView: View {
         }
         .navigationTitle("Customer view")
         .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
+            VStack(spacing: 10) {
                 CustomerHandBackPill(busy: openingID != nil, action: beginHandBack)
                 // At accessibility sizes the pinned foot is the pill alone, so the list keeps its room.
                 if !typeSize.isAccessibilitySize {
                     Text("Your technician's screens stay locked.")
-                        .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 12).background(Theme.canvas)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 12).background(Theme.canvas)
         }
+        // Paper 38B draws no bar over the customer's home: the greeting starts the page and handing
+        // back is the pill at its foot. Pushed pages keep their bar, back circle and owner exit.
+        .toolbar(.hidden, for: .navigationBar)
         .thorbisDestination(item: Binding(get: { book }, set: { book = $0 })) { initial in
             if currentWorkspace {
                 CustomerJobDocumentBook(scope: scope, sourceGeneration: sourceGeneration,
@@ -445,7 +449,7 @@ struct JobCustomerDocumentsView: View {
     }
 
     private func empty(_ text: String) -> some View {
-        Text(text).font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+        Text(text).font(Theme.font(15)).foregroundStyle(Theme.muted)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
             .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
@@ -666,11 +670,10 @@ private struct CustomerJobReadOnlyPaper: View {
     }
 }
 
-/// Paper's section label (Semibold, muted, 4 in from the card's edge) at customer size (17pt):
-/// the customer reads this screen, not the tech.
+/// Paper 38B's section label: 13 Semibold, muted, 4 in from the card's edge.
 private func customerSectionLabel(_ title: String) -> some View {
     Text(title)
-        .font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.muted)
+        .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
         .accessibilityAddTraits(.isHeader)
         .padding(.horizontal, 4)
 }
@@ -692,18 +695,15 @@ private struct CustomerHomeDocumentRow: View {
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
         HStack(alignment: .center, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.customerFont(20, weight: .medium)).foregroundStyle(Theme.foreground)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
                 subtitle.fixedSize(horizontal: false, vertical: true)
                 if stacked, let amount { amountText(amount) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if !stacked, let amount { amountText(amount).fixedSize() }
-            if chevron {
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
-            }
+            if chevron { PaperIcon(.chevronRight, size: 16, color: Theme.muted).accessibilityHidden(true) }
         }
         .multilineTextAlignment(.leading)
         .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 12)
@@ -712,18 +712,18 @@ private struct CustomerHomeDocumentRow: View {
     }
 
     private var subtitle: Text {
-        let quiet = Theme.customerFont(17)
+        let quiet = Theme.font(14)
         var line = Text("\(reference) \u{00B7} ").font(quiet).foregroundStyle(Theme.muted)
-            + Text(word).font(Theme.customerFont(17, weight: tint == nil ? .regular : .medium))
+            + Text(word).font(Theme.font(14, weight: tint == nil ? .regular : .medium))
                 .foregroundStyle(tint ?? Theme.muted)
         if let detail, !detail.isEmpty {
             line = line + Text(" \u{00B7} \(detail)").font(quiet).foregroundStyle(Theme.muted)
         }
-        return line.monospacedDigit()
+        return line
     }
 
     private func amountText(_ amount: String) -> some View {
-        Text(amount).font(Theme.customerFont(20, weight: .medium)).monospacedDigit()
+        Text(amount).font(Theme.font(16, weight: .medium))
             .foregroundStyle(Theme.foreground).lineLimit(1).minimumScaleFactor(0.7)
     }
 }
@@ -746,15 +746,14 @@ private struct CustomerHomeDetailsCard: View {
             } else {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Check your details").font(Theme.customerFont(20, weight: .medium))
+                        Text("Check your details").font(Theme.font(16, weight: .medium))
                             .foregroundStyle(Theme.foreground)
                         Text("Name, phone, email, addresses and how to reach you")
-                            .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    PaperIcon(.chevronRight, size: 16, color: Theme.muted).accessibilityHidden(true)
                 }
                 .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 12).padding(.vertical, 12)
                 .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.target, alignment: .leading)
@@ -774,13 +773,13 @@ private struct CustomerHomeDetailsCard: View {
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
                              : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         return layout {
-            Text(label).font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
-                .frame(width: stacked ? nil : 76, alignment: .leading)
-            Text(shown.isEmpty ? "Not added" : shown).font(Theme.customerFont(17, weight: .medium))
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                .frame(width: stacked ? nil : 64, alignment: .leading)
+            Text(shown.isEmpty ? "Not added" : shown).font(Theme.font(16, weight: .medium))
                 .foregroundStyle(shown.isEmpty ? Theme.muted : Theme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(shown.isEmpty ? "Add" : "Edit").font(Theme.customerFont(17, weight: .semibold))
+            Text(shown.isEmpty ? "Add" : "Edit").font(Theme.font(15, weight: .semibold))
                 .foregroundStyle(Theme.brandText)
         }
         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 9)
@@ -798,20 +797,26 @@ private struct CustomerHandBackPill: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 if busy { ProgressView() }
-                else { Image(systemName: "lock").font(.system(size: 17, weight: .medium)).accessibilityHidden(true) }
-                // The same full sentence the other customer screens use; it is also the button's
-                // spoken name, so the words stay their own element for VoiceOver and the UI tests.
-                Text("Hand back to the technician").font(Theme.customerFont(17, weight: .semibold))
+                else { PaperIcon(.customerLock, size: 18, color: Theme.foreground).accessibilityHidden(true) }
+                // Paper 38B's words. The spoken name stays the full sentence the other customer
+                // screens use, which is also what the UI tests look for.
+                Text("Hand back to technician").font(Theme.font(16, weight: .semibold))
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(Theme.foreground)
             .padding(.horizontal, 16).padding(.vertical, 12)
-            .frame(maxWidth: .infinity, minHeight: CustomerModeStyle.commitHeight)
-            .background(Theme.fill, in: Capsule())
+            .frame(maxWidth: .infinity, minHeight: 50)
+            .background(Theme.quietFill, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(PressStyle())
+        .accessibilityLabel("Hand back to the technician")
         .disabled(busy)
     }
+}
+
+extension PaperGlyph {
+    /// Paper 38B's lock on "Hand back to technician" (18 box, 1.6 stroke).
+    static let customerLock = PaperGlyph(box: 18, [.rect(3.5, 8, 11, 7.5, rx: 2, 1.6), .stroke("M6 8V5.8a3 3 0 0 1 6 0V8", 1.6)])
 }

@@ -123,6 +123,37 @@ final class CustomerViewUITests: XCTestCase {
         XCTAssertTrue(thorbisCustomerViewDoor(app).waitForExistence(timeout: 10))
     }
 
+    /// Presenting one estimate from a job that has two: the customer gets the job's whole Customer
+    /// view (the same verified, locked hand-off as "Show estimates"), opened on the tapped estimate,
+    /// can page to the other one, sees both on the home, and staff screens stay locked until unlock.
+    func testPresentingAnEstimateOnAJobWithTwoEstimatesShowsBothAndReachesTheSecond() {
+        let app = launch(screen: "job-estimates")
+        let row = app.buttons["job-estimate-\(estimateA)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20)); row.tap()
+        let door = detailDoor(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        // Starts on the estimate the technician tapped.
+        XCTAssertTrue(app.navigationBars["EST-2218"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["customer-document-position"].waitForExistence(timeout: 10))
+        // The job's second estimate is one step away.
+        let next = app.buttons["Next document"].firstMatch
+        XCTAssertTrue(next.waitForExistence(timeout: 5)); next.tap()
+        XCTAssertTrue(app.navigationBars["EST-2238"].waitForExistence(timeout: 10), "The job's other estimate must be reachable")
+        // Still locked: no staff control answers under Customer view.
+        XCTAssertFalse(app.buttons["Job actions"].exists && app.buttons["Job actions"].isHittable)
+        XCTAssertFalse(app.buttons["Show customer"].exists && app.buttons["Show customer"].firstMatch.isHittable)
+        // Back on the customer's home both estimates are listed together.
+        back(app)
+        let estimates = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "customer-estimate-"))
+        XCTAssertGreaterThanOrEqual(estimates.count, 2, "Customer view lists every estimate on the job")
+        capture(app, "Customer view from one of two estimates")
+        // Only the technician's unlock returns to staff screens.
+        XCTAssertFalse(app.buttons["Job actions"].exists && app.buttons["Job actions"].isHittable)
+        ownerExit(app)
+        XCTAssertTrue(app.buttons["Show customer"].firstMatch.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts["customer-view-title"].exists)
+    }
+
     private func launch(screen: String = "job") -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -139,7 +170,14 @@ final class CustomerViewUITests: XCTestCase {
 
     private func ownerExit(_ app: XCUIApplication) {
         let exit = app.buttons.matching(identifier: "customer-mode-owner-exit").firstMatch
-        if exit.waitForExistence(timeout: 5) { exit.tap() } else { app.buttons["Technician: unlock to leave customer mode"].tap() }
+        if exit.waitForExistence(timeout: 5) { exit.tap(); return }
+        let lock = app.buttons["Technician: unlock to leave customer mode"]
+        if lock.exists { lock.tap(); return }
+        // Paper 38B: Customer view's home has no bar. Handing back is the pill at its foot, then the
+        // technician's unlock on the hand-back screen.
+        app.buttons["Hand back to the technician"].tap()
+        let unlock = app.buttons["Technician: unlock"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 10)); unlock.tap()
     }
 
     /// Details sit under estimates and invoices; iOS 26 snapshots often omit off-screen SwiftUI rows.

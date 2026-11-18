@@ -54,14 +54,13 @@ struct PublicEstimateActionView: View {
                 }
                 .frame(maxWidth: 640, alignment: .leading)
                 .padding(.horizontal, PaperCardMetrics.margin)
-                .padding(.top, 20)
+                .padding(.top, 4)
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
         }
         .background(Theme.background)
-        .safeAreaInset(edge: .bottom, spacing: 0) { approvalFooter }
         .task(id: token) { await model.load(api: api, token: token) }
         .thorbisConfirm("Decline this estimate?",
                         message: "The company will be notified that you declined this estimate.",
@@ -94,36 +93,38 @@ struct PublicEstimateActionView: View {
 
     private var brandBar: some View {
         HStack(spacing: 9) {
-            ThorbisLogoLockup(markSize: 30, wordmarkSize: 16)
-            Spacer()
+            // Paper 39E draws no brand bar: the page is the company's estimate. Closing stays, as
+            // Paper's quiet 44pt close circle (37) in the leading corner.
             Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
+                PaperIcon(.closeLarge, size: 20, color: Theme.foreground)
                     .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    .background(Theme.card, in: Circle())
+                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityLabel("Close estimate")
+            Spacer()
         }
-        .padding(.leading, 20)
-        .padding(.trailing, 10)
-        .frame(minHeight: 56)
+        .padding(.horizontal, PaperCardMetrics.margin)
+        .padding(.top, 2)
         .background(Theme.background)
     }
 
+    /// Paper 39E: the brand commit sits right under the estimate, above "Ask for changes".
     @ViewBuilder
-    private var approvalFooter: some View {
+    private var approvalButton: some View {
         if let action = model.action,
            action.signingOffered || action.plainApprovalOffered {
-            VStack(spacing: 5) {
+            VStack(spacing: 6) {
                 Button(action: approve) {
                     HStack(spacing: 8) {
                         if model.isSubmitting { ProgressView().tint(.white) }
-                        Text(approvalTitle(action)).font(Theme.customerFont(17, weight: .semibold))
+                        Text(approvalTitle(action)).font(Theme.font(16, weight: .semibold))
+                            .multilineTextAlignment(.center)
                     }
                     .foregroundStyle(approvalEnabled ? Color.white : Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 56)
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: .infinity, minHeight: 50)
                     // Paper v2: the commit is a brand pill.
                     .background(approvalEnabled ? Theme.brand : Theme.fill, in: Capsule())
                 }
@@ -132,18 +133,15 @@ struct PublicEstimateActionView: View {
                 .accessibilityHint(approvalEnabled ? "Records approval of this issued estimate." : (action.amountsAvailableForApproval ? "Choose an option, enter your name, and provide consent to continue." : "The amount cannot be verified. Ask the company for an updated estimate."))
                 if !action.amountsAvailableForApproval {
                     Text("We can’t verify the estimate amount. Ask the company for an updated estimate.")
-                        .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if model.isSubmitting {
                     Text("Saving your decision. Wait for confirmation.")
-                        .font(Theme.customerFont(17))
+                        .font(Theme.font(14))
                         .foregroundStyle(Theme.muted)
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin)
-            .padding(.top, 10)
-            .padding(.bottom, footerBottomPadding)
-            .background(Theme.background)
         }
     }
 
@@ -154,18 +152,16 @@ struct PublicEstimateActionView: View {
             // Paper 39E shows no status over an estimate still waiting on the customer.
             if action.status != .sent { statusLabel(action.status) }
             // MF-01/CP-02: the price is the biggest thing on the estimate, labelled.
-            VStack(alignment: .center, spacing: 2) {
-                Text("Total").font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.muted)
-                Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: selectedOption?.currency ?? action.currency))
-                    .font(Theme.customerMonoFont(34, weight: .bold)).tracking(-1)
-                    .lineLimit(1).minimumScaleFactor(0.6)
-                    .foregroundStyle(Theme.foreground)
-                    .accessibilityIdentifier("public-estimate-total")
-            }
-            .padding(.top, 8)
-            .accessibilityElement(children: .combine)
+            // Paper 39E: the price is the hero (52 Bold), what it is for under it (15). Paper also
+            // names the business above and "valid 30 days"; the link's payload carries neither.
+            Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: selectedOption?.currency ?? action.currency))
+                .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
+                .lineLimit(1).minimumScaleFactor(0.5)
+                .foregroundStyle(Theme.foreground)
+                .accessibilityIdentifier("public-estimate-total")
+                .padding(.top, 6)
             Text(action.title)
-                .font(Theme.customerFont(17))
+                .font(Theme.font(15))
                 .foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -192,24 +188,25 @@ struct PublicEstimateActionView: View {
                 ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
                     HStack(alignment: .center, spacing: 12) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(line.description).font(Theme.customerFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                            Text(line.description).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("\(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each")
-                                .font(Theme.customerFont(17)).monospacedDigit().foregroundStyle(Theme.muted)
+                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 8)
                         Text(action.currency == "USD" ? (PublicEstimateMoney.lineTotal(quantity: line.quantity, unitPrice: line.unitPrice).map { PublicEstimateMoney.format(cents: $0) } ?? "Amount unavailable") : "Amount unavailable")
-                            .font(Theme.customerMonoFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     }
                     .padding(.vertical, 14)
                     if index != lines.count - 1 { WellDivider(leading: 0) }
                 }
                 WellDivider(leading: 0)
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("Total").font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                    Text("Total").font(Theme.font(15)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 8)
                     Text(money(action.totalAmount, currency: action.currency))
-                        .font(Theme.customerMonoFont(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
                 }
                 .padding(.vertical, 14)
                 .accessibilityElement(children: .combine)
@@ -236,7 +233,12 @@ struct PublicEstimateActionView: View {
             }
         } else {
             approvalForm(action)
-            customerActions(action)
+            // Paper 39E: the actions 10 apart, 16 under the estimate.
+            VStack(spacing: 10) {
+                approvalButton
+                customerActions(action)
+            }
+            .padding(.top, -2)
         }
     }
 
@@ -246,14 +248,14 @@ struct PublicEstimateActionView: View {
             VStack(alignment: .leading, spacing: 14) {
                 sectionTitle("Review and approve")
                 Text("Approval uses the issued scope and price. Your name records who approved it.")
-                    .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 if let options = action.options, !options.isEmpty {
                     Text("Choose one complete option")
-                        .font(Theme.customerFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     ForEach(options) { option in optionButton(option) }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Full name").font(Theme.customerFont(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text("Full name").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     TextField("Type your name", text: $model.signerName, prompt: .placeholder("Type your name"))
                         .textContentType(.name)
                         .textInputAutocapitalization(.words)
@@ -267,7 +269,7 @@ struct PublicEstimateActionView: View {
                 }
                 if let consentText = action.consentText {
                     Toggle(isOn: $model.consent) {
-                        Text(consentText).font(Theme.customerFont(17)).foregroundStyle(Theme.foreground)
+                        Text(consentText).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                     }
                     .tint(Theme.brand)
                     .padding(16)
@@ -281,10 +283,10 @@ struct PublicEstimateActionView: View {
             VStack(alignment: .leading, spacing: 12) {
                 sectionTitle("Approve without signing")
                 Text("This records your approval of the issued scope and price without an electronic signature.")
-                    .font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 ForEach(action.scopeLines ?? []) { line in
                     Label("\(line.description) — \(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each", systemImage: "checkmark")
-                        .font(Theme.customerFont(17)).monospacedDigit().foregroundStyle(Theme.foreground)
+                        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.foreground)
                 }
             }
             .padding(16)
@@ -298,11 +300,11 @@ struct PublicEstimateActionView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(option.title).font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        Text(option.title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
                         Spacer(minLength: 6)
                         Text(money(option.totalAmount, currency: option.currency)).moneyStyle(.total).foregroundStyle(Theme.foreground)
                     }
-                    Text(option.description).font(Theme.customerFont(17)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    Text(option.description).font(Theme.font(15)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 20, weight: .regular))
@@ -337,10 +339,10 @@ struct PublicEstimateActionView: View {
                         }
                     } label: {
                         Text(model.isSubmitting ? "Sending request…" : "Ask for changes")
-                            .font(Theme.customerFont(17, weight: .semibold))
+                            .font(Theme.font(16, weight: .semibold))
                             .foregroundStyle(Theme.foreground)
                             .frame(maxWidth: .infinity, minHeight: 50)
-                            .background(Theme.fill, in: Capsule())
+                            .background(Theme.quietFill, in: Capsule())
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -349,21 +351,23 @@ struct PublicEstimateActionView: View {
                     TextField("Tell us what to change", text: $model.changeMessage, prompt: .placeholder("Tell us what to change"), axis: .vertical)
                         .lineLimit(3...5)
                         .focused($focusedField, equals: .message)
-                        .font(Theme.customerFont(17))
+                        .font(Theme.font(16))
                         .padding(.horizontal, 16).padding(.vertical, 14)
+                        .frame(minHeight: 96, alignment: .topLeading)
                         .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .accessibilityLabel("Message requesting estimate changes")
                     HStack {
-                        Text("The company will send a new estimate.").font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+                        Text("The company will send a new estimate.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer()
-                        Text("\(model.changeMessage.count)/500").font(Theme.customerMonoFont(17)).foregroundStyle(Theme.muted)
+                        Text("\(model.changeMessage.count)/500").font(Theme.font(13)).foregroundStyle(Theme.muted)
                     }
                     .padding(.horizontal, 4)
                 }
                 if action.canDecline {
                     Button(role: .destructive) { confirmsDecline = true } label: {
                         Text("Decline")
-                            .font(Theme.customerFont(17, weight: .semibold))
+                            .font(Theme.font(16, weight: .semibold))
                             .foregroundStyle(Theme.destructive)
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .contentShape(Rectangle())
@@ -385,7 +389,7 @@ struct PublicEstimateActionView: View {
         case .changesRequested: ("Changes requested", Theme.warning)
         }
         return Text(title.uppercased())
-            .font(Theme.customerMonoFont(17, weight: .semibold))
+            .font(Theme.font(15, weight: .semibold))
             .tracking(0.6)
             .foregroundStyle(color)
             .padding(.horizontal, 9)
@@ -397,8 +401,8 @@ struct PublicEstimateActionView: View {
 
     private func statusCard<Content: View>(title: String, symbol: String, color: Color, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: symbol).font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(color)
-            content().font(Theme.customerFont(17)).foregroundStyle(Theme.muted)
+            Label(title, systemImage: symbol).font(Theme.font(15, weight: .semibold)).foregroundStyle(color)
+            content().font(Theme.font(15)).foregroundStyle(Theme.muted)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -424,7 +428,7 @@ struct PublicEstimateActionView: View {
     }
 
     private func sectionTitle(_ value: String) -> some View {
-        Text(value).font(Theme.customerFont(17, weight: .semibold)).foregroundStyle(Theme.foreground)
+        Text(value).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
     }
 
     private func approvalTitle(_ action: PublicEstimateAction) -> String {
