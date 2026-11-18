@@ -191,6 +191,11 @@ struct JobDetailView: View {
     }
     /// Paper 21O "At this address", pushed from More.
     @State private var showAtAddress = false
+    /// Paper 22 "Add to job": the sheet, and the row picked in it (run once the sheet has gone).
+    @State private var showAdd = false
+    @State private var pendingAdd: (() -> Void)?
+    /// Paper 21J "Time and profit", from the job's More menu.
+    @State private var showTime = false
     /// Paper F5: the tech moved on from Working to Wrap up without an estimate to approve first.
     @State private var wrapUpStageOpen = false
     /// The visit was under way on this screen, so a job paid and completed here stays on Paper F6
@@ -448,6 +453,16 @@ struct JobDetailView: View {
                 showAtAddress = true
                 return
             }
+            if PaperPreview.screen == "job-add" {
+                try? await Task.sleep(for: .seconds(2))
+                showAdd = true
+                return
+            }
+            if PaperPreview.screen == "job-time" {
+                try? await Task.sleep(for: .seconds(2))
+                showTime = true
+                return
+            }
             // The job's other sheets, each by its own preview name.
             let sheetNames = ["job-add-contact", "job-running-late", "job-cant-start", "job-checklist", "job-scan", "job-reschedule"]
             guard opensAssign || opensPause || sheetNames.contains(PaperPreview.screen) else { return }
@@ -468,6 +483,21 @@ struct JobDetailView: View {
         }
         .thorbisDestination(isPresented: $showAtAddress) {
             if let job { atAddressScreen(job) }
+        }
+        .sheet(isPresented: $showAdd, onDismiss: { pendingAdd?(); pendingAdd = nil }) { SheetSurface {
+            if let job {
+                let rows = addRows(job)
+                JobAddSheet(billing: rows.billing, onTheJob: rows.onTheJob) { row in
+                    pendingAdd = row.action
+                    showAdd = false
+                }
+            }
+        } }
+        .thorbisDestination(isPresented: $showTime) {
+            if let job {
+                JobTimeView(job: job, title: menuTitle(job),
+                            technician: assignedDisplayName(for: job).flatMap { $0 == "Assigned" ? nil : $0 })
+            }
         }
         .thorbisDestination(isPresented: $showFollowUps) {
             JobFollowUpsView(jobID: jobId, initialKind: followUpKind).onDisappear { Task { await loadFollowUps() } }
@@ -1056,9 +1086,17 @@ struct JobDetailView: View {
     private func moreMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
         var actions: [ThorbisMenuItem] = []
         var pause: ThorbisMenuItem?
+        // Paper 22: what can be added to the job opens as its own sheet; "Create invoice" lives there.
+        let adds = addRows(job)
+        let showsAdd = !inField(job) && !(adds.billing.isEmpty && adds.onTheJob.isEmpty)
+        if showsAdd {
+            actions.append(ThorbisMenuItem("Add to job", icon: "plus") { showAdd = true })
+        }
         for action in menuGroups(job).flatMap({ $0 }) {
             if action == .transition("paused") {
                 pause = menuActionItem(action, job: job)
+            } else if action == .billWithoutEstimate, showsAdd {
+                continue
             } else {
                 actions.append(menuActionItem(action, job: job))
             }
@@ -1098,6 +1136,37 @@ struct JobDetailView: View {
         return items
     }
 
+    /// Paper 22's rows, each one only when this person can do it here. "Purchase order" is left
+    /// out: an order isn't tied to a job in the app yet.
+    private func addRows(_ job: JobRecord) -> (billing: [JobAddRow], onTheJob: [JobAddRow]) {
+        var billing: [JobAddRow] = []
+        var onTheJob: [JobAddRow] = []
+        if session.can("estimate.create", feature: "estimates"), scope(for: job) != nil {
+            billing.append(JobAddRow(id: "estimate", glyph: .addEstimate, title: "Estimate",
+                                     subtitle: "Propose new work for approval") { buildEstimate() })
+        }
+        if menuGroups(job).contains(where: { $0.contains(.billWithoutEstimate) }) {
+            billing.append(JobAddRow(id: "invoice", glyph: .addInvoice, title: "Invoice",
+                                     subtitle: "Bill for completed work") { run(.createInvoice) })
+        }
+        if session.can("job.edit", feature: "jobs") {
+            onTheJob.append(JobAddRow(id: "photo", glyph: .jobCamera, title: "Photo or video",
+                                      subtitle: "Capture job-site media") {
+                if UIImagePickerController.isSourceTypeAvailable(.camera) { openCapture(.camera(stage: nil)) } else { openPhotos() }
+            })
+        }
+        if session.can("job.note", feature: "jobs") {
+            onTheJob.append(JobAddRow(id: "note", glyph: .addNote, title: "Note",
+                                      subtitle: "Log an update for the office") { openNoteTool() })
+        }
+        if session.can("customer.view", feature: "core_crm"), session.can("customer.edit", feature: "core_crm"),
+           customerContext(job) != nil, customerContext(job) == contactsContext {
+            onTheJob.append(JobAddRow(id: "contact", glyph: .addContact, title: "Contact",
+                                      subtitle: "Add another person on this job") { showAddContact = true })
+        }
+        return (billing, onTheJob)
+    }
+
     private func sharedJobText(_ job: JobRecord) -> SharedText {
         SharedText(JobShareText.text(title: job.title, customer: store.customerName(job.customerId), scheduledFor: job.scheduledFor))
     }
@@ -1119,6 +1188,10 @@ struct JobDetailView: View {
     /// camera", when the loaded customer and the device allow them.
     private func deviceMenuItems(_ job: JobRecord) -> [ThorbisMenuItem] {
         var items: [ThorbisMenuItem] = []
+        // Paper 21K leads with "Time and profit" (21J): the visit's drive and on-site time.
+        if !inField(job) {
+            items.append(ThorbisMenuItem("Time and profit", icon: "calendar") { showTime = true })
+        }
         if customerContext(job) == contactsContext, contactsContext != nil,
            let record = customerRecord, record.id == job.customerId {
             items.append(ThorbisMenuItem("Save customer to contacts", icon: "person") {
@@ -1127,7 +1200,8 @@ struct JobDetailView: View {
         }
         // On the visit, "Full job details" already opens there.
         if !inField(job) {
-            items.append(ThorbisMenuItem("At this address", icon: "house") { showAtAddress = true })
+            // Paper 21K draws an envelope beside "At this address".
+            items.append(ThorbisMenuItem("At this address", icon: "envelope") { showAtAddress = true })
         }
         if session.can("job.edit", feature: "jobs"), SiteMeasure.isSupported {
             items.append(ThorbisMenuItem("Measure with camera", icon: "camera") { openCapture(.measure) })
