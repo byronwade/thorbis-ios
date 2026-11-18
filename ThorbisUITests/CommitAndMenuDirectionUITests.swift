@@ -13,9 +13,8 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         XCTAssertTrue(commit.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(commit.isEnabled, "Add is never pre-disabled")
         commit.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Add the name customers see")).firstMatch
-            .waitForExistence(timeout: 5), app.debugDescription)
-        XCTAssertTrue(app.staticTexts["Add a price, like 125.00."].exists, app.debugDescription)
+        XCTAssertTrue(fieldProblem(app, "Add the name customers see").waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(fieldProblem(app, "Add a price, like 125.00.").exists, app.debugDescription)
         attach(app, "Price book commit pressed blank")
     }
 
@@ -28,9 +27,14 @@ final class CommitAndMenuDirectionUITests: XCTestCase {
         XCTAssertTrue(commit.waitForExistence(timeout: 30), app.debugDescription)
         XCTAssertTrue(commit.isEnabled, "Add equipment is never pre-disabled")
         commit.tap()
-        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Say what it is")).firstMatch
-            .waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertTrue(fieldProblem(app, "Say what it is").waitForExistence(timeout: 5), app.debugDescription)
         attach(app, "Equipment commit pressed blank")
+    }
+
+    /// The error under a field (Paper 09A): one element, `field-problem`, read as "Error: <message>".
+    private func fieldProblem(_ app: XCUIApplication, _ message: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "field-problem")
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Error: \(message)")).firstMatch
     }
 
     // MARK: Popover direction

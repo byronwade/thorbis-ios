@@ -273,8 +273,10 @@ struct JobEstimateHandoffView: View {
     }
 
     private var overview: some View {
-        // Paper 38C: cards 16 apart under the title.
-        LazyVStack(alignment: .leading, spacing: 16) {
+        // Paper 38C: cards 16 apart under the title. Eager, not lazy: at accessibility sizes the lazy
+        // stack never settled after Review was pressed (its estimated heights kept re-placing the
+        // rows) and the screen froze. A job's estimates come in pages, so the list stays short.
+        VStack(alignment: .leading, spacing: 16) {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--handoff-test-failed-refresh") {
                 Button("Fail sample refresh") {
@@ -689,7 +691,10 @@ struct JobEstimateHandoffView: View {
             } else {
                 // Paper 38C: the count and the total on the commit ("Approve 2 · $2,126.13"). Here it opens
                 // the review before any signature, so it says Review; its spoken name is unchanged.
-                CustomerPresentationCommit(title: reviewCommitTitle, enabled: model.canReview, busy: model.loading, type: type) {
+                // Where the full words would wrap (accessibility sizes), "Review (2)" keeps the pinned commit one
+                // line tall so the estimates keep their room.
+                CustomerPresentationCommit(title: reviewCommitTitle, compactTitle: "Review (\(model.selectedIDs.count))",
+                                           enabled: model.canReview, busy: model.loading, type: type) {
                     Task { await model.reviewSelected(); if !model.reviewed.isEmpty { reviewing = true } }
                 }
                 .accessibilityLabel("Review selected (\(model.selectedIDs.count))")

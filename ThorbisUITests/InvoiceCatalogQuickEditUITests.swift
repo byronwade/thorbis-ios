@@ -32,6 +32,9 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let edit = app.buttons["invoice-detail-edit-items"]
         for _ in 0..<20 where !edit.isHittable { app.swipeUp() }
         XCTAssertTrue(edit.waitForExistence(timeout: 10))
+        // At this size Edit can sit half under the pinned Issue invoice bar: it still reports hittable,
+        // but a tap at its centre lands on Issue. Bring it clear of the bar first, as a person would.
+        app.scrollClearOfFoot(edit)
         XCTAssertTrue(edit.isHittable)
         XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
         edit.tap()

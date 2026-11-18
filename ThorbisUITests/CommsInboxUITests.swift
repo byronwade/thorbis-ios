@@ -85,6 +85,12 @@ final class CommsInboxUITests: XCTestCase {
         return app
     }
 
+    /// The shared confirm card (Paper P4). It is modal, so XCTest reports it as an alert, not an
+    /// "other" element; the composer's own Save draft stays behind its cover.
+    private func confirmCard(_ app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: "thorbis-confirm").firstMatch
+    }
+
     private func attach(_ app: XCUIApplication, _ name: String) {
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
@@ -406,7 +412,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(to.exists)
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let save = app.otherElements["thorbis-confirm"].buttons["Save draft"]
+        let save = confirmCard(app).buttons["Save draft"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.tap()
         XCTAssertTrue(app.staticTexts["Draft"].firstMatch.waitForExistence(timeout: 10), app.debugDescription)
@@ -425,8 +431,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertFalse(app.buttons["inbox-mail-send"].isEnabled)
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
-        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        confirmCard(app).buttons["Save draft"].tap()
         XCTAssertTrue(app.staticTexts["Scope of work"].waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(app.staticTexts["Draft"].firstMatch.exists)
         let options = app.buttons["Options for this email"].firstMatch
@@ -441,8 +446,7 @@ final class CommsInboxUITests: XCTestCase {
         recipient.typeText("customer@example.com")
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let updatedSaves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
-        updatedSaves.element(boundBy: max(0, updatedSaves.count - 1)).tap()
+        confirmCard(app).buttons["Save draft"].tap()
         XCTAssertTrue(app.staticTexts["customer@example.com"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["Sent"].exists)
     }
@@ -465,8 +469,7 @@ final class CommsInboxUITests: XCTestCase {
         XCTAssertTrue(field.exists, "Dragging must not dismiss unsaved reply")
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
-        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        confirmCard(app).buttons["Save draft"].tap()
         XCTAssertTrue(app.staticTexts["Original reply"].waitForExistence(timeout: 10))
         let options = app.buttons["Options for this email"].firstMatch
         XCTAssertTrue(options.waitForExistence(timeout: 5))
@@ -514,8 +517,7 @@ final class CommsInboxUITests: XCTestCase {
         body.typeText("Original")
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
-        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        confirmCard(app).buttons["Save draft"].tap()
         XCTAssertTrue(app.staticTexts["Original"].waitForExistence(timeout: 10))
         app.buttons["Options for this email"].firstMatch.tap()
         let edit = app.buttons["Edit draft"].firstMatch
@@ -529,8 +531,7 @@ final class CommsInboxUITests: XCTestCase {
         remove.tap()
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let updatedSaves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
-        updatedSaves.element(boundBy: max(0, updatedSaves.count - 1)).tap()
+        confirmCard(app).buttons["Save draft"].tap()
         let copy = app.buttons["inbox-mail-save-copy"]
         XCTAssertTrue(copy.waitForExistence(timeout: 10), app.debugDescription)
         copy.tap()
@@ -553,8 +554,7 @@ final class CommsInboxUITests: XCTestCase {
         body.typeText("Keep these details")
         app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(app.buttons["Keep editing"].waitForExistence(timeout: 5))
-        let saves = app.buttons.matching(NSPredicate(format: "label == %@", "Save draft"))
-        saves.element(boundBy: max(0, saves.count - 1)).tap()
+        confirmCard(app).buttons["Save draft"].tap()
         let copy = app.buttons["inbox-mail-copy-text"]
         XCTAssertTrue(copy.waitForExistence(timeout: 10), app.debugDescription)
         XCTAssertTrue(body.exists)
