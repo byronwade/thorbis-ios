@@ -13,6 +13,18 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-menu-and-sign-out-fixes",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "hand.tap", title: "Scrolling a menu no longer picks a row",
+                      detail: "Scrolling a long menu, like a job's More, with your finger on a row no longer chooses that row."),
+                .init(symbol: "rectangle.portrait.and.arrow.right", title: "Sign out fits large text",
+                      detail: "The sign-out sheet scrolls at the largest text sizes, so Cancel is always within reach."),
+                .init(symbol: "keyboard", title: "Line editor clears the keyboard",
+                      detail: "On an invoice, the open line moves above the keyboard so Done and Remove are never covered."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-team-and-company",
             date: "2026-11-18",
             highlights: [
