@@ -221,6 +221,21 @@ struct TeamView: View {
                     }
                     .paperCardMargin().padding(.top, 22)
                 }
+                // Team additions (people not yet in Thorbis) and the team's goals are the team's own
+                // pages: they open from here, not from the menu or Business settings.
+                VStack(alignment: .leading, spacing: 22) {
+                    PlaceDoorRows(door: .team, title: "Also on the team", showsSubtitles: true)
+                    if session.can("organization.performance.view") {
+                        AccountGroup(title: nil) {
+                            NavigationLink(value: PaperRoute.teamGoals) {
+                                AccountRow(glyph: .bizTarget, glyphSize: 22, title: "Team goals", end: .chevronLarge)
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .accessibilityIdentifier("team-goals")
+                        }
+                    }
+                }
+                .paperCardMargin().padding(.top, 22)
                 // Only when there is truly no one; a search with no match has its own state above.
                 if !loading && members.isEmpty && error == nil {
                     PaperEmptyState(symbol: "person.2", title: "No one on the team",

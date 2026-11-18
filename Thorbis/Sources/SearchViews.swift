@@ -107,8 +107,16 @@ struct SearchAction: Identifiable {
     }
 
     /// The creates, Settings and places every search host offers, gated by the host's own lists.
+    /// Every place a person may open, whether or not their menu lists it: Search is the one door
+    /// that reaches them all (Notification rules included, which no menu lists).
+    static func everyPlace(permitted: (MenuItem) -> Bool) -> [MenuItem] {
+        MenuItem.allCases.filter(permitted)
+    }
+
     static func standard(creates: [(title: String, symbol: String, run: () -> Void)], settings: (() -> Void)?,
-                         places: [MenuItem], openPlace: @escaping (MenuItem) -> Void) -> [SearchAction] {
+                         places: [MenuItem], openPlace: @escaping (MenuItem) -> Void,
+                         records: [LocalWorkspaceSection] = [],
+                         openRecord: @escaping (LocalWorkspaceSection) -> Void = { _ in }) -> [SearchAction] {
         var actions: [SearchAction] = creates.map { create in
             switch create.title {
             case "New job":
@@ -133,6 +141,10 @@ struct SearchAction: Identifiable {
             SearchAction(id: "place-\(place.rawValue)", title: place.title, subtitle: place.subtitle ?? "Go to \(place.title)",
                          symbol: place.symbol, keywords: place.searchKeywords, run: { openPlace(place) })
         }
+        actions += records.map { record in
+            SearchAction(id: "place-local-\(record.rawValue)", title: record.title, subtitle: "Go to \(record.title)",
+                         symbol: record.moreSymbol, keywords: record.searchKeywords, run: { openRecord(record) })
+        }
         return actions
     }
 }
@@ -148,6 +160,20 @@ extension MenuItem {
         case .priceBook: words += ["pricebook", "catalog", "parts"]
         case .team: words += ["permissions", "people"]
         default: break
+        }
+        return words
+    }
+}
+
+extension LocalWorkspaceSection {
+    /// Words someone might type to go to these records.
+    var searchKeywords: [String] {
+        var words = [title.lowercased()]
+        switch self {
+        case .fleet: words += ["vehicles", "trucks", "vans"]
+        case .equipment: words += ["units", "assets"]
+        case .agreements: words += ["agreements", "memberships", "plans", "service plans"]
+        case .team: words += ["team", "people not in thorbis"]
         }
         return words
     }
@@ -613,6 +639,9 @@ private struct SearchScreen: View {
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var recents = RecentItems.shared
+    /// Starred jobs and customers. They left the phone's menu (Paper's menu lists places only), so
+    /// they lead Search before anything is typed.
+    @ObservedObject private var favorites = ScopedRecordFavorites.shared
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var path = NavigationPath()
     /// Groups opened past their first rows with "Show all".
@@ -1040,6 +1069,8 @@ private struct SearchScreen: View {
                       target: .run(SearchAction(id: "search:\(words)", title: words, symbol: "clock", keywords: [], run: { model.query = words })))
         }
         if !searches.isEmpty { groups.append(SearchGroup(id: "searches", title: "Recent searches", hits: searches)) }
+        let starred = favoriteHits(builder)
+        if !starred.isEmpty { groups.append(SearchGroup(id: "favorites", title: "Favorites", hits: starred)) }
         let opened = recentlyOpened
         let split = focus.split(opened.map(\.0))
         // One "Recently viewed" (Linear's search): the place's own records first, then the rest.
@@ -1060,9 +1091,48 @@ private struct SearchScreen: View {
         return groups
     }
 
+    private var favoriteScope: ScopedRecordFavorites.Scope? { ScopedRecordFavorites.currentScope(session: session, api: api) }
+    private func canOpenFavorite(_ kind: ScopedRecordFavorites.Kind) -> Bool {
+        switch kind {
+        case .job: session.can("job.view", feature: "jobs")
+        case .customer: session.can("customer.view", feature: "core_crm")
+        }
+    }
+
+    /// The starred records this person may still open, as rows that open them.
+    private func favoriteHits(_ builder: SearchResultsBuilder) -> [SearchHit] {
+        guard favorites.isBound(to: favoriteScope) else { return [] }
+        return favorites.visible.filter { canOpenFavorite($0.entry.kind) }.map { item in
+            let id = item.entry.id
+            switch item.entry.kind {
+            case .job:
+                if let job = store.jobs.first(where: { $0.id == id }) { return builder.jobHit(job) }
+                return SearchHit(id: "favorite:\(item.id)", leading: .icon("star"), title: item.title, target: .open(.route(.job(id))))
+            case .customer:
+                if let customer = store.customers.first(where: { $0.id == id }) { return builder.customerHit(customer) }
+                return SearchHit(id: "favorite:\(item.id)", leading: .icon("star"), title: item.title,
+                                 target: .run(SearchAction(id: "favorite:\(item.id)", title: item.title, symbol: "star", keywords: [],
+                                                           run: { store.requestedRecord = .customer(id) })))
+            }
+        }
+    }
+
+    private struct FavoritesReload: Equatable {
+        let scope: ScopedRecordFavorites.Scope?
+        let entries: [ScopedRecordFavorites.Entry]
+    }
+
     @ViewBuilder private var emptyQuery: some View {
         let groups = emptyGroups
-        if recents.searches.isEmpty && recents.items.isEmpty {
+        // Reads the starred records' names once Search shows, as the menu used to.
+        Color.clear.frame(height: 0).accessibilityHidden(true)
+            .task(id: FavoritesReload(scope: favoriteScope, entries: favorites.entries)) {
+                let expected = favoriteScope
+                favorites.bind(expected)
+                guard expected != nil else { return }
+                await favorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
+            }
+        if recents.searches.isEmpty && recents.items.isEmpty && groups.isEmpty {
             ListRoomEmpty(title: "Nothing viewed yet.",
                           message: "Search for a job by street, a customer by name or phone, or an invoice by number.")
         }

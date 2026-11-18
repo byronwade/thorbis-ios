@@ -38,7 +38,8 @@ final class PrimaryNavigationTests: XCTestCase {
                                                  .place(.reports)])
 
         let owner = make(.owner)
-        XCTAssertEqual(owner.sections[0].places, [.home, .money, .reports, .schedule, .inbox])
+        XCTAssertEqual(owner.sections[0].places, [.home, .money, .reports, .schedule, .jobs, .inbox],
+                       "Paper 58N draws no Jobs row; it stays with the first group until the owner decides")
         XCTAssertEqual(owner.sections[1].kind, .business)
         XCTAssertEqual(owner.sections[1].rows, [.place(.customers), .place(.pipeline), .place(.marketing), .local(.agreements),
                                                 .place(.properties), .local(.equipment), .local(.fleet), .place(.vendors),
@@ -47,17 +48,91 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(PlaceSection.business.rawValue, "Business")
     }
 
-    func testPaperDrawerStillListsEveryReachablePlaceExactlyOnce() {
-        for role in [WorkRole.technician, .office, .owner] {
-            let result = DrawerSections.make(local: LocalWorkspaceSection.allCases, role: role, opens: permitted(role))
-            let expected = Set(MenuItem.allCases.filter(permitted(role)))
-            XCTAssertEqual(Set(result.places), expected, "\(role): places Paper reaches from a hub stay under More")
-            XCTAssertEqual(result.places.count, expected.count, "\(role): no place is listed twice")
-            XCTAssertEqual(Set(result.sections.flatMap(\.local)), Set(LocalWorkspaceSection.allCases), "\(role): every record is listed")
-            XCTAssertEqual(result.sections.flatMap(\.local).count, LocalWorkspaceSection.allCases.count)
+    /// The new rule: the menu lists exactly Paper's rows for the role (29N: 10, 57N: 13, 58N: 14 and
+    /// Jobs), each once, with no More, Records, On this phone or Favorites group after them.
+    func testPaperDrawerListsExactlyPapersRowsForEachRole() {
+        let everything: (MenuItem) -> Bool = { _ in true }
+        func rows(_ role: WorkRole) -> [DrawerSections.Entry] {
+            DrawerSections.make(local: LocalWorkspaceSection.allCases, role: role, opens: everything).sections.flatMap(\.rows)
         }
-        let more = DrawerSections.make(role: .owner, opens: { _ in true }).sections.first { $0.kind == .more }
-        XCTAssertEqual(more?.places.first, .jobs, "Jobs is not in Paper's owner menu, so it leads More")
+        XCTAssertEqual(rows(.technician), [.place(.schedule), .place(.jobs), .place(.customers), .place(.inbox), .place(.timeClock),
+                                           .place(.priceBook), .place(.receipts), .place(.truckStock), .local(.equipment), .place(.training)])
+        XCTAssertEqual(rows(.office), [.place(.home), .place(.schedule), .place(.jobs), .place(.money), .place(.customers),
+                                       .place(.pipeline), .place(.inbox),
+                                       .place(.team), .place(.vendors), .place(.properties), .local(.equipment), .local(.agreements),
+                                       .place(.reports)])
+        XCTAssertEqual(rows(.owner), [.place(.home), .place(.money), .place(.reports), .place(.schedule), .place(.jobs), .place(.inbox),
+                                      .place(.customers), .place(.pipeline), .place(.marketing), .local(.agreements), .place(.properties),
+                                      .local(.equipment), .local(.fleet), .place(.vendors), .place(.businessSettings)])
+        XCTAssertEqual(rows(.technician).count, 10)
+        XCTAssertEqual(rows(.office).count, 13)
+        XCTAssertEqual(rows(.owner).count, 15, "Paper's 14 and Jobs")
+        for role in [WorkRole.technician, .office, .owner] {
+            let result = DrawerSections.make(local: LocalWorkspaceSection.allCases, role: role, opens: everything)
+            XCTAssertEqual(result.sections.count, 2, "\(role): the main places, then one headed group")
+            XCTAssertFalse(result.sections.contains { [.more, .phone, .pinned, .customized].contains($0.kind) })
+            XCTAssertEqual(Set(result.sections.flatMap(\.rows)).count, result.sections.flatMap(\.rows).count, "\(role): no row twice")
+            // Pins and hidden places saved by an older build change nothing but what a company hides.
+            let old = DrawerSections.make(pins: [.estimates, .invoices], explicitPins: true, local: LocalWorkspaceSection.allCases,
+                                          role: role, opens: everything)
+            XCTAssertEqual(old, result, "\(role): pins from an older build add no rows")
+        }
+        // A role sees only the rows it may open; nothing else takes their place.
+        let limited = DrawerSections.make(local: [], role: .technician, opens: permitted(.technician))
+        XCTAssertEqual(limited.sections.flatMap(\.rows), [.place(.schedule), .place(.jobs), .place(.customers), .place(.inbox), .place(.priceBook)])
+    }
+
+    /// The order dragged in Menu and start screen moves the main rows only; ids that are not main
+    /// rows (an older build saved every place) are ignored.
+    func testSavedOrderArrangesTheMainRowsOnly() {
+        let ordered = DrawerSections.make(order: [.estimates, .inbox, .invoices, .schedule, .priceBook], local: LocalWorkspaceSection.allCases,
+                                          role: .technician, opens: { _ in true })
+        XCTAssertEqual(ordered.sections[0].places, [.inbox, .schedule, .jobs, .customers, .timeClock])
+        XCTAssertEqual(ordered.sections[1].rows, [.place(.priceBook), .place(.receipts), .place(.truckStock), .local(.equipment), .place(.training)])
+        XCTAssertEqual(MenuArrangement.rows(role: .technician, order: [.inbox], opens: { $0 != .timeClock }), [.inbox, .schedule, .jobs, .customers])
+        XCTAssertEqual(MenuArrangement.startChoices(rows: [.schedule, .jobs], chosen: .automatic), [.automatic, .schedule, .jobs])
+        XCTAssertEqual(MenuArrangement.startChoices(rows: [.schedule, .jobs], chosen: .invoices), [.automatic, .schedule, .jobs, .invoices],
+                       "A start screen chosen in an older build stays listed")
+    }
+
+    /// Nothing is unreachable: every place and record a role may open is in its menu or behind a
+    /// screen that lists it, and Search lists them all.
+    func testEveryPlaceKeepsADoorAndIsInSearch() {
+        for role in [WorkRole.technician, .office, .owner] {
+            let doors = PlaceDoors(role: role, businessPriceBook: role == .owner, businessTeam: role == .owner, opens: { _ in true })
+            for entry in PlaceDoors.everything {
+                XCTAssertNotNil(doors.door(entry), "\(role): \(entry.id) has no door")
+            }
+            XCTAssertEqual(Set(PlaceDoor.allCases.flatMap { doors.places(behind: $0) }.map(\.id)).count,
+                           MenuItem.allCases.count + LocalWorkspaceSection.allCases.count, "\(role): each place has exactly one door")
+        }
+        let owner = PlaceDoors(role: .owner, businessPriceBook: true, businessTeam: true, opens: { _ in true })
+        XCTAssertEqual(owner.door(.place(.estimates)), .money)
+        XCTAssertEqual(owner.door(.place(.invoices)), .money)
+        XCTAssertEqual(owner.door(.place(.billing)), .money)
+        XCTAssertEqual(owner.door(.place(.attention)), .money)
+        XCTAssertEqual(owner.door(.place(.scorecard)), .reports)
+        XCTAssertEqual(owner.door(.place(.drafts)), .messages, "Message drafts is the Messages folder, not a menu place")
+        XCTAssertEqual(owner.door(.place(.team)), .businessSettings)
+        XCTAssertEqual(owner.door(.place(.notices)), .businessSettings)
+        XCTAssertEqual(owner.door(.place(.priceBook)), .businessSettings)
+        XCTAssertEqual(owner.door(.local(.team)), .team, "Team additions folds into Team")
+        XCTAssertEqual(owner.door(.place(.jobs)), .menu)
+        XCTAssertEqual(owner.places(behind: .settings).map(\.id), ["timeClock", "receipts", "truckStock", "training"])
+        let office = PlaceDoors(role: .office, opens: { _ in true })
+        XCTAssertEqual(office.door(.place(.team)), .menu)
+        XCTAssertEqual(office.door(.local(.team)), .team)
+        XCTAssertEqual(office.door(.place(.priceBook)), .settings)
+        let tech = PlaceDoors(role: .technician, opens: permitted(.technician))
+        XCTAssertNil(tech.door(.place(.money)), "A place a role may not open gets no door")
+        XCTAssertEqual(tech.door(.place(.estimates)), .settings, "Without Money in the menu, Estimates is one row away in Settings")
+        XCTAssertEqual(tech.door(.place(.drafts)), .messages)
+        // Search: every permitted place and every record, the ones no menu lists included.
+        let actions = SearchAction.standard(creates: [], settings: nil, places: SearchAction.everyPlace(permitted: { _ in true }),
+                                            openPlace: { _ in }, records: LocalWorkspaceSection.allCases, openRecord: { _ in })
+        XCTAssertEqual(Set(actions.map(\.id)),
+                       Set(MenuItem.allCases.map { "place-\($0.rawValue)" } + LocalWorkspaceSection.allCases.map { "place-local-\($0.rawValue)" }))
+        XCTAssertEqual(SearchAction.everyPlace(permitted: permitted(.technician)).count, 9)
     }
 
     func testPrimaryDestinationsRemainStableWhenRoleAccessIsLimited() {

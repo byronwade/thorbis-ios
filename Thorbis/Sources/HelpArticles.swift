@@ -148,7 +148,7 @@ enum HelpCatalog {
             id: "customer-import", category: "Customers", title: "Bring customers in from a spreadsheet",
             summary: "Import a CSV file from your old software.",
             steps: [
-                HelpStep(symbol: "gearshape", text: "Open Settings and choose Import customers."),
+                HelpStep(symbol: "gearshape", text: "Open Business settings and choose Import customers, under Setup."),
                 HelpStep(symbol: "doc", text: "Choose a CSV file of up to 5 MB."),
                 HelpStep(symbol: "tablecells", text: "Check that the columns line up, then import."),
             ],
@@ -204,12 +204,12 @@ enum HelpCatalog {
             related: ["offline"]),
         HelpArticle(
             id: "menu-edit", category: "Menu and settings", title: "Change your menu and start screen",
-            summary: "Pin places, hide ones you don't use, and pick where the app opens.",
+            summary: "Put your main places in your order, and pick where the app opens.",
             steps: [
                 HelpStep(symbol: "slider.horizontal.3", text: "Open Settings and choose Menu and start screen."),
                 HelpStep(symbol: "rectangle.on.rectangle", text: "Under Open the app to, pick the place the app opens on."),
-                HelpStep(symbol: "star", text: "Under Pin to the top, add the places you use most. Drag pinned places to reorder them."),
-                HelpStep(symbol: "eye.slash", text: "Under Show in menu, turn a place off to hide it. Nothing is removed."),
+                HelpStep(symbol: "line.3.horizontal", text: "Under Your menu, drag a place up or down to change the order your menu lists it."),
+                HelpStep(symbol: "magnifyingglass", text: "A place that is not in your menu opens from Search, at the top of the menu."),
             ],
             note: "Reset to the standard layout puts everything back.",
             keywords: ["drawer", "sidebar", "reorder", "pin", "hide", "customize", "start screen", "home screen"],
@@ -218,7 +218,7 @@ enum HelpCatalog {
             id: "settings", category: "Menu and settings", title: "Find your way around Settings",
             summary: "Account, notifications, appearance and what changed.",
             steps: [
-                HelpStep(symbol: "gearshape", text: "Open the menu, tap the gear at the bottom and choose Settings."),
+                HelpStep(symbol: "gearshape", text: "Open the menu and tap the gear at the bottom."),
                 HelpStep(symbol: "person.crop.circle", text: "Your name at the top opens Account and data: change your name or password, and see Privacy and permissions."),
                 HelpStep(symbol: "bell", text: "Notifications turns notifications on for this phone."),
                 HelpStep(symbol: "circle.lefthalf.filled", text: "Appearance is Light, Dark or Match device. It changes right away, on this phone only."),
@@ -230,7 +230,7 @@ enum HelpCatalog {
             id: "team-add", category: "Menu and settings", title: "How do I add a technician?",
             summary: "Invite them by email from Team.",
             steps: [
-                HelpStep(symbol: "person.2", text: "Open Team from the menu."),
+                HelpStep(symbol: "person.2", text: "Open Team from the menu. Owners open Business settings, then Team and permissions."),
                 HelpStep(symbol: "person.badge.plus", text: "Tap Invite to team, the person with a plus at the top."),
                 HelpStep(symbol: "envelope", text: "Enter their email and choose their role, then send the invite."),
                 HelpStep(symbol: "checkmark.circle", text: "They join from the invite. Until then they show under Invited."),
@@ -242,7 +242,7 @@ enum HelpCatalog {
             id: "reviews", category: "Customers", title: "Ask customers for a review",
             summary: "Save your review link once; show it as a code any time.",
             steps: [
-                HelpStep(symbol: "star.bubble", text: "Open Settings and choose Review requests."),
+                HelpStep(symbol: "star.bubble", text: "Open Business settings, choose Workflows, then Send review request."),
                 HelpStep(symbol: "link", text: "Paste your review link: one https link of up to 100 characters."),
                 HelpStep(symbol: "switch.2", text: "Turn on Ask for reviews."),
                 HelpStep(symbol: "qrcode", text: "In Marketing, show the link as a code a customer can scan, or copy and share it."),
