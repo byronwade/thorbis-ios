@@ -182,6 +182,15 @@ struct MarketingView: View {
             actionError = nil
             copied = false
             model.bind(organizationID: organizationID)
+            #if DEBUG
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "marketing-campaign": editor = MarketingCampaignEditing(record: model.campaigns.first)
+                case "marketing-sources": showLeads = true
+                default: break
+                }
+            }
+            #endif
             await load()
         }
         .task(id: model.reviewLink ?? "") {

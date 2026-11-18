@@ -26,7 +26,18 @@ enum PlacesPreviewData {
             let entry = TimeClockEntry(clockIn: at(days, 7, 20), clockOut: at(days, 15, 45), breaks: [lunch])
             try? store.save(entry, now: now)
         }
+        if PaperPreview.screen == "time-clock-fix" {
+            // Paper 27B: yesterday's shift was never closed.
+            try? store.save(TimeClockEntry(clockIn: at(1, 7, 52)), now: now)
+            return store
+        }
         let started = now.addingTimeInterval(-9876)
+        if PaperPreview.screen == "time-clock-break" {
+            // Paper 27C: a 30-minute lunch, 13 minutes in.
+            let lunch = TimeClockBreak(start: now.addingTimeInterval(-780), plannedMinutes: 30)
+            try? store.save(TimeClockEntry(clockIn: started, breaks: [lunch]), now: now)
+            return store
+        }
         let pause = TimeClockBreak(start: started.addingTimeInterval(3600), end: started.addingTimeInterval(5400))
         try? store.save(TimeClockEntry(clockIn: started, breaks: [pause]), now: now)
         return store

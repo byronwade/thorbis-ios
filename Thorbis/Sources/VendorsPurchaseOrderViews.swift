@@ -118,6 +118,9 @@ struct PurchaseOrderDetailView: View {
                 }
             }
         }
+        #if DEBUG
+        .task { if PaperPreview.enabled, PaperPreview.screen == "purchase-order-receive" { receiving = true } }
+        #endif
         .sheet(item: $lineDraft) { draft in SheetSurface {
             PurchaseOrderLineSheet(existing: draft.existing) { line in
                 try book.change { records in
@@ -204,15 +207,14 @@ struct PurchaseOrderDetailView: View {
         .padding(.horizontal, 4)
         // Paper 41: the status, the vendor and the total as chips under the title.
         FlowRow(spacing: 8, lineSpacing: 8) {
-            SalesStatusChip(text: PurchaseOrderTone.word(order), ink: PurchaseOrderTone.ink(order),
-                            surface: PurchaseOrderTone.surface(order))
-            PropertyChip(order.vendorName, symbol: "shippingbox")
-            PropertyChip(PurchaseOrderMath.money(order.totalCents, alwaysCents: true))
+            PlaceMetaPill(text: PurchaseOrderTone.word(order), glyph: .placeHalfRing)
             if let orderedAt = order.orderedAt {
-                PropertyChip("Ordered \(orderedAt.formatted(.dateTime.month(.abbreviated).day()))", symbol: "clock")
+                PlaceMetaPill(text: "Ordered \(orderedAt.formatted(.dateTime.month(.abbreviated).day()))", glyph: .placeClock)
             }
+            PlaceMetaPill(text: order.vendorName, initials: VendorInitials.of(order.vendorName))
+            PlaceMetaPill(text: PurchaseOrderMath.money(order.totalCents, alwaysCents: true))
         }
-        .padding(.horizontal, 4)
+        .padding(.top, -4)
         if let actionError { SalesProblemLine(message: actionError) }
         PaperSection("Details") { details(order, vendor: vendor, draft: draft) }
         if draft {

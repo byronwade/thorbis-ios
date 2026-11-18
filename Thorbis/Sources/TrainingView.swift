@@ -462,6 +462,15 @@ struct TrainingView: View {
             opened = nil
             actionError = nil
             model.bind(identity)
+            #if DEBUG
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "training-license": opened = model.credentials.first
+                case "training-license-editor": credentialEditor = TrainingCredentialEditing(record: model.credentials.first)
+                default: break
+                }
+            }
+            #endif
         }
         .thorbisDestination(item: $opened) { credential in
             TrainingCredentialDetail(id: credential.id, model: model)
