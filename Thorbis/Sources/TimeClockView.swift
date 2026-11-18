@@ -105,6 +105,26 @@ enum TimeClockWords {
         return "\(first.tradeTime) \u{2013} \(last.tradeTime)"
     }
 
+    /// Paper 56C's row: "8:00\u{2013}4:30", the hours without their AM and PM.
+    static func shortSpan(_ day: TimeClockMath.Day) -> String {
+        guard let first = day.firstIn else { return "No hours" }
+        func plain(_ date: Date) -> String {
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            return String(format: "%d:%02d", ((parts.hour ?? 0) + 11) % 12 + 1, parts.minute ?? 0)
+        }
+        guard let last = day.lastOut else { return plain(first) }
+        return "\(plain(first))\u{2013}\(plain(last))"
+    }
+
+    /// "Jul 13\u{2013}19", or "Jul 27 \u{2013} Aug 2" across two months.
+    static func shortRange(from start: Date, to end: Date, calendar: Calendar = .current) -> String {
+        let month = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        if calendar.isDate(start, equalTo: end, toGranularity: .month) {
+            return "\(start.formatted(month))\u{2013}\(end.formatted(.dateTime.day()))"
+        }
+        return "\(start.formatted(month)) \u{2013} \(end.formatted(month))"
+    }
+
     static func span(_ entry: TimeClockEntry) -> String {
         guard let out = entry.clockOut else { return "In since \(entry.clockIn.tradeTime)" }
         return "\(entry.clockIn.tradeTime) \u{2013} \(punch(out, on: entry.clockIn))"
@@ -256,9 +276,10 @@ struct TimeClockPill: View {
     let title: String
     var primary = false
     var height: CGFloat = 50
+    var size: CGFloat = 16
 
     var body: some View {
-        Text(title).font(Theme.font(16, weight: .semibold))
+        Text(title).font(Theme.font(size, weight: .semibold))
             .foregroundStyle(primary ? Color.white : Theme.foreground)
             .multilineTextAlignment(.center)
             .padding(.horizontal, 16).padding(.vertical, 8)
@@ -336,6 +357,16 @@ struct TimeClockView: View {
             sheet = nil
             route = nil
             model.bind(userID: session.user?.id, organizationID: session.activeOrganization?.id)
+            #if DEBUG
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "time-clock-timeoff", "time-clock-date": sheet = .timeOff(nil)
+                case "time-clock-fix": if let open = model.active { sheet = .fix(open) }
+                case "time-clock-timesheet": route = .timesheet
+                default: break
+                }
+            }
+            #endif
         }
         .thorbisDestination(item: $route) { place in
             switch place {
@@ -396,11 +427,20 @@ struct TimeClockView: View {
             if let today, !today.entries.isEmpty {
                 todayCard(today, active: active, now: now).padding(.top, 22)
             }
-            weekCard(days, now: now, calendar: calendar).padding(.top, 22)
-            // Where Paper prints "Synced 2m ago": these hours are not synced.
-            PlacePhoneLine(text: "Kept on this phone \u{00B7} not sent to payroll")
-                .padding(.horizontal, -(PaperCardMetrics.margin + 4))
-                .padding(.top, 16)
+            if active?.openBreak != nil {
+                // Paper 27C: on break the page is the break and today; the week is in the ••• menu's
+                // Timesheet. Its note promises a reminder and dispatch; this one says what is true.
+                Text("Kept on this phone \u{00B7} nobody is told you\u{2019}re on break.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4).padding(.top, 10)
+            } else {
+                weekCard(days, now: now, calendar: calendar).padding(.top, 22)
+                // Where Paper prints "Synced 2m ago": these hours are not synced.
+                PlacePhoneLine(text: "Kept on this phone \u{00B7} not sent to payroll")
+                    .padding(.horizontal, -(PaperCardMetrics.margin + 4))
+                    .padding(.top, 16)
+            }
         }
         .padding(.horizontal, PaperCardMetrics.margin)
         .padding(.bottom, 24)
@@ -465,20 +505,30 @@ struct TimeClockView: View {
                 VStack(alignment: .leading, spacing: 6) { dayLabel(now); status }
             }
             // Paper 27: 52 Bold; 27C: 64 Bold while the break runs.
-            Text(figure).font(Theme.font(pause == nil ? 52 : 64, weight: .bold)).tracking(pause == nil ? -1.56 : -2.56)
-                .lineLimit(1).minimumScaleFactor(0.5)
+            ViewThatFits(in: .horizontal) {
+                heroFigure(figure, onBreak: pause != nil).fixedSize()
+                heroFigure(figure, onBreak: pause != nil).minimumScaleFactor(0.5)
+            }
                 .accessibilityLabel(pause == nil ? "Worked today, \(TimeClockMath.durationLabel(worked))"
                                                  : "On break for \(TimeClockMath.durationLabel(now.timeIntervalSince(pause?.start ?? now)))")
                 .accessibilityIdentifier("timeclock-running-total")
             if !line.isEmpty {
-                Text(line).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                Text(line).font(Theme.font(pause == nil ? 15 : 16)).foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let pause { breakProgress(pause, now: now).padding(.top, 10) }
         }
-        .padding(18)
+        .padding(.horizontal, 18).padding(.top, pause == nil ? 18 : 16).padding(.bottom, 18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: pause == nil ? 22 : 24, style: .continuous))
+    }
+
+    /// Paper 27: 52 Bold; 27C: 64 Bold with tabular digits while the break counts.
+    private func heroFigure(_ figure: String, onBreak: Bool) -> some View {
+        // Past the type ramp's 34, so asked for by size.
+        let font = Font.custom("Inter-Regular", size: onBreak ? 64 : 52, relativeTo: .largeTitle).weight(.bold)
+        return Text(figure).font(onBreak ? font.monospacedDigit() : font).tracking(onBreak ? -2.56 : -1.56)
+            .lineLimit(1)
     }
 
     private func dayLabel(_ now: Date) -> some View {
@@ -531,17 +581,25 @@ struct TimeClockView: View {
         return VStack(alignment: .leading, spacing: 0) {
             TimeClockSectionLabel(title: "Today")
             TimeClockCard {
-                TimeClockValueRow(label: "Clocked in", value: TimeClockWords.punch(first, on: now))
+                if active?.openBreak != nil {
+                    PlaceSheetValueRow(label: "Clocked in", value: TimeClockWords.punch(first, on: now), emphasis: true)
+                } else {
+                    TimeClockValueRow(label: "Clocked in", value: TimeClockWords.punch(first, on: now))
+                }
                 if !today.isOpen, let out = today.lastOut {
                     WellDivider(leading: 16)
                     TimeClockValueRow(label: "Clocked out", value: out.tradeTime)
                 }
-                WellDivider(leading: 16)
-                TimeClockValueRow(label: "Break", value: today.breakSeconds >= 60 ? TimeClockMath.durationLabel(today.breakSeconds) : "None")
-                WellDivider(leading: 16)
-                // Paper 27C: on break the total stands still and reads "Worked before break".
-                TimeClockValueRow(label: active?.openBreak == nil ? "Total" : "Worked before break",
-                                  value: TimeClockMath.durationLabel(today.seconds), strong: active?.openBreak == nil)
+                if active?.openBreak == nil {
+                    WellDivider(leading: 16)
+                    TimeClockValueRow(label: "Break", value: today.breakSeconds >= 60 ? TimeClockMath.durationLabel(today.breakSeconds) : "None")
+                    WellDivider(leading: 16)
+                    TimeClockValueRow(label: "Total", value: TimeClockMath.durationLabel(today.seconds), strong: true)
+                } else {
+                    // Paper 27C: on break the total stands still and reads "Worked before break".
+                    WellDivider(leading: 0)
+                    PlaceSheetValueRow(label: "Worked before break", value: TimeClockMath.durationLabel(today.seconds), emphasis: true)
+                }
             }
         }
     }
@@ -616,7 +674,9 @@ struct TimeClockView: View {
     /// one action is Clock in.
     @ViewBuilder private var bar: some View {
         let active = model.active
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(PlaceWeightedRow())
+        // Paper 27C sets Clock out at 122 beside End break at 226, 10 apart.
+        let row = active?.openBreak != nil ? PlaceWeightedRow(weights: [1, 1.85], spacing: 10) : PlaceWeightedRow()
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(row)
         layout {
             if let active {
                 if TimeClockMath.isMissedClockOut(active, now: Date()) {
@@ -627,10 +687,11 @@ struct TimeClockView: View {
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("timeclock-fix-clock-out")
                 } else if active.openBreak != nil {
-                    Button { model.perform { try $0.clockOut() } } label: { TimeClockPill(title: "Clock out") }
+                    // Paper 27C: 56-tall pills in 17 Semibold.
+                    Button { model.perform { try $0.clockOut() } } label: { TimeClockPill(title: "Clock out", height: 56, size: 17) }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("timeclock-clock-out")
-                    Button { model.perform { try $0.endBreak() } } label: { TimeClockPill(title: "End break", primary: true) }
+                    Button { model.perform { try $0.endBreak() } } label: { TimeClockPill(title: "End break", primary: true, height: 56, size: 17) }
                         .buttonStyle(PressStyle())
                         .accessibilityIdentifier("timeclock-end-break")
                 } else {
@@ -772,13 +833,14 @@ struct TimeClockEntriesView: View {
 
 // MARK: - Timesheet
 
-/// Paper 56C "Timesheet", for one person on their own phone: a week's days, what was worked, and
-/// the days to check. There is nobody to approve it here, so the approve bar is not drawn.
+/// Paper 56C "Timesheet", for one person on their own phone: the person, two weeks of days, what
+/// was worked, and the days to check. There is nobody to approve it here, so the approve bar is
+/// not drawn; the ••• circle moves between pay periods.
 struct TimeClockTimesheetView: View {
     @ObservedObject var model: TimeClockModel
     @EnvironmentObject private var session: SessionController
     @State private var sheet: TimeClockSheet?
-    /// 0 is this week; -1 the week before.
+    /// 0 ends with this week; -1 is the two weeks before.
     @State private var offset = 0
 
     var body: some View {
@@ -790,83 +852,94 @@ struct TimeClockTimesheetView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ThorbisToolbarItem(placement: .topBarTrailing) {
+                ThorbisMenu(items: menuItems, accessibilityLabel: "More for timesheet") {
+                    PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                }
+                .accessibilityIdentifier("timeclock-timesheet-more")
+            }
+        }
         .timeClockSheets($sheet, model: model)
+    }
+
+    private var menuItems: [ThorbisMenuItem] {
+        var items = [ThorbisMenuItem("Two weeks before", icon: "chevron.left") { offset -= 1 }]
+        // The weeks ahead have no hours to show, so the item leaves rather than sitting disabled.
+        if offset < 0 { items.append(ThorbisMenuItem("Two weeks after", icon: "chevron.right") { offset += 1 }) }
+        items.append(ThorbisMenuItem("Add missed punch", icon: "plus", startsGroup: true) { sheet = .add })
+        return items
     }
 
     @ViewBuilder private func page(now: Date) -> some View {
         let calendar = Calendar.current
-        let week = TimeClockMath.weekInterval(containing: now, offsetBy: offset, calendar: calendar)
-        let days = TimeClockMath.days(model.entries, in: week, now: now, calendar: calendar)
-        let total = days.reduce(0) { $0 + $1.seconds }
-        let toCheck = days.filter(\.missedClockOut).count
+        let second = TimeClockMath.weekInterval(containing: now, offsetBy: offset * 2, calendar: calendar)
+        let first = TimeClockMath.weekInterval(containing: now, offsetBy: offset * 2 - 1, calendar: calendar)
+        let weeks = [first, second].map { (week: $0, days: TimeClockMath.days(model.entries, in: $0, now: now, calendar: calendar)) }
+        let totals = weeks.map { $0.days.reduce(0) { $0 + $1.seconds } }
+        let total = totals.reduce(0, +)
+        let over = totals.reduce(0) { $0 + TimeClockMath.overtimeSeconds(weekSeconds: $1) }
+        let toCheck = weeks.reduce(0) { $0 + $1.days.filter(\.missedClockOut).count }
         let name = (session.user?.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         VStack(alignment: .leading, spacing: 0) {
-            TimeClockPageTitle(title: "Timesheet",
-                               subtitle: [name, "Pay week \(TimeClockWords.weekRange(week))"].filter { !$0.isEmpty }.joined(separator: TimeClockWords.dot),
-                               identifier: "timeclock-timesheet")
-            weekPicker(week).padding(.top, 14)
-            tiles(total: total, toCheck: toCheck).padding(.top, 12)
-            VStack(alignment: .leading, spacing: 0) {
-                TimeClockSectionLabel(title: offset == 0 ? "This week" : "Week of \(week.start.formatted(.dateTime.month(.abbreviated).day()))",
-                                      trailing: "\(TimeClockMath.decimalHours(total)) h\(offset == 0 ? " so far" : "")")
-                TimeClockCard {
-                    ForEach(days) { day in
-                        if day.id != days.first?.id { WellDivider(leading: 16) }
-                        dayRow(day, now: now, calendar: calendar)
-                    }
+            // Paper 56C: the 44 initials circle, the name in 28 Bold over the period in 15 muted.
+            HStack(alignment: .center, spacing: 12) {
+                if !name.isEmpty { InitialsAvatar(name: name, size: 44) }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(name.isEmpty ? "Timesheet" : name).font(Theme.heading()).tracking(-0.56)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("timeclock-timesheet")
+                    Text("Timesheet\(TimeClockWords.dot)\(TimeClockWords.shortRange(from: first.start, to: second.end.addingTimeInterval(-1)))")
+                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 4)
+            ViewThatFits(in: .horizontal) {
+                PlaceTileRow { tileSet(total: total, over: over, toCheck: toCheck) }
+                VStack(spacing: 8) { tileSet(total: total, over: over, toCheck: toCheck) }
             }
             .padding(.top, 16)
-            TimeClockPhoneNote(text: "This timesheet is kept on this phone. It isn\u{2019}t sent to the office or payroll, and nobody approves it here. \u{201C}Over 40 h\u{201D} is hours past 40 in the week, not a pay figure.")
+            ForEach(Array(weeks.enumerated()), id: \.offset) { index, item in
+                let shown = item.days.filter { day in
+                    !day.entries.isEmpty || model.timeOff.contains { TimeClockMath.timeOffCovers($0, day: day.date, calendar: calendar) }
+                }
+                let live = item.week.contains(now)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Week \(index + 1)\(TimeClockWords.dot)\(TimeClockWords.shortRange(from: item.week.start, to: item.week.end.addingTimeInterval(-1)))")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("\(TimeClockMath.decimalHours(totals[index])) h\(live ? " so far" : "")")
+                    }
+                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 4)
+                    TimeClockCard {
+                        if shown.isEmpty {
+                            Text("No hours").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, 16).frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                        }
+                        ForEach(shown) { day in
+                            if day.id != shown.first?.id { WellDivider(leading: 0) }
+                            dayRow(day, now: now, calendar: calendar)
+                        }
+                    }
+                }
+                .padding(.top, index == 0 ? 16 : 14)
+            }
+            TimeClockPhoneNote(text: "This timesheet is kept on this phone. It isn\u{2019}t sent to the office or payroll, and nobody approves it here. Overtime is hours past 40 in a week, not a pay figure.")
                 .padding(.top, 16)
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
-    }
-
-    private func weekPicker(_ week: DateInterval) -> some View {
-        HStack(spacing: 8) {
-            PaperCircleButton(symbol: "chevron.left", label: "Week before", size: 40, fill: Theme.card) { offset -= 1 }
-                .accessibilityIdentifier("timeclock-timesheet-previous")
-            Text(TimeClockWords.weekRange(week)).font(Theme.font(15, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity)
-                .multilineTextAlignment(.center)
-            // The week ahead has no hours to show, so the circle leaves rather than sitting disabled.
-            if offset < 0 {
-                PaperCircleButton(symbol: "chevron.right", label: "Week after", size: 40, fill: Theme.card) { offset += 1 }
-                    .accessibilityIdentifier("timeclock-timesheet-next")
-            } else {
-                Color.clear.frame(width: 44, height: 44).accessibilityHidden(true)
-            }
-        }
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12).padding(.bottom, 24)
     }
 
     /// Paper 56C: So far, Overtime and To check on three tiles; To check turns warning when any.
-    private func tiles(total: TimeInterval, toCheck: Int) -> some View {
-        let over = TimeClockMath.overtimeSeconds(weekSeconds: total)
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) { tileSet(total: total, over: over, toCheck: toCheck) }
-            VStack(spacing: 8) { tileSet(total: total, over: over, toCheck: toCheck) }
-        }
-    }
-
     @ViewBuilder private func tileSet(total: TimeInterval, over: TimeInterval, toCheck: Int) -> some View {
-        tile(offset == 0 ? "So far" : "Worked", "\(TimeClockMath.decimalHours(total)) h", warn: false)
-        tile("Over 40 h", over > 0 ? "\(TimeClockMath.decimalHours(over)) h" : "0 h", warn: false)
-        tile("To check", "\(toCheck)", warn: toCheck > 0)
-    }
-
-    private func tile(_ label: String, _ value: String, warn: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(label).font(Theme.font(13)).foregroundStyle(warn ? Theme.warning : Theme.muted)
-            Text(value).font(Theme.font(22, weight: .bold))
-                .foregroundStyle(warn ? Theme.warning : Theme.foreground)
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(warn ? Theme.warningSurface : Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .accessibilityElement(children: .combine)
+        PlaceSummaryTile(label: offset == 0 ? "So far" : "Worked", value: "\(TimeClockMath.decimalHours(total)) h")
+        PlaceSummaryTile(label: "Overtime", value: over > 0 ? "\(TimeClockMath.decimalHours(over)) h" : "0 h")
+        PlaceSummaryTile(label: "To check", value: "\(toCheck)", warn: toCheck > 0)
     }
 
     /// Paper 56C: "Mon 13" in a 58pt column, the punches and break, the hours trailing. A day with
@@ -880,10 +953,11 @@ struct TimeClockTimesheetView: View {
             if day.entries.isEmpty {
                 return off.map { "\($0.kind.label) time off\(TimeClockWords.dot)not sent" } ?? "No hours"
             }
+            if day.isOpen, let first = day.firstIn { return "In since \(first.tradeTime)" }
             let pause = day.breakSeconds >= 60 ? "\(TimeClockMath.durationLabel(day.breakSeconds)) break" : ""
-            return [TimeClockWords.span(day), pause].filter { !$0.isEmpty }.joined(separator: TimeClockWords.dot)
+            return [TimeClockWords.shortSpan(day), pause].filter { !$0.isEmpty }.joined(separator: TimeClockWords.dot)
         }()
-        let content = HStack(alignment: .firstTextBaseline, spacing: 10) {
+        let content = HStack(alignment: .center, spacing: 10) {
             Text(label).font(Theme.font(15, weight: .semibold))
                 .frame(minWidth: 58, alignment: .leading)
             VStack(alignment: .leading, spacing: 0) {
@@ -891,7 +965,7 @@ struct TimeClockTimesheetView: View {
                     Text("No clock-out").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.warning)
                     Text("Fix missed clock-out").font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
                 } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(alignment: .center, spacing: 6) {
                         if day.isOpen {
                             Circle().fill(Theme.success).frame(width: 8, height: 8).accessibilityHidden(true)
                         }
@@ -903,7 +977,7 @@ struct TimeClockTimesheetView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(hours).font(Theme.font(15, weight: .semibold))
                 .foregroundStyle(missed != nil ? Theme.warning : (day.entries.isEmpty ? Theme.muted : Theme.foreground))
-                .fixedSize()
+                .fixedSize().frame(minWidth: 52, alignment: .trailing)
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: missed != nil ? 60 : 48, alignment: .leading)

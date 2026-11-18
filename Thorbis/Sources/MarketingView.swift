@@ -129,6 +129,9 @@ struct MarketingView: View {
     @StateObject private var model = MarketingModel()
     @State private var editor: MarketingCampaignEditing?
     @State private var showLeads = false
+    #if DEBUG
+    @State private var previewSettingsPage: String?
+    #endif
     @State private var showReviewSettings = false
     @State private var actionError: String?
     @State private var copied = false
@@ -182,6 +185,16 @@ struct MarketingView: View {
             actionError = nil
             copied = false
             model.bind(organizationID: organizationID)
+            #if DEBUG
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "marketing-campaign": editor = MarketingCampaignEditing(record: model.campaigns.first)
+                case "marketing-sources": showLeads = true
+                case "checklist-templates", "checklist-template", "customer-display", "workflows": previewSettingsPage = PaperPreview.screen
+                default: break
+                }
+            }
+            #endif
             await load()
         }
         .task(id: model.reviewLink ?? "") {
@@ -192,6 +205,17 @@ struct MarketingView: View {
             // Back from Review requests: the link may have changed there.
             if !showing { Task { await model.loadReview(api: api, session: session) } }
         }
+        #if DEBUG
+        // Design preview only: the three Business settings pages are pushed from plain links
+        // there, so the preview opens them from this owner place to screenshot them directly.
+        .thorbisDestination(item: $previewSettingsPage) { name in
+            switch name {
+            case "customer-display": CustomerDisplaySettingsView()
+            case "workflows": WorkflowsView()
+            default: ChecklistTemplatesView()
+            }
+        }
+        #endif
         .thorbisDestination(isPresented: $showLeads) { MarketingLeadSourcesView(model: model) }
         .thorbisDestination(isPresented: $showReviewSettings) { ReviewRequestsView() }
         .sheet(item: $editor) { editing in SheetSurface {
@@ -396,9 +420,16 @@ struct MarketingLeadSourcesView: View {
         let rows = tally.grouped
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Where leads come from", subtitle: subtitle(tally), compact: true)
+                // Paper 92D: the back circle rides the bar; under it the title in 28 Bold over the count.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Where leads come from").font(Theme.heading()).tracking(-0.56)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(subtitle(tally)).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, Theme.gutter).padding(.top, 14)
                 VStack(alignment: .leading, spacing: 14) {
-                    ThorbisSegmented(options: LeadSourcePeriod.allCases.map { (value: $0, label: $0.label) }, selection: $period)
+                    PlaceSegments(options: LeadSourcePeriod.allCases.map { (value: $0, label: $0.label) }, selection: $period, pill: true)
                         .accessibilityIdentifier("marketing-leads-period")
                     if let error = model.leadsError {
                         ErrorBanner(message: error,
@@ -492,7 +523,7 @@ struct MarketingLeadSourcesView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 }

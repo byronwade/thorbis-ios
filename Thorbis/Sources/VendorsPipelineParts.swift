@@ -113,6 +113,7 @@ struct SalesInlineField: View {
             HStack(spacing: 8) {
                 Text(label).font(Theme.font(16)).foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
                     .accessibilityHidden(true)
                 Spacer(minLength: 8)
                 TextField("", text: $text, prompt: .placeholder(prompt))

@@ -82,6 +82,7 @@ struct TimeClockEntryEditor: View {
     @State private var problem: String?
     @State private var reasonMissing = false
     @State private var confirmDelete = false
+    @State private var picking: PlaceDatePick?
     /// The break length the entry opened with, so untouched breaks keep their real times.
     private let originalBreakMinutes: Int
     private let openedAt: Date
@@ -173,23 +174,23 @@ struct TimeClockEntryEditor: View {
                     if isFix {
                         // Paper 27B suggests a time from the last job; the phone has no such record,
                         // so this says plainly where the time came from.
-                        HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Image(systemName: "info.circle").font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(Theme.muted).accessibilityHidden(true)
+                        HStack(alignment: .top, spacing: 10) {
+                            PaperIcon(.placeSpark, size: 18, color: Theme.ai).padding(.top, 1).accessibilityHidden(true)
                             Text(existing?.openBreak != nil
-                                 ? "Set to when your last break began. Change it to when you stopped."
-                                 : "Set to 8 hours after you clocked in. Change it to when you stopped.")
+                                 ? "Suggested from when your last break began. Change it to when you stopped."
+                                 : "Suggested as 8 hours after you clocked in. Change it to when you stopped.")
                                 .font(Theme.font(14)).foregroundStyle(Theme.foreground)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.horizontal, 14).padding(.vertical, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .background(Theme.aiSurface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay { RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Theme.aiBorder, lineWidth: 1) }
                         .padding(.top, 12)
                         .accessibilityElement(children: .combine)
                     }
                     reasons.padding(.top, 20)
-                    TimeClockNoteCard(label: "Note (optional)", placeholder: "What happened", text: $note)
+                    TimeClockNoteCard(label: "Note (optional)", placeholder: "Add a note", text: $note)
                         .padding(.top, 8)
                     if case .edit = mode {
                         Button { confirmDelete = true } label: {
@@ -211,7 +212,7 @@ struct TimeClockEntryEditor: View {
                     FieldProblem(message: problem).frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text("Kept on this phone. Nobody approves it and it isn\u{2019}t sent to payroll.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)
@@ -224,6 +225,7 @@ struct TimeClockEntryEditor: View {
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background.ignoresSafeArea())
+        .placeDatePicker($picking)
         .thorbisConfirm("Delete this entry?", message: "Its hours come off the week. This can\u{2019}t be undone.",
                         isPresented: $confirmDelete,
                         actions: [ThorbisConfirmAction("Delete entry", role: .destructive) { delete() }])
@@ -233,37 +235,45 @@ struct TimeClockEntryEditor: View {
     private var punches: some View {
         TimeClockCard {
             if isFix {
-                TimeClockValueRow(label: "Clock in", value: clockIn.tradeTime)
+                PlaceSheetValueRow(label: "Clock in", value: clockIn.tradeTime)
             } else {
-                DatePicker("Clock in", selection: $clockIn, in: ...openedAt, displayedComponents: [.date, .hourAndMinute])
-                    .datePickerStyle(.compact)
-                    .padding(.horizontal, 16).padding(.vertical, 8).frame(minHeight: 56)
-                    .accessibilityIdentifier("timeclock-entry-clock-in")
-            }
-            WellDivider(leading: 16)
-            DatePicker(selection: $clockOut, in: clockIn...max(openedAt, clockIn), displayedComponents: [.date, .hourAndMinute]) {
-                HStack(spacing: 10) {
-                    Text("Clock out")
-                    if isFix {
-                        Text("Missing").font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.destructive)
-                            .padding(.horizontal, 8).padding(.vertical, 2)
-                            .background(Theme.destructiveSurface, in: Capsule())
-                    }
+                timeRow("Clock in", text: clockIn.tradeTime, identifier: "timeclock-entry-clock-in") {
+                    picking = PlaceDatePick(id: "in", title: "Clock in", date: clockIn, includesTime: true, upper: openedAt) { clockIn = $0 }
                 }
             }
-            .datePickerStyle(.compact)
-            .padding(.horizontal, 16).padding(.vertical, 8).frame(minHeight: 56)
-            .accessibilityIdentifier("timeclock-entry-clock-out")
-            WellDivider(leading: 16)
+            WellDivider(leading: 0)
+            timeRow("Clock out", text: TimeClockWords.punch(clockOut, on: clockIn), missing: isFix, identifier: "timeclock-entry-clock-out") {
+                picking = PlaceDatePick(id: "out", title: "Clock out", date: clockOut, includesTime: true,
+                                        lower: clockIn, upper: max(openedAt, clockIn)) { clockOut = $0 }
+            }
+            WellDivider(leading: 0)
             ThorbisSelect(options: breakOptions, selection: $breakMinutes, label: "Break", menuTitle: "Unpaid break")
                 .padding(.horizontal, 16).frame(minHeight: 56)
-            WellDivider(leading: 16)
-            TimeClockValueRow(label: "Day total", value: TimeClockMath.durationLabel(total), strong: true)
+            WellDivider(leading: 0)
+            PlaceSheetValueRow(label: "Day total", value: TimeClockMath.durationLabel(total), strong: true)
         }
         .font(Theme.font(16)).tint(Theme.brand)
         .onChange(of: clockIn) { _, start in
             if clockOut < start { clockOut = min(start.addingTimeInterval(TimeClockMath.assumedShift), max(openedAt, start)) }
         }
+    }
+
+    /// Paper 27B's Clock out row: the label, "Missing" while fixing, then the time in its brand box.
+    private func timeRow(_ label: String, text: String, missing: Bool = false, identifier: String,
+                         action: @escaping () -> Void) -> some View {
+        HStack(spacing: 10) {
+            Text(label).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if missing {
+                Text("Missing").font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.destructive)
+                    .padding(.horizontal, 8).padding(.vertical, 2)
+                    .background(Theme.destructiveSurface, in: Capsule())
+            }
+            PlaceTimeBox(text: text, label: label, identifier: identifier, action: action)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
     }
 
     /// Paper 27B: Forgot, Phone died, Other; the chosen one on the brand surface with a brand rim.
@@ -277,10 +287,10 @@ struct TimeClockEntryEditor: View {
                     Button { reason = choice; reasonMissing = false } label: {
                         Text(choice.label).font(Theme.font(15, weight: chosen ? .semibold : .medium))
                             .foregroundStyle(chosen ? Theme.brandText : Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 44)
+                            .padding(.horizontal, 14).frame(minHeight: 40)
                             .background(chosen ? Theme.brandSurface : Theme.card, in: Capsule())
                             .overlay { if chosen { Capsule().strokeBorder(Theme.brand, lineWidth: 1.5) } }
-                            .contentShape(Capsule())
+                            .contentShape(Rectangle().inset(by: -2))
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityAddTraits(chosen ? [.isButton, .isSelected] : .isButton)
@@ -342,6 +352,7 @@ struct TimeClockTimeOffEditor: View {
     @State private var note: String
     @State private var problem: String?
     @State private var confirmDelete = false
+    @State private var picking: PlaceDatePick?
 
     init(request: TimeClockTimeOff?, model: TimeClockModel, now: Date = Date(), calendar: Calendar = .current) {
         self.request = request
@@ -369,28 +380,38 @@ struct TimeClockTimeOffEditor: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if let problem { FieldProblem(message: problem).padding(.horizontal, 4) }
                     TimeClockCard {
-                        DatePicker("From", selection: $from, displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
-                            .datePickerStyle(.compact)
-                            .padding(.horizontal, 16).padding(.vertical, 8).frame(minHeight: 56)
-                            .accessibilityIdentifier("timeclock-timeoff-from")
-                        WellDivider(leading: 16)
-                        DatePicker("To", selection: $to, in: from..., displayedComponents: allDay ? [.date] : [.date, .hourAndMinute])
-                            .datePickerStyle(.compact)
-                            .padding(.horizontal, 16).padding(.vertical, 8).frame(minHeight: 56)
-                            .accessibilityIdentifier("timeclock-timeoff-to")
-                        WellDivider(leading: 16)
+                        HStack(alignment: .top, spacing: 0) {
+                            dayCell("From", date: from, identifier: "timeclock-timeoff-from") {
+                                picking = PlaceDatePick(id: "from", title: "From", date: from, includesTime: !allDay) { from = $0 }
+                            }
+                            Rectangle().fill(Theme.border).frame(width: 1).accessibilityHidden(true)
+                            dayCell("To", date: to, identifier: "timeclock-timeoff-to") {
+                                picking = PlaceDatePick(id: "to", title: "To", date: to, includesTime: !allDay, lower: from) { to = $0 }
+                            }
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        WellDivider(leading: 0)
                         ThorbisSheetToggleRow(label: "All day", isOn: $allDay).frame(minHeight: 56)
                     }
-                    .font(Theme.font(16)).tint(Theme.brand)
-                    ThorbisSegmented(options: TimeClockTimeOff.Kind.allCases.map { (value: $0, label: $0.label) }, selection: $kind)
+                    PlaceSegments(options: TimeClockTimeOff.Kind.allCases.map { (value: $0, label: $0.label) }, selection: $kind)
                     TimeClockNoteCard(label: "Note (optional)", placeholder: "Anything the office should know", text: $note)
-                    // Where Paper shows the balance: what this request covers, and that it has not gone anywhere.
-                    TimeClockCard {
-                        TimeClockValueRow(label: "Length", value: TimeClockWords.timeOffLength(draft))
-                        WellDivider(leading: 16)
-                        TimeClockValueRow(label: "Status", value: TimeClockTimeOff.statusLabel)
+                    // Where Paper shows the paid-time-off balance: what this request covers, and
+                    // that it has not gone anywhere. The phone has no balance to draw.
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("This request").font(Theme.font(16)).frame(maxWidth: .infinity, alignment: .leading)
+                            Text(TimeClockWords.timeOffLength(draft)).font(Theme.font(16, weight: .semibold))
+                        }
+                        Text(TimeClockTimeOff.statusLabel)
+                            .font(Theme.font(14)).foregroundStyle(Theme.muted)
                     }
-                    TimeClockPhoneNote(text: "This request stays on this phone. It can\u{2019}t be sent or approved here yet, so tell the office yourself. Your time-off balance and the jobs that need covering aren\u{2019}t shown because the phone doesn\u{2019}t have them.")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 16).padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    .accessibilityElement(children: .combine)
+                    .padding(.top, 4)
+                    TimeClockPhoneNote(text: "It can\u{2019}t be sent or approved here yet, so tell the office yourself. Your time-off balance and the jobs that need covering aren\u{2019}t shown because the phone doesn\u{2019}t have them.")
                     if request != nil {
                         Button { confirmDelete = true } label: {
                             Text("Delete request").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.destructive)
@@ -409,9 +430,37 @@ struct TimeClockTimeOffEditor: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background.ignoresSafeArea())
         .onChange(of: from) { _, start in if to < start { to = start } }
+        #if DEBUG
+        .task {
+            // Design preview: Paper P1's picker, opened over the request it answers.
+            guard PaperPreview.enabled, PaperPreview.screen == "time-clock-date" else { return }
+            try? await Task.sleep(for: .milliseconds(700))
+            picking = PlaceDatePick(id: "from", title: "From", date: from, includesTime: true) { from = $0 }
+        }
+        #endif
+        .placeDatePicker($picking)
         .thorbisConfirm("Delete this request?", message: "It was never sent, so nobody else is told.",
                         isPresented: $confirmDelete,
                         actions: [ThorbisConfirmAction("Delete request", role: .destructive) { delete() }])
+    }
+
+    /// Paper 27A: "From" over "Mon, Aug 10" (13 muted over 17 Medium), half the card wide.
+    private func dayCell(_ label: String, date: Date, identifier: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                Text(allDay ? TimeClockWords.longDay(date) : "\(TimeClockWords.longDay(date)), \(date.tradeTime)")
+                    .font(Theme.font(17, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .multilineTextAlignment(.leading)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityHint("Changes the day")
+        .accessibilityIdentifier(identifier)
     }
 
     private func save() {

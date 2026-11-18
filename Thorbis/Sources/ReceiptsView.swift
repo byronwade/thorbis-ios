@@ -340,7 +340,13 @@ struct ReceiptsView: View {
             picked = []
             model.bind(organizationID: session.activeOrganization?.id, userID: session.user?.id)
             #if DEBUG
-            if PaperPreview.enabled { picked = Set(model.receipts.prefix(2).map(\.id)) }
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "receipt-detail": opened = model.receipts.first.map { ReceiptOpen(id: $0.id) }
+                case "receipt-editor": editor = ReceiptEditorRequest()
+                default: picked = Set(model.receipts.prefix(2).map(\.id))
+                }
+            }
             #endif
         }
         .thorbisDestination(item: $opened) { ReceiptDetailView(id: $0.id, model: model) }
@@ -377,7 +383,7 @@ struct ReceiptsView: View {
 private struct ReceiptThumb: View {
     let image: UIImage?
     var width: CGFloat = 84
-    var height: CGFloat = 104
+    var height: CGFloat = 112
 
     var body: some View {
         ZStack {
@@ -390,6 +396,7 @@ private struct ReceiptThumb: View {
         }
         .frame(width: width, height: height)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.border, lineWidth: 1) }
         .accessibilityHidden(true)
     }
 }
@@ -407,8 +414,36 @@ private struct ReceiptDetailView: View {
     @State private var photo: UIImage?
     @State private var showPhoto = false
 
+    /// "Today 9:20 AM", "Yesterday 4:05 PM", "Mon, Nov 9 10:00 AM"
+    private func when(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let day = calendar.isDateInToday(date) ? "Today" : calendar.isDateInYesterday(date) ? "Yesterday"
+            : date.formatted(calendar.isDate(date, equalTo: Date(), toGranularity: .year)
+                             ? .dateTime.weekday(.abbreviated).month(.abbreviated).day()
+                             : .dateTime.month(.abbreviated).day().year())
+        return "\(day) \(date.tradeTime)"
+    }
+
+    /// Paper 46A's field row: it opens the editor, so it ends in the 14pt chevron.
+    private func fieldRow<Content: View>(height: CGFloat, identifier: String, _ receipt: ReceiptRecord,
+                                         @ViewBuilder content: () -> Content) -> some View {
+        Button { editor = ReceiptEditorRequest(record: receipt) } label: {
+            HStack(alignment: .center, spacing: 12) {
+                content()
+                PaperIcon(.chevronRightSmall, size: 14, color: Theme.subtleForeground).accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: height, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens the receipt to edit")
+        .accessibilityIdentifier(identifier)
+    }
+
     private func page(_ receipt: ReceiptRecord) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 14) {
                 if let photo {
                     Button { showPhoto = true } label: { ReceiptThumb(image: photo) }
@@ -419,15 +454,20 @@ private struct ReceiptDetailView: View {
                 } else {
                     ReceiptThumb(image: nil)
                 }
+                // Paper 46A: the total in 28 Bold, the merchant in 16 Semibold, then when.
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(ReceiptFormat.amount(receipt.totalCents)).font(Theme.font(30, weight: .bold)).monospacedDigit()
+                    Text(ReceiptFormat.amount(receipt.totalCents)).font(Theme.heading()).tracking(-0.56)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
-                    Text(receipt.merchant).font(Theme.font(17, weight: .semibold))
+                    Text(receipt.merchant).font(Theme.font(16, weight: .semibold))
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(receipt.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().year()))
+                    Text(when(receipt.date))
                         .font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
+                    if receipt.imageFile != nil, photo == nil {
+                        Text("Photo not found on this phone").font(Theme.font(14)).foregroundStyle(Theme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -437,38 +477,41 @@ private struct ReceiptDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
             }
-            PaperSection(title: "Details") {
-                VStack(alignment: .leading, spacing: 0) {
-                    PaperDetailRow("Category", value: receipt.category.label)
-                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
-                    WellDivider()
-                    PaperDetailRow("Job", value: receipt.jobReference ?? "None")
-                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
-                    WellDivider()
-                    PaperDetailRow("Photo", value: receipt.imageFile == nil ? "None" : (photo == nil ? "Not found on this phone" : "Attached"))
-                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
-                }
-            } accessory: {
-                Button { editor = ReceiptEditorRequest(record: receipt) } label: {
-                    Text("Edit").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Edit receipt")
-                .accessibilityIdentifier("receipts-edit")
-            }
-            if let note = receipt.note, !note.isEmpty {
-                PaperSection("Note") {
-                    Text(note).font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
+            TimeClockCard {
+                fieldRow(height: 56, identifier: "receipts-edit", receipt) {
+                    Text("Category").font(Theme.font(16)).foregroundStyle(Theme.foreground)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
+                    Text(receipt.category.label).font(Theme.font(16)).foregroundStyle(Theme.muted)
                 }
+                WellDivider(leading: 0)
+                fieldRow(height: 64, identifier: "receipts-edit-job", receipt) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Job").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        Text(receipt.jobReference ?? "None").font(Theme.font(16, weight: .medium))
+                            .foregroundStyle(receipt.jobReference == nil ? Theme.muted : Theme.foreground)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.top, 2)
+            if let note = receipt.note, !note.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Note").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    Text(note).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                .accessibilityElement(children: .combine)
             }
             Text("Saved on this phone only. The office doesn\u{2019}t see it.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                .padding(.top, 4)
         }
     }
 
@@ -484,7 +527,7 @@ private struct ReceiptDetailView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.top, 14).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
@@ -596,6 +639,7 @@ private struct ReceiptEditor: View {
     @State private var missing: Set<Field> = []
     @State private var error: String?
     @State private var openedCamera = false
+    @State private var picking: PlaceDatePick?
     @FocusState private var focus: Field?
 
     init(existing: ReceiptRecord?, existingPhoto: URL?, startsWithCamera: Bool,
@@ -631,7 +675,7 @@ private struct ReceiptEditor: View {
             }
             .padding(.horizontal, 16).padding(.top, 14)
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 22) {
                     Text(existing == nil ? "Add receipt" : "Edit receipt")
                         .font(Theme.font(34, weight: .bold)).tracking(-0.85)
                         .fixedSize(horizontal: false, vertical: true)
@@ -648,8 +692,22 @@ private struct ReceiptEditor: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Category").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                             .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
-                        ThorbisChipGroup(data: ReceiptCategory.allCases, id: \.self,
-                                         isOn: { $0 == category }, label: { $0.label }, toggle: { category = $0 })
+                        // Paper 44: 40-tall pills in 14; the chosen one on the brand tint in brand ink.
+                        FlowRow(spacing: 8, lineSpacing: 8) {
+                            ForEach(ReceiptCategory.allCases, id: \.self) { choice in
+                                let on = choice == category
+                                Button { category = choice } label: {
+                                    Text(choice.label).font(Theme.font(14, weight: on ? .semibold : .medium))
+                                        .foregroundStyle(on ? Theme.brandText : Theme.foreground)
+                                        .padding(.horizontal, 14).frame(minHeight: 40)
+                                        .background(on ? Theme.brandTint : Theme.card, in: Capsule())
+                                        .contentShape(Rectangle().inset(by: -2))
+                                }
+                                .buttonStyle(PressStyle())
+                                .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+                                .accessibilityIdentifier("receipts-category-\(choice.rawValue)")
+                            }
+                        }
                     }
                     textCard(label: "Job", prompt: "Job number or name (optional)", text: typed(.job, $job), field: .job,
                              help: "Written as text. It isn\u{2019}t linked to the job\u{2019}s record.")
@@ -671,6 +729,7 @@ private struct ReceiptEditor: View {
             // Never pre-disabled: pressed with the merchant or total missing, it says which under it.
             PaperActionBar(title: "Save receipt", identifier: "receipts-save") { save() }
         }
+        .placeDatePicker($picking)
         .photosPicker(isPresented: $showPicker, selection: $picked, matching: .images)
         .fullScreenCover(isPresented: $showCamera) {
             CameraCapture { image in
@@ -706,13 +765,13 @@ private struct ReceiptEditor: View {
         case .none:
             EmptyView()
         case .working:
-            noteCard(title: "Reading the photo", body: "Looking for the merchant, total and date.", busy: true)
+            noteCard(title: "Reading the photo", body: "Looking for the vendor, total and date.", busy: true)
         case .filled(let names):
             noteCard(title: "Read from the photo",
                      body: "\(Self.sentence(names)) filled in. Check \(names.count == 1 ? "it" : "them") before saving.", busy: false)
         case .nothing:
             noteCard(title: "Nothing could be read",
-                     body: "The photo is attached. Enter the merchant, total and date by hand.", busy: false)
+                     body: "The photo is attached. Enter the vendor, total and date by hand.", busy: false)
         }
     }
 
@@ -728,14 +787,14 @@ private struct ReceiptEditor: View {
         HStack(alignment: .top, spacing: 12) {
             Group {
                 if busy { ProgressView().tint(Theme.brandText) } else {
-                    Image(systemName: "text.viewfinder").font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.brandText)
+                    PaperIcon(.placeBolt, size: 16, color: Theme.brandText)
                 }
             }
-            .frame(width: 20, height: 20).accessibilityHidden(true)
+            .frame(width: 16, height: 16).padding(.top, 2).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(body).font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                Text(body).font(Theme.font(14)).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -769,7 +828,7 @@ private struct ReceiptEditor: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(shownPhoto == nil ? "Photo" : "Photo attached").font(Theme.font(16, weight: .medium))
                     if shownPhoto == nil {
-                        Text("Take a photo and the merchant, total and date are read from it on this phone.")
+                        Text("Take a photo and the vendor, total and date are read from it on this phone.")
                             .font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -806,44 +865,67 @@ private struct ReceiptEditor: View {
             Text("Receipt details").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                 .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
             VStack(alignment: .leading, spacing: 0) {
-                inlineRow("Merchant", problem: missing.contains(.merchant) ? "Add the merchant to save." : nil) {
+                inlineRow("Vendor", problem: missing.contains(.merchant) ? "Add the vendor to save." : nil) {
                     TextField("", text: typed(.merchant, $merchant), prompt: .placeholder("Where it was bought"))
-                        .font(Theme.font(16)).multilineTextAlignment(.trailing)
+                        .font(Theme.font(15, weight: .medium)).multilineTextAlignment(.trailing)
                         .textInputAutocapitalization(.words)
                         .focused($focus, equals: .merchant)
-                        .accessibilityLabel("Merchant")
+                        .accessibilityLabel("Vendor")
                         .accessibilityIdentifier("receipts-merchant")
                 }
                 WellDivider(leading: 16)
                 inlineRow("Total", problem: missing.contains(.total) ? "Enter the total, like 46.80." : nil) {
                     TextField("", text: typed(.total, $totalText), prompt: .placeholder("0.00"))
-                        .font(Theme.font(16)).monospacedDigit().multilineTextAlignment(.trailing)
+                        .font(Theme.font(15, weight: .medium)).monospacedDigit().multilineTextAlignment(.trailing)
                         .keyboardType(.decimalPad)
                         .focused($focus, equals: .total)
                         .accessibilityLabel("Total in dollars")
                         .accessibilityIdentifier("receipts-total")
                 }
                 WellDivider(leading: 16)
-                inlineRow("Date", problem: nil) {
-                    DatePicker("Date", selection: Binding(get: { date }, set: { date = $0; dateTouched = true }),
-                               in: ...Date(), displayedComponents: .date)
-                        .labelsHidden()
-                        .tint(Theme.brand)
-                        .accessibilityIdentifier("receipts-date")
+                Button {
+                    focus = nil
+                    picking = PlaceDatePick(id: "date", title: "Date", date: date, includesTime: true, upper: Date()) {
+                        date = $0
+                        dateTouched = true
+                    }
+                } label: {
+                    inlineRow("Date", problem: nil) {
+                        Text(Self.dayAndTime(date)).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(RowPressStyle())
+                .accessibilityLabel("Date, \(Self.dayAndTime(date))")
+                .accessibilityIdentifier("receipts-date")
             }
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
     }
 
+    /// "Today, 9:20 AM", "Mon, Nov 9, 10:00 AM"
+    private static func dayAndTime(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let day = calendar.isDateInToday(date) ? "Today" : calendar.isDateInYesterday(date) ? "Yesterday"
+            : date.formatted(calendar.isDate(date, equalTo: Date(), toGranularity: .year)
+                             ? .dateTime.weekday(.abbreviated).month(.abbreviated).day()
+                             : .dateTime.month(.abbreviated).day().year())
+        return "\(day), \(date.tradeTime)"
+    }
+
+    /// Paper 44's row: the 15 label, then the 15 Medium answer and the 12pt up-and-down mark.
     private func inlineRow<Answer: View>(_ label: String, problem: String?, @ViewBuilder answer: () -> Answer) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text(label).font(Theme.font(16)).foregroundStyle(Theme.foreground)
+            HStack(spacing: 6) {
+                Text(label).font(Theme.font(15)).foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
                     .accessibilityHidden(true)
-                Spacer(minLength: 8)
+                Spacer(minLength: 6)
                 answer()
+                PaperIcon(.placeUpDown, size: 12, color: Theme.muted).frame(width: 14).accessibilityHidden(true)
             }
             if let problem { FieldProblem(message: problem) }
         }
@@ -887,7 +969,7 @@ private struct ReceiptEditor: View {
             merchant = name
             fromPhoto.insert(.merchant)
             missing.remove(.merchant)
-            names.append("merchant")
+            names.append("vendor")
         }
         if let cents = read.totalCents, cents > 0, totalText.trimmingCharacters(in: .whitespaces).isEmpty || fromPhoto.contains(.total) {
             totalText = ReceiptMath.plainAmount(cents)

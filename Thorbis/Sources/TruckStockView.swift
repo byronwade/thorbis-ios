@@ -331,6 +331,16 @@ struct TruckStockView: View {
             showRestock = false
             actionError = nil
             model.bind(organizationID: session.activeOrganization?.id, userID: session.user?.id)
+            #if DEBUG
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "truck-stock-item": opened = model.items.first { $0.name.hasPrefix("Run cap") }.map { TruckStockOpen(id: $0.id) }
+                case "truck-stock-add": editor = TruckStockEditorRequest()
+                case "truck-stock-restock": showRestock = true
+                default: break
+                }
+            }
+            #endif
         }
         .thorbisDestination(item: $opened) { TruckStockItemView(id: $0.id, model: model) }
         .sheet(item: $editor) { request in SheetSurface {
@@ -354,90 +364,103 @@ private struct TruckStockItemView: View {
     @State private var editor: TruckStockEditorRequest?
     @State private var confirmRemove = false
     @State private var actionError: String?
+    @State private var restock = false
+    @State private var counting = false
 
     private func figure(_ value: String, _ label: String, tint: Color = Theme.foreground) -> some View {
         VStack(spacing: 2) {
-            Text(value).font(Theme.font(30, weight: .bold)).monospacedDigit().foregroundStyle(tint)
+            Text(value).font(Theme.font(34, weight: .bold)).tracking(-0.68).foregroundStyle(tint)
             Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(label), \(value)")
+    }
+
+    private var rule: some View {
+        Rectangle().fill(Theme.border).frame(width: typeSize.isAccessibilitySize ? nil : 1, height: typeSize.isAccessibilitySize ? 1 : nil)
+            .accessibilityHidden(true)
+    }
+
+    private func fact(_ label: String, _ value: String) -> some View {
+        PlaceSheetValueRow(label: label, value: value, minHeight: 52)
     }
 
     private func page(_ item: TruckStockItem) -> some View {
         let low = TruckStockRules.isLow(item)
         let part = (item.partNumber ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
-        return VStack(alignment: .leading, spacing: 20) {
+        let needed = TruckStockRules.needed(item)
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 0))
+        let pills = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+        return VStack(alignment: .leading, spacing: 12) {
+            // Paper 84B: the name in 28 Bold, then Low beside where the stock is.
             VStack(alignment: .leading, spacing: 6) {
-                Text(item.name).font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                Text(item.name).font(Theme.heading()).tracking(-0.56)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 HStack(spacing: 8) {
                     if low {
-                        Text("Low").font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.warning)
+                        Text("Low").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.warning)
                             .padding(.horizontal, 10).frame(minHeight: 24)
                             .background(Theme.warningSurface, in: Capsule())
                     }
-                    Text("My truck \u{00B7} On this phone").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text("My truck \u{00B7} on this phone").font(Theme.font(15)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .accessibilityElement(children: .combine)
             }
             .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+            .padding(.bottom, 4)
             if let actionError {
                 Text(actionError).font(Theme.font(15)).foregroundStyle(Theme.destructive)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
             }
-            PaperCard {
-                layout {
-                    figure("\(item.quantity)", "On the truck", tint: low ? Theme.warning : Theme.foreground)
-                    figure(item.minimum > 0 ? "\(item.minimum)" : "\u{2013}", "Keep at least")
-                    figure(low ? "\(TruckStockRules.needed(item))" : "0", "To restock")
-                }
+            // Paper's third figure is "Used in July"; uses aren't recorded here, so it is what to get.
+            layout {
+                figure("\(item.quantity)", "On the truck", tint: low ? Theme.warning : Theme.foreground)
+                rule
+                figure(item.minimum > 0 ? "\(item.minimum)" : "\u{2013}", "Par")
+                rule
+                figure("\(needed)", "To restock")
             }
-            PaperCard {
-                HStack(spacing: 8) {
-                    Text("Count").font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    TruckStockStepper(name: item.name, quantity: item.quantity, low: low) { delta in
-                        do {
-                            try model.adjust(item.id, by: delta)
-                            actionError = nil
-                        } catch {
-                            actionError = error.localizedDescription
-                        }
+            .padding(.vertical, 16).padding(.horizontal, 4)
+            .frame(maxWidth: .infinity)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            pills {
+                if low {
+                    Button { restock = true } label: {
+                        Text("Request \(needed) more").font(Theme.font(16, weight: .semibold)).foregroundStyle(Color.white)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16).padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(Theme.brand, in: Capsule()).contentShape(Capsule())
                     }
+                    .buttonStyle(PressStyle())
+                    .accessibilityHint("Opens the restock list to share")
+                    .accessibilityIdentifier("truckstock-request")
                 }
-                .padding(.leading, PaperCardMetrics.inset).padding(.trailing, 8).frame(minHeight: 60)
-            }
-            PaperSection(title: "Details") {
-                VStack(alignment: .leading, spacing: 0) {
-                    PaperDetailRow("Part number", value: part.isEmpty ? "None" : part)
-                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
-                    WellDivider()
-                    PaperDetailRow("Unit", value: item.unit.isEmpty ? TruckStockRules.defaultUnit : item.unit)
-                        .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
-                }
-            } accessory: {
-                Button { editor = TruckStockEditorRequest(item: item) } label: {
-                    Text("Edit").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
-                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
+                Button { counting = true } label: {
+                    Text("Fix count").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .frame(minWidth: 130, maxWidth: low && !typeSize.isAccessibilitySize ? 130 : .infinity, minHeight: 50)
+                        .background(Theme.card, in: Capsule()).contentShape(Capsule())
                 }
                 .buttonStyle(PressStyle())
-                .accessibilityLabel("Edit stock item")
-                .accessibilityIdentifier("truckstock-edit")
+                .accessibilityIdentifier("truckstock-fix-count")
             }
-            Text("Saved on this phone only. The count changes when you change it here.")
+            TimeClockCard {
+                fact("Part number", part.isEmpty ? "None" : part)
+                WellDivider(leading: 0)
+                fact("Unit", item.unit.isEmpty ? TruckStockRules.defaultUnit : item.unit)
+            }
+            Text("Saved on this phone only. The count changes when you change it here; parts used on jobs don\u{2019}t count down on their own.")
                 .font(Theme.font(13)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                .padding(.top, 4)
         }
     }
 
@@ -453,12 +476,21 @@ private struct TruckStockItemView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .paperCardMargin().padding(.top, 14).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .sensoryFeedback(.selection, trigger: item?.quantity ?? 0)
+        .sheet(isPresented: $restock) { SheetSurface { TruckRestockSheet(items: item.map { [$0] } ?? []) } }
+        .sheet(isPresented: $counting) { SheetSurface {
+            if let item {
+                TruckStockCountSheet(item: item) { count in
+                    try model.adjust(item.id, by: count - (model.item(id)?.quantity ?? item.quantity))
+                    actionError = nil
+                }
+            }
+        } }
         .toolbar {
             if item != nil {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
@@ -542,7 +574,7 @@ private struct TruckStockEditor: View {
                     VStack(alignment: .leading, spacing: 0) {
                         countRow("On the truck now", value: $quantity, field: .quantity, identifier: "truckstock-quantity")
                         WellDivider(leading: 16)
-                        countRow("Keep at least", value: $minimum, field: .minimum, identifier: "truckstock-minimum")
+                        countRow("Keep at least (par)", value: $minimum, field: .minimum, identifier: "truckstock-minimum")
                         WellDivider(leading: 16)
                         HStack(spacing: 8) {
                             Text("Unit").font(Theme.font(16)).foregroundStyle(Theme.foreground).accessibilityHidden(true)
@@ -696,31 +728,21 @@ private struct TruckRestockSheet: View {
     var body: some View {
         let lines = TruckStockRules.restockList(items)
         VStack(spacing: 0) {
-            ZStack {
-                Text("Restock list").font(Theme.font(17, weight: .semibold)).accessibilityAddTraits(.isHeader)
-                    .padding(.horizontal, 100)
-                HStack {
-                    Button { dismiss() } label: {
-                        Text("Close").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 16).frame(minHeight: 44)
-                            .background(Theme.card, in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(PressStyle())
-                    Spacer(minLength: 8)
-                }
-            }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 2)
+            SalesSheetHeader(title: "Restock list", saveTitle: nil, onCancel: { dismiss() })
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if lines.isEmpty {
                         PaperEmptyState(symbol: "checkmark.circle", title: "Nothing is low",
                                         message: "Items at or under their minimum collect here.")
                     } else {
-                        PaperSection(lines.count == 1 ? "1 item at or under its minimum" : "\(lines.count) items at or under their minimum") {
-                            VStack(alignment: .leading, spacing: 0) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("My truck \u{00B7} \(lines.count == 1 ? "1 item" : "\(lines.count) items") below par")
+                                .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+                            TimeClockCard {
                                 ForEach(lines) { line in
-                                    if line.id != lines.first?.id { WellDivider() }
+                                    if line.id != lines.first?.id { WellDivider(leading: 0) }
                                     row(line)
                                 }
                             }
@@ -731,7 +753,7 @@ private struct TruckRestockSheet: View {
                             .padding(.horizontal, 4)
                     }
                 }
-                .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 24)
+                .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -747,25 +769,75 @@ private struct TruckRestockSheet: View {
         .sheet(item: $shared) { TextShareSheet(text: $0.text) }
     }
 
-    /// Paper 84A: the item over "Have 1 · keep 4" (amber "Out" when there are none), then how many to get.
+    /// Paper 84A: the item over "Have 1 \u{00B7} par 4" (amber "Out" when there are none), then how
+    /// many to get on the quiet capsule. Paper steps that figure; here it is the gap to par.
     private func row(_ line: TruckRestockLine) -> some View {
         let part = (line.item.partNumber ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let have = line.item.quantity == 0 ? "Out" : "Have \(line.item.quantity)"
         return HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 0) {
                 Text(line.item.name).font(Theme.font(16, weight: .medium))
                     .fixedSize(horizontal: false, vertical: true)
-                Text([have, "keep \(line.item.minimum)", part].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+                Text([have, "par \(line.item.minimum)", part].filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
                     .font(Theme.font(14)).foregroundStyle(line.item.quantity == 0 ? Theme.warning : Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
             Text("Get \(TruckStockRules.amount(line.needed, unit: line.item.unit))")
-                .font(Theme.font(15, weight: .semibold)).monospacedDigit()
+                .font(Theme.font(17, weight: .semibold))
                 .multilineTextAlignment(.trailing)
+                .padding(.horizontal, 16).frame(minHeight: 44)
+                .background(Theme.fill, in: Capsule())
         }
-        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 66, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Paper 84B's "Fix count": the count as it really is on the truck, set with the same − and + as
+/// Paper 84C, then saved.
+private struct TruckStockCountSheet: View {
+    let item: TruckStockItem
+    let onSave: (Int) throws -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var count: Int
+    @State private var error: String?
+
+    init(item: TruckStockItem, onSave: @escaping (Int) throws -> Void) {
+        self.item = item
+        self.onSave = onSave
+        _count = State(initialValue: item.quantity)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SalesSheetHeader(title: "Fix count", saveIdentifier: "truckstock-count-save", onCancel: { dismiss() }) {
+                do { try onSave(count); dismiss() } catch { self.error = error.localizedDescription }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                if let error { SalesProblemLine(message: error) }
+                TimeClockCard {
+                    HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("On the truck now").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                            Text(item.name).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        SalesQuantityStepper(value: count, range: 0...TruckStockRules.maximumCount, name: item.name) { count = $0 }
+                    }
+                    .padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 10)
+                    .frame(minHeight: 66)
+                }
+                Text("Saved on this phone only.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4)
+            }
+            .padding(.horizontal, 16).padding(.top, 16)
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(Theme.foreground)
+        .background(Theme.background.ignoresSafeArea())
+        .presentationDetents([.height(260), .large])
     }
 }

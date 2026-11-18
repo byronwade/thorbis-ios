@@ -250,10 +250,12 @@ struct ChecklistTemplatesView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 // Paper 99: the 34 Bold title, one muted line, then the cards.
-                PaperHeader(title: "Checklists", subtitle: "What your team checks on each job")
+                PaperHeader(title: "Checklists", subtitle: "What your team checks on each kind of job")
                     .environment(\.paperMenuButton, false)
                     .environment(\.paperDrawer, nil)
                 VStack(alignment: .leading, spacing: 20) {
+                    // Paper 99 opens with the card of checklists, then the rules under it.
+                    if canView { templates }
                     if !canView {
                         InlineProblem(message: "Ask your office for access to jobs to see the company’s checks.")
                             .padding(.horizontal, 4)
@@ -269,7 +271,6 @@ struct ChecklistTemplatesView: View {
                     } else {
                         SkeletonSection(rows: 4)
                     }
-                    if canView { templates }
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 44)
             }
@@ -460,7 +461,8 @@ struct ChecklistTemplatesView: View {
 
     private var templates: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PaperSection("Checklists to run on a job", count: ChecklistTemplates.all.count) {
+            PaperCard {
+                VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(ChecklistTemplates.all.enumerated()), id: \.element.id) { index, template in
                     if index > 0 { WellDivider(leading: PaperCardMetrics.inset) }
                     Button { openedTemplate = template } label: {
@@ -472,6 +474,7 @@ struct ChecklistTemplatesView: View {
                     }
                     .buttonStyle(RowPressStyle())
                 }
+            }
             }
             note("These come with the app. A tech runs one from a job’s tools and the result is saved as a job note. They can’t be changed yet.")
         }
@@ -649,11 +652,12 @@ struct ChecklistTemplateStepsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.label).font(Theme.font(16, weight: .medium))
                                 .fixedSize(horizontal: false, vertical: true)
-                            if let reading = item.reading {
-                                Text("Writes down: \(reading.prompt)\(reading.unit.isEmpty ? "" : " (\(reading.unit))")")
-                                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                            // Paper 99A's type line: "Check", or "Reading \u{00B7} psi".
+                            Text(item.reading.map { reading in
+                                (["Reading", reading.prompt] + (reading.unit.isEmpty ? [] : [reading.unit])).joined(separator: " \u{00B7} ")
+                            } ?? "Check")
+                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
                         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)

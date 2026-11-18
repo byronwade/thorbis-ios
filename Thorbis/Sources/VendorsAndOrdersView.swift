@@ -185,6 +185,18 @@ struct VendorsAndOrdersView: View {
                 tab = .orders
                 route = .order(draft.id)
             }
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "vendor-detail": route = (book.vendors.first { $0.name.hasPrefix("Ferguson") } ?? book.vendors.first).map { .vendor($0.id) }
+                case "vendor-editor": vendorDraft = VendorDraft()
+                case "purchase-order-receive":
+                    if let sent = book.orders.first(where: { $0.status == .ordered }) {
+                        tab = .orders
+                        route = .order(sent.id)
+                    }
+                default: break
+                }
+            }
             #endif
         }
         .thorbisDestination(item: $route) { route in
@@ -492,13 +504,22 @@ struct VendorDetailView: View {
         .foregroundStyle(Theme.foreground)
         .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            // Paper 42A: the one commit rides the foot of the screen.
+            if let vendor {
+                Button { orderStart = PurchaseOrderStart(vendorID: vendor.id) } label: { SalesBrandCommit(title: "New PO") }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("New purchase order")
+                    .accessibilityIdentifier("vendors-detail-new-order")
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 28).padding(.bottom, 8)
+                    .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0), .init(color: Theme.background, location: 0.34)],
+                                               startPoint: .top, endPoint: .bottom).ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
+            }
+        }
         .toolbar {
             if let vendor {
                 ThorbisToolbarItem(placement: .topBarTrailing) {
-                    ThorbisMenu(items: [
-                        ThorbisMenuItem("Edit vendor", icon: "pencil") { editing = VendorDraft(vendor) },
-                        ThorbisMenuItem("Remove vendor", icon: "trash", role: .destructive) { removing = true },
-                    ], accessibilityLabel: "Vendor actions") {
+                    ThorbisMenu(items: menuItems(vendor), accessibilityLabel: "Vendor actions") {
                         PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
                     }
                 }
@@ -532,6 +553,17 @@ struct VendorDetailView: View {
                         }])
     }
 
+    /// Paper 42A shows the phone on the card; the email for POs is reached from here.
+    private func menuItems(_ vendor: VendorRecord) -> [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if let mail = vendor.mailURL {
+            items.append(ThorbisMenuItem("Email \(vendor.email ?? "vendor")", icon: "envelope") { openURL(mail) })
+        }
+        items.append(ThorbisMenuItem("Edit vendor", icon: "pencil") { editing = VendorDraft(vendor) })
+        items.append(ThorbisMenuItem("Remove vendor", icon: "trash", role: .destructive) { removing = true })
+        return items
+    }
+
     @ViewBuilder private func page(_ vendor: VendorRecord) -> some View {
         let orders = book.orders(for: vendor.id)
         let open = orders.filter(\.isOpen).count
@@ -539,7 +571,7 @@ struct VendorDetailView: View {
         HStack(alignment: .center, spacing: 14) {
             VendorMark(name: vendor.name, size: 52)
             VStack(alignment: .leading, spacing: 2) {
-                Text(vendor.name).font(Theme.font(28, weight: .bold)).tracking(-0.6)
+                Text(vendor.name).font(Theme.heading()).tracking(-0.56)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isHeader)
                 if let terms = vendor.terms, !terms.isEmpty {
@@ -562,14 +594,7 @@ struct VendorDetailView: View {
                          value: (vendor.phone ?? "").isEmpty ? "No phone yet" : (vendor.phone ?? ""),
                          symbol: "phone", spoken: "Call \(vendor.name)", identifier: "vendors-call", url: vendor.callURL)
                 WellDivider()
-                reachRow(title: "Email for POs",
-                         value: (vendor.email ?? "").isEmpty ? "No email yet" : (vendor.email ?? ""),
-                         symbol: "envelope", spoken: "Email \(vendor.name)", identifier: "vendors-email", url: vendor.mailURL)
-                WellDivider()
-                PaperDetailRow(label: "Account number") {
-                    Text(vendor.maskedAccount ?? "Not set")
-                }
-                .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
+                PlaceSheetValueRow(label: "Account number", value: vendor.maskedAccount ?? "Not set", minHeight: 52)
             }
         }
         PaperSection(title: open > 0 ? "Purchase orders \u{00B7} \(open) open" : "Purchase orders") {
@@ -597,24 +622,12 @@ struct VendorDetailView: View {
                     .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 12)
             }
         }
-        Button { orderStart = PurchaseOrderStart(vendorID: vendor.id) } label: { SalesBrandCommit(title: "New PO") }
-            .buttonStyle(PressStyle())
-            .accessibilityLabel("New purchase order")
-            .accessibilityIdentifier("vendors-detail-new-order")
         SalesPhoneNote(text: "Saved on this phone only. Your team doesn\u{2019}t see this vendor.")
     }
 
-    /// Paper 42A: a small label over the figure in 20 Semibold.
+    /// Paper 42A: a 13 label over the figure in 22 Bold.
     private func tile(_ label: String, _ value: String, ink: Color) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            Text(value).font(Theme.font(20, weight: .semibold)).foregroundStyle(ink)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .accessibilityElement(children: .combine)
+        PlaceSummaryTile(label: label, value: value, valueInk: ink)
     }
 
     /// Paper 42A: who to reach over the number, then the action on a brand-surface circle.

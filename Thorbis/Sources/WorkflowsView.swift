@@ -89,28 +89,23 @@ struct WorkflowsView: View {
         let items = WorkflowAutomations.items(inputs)
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                PaperHeader(title: "Workflows", subtitle: "Built on the web")
+                PaperHeader(title: "Workflows", subtitle: items.count == 1 ? "1 runs on its own" : "\(items.count) run on their own")
                     .environment(\.paperMenuButton, false)
                     .environment(\.paperDrawer, nil)
-                VStack(alignment: .leading, spacing: 20) {
-                    PaperCard(padding: PaperCardMetrics.inset) {
-                        Text("Workflows are built on the web today. The web keeps them on the computer they were built on, so there are none to show or run on this phone.")
-                            .font(Theme.font(15)).foregroundStyle(Theme.foreground)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        PaperSection("Already automatic", count: items.count) {
-                            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                                if index > 0 { WellDivider(leading: PaperCardMetrics.inset) }
-                                row(item)
-                            }
+                // Paper 92: the "Active" card, then one centred line saying where workflows are built.
+                VStack(alignment: .leading, spacing: 16) {
+                    PaperSection("Active", count: items.count) {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            if index > 0 { WellDivider(leading: PaperCardMetrics.inset) }
+                            row(item)
                         }
-                        Text("These run for your company without a workflow.")
-                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 4)
                     }
+                    Text("Workflows are built on the web. None are kept or run on this phone; these run for your company without one.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 12)
                 }
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 44)
             }

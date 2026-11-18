@@ -114,7 +114,7 @@ struct PipelineView: View {
                                 VStack(alignment: .leading, spacing: 0) {
                                     ForEach(shown) { lead in
                                         if lead.id != shown.first?.id { WellDivider(leading: 0) }
-                                        leadRow(lead)
+                                        leadRow(lead, steps: lead.id == shown.first?.id)
                                     }
                                 }
                             }
@@ -126,7 +126,7 @@ struct PipelineView: View {
                             }
                         }
                         // Paper 82A's note sits here (13 muted, 4 in); this one says what is true on this phone.
-                        Text("Leads are kept on this phone. Moving a lead doesn\u{2019}t create a customer or a job.")
+                        Text("Leads are kept on this phone. Book a visit moves the lead to Visit booked; it doesn\u{2019}t create a customer or a job.")
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 4)
@@ -143,6 +143,15 @@ struct PipelineView: View {
         .task(id: organizationID) {
             route = nil; draft = nil; actionError = nil
             book.bind(organizationID: organizationID)
+            #if DEBUG
+            if PaperPreview.enabled {
+                switch PaperPreview.screen {
+                case "lead-detail": route = book.leads.first { $0.stage == .new }.map { LeadRoute(id: $0.id) }
+                case "lead-editor": draft = LeadDraft()
+                default: break
+                }
+            }
+            #endif
         }
         .thorbisDestination(item: $route) { LeadDetailView(leadID: $0.id, book: book) }
         .sheet(item: $draft) { editing in SheetSurface {
@@ -192,7 +201,8 @@ struct PipelineView: View {
 
     /// Paper 82A: the name (16 Semibold) and when, where it came from and what they need, then the
     /// likely value. A new lead carries its two next steps as pills.
-    private func leadRow(_ lead: LeadRecord) -> some View {
+    private func leadRow(_ lead: LeadRecord, steps: Bool) -> some View {
+        let showsSteps = steps && lead.stage == .new
         let today = Calendar.current.isDateInToday(lead.updatedAt)
         return VStack(alignment: .leading, spacing: 0) {
             Button { route = LeadRoute(id: lead.id) } label: {
@@ -223,19 +233,19 @@ struct PipelineView: View {
                     }
                 }
                 .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 14)
-                .padding(.bottom, lead.stage == .new ? 6 : 14)
+                .padding(.bottom, showsSteps ? 6 : 14)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(RowPressStyle())
             .accessibilityElement(children: .combine)
             .accessibilityHint("Opens the lead")
-            if lead.stage == .new {
+            if showsSteps {
                 FlowRow(spacing: 8, lineSpacing: 4) {
                     if let callURL = lead.callURL {
                         rowPill("Call back", spoken: "Call \(lead.name)", fill: Theme.brand, ink: .white, weight: .semibold) { openURL(callURL) }
                     }
-                    rowPill("Visit booked", spoken: "Mark visit booked for \(lead.name)", fill: Theme.sidebarAccent,
+                    rowPill("Book a visit", spoken: "Mark a visit booked for \(lead.name)", fill: Theme.sidebarAccent,
                             ink: Theme.foreground, weight: .medium) {
                         attempt { try book.change { try $0.move(lead.id, to: .visitBooked) } }
                     }
@@ -347,7 +357,7 @@ struct LeadDetailView: View {
 
     @ViewBuilder private func page(_ lead: LeadRecord) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(lead.name).font(Theme.font(28, weight: .bold)).tracking(-0.6)
+            Text(lead.name).font(Theme.heading()).tracking(-0.56)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             FlowRow(spacing: 8, lineSpacing: 4) {
@@ -369,32 +379,36 @@ struct LeadDetailView: View {
             .accessibilityLabel("Call \(lead.name)")
             .accessibilityIdentifier("pipeline-call")
         }
+        // Paper 82B: "Book a visit" beside "Convert to customer". Converting needs the office's
+        // records, so the second pill is Text; Book a visit only moves the stage, and the note says so.
         HStack(alignment: .top, spacing: 8) {
+            if let next = lead.stage.next {
+                Button { move(next) } label: {
+                    SalesQuietPill(title: next == .visitBooked ? "Book a visit" : (next == .won ? "Mark won" : "Move to \(next.label.lowercased())"))
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityIdentifier("pipeline-move-next")
+            }
             if let textURL = lead.textURL {
-                Button { openURL(textURL) } label: { SalesQuietPill(title: "Text", symbol: "message") }
+                Button { openURL(textURL) } label: { SalesQuietPill(title: "Text") }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Text \(lead.name)")
                     .accessibilityIdentifier("pipeline-text")
             }
-            if let next = lead.stage.next {
-                Button { move(next) } label: { SalesQuietPill(title: next == .won ? "Mark won" : "Move to \(next.label.lowercased())") }
-                    .buttonStyle(PressStyle())
-                    .accessibilityIdentifier("pipeline-move-next")
-            }
         }
         PaperCard {
             VStack(alignment: .leading, spacing: 0) {
-                ThorbisSelect(options: LeadStage.allCases.map { (value: $0, label: $0.label) },
-                              selection: Binding(get: { lead.stage }, set: { move($0) }),
-                              label: "Stage", menuTitle: "Move to")
-                    .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
-                    .accessibilityIdentifier("pipeline-stage-select")
-                WellDivider()
                 fact("Source", lead.source ?? "", empty: "Not set")
                 WellDivider()
                 fact("Likely value", lead.valueCents.map { PipelineMath.money($0) } ?? "", empty: "Not set")
                 WellDivider()
                 fact("Phone", lead.phone ?? "", empty: "No phone yet")
+                WellDivider()
+                ThorbisSelect(options: LeadStage.allCases.map { (value: $0, label: $0.label) },
+                              selection: Binding(get: { lead.stage }, set: { move($0) }),
+                              label: "Stage", menuTitle: "Move to")
+                    .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
+                    .accessibilityIdentifier("pipeline-stage-select")
                 WellDivider()
                 fact("Added", lead.createdAt.formatted(date: .abbreviated, time: .omitted))
             }
@@ -420,29 +434,13 @@ struct LeadDetailView: View {
             }
             .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 2).padding(.bottom, 14)
         }
-        if lead.stage.isOpen {
-            HStack(alignment: .top, spacing: 8) {
-                Button { move(.won) } label: { SalesQuietPill(title: "Won", symbol: "checkmark", ink: Theme.success) }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Mark won")
-                    .accessibilityIdentifier("pipeline-mark-won")
-                Button { move(.lost) } label: { SalesQuietPill(title: "Lost", symbol: "xmark", ink: Theme.destructive) }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Mark lost")
-                    .accessibilityIdentifier("pipeline-mark-lost")
-            }
-        } else {
-            Button { move(.new) } label: { SalesQuietPill(title: "Reopen as new", symbol: "arrow.uturn.backward") }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("pipeline-reopen")
-        }
-        SalesPhoneNote(text: "Saved on this phone only. Moving this lead doesn\u{2019}t create a customer or a job.")
+        // Won, Lost and Reopen are in the \u{2022}\u{2022}\u{2022} menu, where Paper keeps a record's other moves.
+        SalesPhoneNote(text: "Saved on this phone only. Book a visit moves this lead to Visit booked; it doesn\u{2019}t create a customer or a job.")
             .padding(.top, 4)
     }
 
     private func fact(_ label: String, _ value: String, empty: String = "") -> some View {
-        PaperDetailRow(label: label) { Text(value.isEmpty ? empty : value) }
-            .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 52)
+        PlaceSheetValueRow(label: label, value: value.isEmpty ? empty : value, minHeight: 52)
     }
 }
 
@@ -507,9 +505,12 @@ struct LeadEditorSheet: View {
                                          problem: valueProblem ? "Write the value as dollars, like 2400." : nil,
                                          keyboard: .decimalPad)
                     }
-                    SalesFormCard {
-                        SalesStackedField(label: "Note", text: $note, prompt: "Anything worth remembering before you call",
-                                          multiline: true)
+                    // Paper 82C has no note on a new lead; the detail's "Add note" opens it here.
+                    if existing != nil {
+                        SalesFormCard {
+                            SalesStackedField(label: "Notes", text: $note, prompt: "Anything worth remembering before you call",
+                                              multiline: true)
+                        }
                     }
                     SalesPhoneNote(text: "Leads live in Pipeline until you mark them won or lost. Saved on this phone only.")
                 }
