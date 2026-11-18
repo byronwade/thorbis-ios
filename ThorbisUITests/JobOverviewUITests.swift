@@ -205,8 +205,8 @@ final class JobOverviewUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(back.frame.height, 43.5)
             let actions = app.buttons["Job actions"]
             XCTAssertTrue(actions.exists)
-            // Share job lives in the Job actions menu, so the header carries one circle.
-            XCTAssertFalse(app.navigationBars.firstMatch.buttons["Share job"].exists)
+            // Paper 21: the bar is Back, Share and More.
+            XCTAssertTrue(app.navigationBars.firstMatch.buttons["Share job"].exists)
             if useSwipe {
                 let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.005, dy: 0.5))
                 start.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)))
@@ -397,7 +397,8 @@ final class JobOverviewUITests: XCTestCase {
         let app = preview("job", working: true)
         // The financial step appears only after the job's paper finishes loading.
         // Open the menu on the loaded record, rather than during its initial redraws.
-        XCTAssertTrue(button(startingWith: "Collect ", in: app).waitForExistence(timeout: 15))
+        // Paper 21: Overview carries no payment step; Money's spoken label has the balance once it loads.
+        XCTAssertTrue(thorbisJobBalanceLoaded(app, "$340.00").waitForExistence(timeout: 20))
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
@@ -418,7 +419,8 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Reschedule"].isHittable, "Reschedule must be back in reach")
         app.buttons["Reschedule"].tap()
         XCTAssertTrue(app.buttons["Save schedule"].waitForExistence(timeout: 5))
-        app.buttons["Cancel"].tap()
+        // Paper 25: the schedule sheet closes from its Close circle.
+        app.buttons["Close"].firstMatch.tap()
         XCTAssertTrue(more.waitForExistence(timeout: 5))
     }
 
@@ -426,12 +428,10 @@ final class JobOverviewUITests: XCTestCase {
         continueAfterFailure = false
         let app = preview("job", working: true)
 
-        // On site, Collect payment is a step of the wrap-up checklist ("Collect payment, $340.00 due").
-        let collect = button(startingWith: "Collect ", in: app)
-        XCTAssertTrue(collect.waitForExistence(timeout: 10))
-        for _ in 0..<6 where !collect.isHittable { app.swipeUp() }
+        // Paper 24: on site, the payment step is Collect payment in the invoice's card on Money.
+        let collect = collectPill(in: app)
         XCTAssertTrue(collect.isHittable)
-        capture(app, name: "In-progress Job Overview")
+        capture(app, name: "In-progress Job Money")
         for _ in 0..<6 where !app.buttons["Job actions"].isHittable { app.swipeDown() }
         app.buttons["Job actions"].tap()
         // The menu's row ("Wrap up, Closeout checklist"), not the bar's commit ("Wrap up · 3 left").
@@ -447,9 +447,7 @@ final class JobOverviewUITests: XCTestCase {
     func testInProgressJobPaymentStepOpensItsInvoice() {
         continueAfterFailure = false
         let app = preview("job", working: true)
-        let collect = button(startingWith: "Collect ", in: app)
-        XCTAssertTrue(collect.waitForExistence(timeout: 10))
-        for _ in 0..<6 where !collect.isHittable { app.swipeUp() }
+        let collect = collectPill(in: app)
         XCTAssertTrue(collect.isHittable)
         collect.tap()
         let invoice = app.descendants(matching: .any)["collect-payment-invoice"]
@@ -493,12 +491,12 @@ final class JobOverviewUITests: XCTestCase {
     func testAccessiblePaymentActionScrollsWithTheJob() {
         continueAfterFailure = false
         let app = preview("job", accessibleText: true, working: true)
-        let collect = button(startingWith: "Collect ", in: app)
+        // Paper 24: Collect payment is in the invoice's card on Money (the sections are one chooser at this size).
+        let collect = collectPill(in: app)
         // The job's own scroll view (on iPad the list column beside it scrolls too).
         let content = app.usesTabletLayout ? app.scrollViews.containing(NSPredicate(format: "label BEGINSWITH %@", "Collect ")).firstMatch
                                            : app.scrollViews.firstMatch
         XCTAssertTrue(content.waitForExistence(timeout: 20))
-        for _ in 0..<5 where !collect.isHittable { content.swipeUp() }
         XCTAssertTrue(collect.isHittable, "Collection must remain reachable")
         let initialY = collect.frame.minY
         content.swipeUp()
@@ -648,6 +646,25 @@ final class JobOverviewUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    /// Paper 24: the job's payment step is "Collect payment" in the invoice's card on Money. Opens
+    /// Money (from the chooser at accessibility sizes) and brings the pill clear of the job's bar.
+    private func collectPill(in app: XCUIApplication) -> XCUIElement {
+        XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 20))
+        let chooser = app.buttons["job-section-chooser"]
+        if chooser.waitForExistence(timeout: 2) {
+            for _ in 0..<5 where !chooser.isHittable { app.swipeUp(velocity: .slow) }
+            chooser.tap()
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Money", "job-section-chooser")).firstMatch.tap()
+        } else {
+            thorbisTapStableButton(app, "job-section-money")
+        }
+        let collect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "job-invoice-collect-")).firstMatch
+        for _ in 0..<8 where !collect.exists { app.swipeUp(velocity: .slow) }
+        XCTAssertTrue(collect.waitForExistence(timeout: 15), "The invoice's card must offer Collect payment")
+        app.scrollClearOfFoot(collect)
+        return collect
     }
 
     private func button(startingWith title: String, in app: XCUIApplication) -> XCUIElement {
