@@ -345,7 +345,7 @@ final class PriceBookPickerUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-pages"]
         app.launch()
-        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 20))
         return app
     }
 

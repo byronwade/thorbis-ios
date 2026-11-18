@@ -19,7 +19,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(edit.isHittable)
         XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
         edit.tap()
-        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["invoice-add-item"].exists)
     }
 
@@ -35,7 +35,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(edit.isHittable)
         XCTAssertGreaterThanOrEqual(edit.frame.height, 44)
         edit.tap()
-        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 10))
     }
 
     func testDirectLineEditingRequiresDraftAndPermission() {
@@ -60,7 +60,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         XCTAssertTrue(edit.waitForExistence(timeout: 10))
         XCTAssertTrue(edit.isHittable)
         edit.tap()
-        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 10))
     }
 
     private func launch(_ extra: [String] = []) -> XCUIApplication {
@@ -68,7 +68,7 @@ final class InvoiceCatalogQuickEditUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-editor", "--paper-preview-catalog-pages"] + extra
         app.launch()
-        XCTAssertTrue(app.navigationBars["Edit invoice"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["Edit invoice"].waitForExistence(timeout: 20))
         return app
     }
 

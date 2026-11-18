@@ -851,8 +851,7 @@ struct BuilderLineRow: View {
             Button {
                 if atOne { remove() } else { quantity = String(quantityValue - 1) }
             } label: {
-                Image(systemName: atOne ? "trash" : "minus").font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(atOne ? Theme.destructive : Theme.foreground)
+                PaperIcon(atOne ? .trash : .stepMinus, size: atOne ? 16 : 14, color: atOne ? Theme.destructive : Theme.foreground)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -864,8 +863,7 @@ struct BuilderLineRow: View {
             Button {
                 quantity = String(min(100_000, quantityValue + 1))
             } label: {
-                Image(systemName: "plus").font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(quantityValue < 100_000 && isEnabled ? Theme.foreground : Theme.muted)
+                PaperIcon(.stepPlus, size: 14, color: quantityValue < 100_000 && isEnabled ? Theme.foreground : Theme.muted)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
@@ -873,7 +871,7 @@ struct BuilderLineRow: View {
             .accessibilityLabel("Increase quantity")
             .accessibilityValue("\(quantityValue)")
         }
-        .background(Theme.fill, in: Capsule())
+        .background(Theme.quietFill, in: Capsule())
         .fixedSize()
         .sensoryFeedback(.selection, trigger: quantity)
     }
@@ -1290,7 +1288,7 @@ struct EstimateBuilderSection<Header: View>: View {
     private var addItemField: some View {
         Button(action: addItem) {
             HStack(spacing: 8) {
-                Image(systemName: "plus").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.brandText)
+                PaperIcon(.plusLight, size: 18, color: Theme.brandText)
                 Text("Add item").font(Theme.font(16)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 8)
                 if let addItemNote {
