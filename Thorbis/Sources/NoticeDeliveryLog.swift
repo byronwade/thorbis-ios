@@ -146,16 +146,8 @@ struct NoticeDeliveryLogView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 // Paper 96B: a 28 Bold title 20 from the edge, one 15 muted line under it. The
                 // log isn't limited to a week here, so the line stops at "sent".
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Delivery log").font(Theme.heading()).tracking(-0.56)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Messages your rules sent")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 8)
+                PaperPageTitle(title: "Delivery log", subtitle: "Messages your rules sent")
+                    .padding(.bottom, 8)
                 if let error { ErrorBanner(message: error) { await load() } }
                 if !loaded && error == nil { ListRoomSkeleton(count: 6, threeLines: false) }
                 if loaded && items.isEmpty && error == nil {

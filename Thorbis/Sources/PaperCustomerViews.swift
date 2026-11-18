@@ -2182,9 +2182,8 @@ struct CustomerDetailView: View {
         } else {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(groups) { group in
-                    Text(group.title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .accessibilityAddTraits(.isHeader)
-                        .padding(.horizontal, 4).padding(.top, 14).padding(.bottom, 10)
+                    PaperSectionLabel(title: group.title)
+                        .padding(.top, 14)
                     ForEach(Array(group.events.enumerated()), id: \.element.id) { index, item in
                         switch item {
                         case .event(let event): activityRow(event, last: index == group.events.count - 1)

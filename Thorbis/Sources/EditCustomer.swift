@@ -871,15 +871,7 @@ struct ArchivedCustomersView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Archived customers").font(Theme.heading()).tracking(-0.56)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("\(archived.count) archived \u{00B7} jobs and invoices are kept")
-                        .font(Theme.font(15)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 20).padding(.top, 14)
+                PaperPageTitle(title: "Archived customers", subtitle: "\(archived.count) archived \u{00B7} jobs and invoices are kept")
                 searchField.padding(.top, 16)
                 if let error {
                     ErrorBanner(message: error, outer: PaperCardMetrics.margin).padding(.top, 12)

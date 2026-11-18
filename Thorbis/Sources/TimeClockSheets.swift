@@ -253,8 +253,7 @@ struct TimeClockEntryEditor: View {
     /// Paper 27B: Forgot, Phone died, Other; the chosen one on the brand surface with a brand rim.
     private var reasons: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Reason").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 4).accessibilityAddTraits(.isHeader)
+            PaperSectionLabel(title: "Reason", gap: 0)
             FlowRow(spacing: 8, lineSpacing: 8) {
                 ForEach(TimeClockEntry.Reason.allCases, id: \.self) { choice in
                     let chosen = reason == choice

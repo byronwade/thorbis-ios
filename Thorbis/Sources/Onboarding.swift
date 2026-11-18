@@ -892,10 +892,8 @@ struct CompanyDetailsForm: View {
     private func group(_ title: String, _ entries: [OrganizationProfile.Entry]) -> some View {
         if !entries.isEmpty {
             // Paper v2 section label: 13 Semibold, 4 in, 20 above the group.
-            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 4)
-                .padding(.top, 20).padding(.bottom, 10)
+            PaperSectionLabel(title: title)
+                .padding(.top, 22)
             VStack(alignment: .leading, spacing: 16) { ForEach(entries, id: \.factKey) { row($0) } }
         }
     }
@@ -1209,7 +1207,7 @@ struct BusinessSetupView: View {
                         .padding(.top, 22)
                 }
             }
-            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, PaperHeaderMetrics.titleTopUnderBar).padding(.bottom, 24)
             .frame(maxWidth: 560, alignment: .leading)
             .frame(maxWidth: .infinity)
         }

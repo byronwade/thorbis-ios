@@ -341,8 +341,7 @@ struct JobBookingCallSection: View {
     private var transcript: some View {
         let segments = showTranscript ? call.transcript : Array(call.transcript.prefix(1))
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Transcript").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                .accessibilityAddTraits(.isHeader)
+            PaperSectionLabel(title: "Transcript", inset: 0, gap: 0)
             ForEach(segments) { segment in
                 VStack(alignment: .leading, spacing: 0) {
                     Text(segment.label).font(Theme.font(15, weight: .semibold))

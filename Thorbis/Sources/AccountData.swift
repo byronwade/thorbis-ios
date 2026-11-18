@@ -164,9 +164,7 @@ struct AccountAndDataView: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            .padding(.horizontal, 4).padding(.bottom, 8)
-            .accessibilityAddTraits(.isHeader)
+        PaperSectionLabel(title: text)
     }
 }
 

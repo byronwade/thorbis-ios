@@ -14,7 +14,7 @@ struct TeamDetailTitle<Line: View>: View {
             line
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, Theme.gutter).padding(.top, 14)
+        .padding(.horizontal, Theme.gutter).padding(.top, PaperHeaderMetrics.titleTopUnderBar)
     }
 }
 
@@ -354,8 +354,7 @@ struct OwnershipView: View {
     }
 
     private func label(_ text: String) -> some View {
-        Text(text).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            .accessibilityAddTraits(.isHeader)
-            .padding(.horizontal, Theme.gutter).padding(.top, 22).padding(.bottom, 8)
+        PaperCardLabel(title: text)
+            .padding(.top, 22)
     }
 }

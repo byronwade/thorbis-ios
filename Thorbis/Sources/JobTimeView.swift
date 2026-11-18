@@ -156,9 +156,7 @@ struct JobTimeView: View {
     /// Paper: a 13 Semibold label 8 over a radius-20 card.
     private func section<Rows: View>(_ title: String, @ViewBuilder rows: () -> Rows) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 4)
-                .accessibilityAddTraits(.isHeader)
+            PaperSectionLabel(title: title, gap: 0)
             VStack(spacing: 0) { rows() }
                 .panelBackground(cornerRadius: Theme.cardRadius)
         }

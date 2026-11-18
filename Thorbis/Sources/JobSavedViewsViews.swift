@@ -160,9 +160,7 @@ struct JobSavedViewSaveSheet: View {
                     .accessibilityIdentifier("jobviews-name")
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("Filters in this view").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 4)
-                    .accessibilityAddTraits(.isHeader)
+                PaperSectionLabel(title: "Filters in this view", gap: 0)
                 FlowRow(spacing: 6, lineSpacing: 6) {
                     ForEach(JobSavedViewMapping.summary(choices, me: session.user?.id, techName: { roster[$0] }), id: \.self) { word in
                         Text(word).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.subtle)
@@ -238,7 +236,7 @@ struct JobSavedViewsSheet: View {
                         Text("Your views").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
                             .accessibilityAddTraits(.isHeader)
                         Spacer(minLength: 8)
-                        Text("\(entries.count)").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        Text("\(entries.count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
                             .accessibilityLabel("\(entries.count) view\(entries.count == 1 ? "" : "s")")
                     }
                     .padding(.horizontal, 4).padding(.top, 8)

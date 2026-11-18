@@ -295,6 +295,8 @@ struct PaperSectionLabel<Trailing: View>: View {
     var titleColor: Color = Theme.muted
     /// The label's inset from its column: 4 beside a card, 0 inside a sheet (Paper 21E).
     var inset: CGFloat = 4
+    /// The space to the card: Paper's 8. Pass 0 only inside a stack whose own spacing is that 8.
+    var gap: CGFloat = 8
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
@@ -313,13 +315,13 @@ struct PaperSectionLabel<Trailing: View>: View {
         }
         .frame(minHeight: 18)
         .padding(.horizontal, inset)
-        .padding(.bottom, 8)
+        .padding(.bottom, gap)
     }
 }
 
 extension PaperSectionLabel where Trailing == EmptyView {
-    init(title: String, count: Int? = nil, countText: String? = nil, titleColor: Color = Theme.muted, inset: CGFloat = 4) {
-        self.init(title: title, count: count, countText: countText, titleColor: titleColor, inset: inset) { EmptyView() }
+    init(title: String, count: Int? = nil, countText: String? = nil, titleColor: Color = Theme.muted, inset: CGFloat = 4, gap: CGFloat = 8) {
+        self.init(title: title, count: count, countText: countText, titleColor: titleColor, inset: inset, gap: gap) { EmptyView() }
     }
 }
 

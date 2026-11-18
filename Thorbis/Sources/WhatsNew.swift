@@ -199,9 +199,7 @@ struct WhatsNewHistoryView: View {
                 .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 16)
                 ForEach(notes) { note in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(note.dayLabel).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                            .accessibilityAddTraits(.isHeader)
-                            .padding(.horizontal, 4)
+                        PaperSectionLabel(title: note.dayLabel, gap: 0)
                         LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                             ForEach(Array(note.highlights.enumerated()), id: \.offset) { index, item in
                                 WhatsNewHistoryCard(item: item, index: index)

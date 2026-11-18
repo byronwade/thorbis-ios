@@ -51,9 +51,7 @@ struct JobAddSheet: View {
 
     private func group(_ title: String, rows: [JobAddRow]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 4)
-                .accessibilityAddTraits(.isHeader)
+            PaperSectionLabel(title: title, gap: 0)
             VStack(spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     Button { choose(row) } label: {

@@ -340,9 +340,7 @@ struct InvoiceLineEditorView: View {
     @ViewBuilder private var detailsCard: some View {
         let job = editor.invoice.jobId.flatMap { id in store.jobs.first(where: { $0.id == id }) }
         VStack(alignment: .leading, spacing: 8) {
-            Text("Details").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 4)
+            PaperSectionLabel(title: "Details", gap: 0)
             VStack(alignment: .leading, spacing: 0) {
                 detailRow("Customer", store.customerName(invoice.customerId))
                 if let job {

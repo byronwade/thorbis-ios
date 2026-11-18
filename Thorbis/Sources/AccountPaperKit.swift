@@ -141,14 +141,7 @@ struct AccountGroup<Content: View>: View {
         let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
             if let title {
-                HStack(spacing: 8) {
-                    Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 0)
-                    if let count { Text(count).font(Theme.font(13)).foregroundStyle(Theme.muted) }
-                }
-                .padding(.horizontal, 4).padding(.bottom, 8)
+                PaperSectionLabel(title: title, countText: count)
             }
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)

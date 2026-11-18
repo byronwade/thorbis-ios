@@ -441,9 +441,8 @@ struct TeamGoalsView: View {
     }
 
     private func label(_ title: String, top: CGFloat) -> some View {
-        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-            .accessibilityAddTraits(.isHeader)
-            .padding(.horizontal, 4).padding(.top, top).padding(.bottom, 8)
+        PaperSectionLabel(title: title)
+            .padding(.top, top)
     }
 
     /// Paper 91's hero: "Revenue" over the week's sold in 44 Bold with "of $25,000", an 8pt bar,

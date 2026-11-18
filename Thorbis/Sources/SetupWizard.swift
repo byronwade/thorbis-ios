@@ -655,14 +655,9 @@ struct SetupWizardView: View {
     /// Paper 08-17's group label: 13 Semibold muted, 4 in from the card, 22 above and 8 below,
     /// with an optional count at the trailing edge.
     private func groupLabel(_ title: String, trailing: String?) -> some View {
-        HStack {
-            Text(title).font(Theme.font(13, weight: .semibold)).accessibilityAddTraits(.isHeader)
-            Spacer(minLength: 8)
-            if let trailing { Text(trailing).font(Theme.font(13)) }
-        }
-        .foregroundStyle(Theme.muted)
-        .padding(.horizontal, 4).padding(.top, 22).padding(.bottom, 8)
-        .accessibilityElement(children: .combine)
+        PaperSectionLabel(title: title, countText: trailing)
+            .padding(.top, 22)
+            .accessibilityElement(children: .combine)
     }
 
     /// Paper 08: "What's your primary trade?" over one 50pt well with the chosen trade and a

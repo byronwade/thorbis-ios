@@ -1802,9 +1802,7 @@ struct JobFollowUpsView: View {
                     // Paper 21H: "Reason" over its chips, then the note. Paper's "Open times" needs
                     // the office's free slots, which the server doesn't list, so the request goes to
                     // the office to book (Paper's "Can't find a time?" path).
-                    Text("Reason").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .padding(.horizontal, 4).padding(.bottom, 8)
-                        .accessibilityAddTraits(.isHeader)
+                    PaperSectionLabel(title: "Reason")
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(Self.reasons, id: \.self) { option in
