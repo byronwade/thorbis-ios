@@ -118,7 +118,7 @@ struct ChangePasswordSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if let serverMessage {
-                        ErrorBanner(message: serverMessage, outer: 0)
+                        ErrorBanner(message: serverMessage, tint: Theme.destructive, outer: 0)
                             .accessibilityIdentifier("change-password-error")
                     }
                     currentCard

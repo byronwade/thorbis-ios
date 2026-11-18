@@ -596,7 +596,9 @@ struct PaperActionBar<Secondary: View>: View {
     /// Kept for source compatibility; the bar's pill is always the ramp's commit (50 tall, 16
     /// Semibold). Paper's main file has no taller brand pill outside Field mode.
     var height: CGFloat = Theme.commitHeight
-    var ground: Color = Theme.background
+    /// The bar's ground; nil is the page it is pinned to (`Theme.canvas`: the canvas on a route, the
+    /// panel inside a sheet), so the bar never shows as a band of another tone.
+    var ground: Color? = nil
     var identifier: String? = nil
     let action: () -> Void
     @ViewBuilder var secondary: Secondary
@@ -638,7 +640,7 @@ struct PaperActionBar<Secondary: View>: View {
                     .accessibilityHidden(true)
             }
         }
-        .paperActionBarGround(ground, top: hint == nil ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
+        .paperActionBarGround(ground.map { AnyShapeStyle($0) } ?? AnyShapeStyle(Theme.canvas), top: hint == nil ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
     }
 }
 
@@ -662,7 +664,7 @@ extension View {
     ///
     ///     .safeAreaInset(edge: .bottom, spacing: 0) { twoButtons.paperActionBarGround() }
     /// `maxWidth` keeps the pill a readable width on an iPad; the ground still spans the screen.
-    func paperActionBarGround<Ground: ShapeStyle>(_ ground: Ground = Theme.background,
+    func paperActionBarGround<Ground: ShapeStyle>(_ ground: Ground = Theme.canvas,
                                                   top: CGFloat = PaperActionBarMetrics.top,
                                                   maxWidth: CGFloat = .infinity) -> some View {
         self.frame(maxWidth: .infinity)
@@ -678,17 +680,25 @@ extension View {
             .padding(.horizontal, PaperCardMetrics.margin)
             .padding(.top, PaperActionBarMetrics.topOverFade).padding(.bottom, PaperActionBarMetrics.bottom)
             .frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
-            .background(LinearGradient(stops: [.init(color: Theme.background.opacity(0), location: 0),
-                                               .init(color: Theme.background, location: 0.34)],
-                                       startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
+            .background(PaperCanvasFade().ignoresSafeArea(edges: .bottom).allowsHitTesting(false))
+    }
+}
+
+/// The fading bar's ground: clear at the top to the page's own ground by 34%, so the fade meets
+/// the canvas on a route and the panel inside a sheet.
+private struct PaperCanvasFade: View {
+    @Environment(\.thorbisSheetCanvas) private var inSheet
+    var body: some View {
+        let ground = inSheet ? Theme.surface : Theme.background
+        LinearGradient(stops: [.init(color: ground.opacity(0), location: 0), .init(color: ground, location: 0.34)],
+                       startPoint: .top, endPoint: .bottom)
     }
 }
 
 extension PaperActionBar where Secondary == EmptyView {
     init(title: String, symbol: String? = nil, busy: Bool = false, disabled: Bool = false, disabledReason: String? = nil,
          hint: String? = nil, height: CGFloat = Theme.commitHeight,
-         ground: Color = Theme.background, identifier: String? = nil, action: @escaping () -> Void) {
+         ground: Color? = nil, identifier: String? = nil, action: @escaping () -> Void) {
         self.init(title: title, symbol: symbol, busy: busy, disabled: disabled, disabledReason: disabledReason,
                   hint: hint, height: height, ground: ground, identifier: identifier, action: action) { EmptyView() }
     }

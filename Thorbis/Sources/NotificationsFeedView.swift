@@ -69,9 +69,9 @@ struct NotificationsFeedView: View {
                     }
                     if groups.isEmpty && loaded && error == nil {
                         if chosen == .unread && !notices.isEmpty {
-                            ListRoomEmpty(title: "No unread notices", message: "All shows every notice.")
+                            ListRoomEmpty(glyph: .bell, title: "No unread notices", message: "All shows every notice.")
                         } else {
-                            ListRoomEmpty(title: "No notices yet", message: "New assignments and job changes land here.")
+                            ListRoomEmpty(glyph: .bell, title: "No notices yet", message: "New assignments and job changes land here.")
                         }
                     }
                 }

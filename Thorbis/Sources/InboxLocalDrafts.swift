@@ -165,7 +165,7 @@ struct InboxLocalDraftView: View {
                     if bound {
                         // Empty: the shared empty state, not a label over a one-line card.
                         if inbox.messages.isEmpty {
-                            ListRoomEmpty(title: "No drafts yet", message: "Start one with New draft below.")
+                            ListRoomEmpty(glyph: .bubble, title: "No drafts yet", message: "Start one with New draft below.")
                                 .padding(.horizontal, -PaperCardMetrics.margin)
                         } else {
                             PaperCard {

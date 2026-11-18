@@ -53,7 +53,7 @@ struct ThorbisSheetHeader: View {
             if closeOnLeft { barRow } else { titleRow }
         }
         .padding(.horizontal, Theme.gutter)
-        .padding(.top, 14).padding(.bottom, 6)
+        .padding(.top, PaperSheetMetrics.headerTop).padding(.bottom, 6)
     }
 
     /// Leading title and subtitle, the close circle on the right.
@@ -142,6 +142,36 @@ struct PaperSheetTitle: View {
     }
 }
 
+/// Where the first row of each kind of sheet stands, so every sheet of a kind opens at one height:
+/// a compact sheet's title row (`ThorbisSheetHeader`) and a task sheet's bar (`PaperTaskBar`) sit
+/// 14 under the sheet's top; a sheet Paper draws as a whole page (40 Edit invoice, 21F Checklist,
+/// 36 Sign estimate, 65 Settings) puts its 44pt circle row 2 under it, as a pushed page does under
+/// the status bar (Paper's circle row: `paddingTop: 2`).
+enum PaperSheetMetrics {
+    static let headerTop: CGFloat = 14
+    static let pageTop: CGFloat = 2
+}
+
+/// The circle row of a sheet that is a whole page (Paper 40, 21F, 36): the way out on the left, an
+/// optional "…" or quiet word on the right, 16 from the sides, `PaperSheetMetrics.pageTop` under the
+/// sheet's top. Put it in `.safeAreaInset(edge: .top, spacing: 0)` with the system bar hidden, so it
+/// stands at the same height on every page sheet instead of wherever a navigation bar centres it.
+struct PaperPageSheetBar<Leading: View, Trailing: View>: View {
+    @ViewBuilder var leading: Leading
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        HStack(spacing: 8) {
+            leading
+            Spacer(minLength: 0)
+            trailing
+        }
+        .frame(minHeight: 44)
+        .padding(.horizontal, PaperCardMetrics.margin)
+        .padding(.top, PaperSheetMetrics.pageTop).padding(.bottom, 2)
+    }
+}
+
 /// A task sheet's title row (Paper 27A "Time off", 42B, 82C, 88B, 21T): the way out on a card pill
 /// (16 Medium), the title in 17/22 Semibold between, the commit on a brand pill (16 Semibold). 44
 /// tall, 16 from the edges, 14 under the sheet's top. This is the one bar for a sheet that is a
@@ -167,7 +197,7 @@ struct PaperTaskBar: View {
                 titleText.fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14).padding(.bottom, 2)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, PaperSheetMetrics.headerTop).padding(.bottom, 2)
     }
 
     private var titleText: some View {

@@ -69,9 +69,9 @@ struct WorkspaceNoticesView: View {
                     }
                     if visible.isEmpty && !loading && error == nil {
                         if filter == "Unread" && !items.isEmpty {
-                            ListRoomEmpty(title: "No unread notices", message: "All shows every notice.")
+                            ListRoomEmpty(glyph: .bell, title: "No unread notices", message: "All shows every notice.")
                         } else {
-                            ListRoomEmpty(title: "No notices yet", message: "New assignments and job changes land here.")
+                            ListRoomEmpty(glyph: .bell, title: "No notices yet", message: "New assignments and job changes land here.")
                         }
                     }
                 }
@@ -520,7 +520,7 @@ struct WorkspacePriceBookView: View {
                         }
                         if hasCurrentOwner && visibleItems.isEmpty && !loading && error == nil {
                             if currentItems.isEmpty {
-                                ListRoomEmpty(title: "No price book items",
+                                ListRoomEmpty(glyph: .priceBook, title: "No price book items",
                                               message: canEdit ? "Services, parts and fees you add here fill estimates and invoices." : "Services, parts and fees your office adds show up here.",
                                               actionTitle: canEdit ? "Add an item" : nil, action: { creating = true })
                             } else {

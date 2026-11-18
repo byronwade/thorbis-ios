@@ -90,6 +90,16 @@ enum LocalWorkspaceSection: String, CaseIterable, Hashable {
         }
     }
 
+    /// The empty room's Paper glyph (the drawer's own mark for the place).
+    var emptyGlyph: PaperGlyph {
+        switch self {
+        case .fleet: .truck
+        case .equipment: .equipment
+        case .agreements: .document
+        case .team: .people
+        }
+    }
+
     /// The header + and the editor's title for a new record.
     var addTitle: String {
         switch self {
@@ -386,7 +396,7 @@ struct LocalWorkspaceView: View {
                         if rows.isEmpty && sharedEquipment {
                             EmptyView()
                         } else if rows.isEmpty {
-                            ListRoomEmpty(title: "Nothing here yet",
+                            ListRoomEmpty(glyph: section.emptyGlyph, title: "Nothing here yet",
                                           message: "\(section.addTitle) with the + above.")
                         } else {
                             // Paper 88: a 13 Semibold label and its count over one card of rows.

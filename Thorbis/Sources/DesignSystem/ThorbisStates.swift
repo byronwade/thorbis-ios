@@ -94,6 +94,8 @@ extension Error {
 /// mark colour; nil is Paper's neutral circle.
 struct PaperEmptyState: View {
     let symbol: String
+    /// Paper's own glyph for the place (jobs, calendar, person…), drawn in place of `symbol`.
+    var glyph: PaperGlyph? = nil
     let title: String
     var message: String? = nil
     var actionTitle: String? = nil
@@ -104,9 +106,10 @@ struct PaperEmptyState: View {
     var action: (() -> Void)? = nil
     @ScaledMetric(relativeTo: .title3) private var scale: CGFloat = 1
 
-    init(symbol: String, title: String, message: String? = nil, actionTitle: String? = nil,
+    init(symbol: String, glyph: PaperGlyph? = nil, title: String, message: String? = nil, actionTitle: String? = nil,
          tint: Color? = nil, prominent: Bool = false, problem: Bool = false, action: (() -> Void)? = nil) {
         self.symbol = symbol
+        self.glyph = glyph
         self.title = title
         self.message = message
         self.actionTitle = actionTitle
@@ -120,7 +123,7 @@ struct PaperEmptyState: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            EmptyGlyph(symbol: symbol, tint: tint, size: markSize)
+            EmptyGlyph(symbol: symbol, glyph: glyph, tint: tint, size: markSize)
                 .padding(.bottom, problem ? 12 : prominent ? 16 : 14)
             Text(title)
                 .font(prominent ? Theme.font(22, weight: .bold) : Theme.font(17, weight: .semibold))
@@ -169,16 +172,24 @@ struct PaperEmptyState: View {
 /// carry the meaning.
 struct EmptyGlyph: View {
     let symbol: String
+    /// Paper's own glyph, drawn at the symbol's size in place of it.
+    var glyph: PaperGlyph? = nil
     var tint: Color? = nil
     var size: CGFloat = 48
 
     var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.42, weight: .regular))
-            .foregroundStyle(tint ?? Theme.muted)
-            .frame(width: size, height: size)
-            .background(tint.map { $0.opacity(0.16) } ?? Theme.quietFill, in: Circle())
-            .accessibilityHidden(true)
+        Group {
+            if let glyph {
+                PaperIcon(glyph, size: size * 0.46, color: tint ?? Theme.muted)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: size * 0.42, weight: .regular))
+                    .foregroundStyle(tint ?? Theme.muted)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(tint.map { $0.opacity(0.16) } ?? Theme.quietFill, in: Circle())
+        .accessibilityHidden(true)
     }
 }
 
@@ -217,6 +228,10 @@ struct BannerGlyph: View {
 enum BannerTone {
     /// Something is wrong or waiting on the person: offline, a failed read, needs review.
     case warning
+    /// A change that failed or was refused (a save the server turned down, a destructive step that
+    /// did not go through): Paper 48A "Service hold" and 73A "Rejected", the red surface with
+    /// destructive-text words. Connection and "try again" problems stay `warning` (Paper 73 / 73C).
+    case danger
     /// Something is going right: back online, sending.
     case success
     /// Neither: a locked area, a permission that is off, work saved on this phone.
@@ -225,6 +240,7 @@ enum BannerTone {
     var ink: Color {
         switch self {
         case .warning: Theme.warning
+        case .danger: Theme.destructive
         case .success: Theme.success
         case .quiet: Theme.foreground
         }
@@ -232,6 +248,7 @@ enum BannerTone {
     var ground: Color {
         switch self {
         case .warning: Theme.warningSurface
+        case .danger: Theme.destructiveSurface
         case .success: Theme.successSurface
         case .quiet: Theme.fill
         }
@@ -335,8 +352,9 @@ struct ErrorBanner: View {
 
     var body: some View {
         // Paper 73: a problem is the warning strip; a locked area or a permission that is off (the
-        // muted tint) is the quiet one. A long message keeps the full width, its action underneath.
-        let tone: BannerTone = tint == Theme.muted ? .quiet : .warning
+        // muted tint) is the quiet one; a failed save (`tint: Theme.destructive`) is Paper 48A's red
+        // strip. A long message keeps the full width, its action underneath.
+        let tone: BannerTone = tint == Theme.muted ? .quiet : tint == Theme.destructive ? .danger : .warning
         PaperBannerStrip(symbol: symbol, tone: tone, text: message, stacked: action != nil && message.count > 64) {
             if let action {
                 Button {

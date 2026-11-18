@@ -116,16 +116,18 @@ struct SignatureCaptureSheet: View {
             .paperPageGround()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .topBarLeading) {
+            // The page sheet's circle row (not a system bar), so Sign estimate opens at the same
+            // height as Edit invoice and Checklist.
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaperPageSheetBar {
                     Button { dismiss() } label: { PaperCircleLabel(symbol: "xmark", size: 44, fill: Theme.card) }
                         .buttonStyle(PressStyle())
                         .disabled(busy)
                         .accessibilityLabel("Cancel")
-                }
-                // Paper 36: "Sign later" in quiet type opposite the close circle; it leaves the
-                // sheet without signing, the same as Cancel.
-                ThorbisToolbarItem(placement: .topBarTrailing) {
+                } trailing: {
+                    // Paper 36: "Sign later" in quiet type opposite the close circle; it leaves the
+                    // sheet without signing, the same as Cancel.
                     Button { dismiss() } label: {
                         Text("Sign later").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.muted)
                             .padding(.horizontal, 4)
@@ -135,6 +137,8 @@ struct SignatureCaptureSheet: View {
                     .buttonStyle(PressStyle())
                     .disabled(busy)
                 }
+                // The page's ground (`paperPageGround` above does not reach this inset).
+                .background(Theme.background)
             }
             .onAppear { if name.isEmpty { name = suggestedName } }
         }
