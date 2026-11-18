@@ -596,13 +596,13 @@ struct EstimateDetailView: View {
     @ViewBuilder private var estimateBar: some View {
         if let record, record.status == "draft", jobID != nil, TechJobFlow.canShow(record, can: estimateAbilities) {
             // TF-05: on site, showing is sending. The draft is issued as it's handed over, no second step.
-            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { Task { await handToCustomer() } }
+            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy, height: 52) { Task { await handToCustomer() } }
         } else if let record, record.status == "draft", session.can("estimate.send", feature: "estimates") {
-            PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy) { action = "Send"; confirm = true }
+            PaperActionBar(title: "Send estimate", symbol: "paperplane", busy: busy, height: 52) { action = "Send"; confirm = true }
         } else if let record, record.status == "sent", canShowSent(record) {
             // On site, the next step is the customer's yes: hand them the options to choose and sign.
             // Options (and estimates without a job) are signed through an issued link, which needs estimate.send.
-            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy) { Task { await presentToCustomer() } }
+            PaperActionBar(title: "Show customer", symbol: "iphone", busy: busy, height: 52) { Task { await presentToCustomer() } }
         }
     }
 
@@ -1831,37 +1831,29 @@ func invoicesSummary(_ invoices: [InvoiceRecord]) -> String {
 }
 
 /// Paper 20E/20F's search field: a card well 48 tall, radius 14, the magnifier and 16pt words.
-struct DocumentSearchField: View {
+/// The shared `PaperSearchInput` draws it (one face with `PaperSearchBar`); this name stays for
+/// the document lists. Pass `filter` where the list has one (Paper's 40pt circle at the right).
+struct DocumentSearchField<Filter: View>: View {
     @Binding var text: String
     /// Spoken name of the field ("Search estimates").
     let label: String
+    @ViewBuilder var filter: Filter
 
     var body: some View {
-        HStack(spacing: 8) {
-            PaperIcon(.documentSearch, size: 18, color: Theme.muted).accessibilityHidden(true)
-            TextField(label, text: $text, prompt: .placeholder("Search or ask"))
-                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .submitLabel(.search)
-            if !text.isEmpty {
-                Button { text = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear search")
-            }
-        }
-        .padding(.leading, 14).padding(.trailing, text.isEmpty ? 14 : 2)
-        .frame(minHeight: 48)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 2)
+        PaperSearchInput(text: $text, label: label) { filter }
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 2)
+    }
+}
+
+extension DocumentSearchField where Filter == EmptyView {
+    init(text: Binding<String>, label: String) {
+        self.init(text: text, label: label) { EmptyView() }
     }
 }
 
 extension PaperGlyph {
     /// Paper 20E/20F's 18pt magnifier: a 5.5 circle and its handle, 1.6 strokes.
-    static let documentSearch = PaperGlyph(box: 18, [.circle(8, 8, 5.5, 1.6), .stroke("M12.2 12.2L15.5 15.5", 1.6)])
+    static let documentSearch = PaperGlyph.searchField
 }
 
 /// Paper 20E/20F's document row on a card: the customer and the amount in 16 Semibold, the

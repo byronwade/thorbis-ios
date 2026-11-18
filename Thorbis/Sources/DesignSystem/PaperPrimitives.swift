@@ -30,6 +30,65 @@ extension Theme {
 
 // MARK: - Search and filter field
 
+/// The typed-in twin of `PaperSearchBar`: the same card well, magnifier and 16pt "Search or ask",
+/// but the words are a real field that narrows the list under it (Paper 20E Estimates, 20F
+/// Invoices, 55 Team). With a `filter` it takes Paper 87A's measures (46 tall, 12 leading, the
+/// 40pt circle 6 from the right); alone it is 20E's 48-tall well.
+///
+///     PaperSearchInput(text: $search, label: "Search estimates") {
+///         Button { showFilters = true } label: { PaperFilterCircle(active: filtered) }
+///     }
+///     .paperCardMargin()
+struct PaperSearchInput<Filter: View>: View {
+    @Binding var text: String
+    /// Spoken name of the field ("Search estimates").
+    let label: String
+    var placeholder = "Search or ask"
+    @ViewBuilder var filter: Filter
+
+    private var hasFilter: Bool { Filter.self != EmptyView.self }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Group {
+                if hasFilter { PaperIcon(.search, size: 18, color: Theme.muted) }
+                else { PaperIcon(.searchField, size: 18, color: Theme.muted) }
+            }
+            .accessibilityHidden(true)
+            TextField(label, text: $text, prompt: .placeholder(placeholder))
+                .font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                .submitLabel(.search)
+            if !text.isEmpty {
+                Button { text = "" } label: {
+                    PaperIcon(.close, size: 12, color: Theme.muted)
+                        .frame(width: 22, height: 22).background(Theme.quietFill, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Clear search")
+            }
+            // The circle's 44pt target overhangs its 40pt face by 2, so 4 + 2 is Paper's 6.
+            if hasFilter { filter.padding(.leading, -2) }
+        }
+        .padding(.leading, hasFilter ? 12 : 14)
+        .padding(.trailing, hasFilter ? 4 : (text.isEmpty ? 14 : 2))
+        .frame(minHeight: hasFilter ? 46 : 48)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+extension PaperSearchInput where Filter == EmptyView {
+    init(text: Binding<String>, label: String, placeholder: String = "Search or ask") {
+        self.init(text: text, label: label, placeholder: placeholder) { EmptyView() }
+    }
+}
+
+extension PaperGlyph {
+    /// Paper 20E/20F's 18pt magnifier: a 5.5 circle and its handle, 1.6 strokes.
+    static let searchField = PaperGlyph(box: 18, [.circle(8, 8, 5.5, 1.6), .stroke("M12.2 12.2L15.5 15.5", 1.6)])
+}
+
 /// A filter shown in the search field as a brand chip; × takes it off.
 struct PaperFilterChip: Identifiable {
     let id: String

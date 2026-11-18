@@ -913,7 +913,7 @@ private struct SearchScreen: View {
             HStack(alignment: .center, spacing: 12) {
                 if !stacked { leadingMark(hit) }
                 VStack(alignment: .leading, spacing: 2) {
-                    PaperHighlight.text(hit.title, words: terms.marks).font(Theme.font(16, weight: .medium))
+                    PaperHighlight.text(hit.title, words: terms.marks, size: 16).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(hit.dimmed ? Theme.muted : Theme.foreground)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)

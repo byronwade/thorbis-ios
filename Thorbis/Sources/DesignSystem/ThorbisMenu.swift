@@ -706,10 +706,8 @@ struct ThorbisMenuCard: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
+                PaperIcon(.chevronRight, size: 16, color: Theme.muted)
                     .frame(width: 24)
-                    .accessibilityHidden(true)
             }
             .padding(.leading, 16).padding(.trailing, 12).padding(.vertical, 12)
             .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)

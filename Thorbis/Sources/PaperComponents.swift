@@ -37,6 +37,9 @@ struct PaperHeader: View {
     var filterActive = false
     /// Tab roots show the shell's + (New job / estimate / customer) beside the filter.
     var showsCreate = false
+    /// Paper 52 / 58 / 59: dashboards and money pages carry Search as the top-right circle (44pt
+    /// card circle, 20pt glyph). Opens the shell's Search; absent where the shell offers none.
+    var showsSearch = false
     /// A screen-specific identifier for the title (e.g. `schedule-title`), so tests find this place
     /// whatever its title reads ("Today", "This week", "Board").
     var titleIdentifier: String? = nil
@@ -50,8 +53,17 @@ struct PaperHeader: View {
     /// Set by the phone shell on a place's root only, so pushed screens never offer the drawer.
     @Environment(\.paperDrawer) private var drawer
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.paperSearch) private var search
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     private var showsMenuButton: Bool { menuButtonSetting || drawer != nil }
+    /// Paper 87A / 77: a page without the header's own top row (the menu circle or Back sits in
+    /// the navigation bar) carries its circles at that bar's right, 44pt, never beside the title.
+    /// A wide iPad column has no bar of its own, so there they stay beside the title.
+    private var circlesInBar: Bool { !showsMenuButton && sizeClass != .regular }
+    private var hasCircles: Bool {
+        (showsSearch && search != nil) || (showsCreate && create != nil) || filter != nil || !(filterMenu ?? []).isEmpty
+    }
 
     var body: some View {
         // Paper 18 / 20: the 44pt circles 16 from the screen's edges; 14 under them the title
@@ -69,6 +81,7 @@ struct PaperHeader: View {
                     }
                     Spacer(minLength: 0)
                     filterButton
+                    searchButton
                     createButton
                 }
                 .frame(minHeight: 44)
@@ -83,8 +96,9 @@ struct PaperHeader: View {
                     .accessibilityAddTraits(.isHeader)
                     .modifier(OptionalIdentifier(identifier: titleIdentifier))
                 Spacer(minLength: 0)
-                if !showsMenuButton {
+                if !showsMenuButton && !circlesInBar {
                     filterButton
+                    searchButton
                     createButton
                 }
             }
@@ -103,6 +117,27 @@ struct PaperHeader: View {
         }
         .foregroundStyle(Theme.foreground)
         .padding(.horizontal, Theme.gutter).padding(.top, showsMenuButton ? 2 : 12).padding(.bottom, 14)
+        .toolbar {
+            if circlesInBar && hasCircles {
+                ThorbisToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 8) {
+                        filterButton
+                        searchButton
+                        createButton
+                    }
+                }
+            }
+        }
+    }
+
+    /// Paper 52 / 58 / 59: Search, the 44pt card circle with the 20pt glyph.
+    @ViewBuilder private var searchButton: some View {
+        if showsSearch, let search {
+            Button(action: search.run) { CreamCircleLabel(symbol: "magnifyingglass", glyph: .search) }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Search")
+                .accessibilityIdentifier("header-search")
+        }
     }
 
     /// The tab root's +. Several creates open the create menu; a long press lists them directly.
@@ -562,24 +597,47 @@ struct PaperActionBar<Secondary: View>: View {
     var busy = false
     var disabled = false
     var disabledReason: String? = nil
+    /// Paper 35C: one 13pt muted line centred above the pill, saying what the commit will do
+    /// ("Nudge texts Nikolai a friendly check-in.").
+    var hint: String? = nil
+    /// The pill's height. Paper's sheets and editors use 50 (15 Semibold); the estimate and
+    /// invoice pages (35C / 40C) use 52 with a 17 Semibold word and an 18pt glyph.
+    var height: CGFloat = Theme.commitHeight
     var ground: Color = Theme.background
     var identifier: String? = nil
     let action: () -> Void
     @ViewBuilder var secondary: Secondary
 
+    private var large: Bool { height >= 52 }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let hint, !hint.isEmpty {
+                Text(hint).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
             HStack(spacing: 8) {
                 Button(action: action) {
-                    HStack(spacing: 7) {
-                        if busy { ProgressView().tint(.white) } else if let symbol { Image(systemName: symbol).font(.subheadline.weight(.medium)).accessibilityHidden(true) }
-                        Text(title)
+                    HStack(spacing: large ? 8 : 7) {
+                        if busy {
+                            ProgressView().tint(.white)
+                        } else if let symbol {
+                            // Paper's own mark where it draws one; the symbol otherwise.
+                            if let glyph = PaperGlyph.chrome(symbol: symbol) {
+                                PaperIcon(glyph, size: large ? 18 : 16, color: .white)
+                            } else {
+                                Image(systemName: symbol).font(.system(size: large ? 16 : 15, weight: .medium)).accessibilityHidden(true)
+                            }
+                        }
+                        Text(title).font(Theme.font(large ? 17 : 16, weight: .semibold))
                     }
-                    .inkCommit(enabled: !disabled)
+                    .inkCommit(enabled: !disabled, height: height)
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy || disabled)
-                .accessibilityHint(disabled ? (disabledReason ?? "") : "")
+                .accessibilityHint(disabled ? (disabledReason ?? "") : (hint ?? ""))
                 .modifier(OptionalIdentifier(identifier: identifier))
                 secondary
             }
@@ -589,16 +647,17 @@ struct PaperActionBar<Secondary: View>: View {
                     .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 10).padding(.bottom, 8)
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.top, hint == nil ? 10 : 12).padding(.bottom, 8)
         .background(ground)
     }
 }
 
 extension PaperActionBar where Secondary == EmptyView {
     init(title: String, symbol: String? = nil, busy: Bool = false, disabled: Bool = false, disabledReason: String? = nil,
+         hint: String? = nil, height: CGFloat = Theme.commitHeight,
          ground: Color = Theme.background, identifier: String? = nil, action: @escaping () -> Void) {
         self.init(title: title, symbol: symbol, busy: busy, disabled: disabled, disabledReason: disabledReason,
-                  ground: ground, identifier: identifier, action: action) { EmptyView() }
+                  hint: hint, height: height, ground: ground, identifier: identifier, action: action) { EmptyView() }
     }
 }
 
@@ -1063,10 +1122,8 @@ struct FloatingCreateButton: View {
 /// Row disclosure chevron: one size, weight and colour for every tappable row.
 struct PaperDisclosure: View {
     var body: some View {
-        Image(systemName: "chevron.right")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(Theme.muted)
-            .accessibilityHidden(true)
+        // Paper 76 / 67: the 14pt chevron, 1.5 stroke, muted.
+        PaperIcon(.chevronRightSmall, size: 14, color: Theme.muted)
     }
 }
 
@@ -1475,7 +1532,7 @@ struct PaperListRow<Trailing: View>: View {
         layout {
             leadingView
             VStack(alignment: .leading, spacing: 2) {
-                PaperHighlight.text(title, words: highlight).font(Theme.font(16, weight: .medium))
+                PaperHighlight.text(title, words: highlight, size: 16).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(dimmed ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1542,10 +1599,10 @@ struct PaperListRow<Trailing: View>: View {
     }
 }
 
-/// The matched part of a search row: a quiet fill behind it and full ink, never a second accent.
-/// Inter carries only 400 and 500 here, so weight cannot mark it.
+/// The matched part of a search row (Paper 76 Search: "18 Juniper Circle"): the brand text colour
+/// in Semibold, never a fill behind it. `size` is the row line's own size (16 title, 14 line).
 enum PaperHighlight {
-    static func text(_ string: String, words: [String]) -> Text {
+    static func text(_ string: String, words: [String], size: CGFloat = 14) -> Text {
         guard !words.isEmpty else { return Text(verbatim: string) }
         var attributed = AttributedString(string)
         for word in words where !word.isEmpty {
@@ -1556,8 +1613,8 @@ enum PaperHighlight {
                 let startsWord = range.lowerBound == attributed.startIndex
                     || !(attributed.characters[attributed.characters.index(before: range.lowerBound)].isLetter)
                 guard word.count > 2 || startsWord else { start = range.upperBound; continue }
-                attributed[range].backgroundColor = Theme.muted.opacity(0.22)
-                attributed[range].foregroundColor = Theme.foreground
+                attributed[range].foregroundColor = Theme.brandText
+                attributed[range].font = Theme.font(size, weight: .semibold)
                 start = range.upperBound
             }
         }
@@ -1619,10 +1676,9 @@ struct PaperSection<Content: View, Accessory: View>: View {
                 HStack(alignment: .center, spacing: 8) {
                     Button { withMotion { collapsed.wrappedValue.toggle() } } label: {
                         HStack(alignment: .center, spacing: 6) {
-                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                            // Paper 58 "Needs your attention": the 12pt chevron, 1.5 stroke, muted.
+                            PaperIcon(.chevronDown, size: 12, color: Theme.muted)
                                 .rotationEffect(.degrees(collapsed.wrappedValue ? -90 : 0))
-                                .frame(width: 12, height: 12)
-                                .accessibilityHidden(true)
                             Text(title).font(Theme.font(13, weight: .semibold))
                                 .multilineTextAlignment(.leading)
                                 .fixedSize(horizontal: false, vertical: true)
