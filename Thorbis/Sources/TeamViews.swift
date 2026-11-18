@@ -119,6 +119,7 @@ struct TeamView: View {
     @State private var notice: String?
     @State private var removing: RoleMember?
     @State private var openingInvite: TeamInvitation?
+    @State private var showingRoles = false
     private var canInvite: Bool { session.can("organization.members.manage") }
     /// Changing someone's access needs both owner capabilities, the same pair the server checks.
     private var canManage: Bool {
@@ -285,6 +286,15 @@ struct TeamView: View {
             #if DEBUG
             // Screenshots of the pushed screens: the first custom role, the first person who is not the owner.
             if PaperPreview.enabled, PaperPreview.screen == "role-editor" { editingRoleID = customRoles.first?.id }
+            if PaperPreview.enabled, PaperPreview.screen == "team-roles" { showingRoles = true }
+            if PaperPreview.enabled, PaperPreview.screen == "team-invite-detail" {
+                // Screenshot only: the fixtures carry no pending invite.
+                openingInvite = invitations.first ?? TeamInvitation(
+                    id: "preview-invite", email: "ana@wadesplumbing.com", role: "apprentice", status: "pending",
+                    createdAt: ISO8601DateFormatter().string(from: .now.addingTimeInterval(-86_400)),
+                    expiresAt: ISO8601DateFormatter().string(from: .now.addingTimeInterval(6 * 86_400)))
+            }
+            if PaperPreview.enabled, PaperPreview.screen == "member-offboard" { opening = members.first { !$0.member.isLegalOwner } }
             if PaperPreview.enabled, PaperPreview.screen == "member-access" { opening = members.first { !$0.member.isLegalOwner } }
             #endif
         }
@@ -297,6 +307,9 @@ struct TeamView: View {
         }, onError: { message in error = message })
         .thorbisDestination(item: $opening) { member in
             MemberAccessView(member: member) { await load() }
+        }
+        .thorbisDestination(isPresented: $showingRoles) {
+            TeamRolesView(members: members, roles: customRoles) { await load() }
         }
         .thorbisDestination(item: $editingRoleID) { id in
             RoleEditorView(roleID: id, memberCount: customRoles.first { $0.id == id }.map(roleCount)) { await load() }
@@ -360,13 +373,10 @@ extension TeamView {
         }
     }
 
-    /// Paper 62's •••: each role's editor, then New role.
+    /// Paper 62's •••: the Roles page (Paper 61D, each role into its editor), then New role.
     fileprivate var roleItems: [ThorbisMenuItem] {
-        customRoles.map { role in
-            let count = roleCount(role)
-            return ThorbisMenuItem(role.revision.name, icon: "person.badge.key",
-                                   subtitle: "\(count) \(count == 1 ? "person" : "people") · edit what it can do") { editingRoleID = role.id }
-        } + [ThorbisMenuItem("New role", icon: "plus") { newRoleName = ""; naming = true }]
+        [ThorbisMenuItem("Roles", icon: "person.badge.key", subtitle: "What each role can see and do") { showingRoles = true },
+         ThorbisMenuItem("New role", icon: "plus") { newRoleName = ""; naming = true }]
     }
 
     /// Paper 62 Invited: a dashed initial, the email, when it was sent, and "Pending" in the warning
@@ -460,6 +470,11 @@ private enum TeamInviteCopy {
         return "Invite sent \(sent.formatted(.relative(presentation: .named)))"
     }
 
+    /// Paper 62D: "Sent yesterday". Who sent it is not on the invitation, so the name is left out.
+    static func sentShort(_ invitation: TeamInvitation) -> String? {
+        JobFiltering.date(invitation.createdAt).map { "Sent \($0.formatted(.relative(presentation: .named)))" }
+    }
+
     static func day(_ raw: String) -> String? {
         JobFiltering.date(raw).map { $0.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) }
     }
@@ -529,48 +544,61 @@ private struct TeamInviteDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Paper 62D: the title is 28 Bold.
-                    Text(invitation.email)
-                        .font(Theme.heading()).tracking(-0.56)
-                        .lineLimit(1).minimumScaleFactor(0.5)
-                        .accessibilityAddTraits(.isHeader)
+                TeamDetailTitle(title: invitation.email) {
                     HStack(spacing: 8) {
                         Text("Invite pending").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.warning)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .padding(.horizontal, 10).frame(minHeight: 24)
                             .background(Theme.warningSurface, in: Capsule())
-                        Text(TeamInviteCopy.sentLine(invitation)).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if let sent = TeamInviteCopy.sentShort(invitation) {
+                            Text(sent).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 14).padding(.bottom, 16)
-                PaperCard {
-                    detailRow("Role", invitation.roleLabel)
-                    WellDivider()
-                    detailRow("Sent to", invitation.email)
-                    if let expires = TeamInviteCopy.day(invitation.expiresAt) {
-                        WellDivider()
-                        detailRow("Link works until", expires)
+                VStack(alignment: .leading, spacing: 12) {
+                    // Paper 62D: who it is for and how long the link works. Whether the link was
+                    // opened is not something the server reports, so the line says what is known.
+                    HStack(alignment: .center, spacing: 12) {
+                        Text(String(invitation.email.prefix(1)).uppercased())
+                            .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.subtle)
+                            .frame(width: 44, height: 44).background(Theme.fill, in: Circle())
+                            .dynamicTypeSize(...DynamicTypeSize.large)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text("Not accepted yet").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            if let expires = TeamInviteCopy.day(invitation.expiresAt) {
+                                Text("Link works until \(expires)").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                .paperCardMargin()
-                if let error { ErrorBanner(message: error).padding(.top, 12) }
-                Button { confirmRevoke = true } label: {
-                    HStack(spacing: 8) {
-                        if busy { ProgressView() }
-                        Text("Revoke invite")
+                    .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 14)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .accessibilityElement(children: .combine)
+                    TeamCard {
+                        detailRow("Role", RolePickerSheet.name(for: invitation.role) ?? invitation.roleLabel)
+                        WellDivider(leading: 0)
+                        detailRow("Sent to", invitation.email)
                     }
-                    .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
-                    .frame(maxWidth: .infinity, minHeight: 50)
-                    .contentShape(Rectangle())
+                    if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
+                    Button { confirmRevoke = true } label: {
+                        HStack(spacing: 8) {
+                            if busy { ProgressView() }
+                            Text("Revoke invite")
+                        }
+                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.destructive)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy)
+                    Text("Revoking turns off the link right away. They won't be told.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
                 }
-                .buttonStyle(PressStyle())
-                .disabled(busy)
                 .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 16)
-                Text("Revoking turns off the link right away.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, Theme.gutter).padding(.top, 8)
             }
             .padding(.bottom, 32)
         }
@@ -582,10 +610,17 @@ private struct TeamInviteDetailView: View {
                         actions: [ThorbisConfirmAction("Revoke invite", role: .destructive) { Task { await revoke() } }])
     }
 
+    /// Paper 62D: the label in ink, its answer in the muted tone, both 16.
     private func detailRow(_ label: String, _ value: String) -> some View {
-        PaperDetailRow(label, value: value)
-            .padding(.horizontal, PaperCardMetrics.inset)
-            .frame(minHeight: 52)
+        HStack(alignment: .center, spacing: 8) {
+            Text(label).font(Theme.font(16)).foregroundStyle(Theme.foreground).fixedSize()
+            Text(value).font(Theme.font(16)).foregroundStyle(Theme.muted)
+                .lineLimit(1).minimumScaleFactor(0.7).truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal, PaperCardMetrics.inset)
+        .frame(minHeight: 52)
+        .accessibilityElement(children: .combine)
     }
 
     private func revoke() async {
