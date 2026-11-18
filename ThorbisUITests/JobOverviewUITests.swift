@@ -392,32 +392,54 @@ final class JobOverviewUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Job actions"].exists)
     }
 
-    func testMoreKeepsEverySecondaryActionAndOpensScheduling() {
+    /// Paper 21K trims More to its eight rows; every action it no longer carries stays one tap from
+    /// its door on Job details: the clock chip (Reschedule), the person chip (Reassign technician),
+    /// the Share circle (Add to Calendar, Customer view, Copy job ID). More keeps Wrap up's closeout
+    /// checklist while the bar is not carrying it.
+    func testEverySecondaryActionKeepsADoorAndSchedulingOpens() {
         continueAfterFailure = false
         let app = preview("job", working: true)
         // The financial step appears only after the job's paper finishes loading.
-        // Open the menu on the loaded record, rather than during its initial redraws.
-        // Paper 21: Overview carries no payment step; Money's spoken label has the balance once it loads.
         XCTAssertTrue(thorbisJobBalanceLoaded(app, "$340.00").waitForExistence(timeout: 20))
         let more = app.buttons["Job actions"]
         XCTAssertTrue(more.waitForExistence(timeout: 15))
         more.tap()
-
-        // "Wrap up," is the menu's row ("Wrap up, Closeout checklist"), never the bar's "Wrap up · 3 left".
-        for title in ["Reschedule", "Add to Calendar", "Reassign technician", "Wrap up,", "Follow-ups", "Customer view", "Copy job ID"] {
-            // The header door shares the name; check the menu's own row.
-            let action = title == "Customer view" ? thorbisCustomerViewMenuItem(app) : button(startingWith: title, in: app)
-            XCTAssertTrue(action.waitForExistence(timeout: 5), "Missing secondary action: \(title)")
-            // Paper 21K / F8: the menu is a bottom sheet (a lead card, then the rows in cards). A long
-            // one opens at half height and scrolls; reach each row with short drags, either way.
+        for title in ["Time and profit", "At this address", "Wrap up,"] {
+            let action = button(startingWith: title, in: app)
+            XCTAssertTrue(action.waitForExistence(timeout: 5), "Missing More row: \(title)")
             revealMenuRow(action, in: app)
-            XCTAssertTrue(action.isHittable, "Secondary action is unreachable: \(title)")
+            XCTAssertTrue(action.isHittable, "More row is unreachable: \(title)")
+        }
+        for title in ["Reschedule", "Add to Calendar", "Customer view", "Copy job ID"] {
+            XCTAssertFalse(button(startingWith: title, in: app).exists, "\(title) moved out of More (Paper 21K)")
         }
         capture(app, name: "Job More menu")
+        app.buttons["Close"].firstMatch.tap()
 
-        revealMenuRow(app.buttons["Reschedule"], in: app)
-        XCTAssertTrue(app.buttons["Reschedule"].isHittable, "Reschedule must be back in reach")
-        app.buttons["Reschedule"].tap()
+        // The Share circle's sheet.
+        let share = app.buttons["job-share"]
+        XCTAssertTrue(share.waitForExistence(timeout: 5)); share.tap()
+        for title in ["Share job", "Customer view", "Add to Calendar", "Copy job ID"] {
+            let action = button(startingWith: title, in: app)
+            XCTAssertTrue(action.waitForExistence(timeout: 5), "Missing Share row: \(title)")
+            revealMenuRow(action, in: app)
+            XCTAssertTrue(action.isHittable, "Share row is unreachable: \(title)")
+        }
+        capture(app, name: "Job Share sheet")
+        app.buttons["Close"].firstMatch.tap()
+
+        // The person chip assigns.
+        let assignee = app.buttons["job-assignee"]
+        XCTAssertTrue(assignee.waitForExistence(timeout: 5))
+        XCTAssertTrue(assignee.label.hasPrefix("Reassign technician"), assignee.label)
+
+        // The clock chip reschedules.
+        let when = app.buttons["job-when"]
+        XCTAssertTrue(when.waitForExistence(timeout: 5)); reveal(when, in: app)
+        when.tap()
+        let reschedule = app.buttons["Reschedule"]
+        XCTAssertTrue(reschedule.waitForExistence(timeout: 5))
+        reschedule.tap()
         XCTAssertTrue(app.buttons["Save schedule"].waitForExistence(timeout: 5))
         // Paper 25: the schedule sheet closes from its Close circle.
         app.buttons["Close"].firstMatch.tap()

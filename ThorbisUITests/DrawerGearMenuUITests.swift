@@ -11,7 +11,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-role", "office"]
         app.launch()
         _ = id
-        // Paper 21: the job's bar is Back, Share and More; the favorite is a row in More, which
+        // Paper 21: the job's bar is Back, Share and More; the favorite is a row of the Share circle's sheet, which
         // closes on each choice and reads the new state when opened again.
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 30))
         var row = thorbisJobFavoriteRow(app)

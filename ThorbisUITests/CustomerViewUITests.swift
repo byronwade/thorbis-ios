@@ -15,9 +15,9 @@ final class CustomerViewUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
-        // Paper 21K: the job's Customer view door is a row in More.
+        // Paper 21K trims More: the job's Customer view door is a row of the Share circle's sheet.
         let door = thorbisCustomerViewDoor(app)
-        XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one Customer view door in More")
+        XCTAssertTrue(door.waitForExistence(timeout: 20), "The job needs one Customer view door")
         XCTAssertTrue(door.label.hasPrefix("Customer view"), door.label)
         door.tap()
         XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 10))
@@ -101,7 +101,7 @@ final class CustomerViewUITests: XCTestCase {
 
     func testChangedDetailsStillGoThroughStaffReviewAfterHandBack() {
         let app = launch()
-        // Paper 21K: the door is More › Customer view.
+        // Paper 21K: the door is Share › Customer view.
         let door = thorbisCustomerViewDoor(app)
         XCTAssertTrue(door.waitForExistence(timeout: 20))
         door.tap()

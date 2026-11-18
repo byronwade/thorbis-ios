@@ -12,7 +12,7 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
     func testOnsiteShortcutOpensOnlyThisJobsCustomerDocuments() {
         continueAfterFailure = false
         let app = open()
-        // Paper 21K / F8: the job's one customer door is More › Customer view, on site included.
+        // Paper 21K / F8: the job's one customer door is Share › Customer view, on site included.
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
         let shortcut = thorbisCustomerViewDoor(app)
         XCTAssertTrue(shortcut.waitForExistence(timeout: 10))
@@ -47,7 +47,7 @@ final class JobOnsiteCustomerShortcutUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-job-documents", "--paper-preview-owner-auth", "approved"]
         app.launch()
         XCTAssertTrue(app.staticTexts["job-title"].waitForExistence(timeout: 30))
-        // A job not yet on its visit keeps the same door: More › Customer view.
+        // A job not yet on its visit keeps the same door: Share › Customer view.
         let door = thorbisCustomerViewDoor(app)
         XCTAssertTrue(door.waitForExistence(timeout: 10))
         door.tap()

@@ -129,8 +129,9 @@ final class CommsInboxUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job"]
         app.launch()
-        let actions = app.buttons["Job actions"]
-        XCTAssertTrue(actions.waitForExistence(timeout: 20)); actions.tap()
+        // Paper 21K trims More; Email customer is a row of the header's Share circle sheet.
+        let share = app.buttons["job-share"]
+        XCTAssertTrue(share.waitForExistence(timeout: 20)); share.tap()
         let email = app.buttons["Email customer"]
         XCTAssertTrue(email.waitForExistence(timeout: 10)); email.tap()
         let to = app.textFields["inbox-mail-to"]
