@@ -269,17 +269,23 @@ struct CommsInboxView: View {
 
     /// One row of chips, one on at a time; it scrolls sideways when large text needs the room.
     private var chipRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(CommsInboxFilter.available(access)) { item in
-                    PaperChoiceChip(title: item.title, isOn: moreFilter == nil && chip == item) { choose(item) }
-                        .accessibilityIdentifier("inbox-filter-\(item.rawValue)")
-                        .accessibilityHint("Shows \(item == .all ? "everything in Messages" : item.title.lowercased())")
+        ScrollViewReader { reader in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(CommsInboxFilter.available(access)) { item in
+                        PaperChoiceChip(title: item.title, isOn: moreFilter == nil && chip == item) { choose(item) }
+                            .id(item)
+                            .accessibilityIdentifier("inbox-filter-\(item.rawValue)")
+                            .accessibilityHint("Shows \(item == .all ? "everything in Messages" : item.title.lowercased())")
+                    }
                 }
+                .padding(.horizontal, PaperCardMetrics.margin)
             }
-            .padding(.horizontal, PaperCardMetrics.margin)
+            .scrollClipDisabled()
+            // The chip that is on is always in sight, the last one included.
+            .onAppear { reader.scrollTo(chip) }
+            .onChange(of: chip) { _, next in withAnimation(.snappy) { reader.scrollTo(next) } }
         }
-        .scrollClipDisabled()
         .accessibilityIdentifier("inbox-filters")
     }
 
@@ -309,7 +315,7 @@ struct CommsInboxView: View {
             items.append(ThorbisMenuItem(item.title, icon: item.symbol, isSelected: moreFilter == item,
                                          startsGroup: item == lenses.first(where: \.isFolder) && !items.isEmpty) { choose(item) })
         }
-        return ThorbisMenu(items: items, title: "Messages", accessibilityLabel: "More for Messages") {
+        return ThorbisMenu(items: items, title: "Messages", accessibilityLabel: "More for Messages", opensOnAppear: Self.previewOpensMore) {
             CreamCircleLabel(symbol: "ellipsis")
         }
         .accessibilityIdentifier("inbox-more-menu")
@@ -671,6 +677,15 @@ struct CommsInboxView: View {
         }
         if more != nil && !CommsInboxMoreFilter.available(access).contains(more!) { more = nil }
         return (chips.contains(chip) ? chip : .all, more)
+    }
+
+    /// `--paper-preview-inbox-more`: opens the header's "…" for a screenshot.
+    private static var previewOpensMore: Bool {
+        #if DEBUG
+        return PaperPreview.enabled && ProcessInfo.processInfo.arguments.contains("--paper-preview-inbox-more")
+        #else
+        return false
+        #endif
     }
 
     /// `--paper-preview-inbox-thread calls|text|email`: opens that sample conversation.
