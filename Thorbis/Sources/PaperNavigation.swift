@@ -209,9 +209,12 @@ struct RootView: View {
                                        rowsBuilt: drawerOpen || drawerDrag != 0 || drawerSettling,
                                        visible: drawerOpen || drawerDrag != 0),
                                 width: width, full: full)
+                        // It comes in from the left edge growing the last few percent and
+                        // clearing as it lands, so it reads as arriving rather than being shoved.
+                        .scaleEffect(0.96 + 0.04 * progress, anchor: .leading)
                         .offset(x: -travel * (1 - progress))
                         .simultaneousGesture(closeDrag(width: travel))
-                        .opacity(progress > 0 ? 1 : 0)
+                        .opacity(Double(min(1, progress * 3)))
                         .accessibilityHidden(!drawerOpen)
                         .allowsHitTesting(drawerOpen)
                 } else if drawerOpen {
@@ -244,8 +247,24 @@ struct RootView: View {
         }
     }
 
-    private var drawerAnimation: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.4, dampingFraction: 0.9)
+    /// Opening lands with a small settle; closing is quicker and has none, so the place is back
+    /// under the thumb at once. A release mid-drag carries the finger's speed into the spring.
+    private var drawerAnimation: Animation { drawerSpring(opening: true) }
+
+    private func drawerSpring(opening: Bool, velocity: CGFloat = 0) -> Animation {
+        if reduceMotion { return .easeInOut(duration: 0.2) }
+        if velocity != 0 {
+            return .interpolatingSpring(mass: 1, stiffness: opening ? 260 : 320, damping: opening ? 27 : 34,
+                                        initialVelocity: Double(max(-12, min(12, velocity))))
+        }
+        return opening ? .spring(duration: 0.36, bounce: 0.14) : .spring(duration: 0.26, bounce: 0)
+    }
+
+    /// The finger's speed at release as the spring wants it: points a second over the distance
+    /// still to travel. `predictedEndTranslation` is roughly a quarter second ahead.
+    private func releaseVelocity(translation: CGFloat, predicted: CGFloat, remaining: CGFloat) -> CGFloat {
+        guard remaining > 1 else { return 0 }
+        return abs((predicted - translation) * 4) / remaining
     }
 
     /// The drawer as Paper's panel: radius 30 on its own fill, a 1pt border and a deep shadow,
@@ -270,6 +289,8 @@ struct RootView: View {
         phonePlaces()
             // Paper 18A: the bottom bar floats over the place, dims with it under the drawer.
             .overlay(alignment: .bottom) { tabBarOverlay }
+            // The place gives a little as the menu arrives: depth, without leaving its spot.
+            .offset(x: reduceMotion ? 0 : 14 * progress)
             .accessibilityHidden(drawerOpen)
             .overlay {
                 Color.black.opacity(DrawerPanel.scrim(dark: colorScheme == .dark) * progress)
@@ -361,16 +382,19 @@ struct RootView: View {
             .onEnded { value in
                 let open = DrawerMotion.settlesOpen(wasOpen: false, translation: value.translation.width,
                                                     predicted: value.predictedEndTranslation.width, width: width)
-                if open { openDrawer() } else { settleShut { drawerDrag = 0 } }
+                let moved = min(width, max(0, value.translation.width))
+                let speed = releaseVelocity(translation: value.translation.width, predicted: value.predictedEndTranslation.width,
+                                            remaining: open ? width - moved : moved)
+                if open { openDrawer(velocity: speed) } else { settleShut(velocity: speed) { drawerDrag = 0 } }
             }
     }
 
     /// Runs the closing change on the drawer's spring and keeps the contents built until it lands.
     /// `.removed` never fires: rows stay in the tree while `drawerSettling` is true, so the
     /// completion that clears that flag would wait on a removal that cannot happen.
-    private func settleShut(_ change: () -> Void) {
+    private func settleShut(velocity: CGFloat = 0, _ change: () -> Void) {
         drawerSettling = true
-        withAnimation(drawerAnimation, completionCriteria: .logicallyComplete) {
+        withAnimation(drawerSpring(opening: false, velocity: velocity), completionCriteria: .logicallyComplete) {
             change()
         } completion: {
             if !drawerOpen && drawerDrag == 0 { drawerSettling = false }
@@ -387,14 +411,17 @@ struct RootView: View {
                 guard drawerOpen else { return }
                 let open = DrawerMotion.settlesOpen(wasOpen: true, translation: drawerDrag,
                                                     predicted: drawerDrag == 0 ? 0 : value.predictedEndTranslation.width, width: width)
-                if open { withAnimation(drawerAnimation) { drawerDrag = 0 } } else { closeDrawer() }
+                let speed = releaseVelocity(translation: value.translation.width, predicted: value.predictedEndTranslation.width,
+                                            remaining: open ? abs(drawerDrag) : width - abs(drawerDrag))
+                if open { withAnimation(drawerSpring(opening: true, velocity: speed)) { drawerDrag = 0 } }
+                else { closeDrawer(velocity: speed) }
             }
     }
 
-    private func openDrawer() {
+    private func openDrawer(velocity: CGFloat = 0) {
         if barSearching { closeBarSearch() }
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        withAnimation(drawerAnimation) {
+        withAnimation(drawerSpring(opening: true, velocity: velocity)) {
             drawerOpen = true
             drawerDrag = 0
         }
@@ -408,9 +435,9 @@ struct RootView: View {
     }
 
     /// Closes the drawer, then runs `thenRun` (a sheet or search) once the card is back.
-    private func closeDrawer(thenRun: (() -> Void)? = nil) {
+    private func closeDrawer(velocity: CGFloat = 0, thenRun: (() -> Void)? = nil) {
         guard drawerOpen else { thenRun?(); return }
-        settleShut {
+        settleShut(velocity: velocity) {
             drawerOpen = false
             drawerDrag = 0
         }
