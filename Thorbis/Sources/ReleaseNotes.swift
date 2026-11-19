@@ -32,6 +32,8 @@ enum ReleaseNotes {
                       detail: "In Customer view, a customer can pick the estimates they want and approve them all with one signature."),
                 .init(symbol: "checkmark.shield", title: "Each approval is confirmed",
                       detail: "Estimates are approved one at a time. If one can't be confirmed, the run stops and says which need checking."),
+                .init(symbol: "keyboard", title: "Done stays above the keyboard",
+                      detail: "In the price book, Done could sit behind the keyboard after editing a quantity. It now stays in reach."),
             ]
         ),
         ReleaseNote(

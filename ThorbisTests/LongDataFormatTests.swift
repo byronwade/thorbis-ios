@@ -52,3 +52,18 @@ final class ClampedSumTests: XCTestCase {
         XCTAssertEqual(Int.min.addingClamped(1, times: -1), Int.min)
     }
 }
+
+final class KeyboardPinnedBarTests: XCTestCase {
+    private let screen: (height: CGFloat, bottomInset: CGFloat) = (874, 34)
+
+    func testDockedKeyboardLiftsTheBarToItsTop() {
+        let keyboard = CGRect(x: 0, y: 530, width: 402, height: 344)
+        XCTAssertEqual(KeyboardPinnedBarMetrics.overlap(keyboard: keyboard, screen: screen), 310)
+    }
+
+    func testHiddenOrFloatingKeyboardAsksForNothing() {
+        XCTAssertEqual(KeyboardPinnedBarMetrics.overlap(keyboard: CGRect(x: 0, y: 874, width: 402, height: 344), screen: screen), 0)
+        XCTAssertEqual(KeyboardPinnedBarMetrics.overlap(keyboard: CGRect(x: 40, y: 300, width: 320, height: 260), screen: screen), 0)
+        XCTAssertEqual(KeyboardPinnedBarMetrics.overlap(keyboard: .zero, screen: screen), 0)
+    }
+}

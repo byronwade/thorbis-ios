@@ -85,7 +85,7 @@ struct PriceBookCartPicker: View {
         }
         .background(Theme.canvas)
         .paperPageGround()
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        .keyboardPinnedBar {
             // Paper 33: the commit with the keyboard circle beside it. Each "+" has already added its
             // item, so the commit says Done rather than Paper's "Add 1 item · $28.00".
             PaperActionBar(title: added == 0 ? "Done" : "Done · \(added) \(added == 1 ? "item" : "items")",
