@@ -56,20 +56,28 @@ enum AccountDeletionOutcome: Equatable {
     case notAvailable
     case failed(String)
 
-    /// The sign-in check's refusal.
-    init(signInCheck status: Int?) {
-        switch status {
-        case 400, 401, 403, 422: self = .wrongPassword
-        case 429: self = .tooManyTries
-        case 404, 409, 501, 503: self = .notAvailable
+    /// The sign-in check's refusal (POST /v1/account-lifecycle/reauthentications).
+    /// 409 `reauthentication_rejected` is a wrong password; any other 409 or a missing route means
+    /// the server cannot check passwords yet; 401 means the sign-in itself ran out.
+    init(signInCheck status: Int?, code: String? = nil) {
+        switch (status, code) {
+        case (409, "reauthentication_rejected"), (400, _), (422, _): self = .wrongPassword
+        case (429, _): self = .tooManyTries
+        case (401, _): self = .failed("You've been signed out. Nothing was deleted. Sign in again, then try again.")
+        case (404, _), (409, _), (501, _): self = .notAvailable
         default: self = .failed("Thorbis couldn't check your password. Nothing was deleted. Try again.")
         }
     }
 
-    /// The deletion request's refusal.
-    init(status: Int?, detail: String?) {
-        switch status {
-        case 404, 409: self = .notAvailable
+    /// The deletion request's refusal (POST /v1/account-lifecycle/deletion-requests).
+    /// 409 `reauthentication_required` means the password check ran out or was already used.
+    init(status: Int?, detail: String?, code: String? = nil) {
+        switch (status, code) {
+        case (409, "reauthentication_required"):
+            self = .failed("Thorbis needs to check your password again. Nothing was deleted. Try again.")
+        case (429, _): self = .tooManyTries
+        case (401, _): self = .failed("You've been signed out. Nothing was deleted. Sign in again, then try again.")
+        case (404, _), (409, _): self = .notAvailable
         default: self = .failed(detail ?? "Your account wasn't deleted. Try again.")
         }
     }
@@ -334,7 +342,7 @@ struct DeleteAccountSheet: View {
         do {
             proof = try await api.reauthenticateAccount(password: password)
         } catch let problem as Problem {
-            outcome = AccountDeletionOutcome(signInCheck: problem.status)
+            outcome = AccountDeletionOutcome(signInCheck: problem.status, code: problem.code)
             if outcome == .wrongPassword { password = ""; passwordFocused = true }
             return
         } catch is CancellationError {
@@ -350,7 +358,8 @@ struct DeleteAccountSheet: View {
             onRequested(request)
             dismiss()
         } catch let problem as Problem {
-            outcome = AccountDeletionOutcome(status: problem.status, detail: problem.detail)
+            outcome = AccountDeletionOutcome(status: problem.status, detail: problem.detail, code: problem.code)
+            password = ""
         } catch is CancellationError {
             return
         } catch {

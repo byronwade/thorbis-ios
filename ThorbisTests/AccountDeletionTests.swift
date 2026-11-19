@@ -11,8 +11,21 @@ final class AccountDeletionTests: XCTestCase {
         XCTAssertFalse(AccountDeletionOutcome.confirms("DELETE ME"))
     }
 
+    func testServerReasonCodeIsRead() throws {
+        let body = Data(#"{"type":"https://thorbis.com/problems/conflict","title":"conflict","status":409,"category":"conflict","detail":"the password could not be verified","code":"reauthentication_rejected"}"#.utf8)
+        let problem = try JSONDecoder().decode(Problem.self, from: body)
+        XCTAssertEqual(problem.code, "reauthentication_rejected")
+        XCTAssertNil(Problem(title: "x", status: nil, detail: nil).code)
+    }
+
     func testEveryRefusalSaysNothingWasDeleted() {
-        XCTAssertEqual(AccountDeletionOutcome(signInCheck: 401), .wrongPassword)
+        XCTAssertEqual(AccountDeletionOutcome(signInCheck: 409, code: "reauthentication_rejected"), .wrongPassword)
+        XCTAssertEqual(AccountDeletionOutcome(signInCheck: 409, code: "reauthentication_unavailable"), .notAvailable)
+        XCTAssertNotEqual(AccountDeletionOutcome(signInCheck: 401), .wrongPassword, "A lapsed sign-in is not a wrong password")
+        XCTAssertEqual(AccountDeletionOutcome(status: 409, detail: nil, code: "account_lifecycle_policy_unavailable"), .notAvailable)
+        let again = AccountDeletionOutcome(status: 409, detail: "recent reauthentication is required", code: "reauthentication_required")
+        XCTAssertEqual(again.message, "Thorbis needs to check your password again. Nothing was deleted. Try again.")
+        XCTAssertTrue(AccountDeletionOutcome(signInCheck: 401).message?.contains("Nothing was deleted") == true)
         XCTAssertEqual(AccountDeletionOutcome(signInCheck: 429), .tooManyTries)
         XCTAssertEqual(AccountDeletionOutcome(signInCheck: 404), .notAvailable)
         XCTAssertEqual(AccountDeletionOutcome(status: 409, detail: "account lifecycle retention policy is not configured"), .notAvailable)

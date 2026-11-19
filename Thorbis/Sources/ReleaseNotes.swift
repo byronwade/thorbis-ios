@@ -13,6 +13,21 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-19-ready",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "note.text", title: "Notes never post twice",
+                      detail: "A note that timed out while sending is checked on the job before it is sent again."),
+                .init(symbol: "message", title: "Text and Email open your phone's apps",
+                      detail: "Inbox texts and email are put away until Thorbis can send them. Calls and notices stay."),
+                .init(symbol: "wrench.and.screwdriver", title: "Equipment and plans are shared",
+                      detail: "Add a unit or a plan on its customer's page and the whole team sees it."),
+                .init(symbol: "hand.raised", title: "Simpler permission screens",
+                      detail: "One Continue button, then your iPhone asks. You choose there."),
+                .init(symbol: "bell.slash", title: "Signing out stops alerts",
+                      detail: "This phone stops getting job alerts as soon as you sign out, even with no signal."),
+            ]),
+        ReleaseNote(
             id: "2026-11-19-sturdier",
             date: "2026-11-19",
             highlights: [
