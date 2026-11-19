@@ -149,7 +149,8 @@ struct PaperSheetTitle: View {
 /// the status bar (Paper's circle row: `paddingTop: 2`).
 enum PaperSheetMetrics {
     static let headerTop: CGFloat = 14
-    static let pageTop: CGFloat = 2
+    /// Clear of the sheet's rounded top corner (2 crowded the curve on a real phone).
+    static let pageTop: CGFloat = 14
 }
 
 /// The circle row of a sheet that is a whole page (Paper 40, 21F, 36): the way out on the left, an

@@ -278,9 +278,13 @@ struct EstimateRevisionEditorView: View {
                            subtitle: "EST-\(editor.estimate.id.suffix(4).uppercased()) \u{00B7} \(customer) \u{00B7} Revision \(editor.estimate.currentRevisionNumber ?? 0) \u{00B7} \(editingDraft ? "Edit draft" : "New replacement draft")",
                            columnInset: PaperCardMetrics.margin)
             VStack(alignment: .leading, spacing: 6) {
-                Text("Title").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 4).accessibilityHidden(true)
-                TextField("Estimate title", text: $editor.title, prompt: .placeholder("Estimate title"), axis: .vertical)
+                // "Name", not "Title": it is what the customer reads beside the price.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Name").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    Text("Your customer sees this").font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                }
+                .padding(.horizontal, 4).accessibilityHidden(true)
+                TextField("Estimate title", text: $editor.title, prompt: .placeholder("Estimate name, like Furnace replacement"), axis: .vertical)
                     .font(Theme.font(17, weight: .medium))
                     .accessibilityLabel("Estimate title")
                     .disabled(busy || !canEdit)

@@ -256,9 +256,10 @@ struct EstimateDetailView: View {
         let customerName = store.customerName(record.customerId)
         let customer = session.can("customer.view", feature: "core_crm") ? store.customers.first(where: { $0.id == record.customerId }) : nil
         let figure = estimateFigure(record, currency: currency)
-        let name: String? = record.title.isEmpty ? nil : record.title
-        let parts: [String?] = [name, figure]
-        let subtitle = parts.compactMap { $0 }.joined(separator: " \u{00B7} ")
+        // The estimate's own name is the headline (owner, 2026-11-19: after the price, the name is
+        // what people look at); the customer sits under it. Paper 35C drew the customer at 28 Bold.
+        let name: String? = record.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : record.title
+        let subtitle = figure ?? ""
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 8) {
                 Text("EST-\(record.id.suffix(4).uppercased())").font(Theme.font(14, weight: .semibold))
@@ -269,7 +270,19 @@ struct EstimateDetailView: View {
                     .accessibilityLabel("Status, \(status.word)")
                     .accessibilityIdentifier("estimate-chip-status")
             }
-            if let customer {
+            if let name {
+                estimateTitle(name)
+                let who = Text(customerName).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let customer {
+                    Button { openCustomer = customer } label: { who.frame(minHeight: 28, alignment: .leading).contentShape(Rectangle()) }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityHint("Opens the customer")
+                        .accessibilityIdentifier("estimate-customer")
+                } else {
+                    who
+                }
+            } else if let customer {
                 Button { openCustomer = customer } label: { estimateTitle(customerName) }
                     .buttonStyle(RowPressStyle())
                     .accessibilityHint("Opens the customer")

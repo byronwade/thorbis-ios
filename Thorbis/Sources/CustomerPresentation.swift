@@ -299,7 +299,8 @@ struct CustomerEstimatePresentation: View {
                 // them in muted, then the "Choose this" pill ("In your cart" with a check once chosen).
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(option.title).font(Theme.customerFont(type.body + 2, weight: .bold)).tracking(-0.18)
+                        // The name is the most-read thing after the price, so it is set as large as the price.
+                        Text(option.title).font(Theme.customerFont(type.heading, weight: .bold)).tracking(-0.2)
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text(total)

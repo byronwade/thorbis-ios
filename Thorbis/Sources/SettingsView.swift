@@ -34,7 +34,9 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     // Paper 65: the 44pt back circle, 14 under it "Settings" in 34 Bold.
-                    ThorbisBackButton()
+                    // The way out of a sheet is ×; a chevron is for going back a page.
+                    PaperCircleButton(symbol: "xmark", label: "Close", size: 44, fill: Theme.card) { dismiss() }
+                        .accessibilityIdentifier("settings-close")
                         .padding(.top, PaperSheetMetrics.pageTop)
                     AccountPageTitle(title: "Settings", underBar: false)
 

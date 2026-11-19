@@ -126,7 +126,7 @@ struct JobChecklistSheet: View {
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 PaperPageSheetBar {
-                    PaperCircleButton(symbol: "chevron.left", label: finished ? "Done" : "Close", size: 44, fill: Theme.card, action: onDone)
+                    PaperCircleButton(symbol: "xmark", label: finished ? "Done" : "Close", size: 44, fill: Theme.card, action: onDone)
                         .accessibilityHint(finished ? "" : "Progress stays on this phone.")
                         .accessibilityIdentifier("checklist-close")
                 } trailing: {

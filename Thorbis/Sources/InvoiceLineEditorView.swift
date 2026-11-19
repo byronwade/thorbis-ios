@@ -566,7 +566,7 @@ struct InvoiceLineEditorView: View {
     /// page (scan or paste a parts list, discard). Back asks before dropping edits, as Cancel did.
     private var editorTopBar: some View {
         PaperPageSheetBar {
-            PaperCircleButton(symbol: "chevron.left", label: "Cancel", size: 44, fill: Theme.card) {
+            PaperCircleButton(symbol: "xmark", label: "Cancel", size: 44, fill: Theme.card) {
                 if editor.hasChanges { confirmDiscard = true } else { dismiss() }
             }
             .disabled(busy)

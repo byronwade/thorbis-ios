@@ -13,6 +13,24 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-19-estimate-names",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "textformat", title: "Estimate names stand out",
+                      detail: "An estimate's name is now its headline, and customers see each option's name as large as its price."),
+                .init(symbol: "pencil", title: "Name field says what it's for",
+                      detail: "The field is now called Name and notes that your customer sees it. Change it from an estimate's Edit."),
+            ]
+        ),
+        ReleaseNote(
+            id: "2026-11-19-tidy-sheets",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "xmark.circle", title: "Tidier pop-up screens",
+                      detail: "The top button on Settings and other pop-ups sits clear of the corner, and closing is always an \u{00D7}."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-19-simpler-lists",
             date: "2026-11-19",
             highlights: [

@@ -1325,7 +1325,7 @@ struct InvoicePaymentCollectionSheet: View {
             .toolbar {
                 // Paper 39: the 44 back circle on the card tone at top left closes the sheet.
                 ThorbisToolbarItem(placement: .topBarLeading) {
-                    PaperCircleButton(symbol: "chevron.left", label: "Close", size: 44, fill: Theme.card) { dismiss() }
+                    PaperCircleButton(symbol: "xmark", label: "Close", size: 44, fill: Theme.card) { dismiss() }
                 }
             }
             .thorbisDestination(isPresented: $showPayLinkShare) {

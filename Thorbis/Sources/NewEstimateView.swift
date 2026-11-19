@@ -352,8 +352,12 @@ struct NewEstimateView: View {
             PaperPageTitle(title: created == nil ? "New estimate" : "Estimate saved", subtitle: subtitle)
             VStack(alignment: .leading, spacing: 6) {
                 // The label stays above the field; the placeholder is only an example.
-                Text("Title").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 4).accessibilityHidden(true)
+                // "Name", not "Title": it is what the customer reads beside the price.
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Name").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    Text("Your customer sees this").font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                }
+                .padding(.horizontal, 4).accessibilityHidden(true)
                 TextField("", text: $title, prompt: .placeholder("Furnace replacement"), axis: .vertical)
                     .font(Theme.font(17, weight: .medium))
                     .accessibilityLabel("Estimate title")
