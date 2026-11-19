@@ -1527,7 +1527,9 @@ struct JobDetailView: View {
                 .accessibilityLabel(job.assignedToUserId == nil ? "Assign technician" : "Reassign technician")
                 .accessibilityValue(assignee ?? "Unassigned")
                 .accessibilityIdentifier("job-assignee")
-        } else {
+        } else if job.assignedToUserId == nil || job.assignedToUserId != session.user?.id {
+            // Your own job never tells you your own name: the chip only earns its place when
+            // the job is someone else's or nobody's.
             assigneeChip(job)
         }
     }

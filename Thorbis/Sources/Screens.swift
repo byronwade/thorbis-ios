@@ -287,7 +287,7 @@ struct CustomerContactSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                PaperCircleButton(symbol: "chevron.left",
+                PaperCircleButton(symbol: "xmark",
                                   label: contact == nil ? "Cancel new contact" : "Cancel contact changes",
                                   size: 44, fill: Theme.quietFill) { dismiss() }
                     .disabled(busy)

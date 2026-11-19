@@ -479,7 +479,9 @@ struct PurchaseOrderLineSheet: View {
     private var lineTotal: String? {
         guard let count = Int(quantity.trimmingCharacters(in: .whitespaces)), count > 0,
               let cents = MoneyInput.cents(cost) else { return nil }
-        return PurchaseOrderMath.money(count * cents, alwaysCents: true)
+        let (total, overflow) = count.multipliedReportingOverflow(by: cents)
+        guard !overflow else { return nil }
+        return PurchaseOrderMath.money(total, alwaysCents: true)
     }
 
     var body: some View {

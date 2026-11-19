@@ -256,8 +256,13 @@ extension Array where Element == EstimateRevisionLineDraft {
         var sum = 0
         for line in self {
             guard let cents = EstimateRevisionEditorState.parsePrice(line.unitPrice),
-                  let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
-            sum += quantity * (cents > 0 ? pricing.memberPrice(cents) : cents)
+                  let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  (1...100_000).contains(quantity) else { return nil }
+            // Same bounds as `subtotal`: a long quantity must read as "not yet", never trap.
+            let (amount, overflow) = quantity.multipliedReportingOverflow(by: cents > 0 ? pricing.memberPrice(cents) : cents)
+            let (next, overflowSum) = sum.addingReportingOverflow(amount)
+            guard !overflow, !overflowSum else { return nil }
+            sum = next
         }
         return sum
     }

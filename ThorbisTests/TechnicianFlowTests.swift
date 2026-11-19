@@ -145,3 +145,15 @@ final class TechnicianFlowTests: XCTestCase {
         XCTAssertNil(next("in_progress", can: TechJobAbilities()))
     }
 }
+
+/// A quantity far past any real job must read as "not yet", never trap the app.
+@MainActor
+final class LargeQuantityTests: XCTestCase {
+    func testMemberTotalIsNilInsteadOfOverflowing() {
+        let pricing = MemberPricing(isMember: true, discountPercent: 15, membership: nil)
+        let huge = [EstimateRevisionLineDraft(description: "Coil", quantity: "999999999999", unitPrice: "1000000.00")]
+        XCTAssertNil(huge.memberTotal(pricing))
+        let real = [EstimateRevisionLineDraft(description: "Coil", quantity: "2", unitPrice: "100.00")]
+        XCTAssertEqual(real.memberTotal(pricing), 17_000)
+    }
+}

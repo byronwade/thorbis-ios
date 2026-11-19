@@ -159,6 +159,11 @@ struct PaperSearchBar<Filter: View>: View {
             }
             .buttonStyle(PressStyle())
             .accessibilityHidden(true)
+        } else if chips.isEmpty {
+            // iPad: the shell's bar searches, so this field only filters. Empty, it says so
+            // instead of sitting blank.
+            Text("No filters").font(Theme.font(16)).foregroundStyle(Theme.muted).lineLimit(1)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         } else {
             Spacer(minLength: 0)
         }

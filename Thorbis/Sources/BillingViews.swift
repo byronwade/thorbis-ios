@@ -424,7 +424,7 @@ struct JobDepositSheet: View {
             // Paper 89: the 44 back circle on the card tone at top left closes the sheet.
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) {
-                    PaperCircleButton(symbol: "chevron.left", label: "Cancel", size: 44, fill: Theme.card) { dismiss() }
+                    PaperCircleButton(symbol: "xmark", label: "Cancel", size: 44, fill: Theme.card) { dismiss() }
                         .disabled(busy)
                 }
             }

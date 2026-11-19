@@ -179,6 +179,14 @@ private struct GuidedTourOverlay: View {
     }
 }
 
+// MARK: - Legal links
+
+/// The public legal pages. Sign-up and Account and data both open these.
+enum LegalLinks {
+    static let privacy = URL(string: "https://thorbis.com/legal/privacy")!
+    static let terms = URL(string: "https://thorbis.com/legal/terms")!
+}
+
 // MARK: - P5 Legal page
 
 /// A legal text the app ships with (Privacy policy, Terms of service, …). Plain words only.

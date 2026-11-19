@@ -102,7 +102,7 @@ struct NewEstimateView: View {
                 // the same discard check the toolbar Cancel had.
                 // Paper 35: the screen's title is the 34 Bold heading in the builder; the header keeps Cancel.
                 HStack {
-                    PaperCircleButton(symbol: "chevron.left", label: created == nil ? "Cancel" : "Close", size: 44, fill: Theme.card) {
+                    PaperCircleButton(symbol: "xmark", label: created == nil ? "Cancel" : "Close", size: 44, fill: Theme.card) {
                         if lines.isEmpty || created != nil { dismiss() } else { confirmDiscard = true }
                     }
                     .disabled(busy)

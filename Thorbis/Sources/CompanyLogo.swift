@@ -295,7 +295,7 @@ struct LogoCropEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Button(action: cancel) { CreamCircleLabel(symbol: "chevron.left") }
+                Button(action: cancel) { CreamCircleLabel(symbol: "xmark") }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Back")
                 Spacer()

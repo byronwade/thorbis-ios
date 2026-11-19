@@ -439,7 +439,7 @@ struct MediaCompareView: View {
         // Paper 21P: a 44pt card circle to leave, the 34 Bold title, the photos on a radius-20
         // frame, then the pickers and a quiet hint.
         VStack(alignment: .leading, spacing: 12) {
-            Button(action: onClose) { CreamCircleLabel(symbol: "chevron.left") }
+            Button(action: onClose) { CreamCircleLabel(symbol: "xmark") }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("Done")
                 .accessibilityIdentifier("media-compare-done")

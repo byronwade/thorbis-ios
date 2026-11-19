@@ -13,6 +13,20 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-19-sturdier",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "shield", title: "Sturdier with big numbers",
+                      detail: "Typing a very long quantity on an estimate or purchase order no longer closes the app."),
+                .init(symbol: "tray.full", title: "Waiting work is better protected",
+                      detail: "If saved work on this phone can't be read after an update, a copy is kept instead of being written over."),
+                .init(symbol: "hand.raised", title: "Privacy policy and terms",
+                      detail: "Open both from sign-up and from Settings, under Account and data."),
+                .init(symbol: "xmark", title: "Sheets close the same way",
+                      detail: "New estimate, New contact and the photo compare view now close with an ×, like the rest."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-19-estimate-names",
             date: "2026-11-19",
             highlights: [

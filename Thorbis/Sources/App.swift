@@ -66,7 +66,7 @@ struct ThorbisApp: App {
             pendingMedia?.bind(nil)
             JobLiveActivity.retire()
         }
-        session.onJobAuthorityRevoked = { JobLiveActivity.retire() }
+        session.onJobAuthorityRevoked = { JobLiveActivity.retire(); TodaySnapshot.clear() }
         session.onSignedOut = { [weak store, weak outbox, weak pendingMedia, weak api] in
             DayPrefetch.shared.cancel()
             api?.savedCopyScope = nil

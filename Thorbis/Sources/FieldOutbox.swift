@@ -319,7 +319,21 @@ final class FieldOutbox: ObservableObject {
         guard identity?.actorID != actorID || identity?.organizationID != organizationID else { return }
         binding = UUID(); activeDrain = nil; syncing = false; lastSyncSent = 0
         identity = (actorID, organizationID)
-        entries = file.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode([OutboxEntry].self, from: $0) } ?? []
+        if let file, let data = try? Data(contentsOf: file) {
+            if let saved = try? JSONDecoder().decode([OutboxEntry].self, from: data) {
+                entries = saved
+            } else {
+                // A queue this build can't read is set aside before the next save writes over it,
+                // so waiting work is never silently destroyed. The first copy is the one kept.
+                entries = []
+                let aside = file.appendingPathExtension("unreadable")
+                if !data.isEmpty, !FileManager.default.fileExists(atPath: aside.path) {
+                    try? data.write(to: aside, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                }
+            }
+        } else {
+            entries = []
+        }
         recordedPayments = recordedFile.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONDecoder().decode([OutboxEntry.PaymentPayload].self, from: $0) } ?? []
     }

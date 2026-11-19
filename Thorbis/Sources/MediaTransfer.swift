@@ -42,6 +42,9 @@ final class MediaTransfer {
         self.storageSession = URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
     }
 
+    // A URLSession keeps its delegate until invalidated; one is made per transfer.
+    deinit { storageSession.finishTasksAndInvalidate() }
+
     func upload(jobID: String, clientAssetID: String, kind: String, mime: String,
                 originalFilename: String, data: Data, tags: [String] = [], caption: String? = nil, capturedAt: Date? = nil,
                 expectedOrganizationID: String? = nil, currentAuthority: @MainActor () -> Bool = { true }) async throws -> MediaAssetRecord {

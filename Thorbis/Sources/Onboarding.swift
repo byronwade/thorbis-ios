@@ -154,8 +154,9 @@ struct SignUpView: View {
                     }
 
                     // Paper 05: the 13 muted terms line, 12 under the password.
-                    Text("By continuing you agree to Thorbis’s Terms and Privacy Policy.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    Text("By continuing you agree to Thorbis’s [Terms](https://thorbis.com/legal/terms) and [Privacy Policy](https://thorbis.com/legal/privacy).")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).tint(Theme.brandText)
+                        .accessibilityIdentifier("signup-legal")
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 4).padding(.top, 12)
                     // Paper 05: Create account sits under the fields; only "Log in" stays at the bottom.

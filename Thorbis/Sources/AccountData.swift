@@ -106,6 +106,18 @@ struct AccountAndDataView: View {
                     }
                     .buttonStyle(RowPressStyle())
                     .accessibilityIdentifier("account-privacy")
+                    WellDivider(leading: AccountRow<EmptyView>.dividerInset)
+                    Button { openURL(LegalLinks.privacy) } label: {
+                        AccountRow(symbol: "hand.raised", title: "Privacy policy", subtitle: "Opens thorbis.com")
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityIdentifier("account-privacy-policy")
+                    WellDivider(leading: AccountRow<EmptyView>.dividerInset)
+                    Button { openURL(LegalLinks.terms) } label: {
+                        AccountRow(symbol: "doc.text", title: "Terms of service", subtitle: "Opens thorbis.com")
+                    }
+                    .buttonStyle(RowPressStyle())
+                    .accessibilityIdentifier("account-terms")
                 }
                 .padding(.top, 22)
 
