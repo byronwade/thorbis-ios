@@ -163,7 +163,7 @@ final class DrawerGearMenuUITests: XCTestCase {
         XCTAssertTrue(money.exists)
         XCTAssertLessThan(schedule.frame.minY, jobs.frame.minY)
         XCTAssertLessThan(jobs.frame.minY, money.frame.minY)
-        for gone in ["estimates", "invoices", "drafts", "billing", "attention", "scorecard", "priceBook", "local-team"] {
+        for gone in ["estimates", "invoices", "drafts", "billing", "attention", "scorecard", "local-team"] {
             XCTAssertFalse(app.buttons["\(prefix)-\(gone)"].exists, "\(gone) is not one of Paper's office rows")
         }
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

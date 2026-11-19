@@ -197,6 +197,36 @@ struct DrawerSections: Equatable {
     private static func unique(_ items: [MenuItem]) -> [MenuItem] {
         items.reduce(into: [MenuItem]()) { if !$0.contains($1) { $0.append($1) } }
     }
+
+    /// The phone's menu as people use it (owner feedback 2026-11-18: one place to look). Places
+    /// already in the bottom bar are not repeated, and places Paper gives this role no row or
+    /// parent screen for (`PlaceDoor.settings`) are listed last under "Everything else" instead
+    /// of inside Settings. Each place stays listed once.
+    func phoneMenu(also orphans: [Entry], inBar tabs: [MenuItem]) -> DrawerSections {
+        func inBar(_ entry: Entry) -> Bool {
+            if case .place(let item) = entry { return tabs.contains(item) }
+            return false
+        }
+        func section(_ kind: PlaceSection, _ rows: [Entry]) -> Section? {
+            guard !rows.isEmpty else { return nil }
+            var places: [MenuItem] = []
+            var records: [LocalWorkspaceSection] = []
+            for row in rows {
+                switch row {
+                case .place(let item): places.append(item)
+                case .local(let local): records.append(local)
+                }
+            }
+            return Section(kind: kind, places: places, local: records, entries: rows)
+        }
+        var result = sections.compactMap { section($0.kind, $0.rows.filter { !inBar($0) }) }
+        let listed = Set(sections.flatMap(\.rows))
+        let extra = orphans.reduce(into: [Entry]()) { list, entry in
+            if !listed.contains(entry), !inBar(entry), !list.contains(entry) { list.append(entry) }
+        }
+        if let more = section(.more, extra) { result.append(more) }
+        return DrawerSections(sections: result)
+    }
 }
 
 /// Projects reachable native destinations into the web's personal tier and workspaces.
@@ -432,7 +462,7 @@ struct PlacesList: View {
             // Paper v2: the role's places as flat rows; a heading only above the second group.
             let listed = sections.sections.filter { ![.pinned, .customized, .phone].contains($0.kind) }
             ForEach(Array(listed.enumerated()), id: \.element.id) { index, section in
-                if section.kind.hasHeading { heading(section.kind.rawValue) }
+                if section.kind.hasHeading { heading(section.kind == .more ? "Everything else" : section.kind.rawValue) }
                 ForEach(section.rows) { entry in
                     switch entry {
                     case .place(let item): place(item)

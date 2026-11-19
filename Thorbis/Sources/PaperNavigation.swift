@@ -309,6 +309,7 @@ struct RootView: View {
             role: WorkRole(session),
             current: selectedTab,
             sections: drawerSections,
+            hasMessages: placeOpens(.inbox),
             count: drawerCount,
             recents: drawerRecents,
             savedWork: barSync,
@@ -517,8 +518,14 @@ struct RootView: View {
     /// from Menu and start screen is this phone's own.
     private var drawerSections: DrawerSections {
         let own = layout.source == .phone
-        return DrawerSections.make(hidden: menuHidden, order: own ? layout.menuOrder : [],
-                                   local: localSections, role: WorkRole(session), opens: placeOpens)
+        let paper = DrawerSections.make(hidden: menuHidden, order: own ? layout.menuOrder : [],
+                                        local: localSections, role: WorkRole(session), opens: placeOpens)
+        // One place to look: nothing the bar already shows, and no places tucked into Settings.
+        let orphans = PlaceDoors(session: session).places(behind: .settings).filter { entry in
+            if case .place(let item) = entry { return placeOpens(item) && !menuHidden.contains(item) }
+            return true
+        }
+        return paper.phoneMenu(also: orphans, inBar: layout.usesBottomBar ? phoneTabs : [])
     }
 
     /// Places a company layout turned off (this phone's own layout hides none).

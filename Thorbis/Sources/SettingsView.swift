@@ -121,8 +121,12 @@ struct SettingsView: View {
 
                     // Places this role's menu does not list and no other screen leads to. Paper
                     // gives them no parent for this role, so they stay one row away here.
-                    PlaceDoorRows(door: .settings, title: "Other places")
-                        .padding(.top, 22)
+                    // The phone's menu lists them itself ("Everything else"), so Settings is
+                    // settings only there; iPad's sidebar keeps Paper's rows and this door.
+                    if UIDevice.current.userInterfaceIdiom == .pad {
+                        PlaceDoorRows(door: .settings, title: "Other places")
+                            .padding(.top, 22)
+                    }
 
                     AccountGroup(title: "App") {
                         NavigationLink(value: PaperRoute.help) {

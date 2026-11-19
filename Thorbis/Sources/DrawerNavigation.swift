@@ -82,6 +82,8 @@ struct AppDrawer: View {
     /// The place showing (a MenuItem id or "local-<section>").
     let current: String
     let sections: DrawerSections
+    /// This person can open Messages (it may be in the bottom bar rather than these rows).
+    var hasMessages = false
     let count: (MenuItem) -> PlaceCount?
     let recents: [DrawerRecent]
     /// Saved work on this phone: the gear says it and wears its dot when it needs the person; its
@@ -245,44 +247,59 @@ struct AppDrawer: View {
     /// Paper v2: a hairline, then the person (initials on brand surface, name 15 Semibold, role 13),
     /// the bell (Notifications, Paper 77; Messages without access to notices) and the gear, which
     /// opens Settings (Paper 65) and wears saved work's dot when it needs the person.
+    /// The person, then Notifications and Settings as worded buttons (owner feedback 2026-11-18:
+    /// a bare bell and gear were two more marks to guess at; Paper 29N draws them icon-only).
     private var footer: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Text(personInitials)
-                .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brandText)
-                .frame(width: 34, height: 34)
-                .background(Theme.brandSurface, in: Circle())
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(personName).font(Theme.font(15, weight: .semibold)).lineLimit(1)
-                Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .combine)
-            if openNotifications != nil || sections.places.contains(.inbox) {
-                Button {
-                    if let openNotifications { openNotifications() } else { openPlace(.inbox) }
-                } label: {
-                    PaperIcon(.bell, size: 18, color: Theme.muted)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Text(personInitials)
+                    .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .frame(width: 34, height: 34)
+                    .background(Theme.brandSurface, in: Circle())
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(personName).font(Theme.font(15, weight: .semibold)).lineLimit(1)
+                    Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Notifications")
-                .accessibilityIdentifier("drawer-notifications")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
             }
-            Button(action: openSettings) {
-                PaperIcon(.gear, size: 18, color: Theme.muted)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-                    .overlay(alignment: .topTrailing) {
-                        if savedWork?.needsPerson == true { DrawerDot().offset(x: -6, y: 6) }
+            let buttons = Group {
+                if openNotifications != nil || hasMessages || sections.places.contains(.inbox) {
+                    footerButton("Notifications", glyph: .bell, dot: false, id: "drawer-notifications") {
+                        if let openNotifications { openNotifications() } else { openPlace(.inbox) }
                     }
+                }
+                footerButton("Settings", glyph: .gear, dot: savedWork?.needsPerson == true, id: "drawer-settings",
+                             action: openSettings)
+                    .accessibilityValue(savedWork?.words ?? "")
             }
-            .buttonStyle(PressStyle())
-            .accessibilityLabel("Settings")
-            .accessibilityValue(savedWork?.words ?? "")
-            .accessibilityIdentifier("drawer-settings")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { buttons }
+                VStack(spacing: 8) { buttons }
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+    }
+
+    private func footerButton(_ title: String, glyph: PaperGlyph, dot: Bool, id: String,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                PaperIcon(glyph, size: 16, color: Theme.muted)
+                Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .lineLimit(1).fixedSize()
+                if dot { DrawerDot() }
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Theme.well, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(id)
     }
 }
 

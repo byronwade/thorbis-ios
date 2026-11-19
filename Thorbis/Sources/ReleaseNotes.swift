@@ -13,6 +13,18 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-simpler-more",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "ellipsis.circle", title: "More shows only what's not in the bar",
+                      detail: "The More menu no longer repeats Schedule, Jobs and the other tabs. It lists everything else, once."),
+                .init(symbol: "list.bullet", title: "Every place is in the menu",
+                      detail: "Places that were tucked inside Settings, like Estimates and Invoices, are now under Everything else."),
+                .init(symbol: "gearshape", title: "Notifications and Settings have words",
+                      detail: "The bell and gear at the foot of the menu are now labeled buttons."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-bottom-bar",
             date: "2026-11-18",
             highlights: [

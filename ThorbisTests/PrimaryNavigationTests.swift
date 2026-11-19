@@ -125,7 +125,7 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(office.door(.place(.priceBook)), .settings)
         let tech = PlaceDoors(role: .technician, opens: permitted(.technician))
         XCTAssertNil(tech.door(.place(.money)), "A place a role may not open gets no door")
-        XCTAssertEqual(tech.door(.place(.estimates)), .settings, "Without Money in the menu, Estimates is one row away in Settings")
+        XCTAssertEqual(tech.door(.place(.estimates)), .settings, "Without Money in the menu, Estimates is listed under the menu's Everything else")
         XCTAssertEqual(tech.door(.place(.drafts)), .messages)
         // Search: every permitted place and every record, the ones no menu lists included.
         let actions = SearchAction.standard(creates: [], settings: nil, places: SearchAction.everyPlace(permitted: { _ in true }),
@@ -327,5 +327,32 @@ final class PrimaryNavigationTests: XCTestCase {
         XCTAssertEqual(TodayNumbers.late(mine, now: now), 1, line: line)
         XCTAssertEqual(TodayNumbers.open(jobs), 3, line: line)
         XCTAssertEqual(TodayNumbers.visits(jobs, assignee: nil, now: now, calendar: calendar).count, 4, line: line)
+    }
+
+    /// The phone's menu: nothing the bar shows is repeated, and the places with no Paper row or
+    /// parent screen are listed last rather than inside Settings. Each place once.
+    func testPhoneMenuDropsBarTabsAndListsOrphans() {
+        for role in [WorkRole.technician, .office, .owner] {
+            let paper = DrawerSections.make(local: LocalWorkspaceSection.allCases, role: role, opens: { _ in true })
+            let doors = PlaceDoors(role: role, businessPriceBook: role == .owner, businessTeam: role == .owner, opens: { _ in true })
+            let orphans = doors.places(behind: .settings)
+            let tabs = PhoneTabs.tabs(role: role, opens: { _ in true })
+            let menu = paper.phoneMenu(also: orphans, inBar: tabs)
+            let rows = menu.sections.flatMap(\.rows)
+            XCTAssertEqual(Set(rows).count, rows.count, "\(role): a place is listed twice")
+            for tab in tabs { XCTAssertFalse(rows.contains(.place(tab)), "\(role): \(tab) is in the bar and the menu") }
+            for orphan in orphans { XCTAssertTrue(rows.contains(orphan), "\(role): \(orphan.id) is not in the menu") }
+            let paperRows = paper.sections.flatMap(\.rows)
+            XCTAssertEqual(Set(rows).union(tabs.map(DrawerSections.Entry.place)), Set(paperRows).union(orphans).union(tabs.map(DrawerSections.Entry.place)),
+                           "\(role): the bar and the menu together reach every place the menu or Settings did")
+            XCTAssertEqual(menu.sections.last?.kind, orphans.isEmpty ? menu.sections.last?.kind : .more)
+            // Sidebar style: Paper's rows untouched, then the same last group.
+            let sidebar = paper.phoneMenu(also: orphans, inBar: [])
+            XCTAssertEqual(Array(sidebar.sections.flatMap(\.rows).prefix(paperRows.count)), paperRows)
+        }
+        let tech = DrawerSections.make(local: [], role: .technician, opens: { _ in true })
+            .phoneMenu(also: [.place(.estimates), .place(.schedule), .place(.estimates)], inBar: [.schedule, .jobs])
+        XCTAssertEqual(tech.sections.last?.rows, [.place(.estimates)], "A tab or a repeat is never added")
+        XCTAssertFalse(tech.places.contains(.jobs))
     }
 }
