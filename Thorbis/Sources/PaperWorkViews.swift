@@ -109,6 +109,10 @@ struct ScheduleView: View {
         pickedScope ?? .initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
     }
     /// Mine/Everyone applies to a day, week or map; Unscheduled is everyone's queue.
+    /// Whose jobs this role's schedule opens on; the field only names a scope that differs from it.
+    private var startingScope: ScheduleScope {
+        .initial(schedulesOwnDay: WorkRole(session).schedulesOwnDay, actorID: session.user?.id)
+    }
     private var showsScope: Bool { range != .unscheduled && session.user?.id != nil }
     /// Finding a job is the bar's Search; this screen narrows by range and whose jobs only.
     private var jobs: [Job] {
@@ -150,9 +154,10 @@ struct ScheduleView: View {
         var chips: [PaperFilterChip] = []
         if tab == "Unscheduled" {
             chips.append(PaperFilterChip(id: "unscheduled", title: "Unscheduled") { tab = "Today" })
-        } else if showsScope && scope == .mine {
+        } else if showsScope && scope == .mine && scope != startingScope {
+            // Only a choice the person made is a chip: a technician's own day is simply the schedule.
             chips.append(PaperFilterChip(id: "mine", title: "My jobs") { pickedScope = .everyone })
-        } else if showsScope && canSchedule {
+        } else if showsScope && canSchedule && scope != .mine && scope != startingScope {
             // Paper 53: the dispatcher's field reads "All techs"; × narrows to their own jobs.
             chips.append(PaperFilterChip(id: "everyone", title: "All techs") { pickedScope = .mine })
         }
@@ -1015,10 +1020,8 @@ struct JobsView: View {
     /// narrowed list never looks empty by accident; × takes each one off.
     private var filterChips: [PaperFilterChip] {
         var chips: [PaperFilterChip] = []
-        // Paper 20: the Assigned tab reads "My jobs" in the field; × shows everyone's.
-        if tab == "Assigned" {
-            chips.append(PaperFilterChip(id: "mine", title: "My jobs") { withMotion { tab = "All jobs" } })
-        } else if who == .unassigned {
+        // "My jobs" is already the picked view under the field, so the field does not repeat it.
+        if tab != "Assigned", who == .unassigned {
             chips.append(PaperFilterChip(id: "who", title: "Unassigned") { withMotion { who = .anyone } })
         } else if let pickedTechName {
             chips.append(PaperFilterChip(id: "who", title: pickedTechName) { withMotion { who = .anyone } })

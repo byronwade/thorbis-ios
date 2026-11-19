@@ -2629,7 +2629,8 @@ struct JobDetailView: View {
             Button { withMotion(.snappy) { fieldModeOpen = true; selectedTab = "Overview" } } label: {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Field mode \u{00B7} \(JobFieldSteps.titles[shown])")
+                        // Plain words: which step of the visit this is, not the name of a mode.
+                        Text("Step \(shown + 1) of \(JobFieldSteps.titles.count) \u{00B7} \(JobFieldSteps.titles[shown])")
                             .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
                         HStack(spacing: 4) {

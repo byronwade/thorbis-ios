@@ -13,6 +13,16 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-19-simpler-lists",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "line.3.horizontal.decrease", title: "Less clutter above your lists",
+                      detail: "Schedule and Jobs no longer repeat \"My jobs\" in the search box. Only filters you add show there."),
+                .init(symbol: "figure.walk", title: "Visit steps in plain words",
+                      detail: "A job now says \"Step 1 of 5 \u{00B7} Driving\" so you can see where the visit is at a glance."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-19-cleaner-menu",
             date: "2026-11-19",
             highlights: [
