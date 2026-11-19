@@ -28,6 +28,8 @@ struct JobDetailView: View {
     @EnvironmentObject private var pendingMedia: PendingMediaStore
     @Environment(\.dismiss) private var dismiss
     @State private var job: JobRecord?
+    /// False while `job` is only the phone's own copy, shown at once before the server answers.
+    @State private var jobConfirmed = false
     @EnvironmentObject private var estimateHandoffPresenter: JobEstimateHandoffPresenter
     @StateObject private var customerWindowAnchor = CustomerWindowAnchor()
     @State private var customerPaymentInvoiceID: String?
@@ -616,10 +618,18 @@ struct JobDetailView: View {
                 loadedInvoiceModelID = nil
                 paymentRoute = nil
             }
-            await load()
-            // The next step needs the job's paper, so it loads with the job, not only on its tab.
-            await loadInvoices()
-            if let job { await loadJobEstimates(job) }
+            if let known = job {
+                // The job is already on screen from what the phone knows, so its live copy and its
+                // paper (the next step needs it) are asked for together, not one after another.
+                async let live: Void = load()
+                async let bills: Void = loadInvoices()
+                async let offers: Void = loadJobEstimates(known)
+                _ = await (live, bills, offers)
+            } else {
+                await load()
+                await loadInvoices()
+                if let job { await loadJobEstimates(job) }
+            }
             if opensCustomerView, !openedCustomerViewOnArrival, job != nil {
                 openedCustomerViewOnArrival = true
                 openCustomerView(.home)
@@ -660,7 +670,10 @@ struct JobDetailView: View {
             }
         }
         // Coming back from Assign, Wrap up or Follow-ups: the job may have moved on.
-        .onAppear { customerWindowAnchor.visible = true; if job != nil { Task { await load() } } }
+        .onAppear {
+            customerWindowAnchor.visible = true
+            if job != nil { Task { await load() } } else { showWhatThePhoneKnows() }
+        }
         .onChange(of: session.can("customer.view", feature: "core_crm")) { _, _ in
             locations = []
             locationsContext = nil
@@ -5052,6 +5065,7 @@ struct JobDetailView: View {
                 throw Problem(title: "Job could not be verified", status: nil, detail: nil)
             }
             job = loadedJob
+            jobConfirmed = true
             // Record before the follow-up requests below, while the identity is known to match.
             RecentItems.shared.record(.job, id: loadedJob.id, title: loadedJob.title,
                                       subtitle: "JOB-\(loadedJob.id.suffix(4).uppercased()) · \(store.customerName(loadedJob.customerId))")
@@ -5061,16 +5075,26 @@ struct JobDetailView: View {
                 locationsContext = nil
                 locationsFailed = false
             }
-            if locationContext != nil { await loadLocations(loadedJob) }
-            if let locationContext, contactsContext != locationContext || !contactsLoaded { await loadContacts(loadedJob) }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
-            let loadedNotes = try await api.fieldNotes(jobId)
-            guard session.generation == generation else { return }
-            notes = loadedNotes
-            JobDetailCache.save(notes: loadedNotes, jobID: jobId)
-            error = nil
-            await loadBrief()
+            // Everything under the header is asked for at once; each part fills in as it answers.
+            let wantsLocations = locationContext != nil
+            let wantsContacts = locationContext != nil && (contactsContext != locationContext || !contactsLoaded)
+            async let places: Void = wantsLocations ? loadLocations(loadedJob) : ()
+            async let people: Void = wantsContacts ? loadContacts(loadedJob) : ()
+            async let brief: Void = loadBrief()
+            do {
+                let loadedNotes = try await api.fieldNotes(jobId)
+                if session.generation == generation {
+                    notes = loadedNotes
+                    JobDetailCache.save(notes: loadedNotes, jobID: jobId)
+                    error = nil
+                }
+            } catch {
+                _ = await (places, people, brief)
+                throw error
+            }
+            _ = await (places, people, brief)
         } catch is CancellationError {} catch {
             guard session.generation == generation else { return }
             if error.isConnectivityFailure {
@@ -5078,6 +5102,9 @@ struct JobDetailView: View {
                 if job == nil { job = JobDetailCache.job(jobId) ?? listRecord() }
                 if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
                 if job != nil { self.error = nil; return }
+            } else if !jobConfirmed {
+                // The server refused or no longer has it: the phone's own copy must not stay up.
+                job = nil
             }
             self.error = error.localizedDescription
         }
@@ -5158,27 +5185,56 @@ struct JobDetailView: View {
     /// read fails or that an older server doesn't offer simply stays out.
     private func loadBrief() async {
         let generation = session.generation
-        await loadFollowUps()
-        await loadMediaCount()
-        let loadedVisits = try? await api.fieldVisitHistory(jobId)
-        let loadedCall = try? await api.fieldBookingCall(jobId)
+        // Independent reads, asked for together so the slowest one sets the wait, not their sum.
+        async let followUpsRead: Void = loadFollowUps()
+        async let mediaRead: Void = loadMediaCount()
+        async let closeoutRead: Void = loadCloseout()
+        async let historyRead: Void = loadVisitsAndCall(generation: generation)
+        async let customerRead: Void = loadPricingAndEquipment(generation: generation)
+        async let officeRead: Void = loadOfficeContact(generation: generation)
+        _ = await (followUpsRead, mediaRead, closeoutRead, historyRead, customerRead, officeRead)
+    }
+
+    private func loadVisitsAndCall(generation: UUID) async {
+        async let visitsRead = try? await api.fieldVisitHistory(jobId)
+        async let callRead = try? await api.fieldBookingCall(jobId)
+        let (loadedVisits, loadedCall) = await (visitsRead, callRead)
         guard session.generation == generation else { return }
         if let loadedVisits { visits = loadedVisits; visitsLoaded = true }
         if let loadedCall { bookingCall = loadedCall }
-        if let job, let pricing = try? await api.memberPricing(job.customerId), session.generation == generation,
-           self.job?.customerId == job.customerId { memberPricing = pricing }
+    }
+
+    private func loadPricingAndEquipment(generation: UUID) async {
+        guard let job else { return }
+        async let pricingRead = try? await api.memberPricing(job.customerId)
         // Quiet: a refused read (technicians on some servers) or an older server leaves the rows out.
-        if let job, session.can("customer.view", feature: "core_crm"),
-           let loaded = try? await api.customerEquipment(job.customerId), session.generation == generation,
-           self.job?.customerId == job.customerId {
-            equipment = loaded.filter { $0.customerId == job.customerId }
-        }
-        await loadCloseout()
-        // The office's phone feeds the on-site circle and, through the whole visit, the menu's rows.
-        if let job, inField(job), officeContact == nil {
-            let contact = await OfficeContact.load(api: api, session: session)
-            if session.generation == generation { officeContact = contact }
-        }
+        let wantsEquipment = session.can("customer.view", feature: "core_crm")
+        async let equipmentRead = wantsEquipment ? (try? await api.customerEquipment(job.customerId)) : nil
+        let (pricing, loaded) = await (pricingRead, equipmentRead)
+        guard session.generation == generation, self.job?.customerId == job.customerId else { return }
+        if let pricing { memberPricing = pricing }
+        if let loaded { equipment = loaded.filter { $0.customerId == job.customerId } }
+    }
+
+    /// The office's phone feeds the on-site circle and, through the whole visit, the menu's rows.
+    private func loadOfficeContact(generation: UUID) async {
+        guard let job, inField(job), officeContact == nil else { return }
+        let contact = await OfficeContact.load(api: api, session: session)
+        if session.generation == generation { officeContact = contact }
+    }
+
+    /// Opening a job shows it at once from what this phone already holds (its last full copy, or
+    /// the row just tapped), for this business only; the live copy then replaces it. Money, the
+    /// wrap-up checklist and anything that can be acted on wrongly still come only from the server.
+    private func showWhatThePhoneKnows() {
+        guard job == nil, let organization = session.activeOrganization?.id else { return }
+        let saved = JobDetailCache.job(jobId).flatMap { $0.id == jobId && $0.organizationId == organization ? $0 : nil }
+        let row = listRecord()
+        let known: JobRecord?
+        if let saved, let row { known = row.updatedAt > saved.updatedAt ? row : saved } else { known = saved ?? row }
+        guard let known else { return }
+        job = known
+        if notes.isEmpty { notes = JobDetailCache.notes(jobId) }
     }
 
     /// "Before you wrap up" reads the server's closeout while on site. Quiet: a failed read hides

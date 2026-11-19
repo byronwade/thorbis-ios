@@ -13,6 +13,16 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-instant-job",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "bolt", title: "Jobs open right away",
+                      detail: "A job shows at once from what your phone already has, then updates when the server answers."),
+                .init(symbol: "arrow.triangle.branch", title: "Job details load together",
+                      detail: "Contacts, notes, photos, estimates and invoices are fetched at the same time instead of one by one."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-simpler-more",
             date: "2026-11-18",
             highlights: [
