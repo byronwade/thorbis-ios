@@ -193,7 +193,7 @@ struct SettingsView: View {
         return .savedWork(.make(scope: scope, entries: outbox.entries, media: pendingMedia.items,
                                 mediaErrors: pendingMedia.errors, unverifiedMediaIDs: pendingMedia.unverifiedIDs,
                                 uploadingMediaID: pendingMedia.uploadingID, commandsSyncing: outbox.syncing,
-                                jobs: store.jobs, listingWarning: pendingMedia.storageWarning))
+                                jobs: store.jobs, listingWarning: pendingMedia.storageWarning ?? outbox.storageWarning))
     }
 
     private var signOutWarning: String {

@@ -45,12 +45,14 @@ extension APIClient {
     func billingSchedules() async throws -> [BillingSchedule] {
         var items: [BillingSchedule] = []
         var cursor: String?
+        var seen: Set<String> = []
         repeat {
             let page: Items<BillingSchedule> = try await send("GET", "/v1/billing-schedules", cursor: cursor)
             items += page.items
-            guard page.nextCursor != cursor else { break }
-            cursor = page.nextCursor
-        } while cursor != nil && items.count < 2_000
+            // A cursor the server already handed out means it is going in circles; stop with what we have.
+            guard let next = page.nextCursor, seen.insert(next).inserted else { break }
+            cursor = next
+        } while items.count < 2_000 && seen.count < 200
         return items
     }
 

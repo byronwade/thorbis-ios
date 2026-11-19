@@ -91,8 +91,10 @@ extension APIClient {
                 }
             }
             guard page.nextCursor != cursor else { break }
+            // A cursor seen before means the server is going in circles; stop with what we have.
+            if let next = page.nextCursor, !requireComplete, !seen.insert(next).inserted { break }
             cursor = page.nextCursor
-        } while cursor != nil && items.count < 2_000
+        } while cursor != nil && items.count < 2_000 && pages < 500
         return items
     }
 }

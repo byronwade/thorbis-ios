@@ -211,6 +211,8 @@ struct OutboxOutcome: Decodable {
 final class FieldOutbox: ObservableObject {
     @Published private(set) var entries: [OutboxEntry] = []
     @Published private(set) var syncing = false
+    /// True while the queue on disk is behind what is held in memory.
+    @Published private(set) var storageFailed = false
     /// How many changes the last sync sent, for the "back online" banner.
     @Published private(set) var lastSyncSent = 0
     /// Photos and files waiting in `PendingMediaStore`, counted in the one sync line (OF-03).
@@ -364,8 +366,18 @@ final class FieldOutbox: ObservableObject {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try JSONEncoder().encode(entries).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            if storageFailed { storageFailed = false }
             return true
-        } catch { return false }
+        } catch {
+            // The change is still held in memory and will send; it just would not survive the app closing.
+            if !storageFailed { storageFailed = true }
+            return false
+        }
+    }
+
+    /// Says so when the last change could not be written to the phone's storage.
+    var storageWarning: String? {
+        storageFailed ? "This phone could not save the latest change. Keep Thorbis open until it sends." : nil
     }
 
     @discardableResult
@@ -644,6 +656,18 @@ final class FieldOutbox: ObservableObject {
                 }
                 _ = try await api.progressFieldJob(payload.jobId, request: request)
             case .note(let payload):
+                // A send that timed out may still have reached the server. Before sending the same
+                // note again, look for it there, so it is never posted twice.
+                if entry.attempted == true {
+                    let earlier = await noteExists(payload, since: entry.createdAt, actorID: entry.actorId, api: api)
+                    guard current() else { return .stop }
+                    guard let earlier else { return .stop }
+                    if earlier { break }
+                }
+                if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+                    entries[index].attempted = true
+                    persist()
+                }
                 _ = try await api.addFieldNote(payload.jobId, body: payload.body)
             case .acknowledgeCheck(let payload):
                 _ = try await api.acknowledgeFieldCheck(payload.jobId, checkKey: payload.checkKey)
@@ -744,6 +768,19 @@ final class FieldOutbox: ObservableObject {
         return records.contains { record in
             record.kind == payload.kind && record.reason == payload.reason && record.nextAction == payload.nextAction &&
                 record.createdByUserId == actorID && (JobFiltering.date(record.createdAt).map { $0 >= earliest } ?? true)
+        }
+    }
+
+    /// Whether the job already has this note from this person, written around or after it was
+    /// queued. Nil when there is no live answer.
+    private func noteExists(_ payload: OutboxEntry.NotePayload, since queued: Date, actorID: String, api: APIClient) async -> Bool? {
+        guard let records = try? await SavedCopies.$liveOnly.withValue(true, operation: { try await api.fieldNotes(payload.jobId) }),
+              api.savedCopyDate("/v1/jobs/\(payload.jobId)/notes") == nil
+        else { return nil }
+        let earliest = queued.addingTimeInterval(-600)
+        return records.contains { record in
+            record.body == payload.body && record.authorUserId == actorID &&
+                (JobFiltering.date(record.createdAt).map { $0 >= earliest } ?? true)
         }
     }
 

@@ -25,13 +25,17 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
     /// Called whenever the verified identity changes: a signed-in launch, a sign-in or a workspace switch.
     func identityChanged(signedIn: Bool) {
         self.signedIn = signedIn
+        if !signedIn, !Self.disabled {
+            // Signed out, possibly offline so the server never heard: stop this phone taking alerts
+            // meant for the person who just left. Signing in registers again.
+            UIApplication.shared.unregisterForRemoteNotifications()
+        }
         guard signedIn, !Self.disabled else { return }
         Task {
             let center = UNUserNotificationCenter.current()
             let settings = await center.notificationSettings()
             if settings.authorizationStatus == .notDetermined {
                 // Paper 71: say what alerts are for first; its commit shows the system prompt.
-                // "Maybe later" leaves the system unasked, so nothing below registers.
                 await PermissionPrimerPresenter.ask(.notifications)
             }
             let granted = await center.notificationSettings().authorizationStatus

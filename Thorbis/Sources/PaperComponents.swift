@@ -835,7 +835,7 @@ struct OfflineBanner: View {
         guard let scope else { return nil }
         return .make(scope: scope, entries: outbox.entries, media: media.items, mediaErrors: media.errors,
                      unverifiedMediaIDs: media.unverifiedIDs, uploadingMediaID: media.uploadingID,
-                     commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning)
+                     commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning ?? outbox.storageWarning)
     }
     var body: some View {
         let waiting = outbox.waitingCount

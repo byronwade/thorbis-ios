@@ -225,7 +225,22 @@ final class FieldOutboxTests: XCTestCase {
         let task = Task { await box.drain(api: client, useCommandEndpoint: false, canSend: { allowed }) }
         try await waitForRequests(1); allowed = false; gate.release(); await task.value
         XCTAssertEqual(URLProtocolFixture.recorded.count, 1)
-        XCTAssertEqual(box.entries, original); XCTAssertEqual(outbox().entries, original)
+        // The first note is marked as tried, so the next sync looks for it before sending again.
+        var expected = original; expected[0].attempted = true
+        XCTAssertEqual(box.entries, expected); XCTAssertEqual(outbox().entries, expected)
+    }
+
+    func testRetriedNoteAlreadyOnServerIsNotPostedTwice() async throws {
+        let box = outbox()
+        box.enqueue(.note(.init(jobId: jobA, body: "First")), policyVersion: 1)
+        let saved = #"{"id":"019f0000-0000-7000-8000-0000000000c1","organizationId":"\#(org)","jobId":"\#(jobA)","authorUserId":"\#(actor)","body":"First","createdAt":"\#(ISO8601DateFormatter().string(from: Date()))"}"#
+        // The first send reaches the server but the reply is lost.
+        await box.drain(api: api([URLProtocolFixture.offline]), useCommandEndpoint: false)
+        XCTAssertEqual(box.entries.first?.attempted, true)
+        // The retry reads the job's notes, finds it, and sends nothing more.
+        await box.drain(api: api([.init(200, #"{"items":[\#(saved)]}"#)]), useCommandEndpoint: false)
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.method), ["GET"])
+        XCTAssertTrue(box.entries.isEmpty)
     }
 
     func testBindingFlipAndReturnCannotCommitOldResponse() async throws {

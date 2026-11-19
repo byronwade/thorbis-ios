@@ -228,8 +228,9 @@ struct PermissionPrimer: Identifiable, Equatable, Sendable {
     let title: String
     let detail: String
     let points: [String]
+    /// The commit. Apple asks that an explainer always leads on to the system prompt, which is
+    /// where the person says yes or no, so there is no second button and the word is neutral.
     let allow: String
-    let later: String
 
     var id: String { kind.rawValue }
 
@@ -240,32 +241,32 @@ struct PermissionPrimer: Identifiable, Equatable, Sendable {
         kind: .location, symbol: "location", title: "Location while you work",
         detail: "Used only while Thorbis is open, to show the drive to your next job and where you are on the schedule map.",
         points: ["Drive time to your next job", "Your position on the schedule map", "Never used when Thorbis is closed"],
-        allow: "Allow while using", later: "Not now")
+        allow: "Continue")
 
     /// Paper 71, with the points this app can keep (alerts are on or off for the whole phone).
     static let notifications = PermissionPrimer(
         kind: .notifications, symbol: "bell", title: "Know when plans change",
         detail: "Dispatch moves jobs during the day. Without alerts you'll only see it next time you open the app.",
         points: ["New jobs", "Schedule changes", "The morning digest, if you turn it on"],
-        allow: "Turn on alerts", later: "Maybe later")
+        allow: "Continue")
 
     static let camera = PermissionPrimer(
         kind: .camera, symbol: "camera", title: "Camera for the job",
         detail: "Used only while the camera is open, to add photos to the job you are working on.",
         points: ["Before and after photos", "Data plate and receipt scans", "Barcodes on parts"],
-        allow: "Allow camera", later: "Not now")
+        allow: "Continue")
 
     static let dictation = PermissionPrimer(
         kind: .dictation, symbol: "mic", title: "Talk instead of typing",
         detail: "Used only while you dictate or record. Thorbis turns what you say into text, on this iPhone when it can.",
         points: ["Dictate a job note", "Dictate a photo caption", "Record a video clip for a job"],
-        allow: "Allow microphone", later: "Not now")
+        allow: "Continue")
 
     static let calendar = PermissionPrimer(
         kind: .calendar, symbol: "calendar", title: "Visits on your calendar",
         detail: "Thorbis adds a scheduled visit to your calendar when you ask. It never reads your other events.",
         points: ["Add a visit with its time and address", "Add only: nothing is read", "Only when you tap Add to Calendar"],
-        allow: "Allow adding events", later: "Not now")
+        allow: "Continue")
 
     /// The explainer for a Device access row, by the row's id.
     static func primer(for rowID: String) -> PermissionPrimer? {
@@ -329,13 +330,12 @@ struct PermissionPrimer: Identifiable, Equatable, Sendable {
 }
 
 /// Paper 70/71: the glyph, a 34 Bold promise, one muted line, a card of what you get, then the
-/// brand commit and a quiet "Not now". The commit shows the system prompt and closes.
+/// brand commit. The commit shows the system prompt and closes. Paper's quiet "Not now" is left
+/// out on purpose: App Review rejects an explainer that can be left without the system prompt.
 struct PermissionPrimerView: View {
     let primer: PermissionPrimer
-    /// The system has answered (after the commit), or "Not now" when `later` is not given.
+    /// The system has answered (after the commit).
     let done: () -> Void
-    /// "Not now", for a caller that needs to tell it from an answer.
-    var later: (() -> Void)? = nil
     @State private var asking = false
 
     var body: some View {
@@ -394,11 +394,6 @@ struct PermissionPrimerView: View {
                 .buttonStyle(PressStyle())
                 .disabled(asking)
                 .accessibilityIdentifier("permission-primer-allow")
-                Button { (later ?? done)() } label: {
-                    Text(primer.later).paperButton(.commit, tone: .quiet, fills: true)
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityIdentifier("permission-primer-later")
             }
             .frame(maxWidth: 560)
             .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 8)
@@ -471,8 +466,7 @@ enum PermissionPrimerPresenter {
         guard let top, !top.isBeingPresented, !top.isBeingDismissed else { return false }
         let host = PermissionPrimerHost(rootView: PermissionPrimerView(primer: primer, done: {}))
         host.rootView = PermissionPrimerView(primer: primer,
-                                             done: { [weak host] in host?.finish(.asked) },
-                                             later: { [weak host] in host?.finish(.later) })
+                                             done: { [weak host] in host?.finish(.asked) })
         host.modalPresentationStyle = .fullScreen
         host.isModalInPresentation = true
         let answer: PermissionPrimerAnswer = await withCheckedContinuation { continuation in

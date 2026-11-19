@@ -50,7 +50,7 @@ struct SavedWorkReviewView: View {
     private var snapshot: SavedWorkSnapshot {
         .make(scope: scope, entries: outbox.entries, media: media.items, mediaErrors: media.errors,
               unverifiedMediaIDs: media.unverifiedIDs, uploadingMediaID: media.uploadingID,
-              commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning)
+              commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning ?? outbox.storageWarning)
     }
 
     var body: some View {
@@ -131,7 +131,11 @@ struct SavedWorkReviewView: View {
                             .font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .padding(.top, 12)
                     }
-                    if state.hasListingWarning {
+                    if let warning = outbox.storageWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                            .font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                            .padding(.top, 12)
+                    } else if state.hasListingWarning {
                         Label("The list may be incomplete. Saved work has not been cleared.", systemImage: "exclamationmark.triangle")
                             .font(Theme.font(14)).foregroundStyle(Theme.foreground)
                             .padding(.top, 12)

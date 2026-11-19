@@ -484,7 +484,7 @@ struct OwnerHomeView: View {
         guard let scope = SavedWorkScope.capture(session: session, api: api, media: media, outbox: outbox) else { return nil }
         return .make(scope: scope, entries: outbox.entries, media: media.items, mediaErrors: media.errors,
                      unverifiedMediaIDs: media.unverifiedIDs, uploadingMediaID: media.uploadingID,
-                     commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning)
+                     commandsSyncing: outbox.syncing, jobs: store.jobs, listingWarning: media.storageWarning ?? outbox.storageWarning)
     }
 
     /// One thing that needs someone: a tinted mark, what it is, how much or how old, and where it leads.
