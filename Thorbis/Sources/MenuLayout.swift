@@ -200,7 +200,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .team: session.can("organization.members.manage") || session.can("organization.permissions.manage")
         case .notices: session.can("organization.settings.edit", feature: "job_booking_notices")
             || PushNotifications.receivesMorningDigest(session)
-        case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
+        case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil && InboxMessaging.on(session)
         // Paper 58N: the owner's menu ends on Business settings (61N).
         case .businessSettings: session.can("organization.settings.edit")
         // Kept on this phone: anyone who works jobs has a clock, receipts, a truck and training.

@@ -91,11 +91,11 @@ struct CustomerCommsSection: View {
 
     /// What the page can and cannot know, said once under the list.
     private var footnote: String {
-        let texts = "Texts and emails here are drafts kept on this phone. Thorbis has not sent them."
-        if !callsAvailable || model.denied { return "Your role can\u{2019}t see the call log. \(texts)" }
+        let texts = model.messagingOn ? " Texts and emails here are drafts kept on this phone. Thorbis has not sent them." : ""
+        if !callsAvailable || model.denied { return "Your role can\u{2019}t see the call log.\(texts)" }
         return model.hasOlder
-            ? "Calls come from your business\u{2019}s call log, newest 200 first. \(texts)"
-            : "Calls come from your business\u{2019}s call log. \(texts)"
+            ? "Calls come from your business\u{2019}s call log, newest 200 first.\(texts)"
+            : "Calls come from your business\u{2019}s call log.\(texts)"
     }
 
     /// Call and Text, side by side; stacked at the largest text sizes.

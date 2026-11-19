@@ -518,8 +518,8 @@ extension LocalWorkspaceSection {
     var moreSubtitle: String {
         switch self {
         case .fleet: "Vehicles, plates and drivers"
-        case .equipment: "Units you service, kept on this phone"
-        case .agreements: "Service plans, kept on this phone"
+        case .equipment: "Units you service, by customer"
+        case .agreements: "Service plans, by customer"
         case .team: "People not yet in Thorbis"
         }
     }

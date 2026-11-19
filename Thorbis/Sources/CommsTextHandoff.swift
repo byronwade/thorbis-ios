@@ -73,6 +73,7 @@ private struct InboxTextPresenterModifier: ViewModifier {
             .onAppear { bind() }
             .onChange(of: session.user?.id) { _, _ in bind() }
             .onChange(of: session.activeOrganization?.id) { _, _ in bind() }
+            .onChange(of: InboxMessaging.on(session)) { _, _ in bind() }
             .onDisappear { presenter.identity = nil; presenter.opening = nil; presenter.storageUnavailable = false }
             .thorbisConfirm("Couldn’t open text",
                             message: "Your inbox on this device isn’t available. Copy unsaved work before restarting the app, then check saved messages.",
@@ -95,7 +96,8 @@ private struct InboxTextPresenterModifier: ViewModifier {
     }
 
     private func bind() {
-        if let actor = session.user?.id, let org = session.activeOrganization?.id {
+        // Without Inbox texts, a Text button opens the phone's own Messages app.
+        if InboxMessaging.on(session), let actor = session.user?.id, let org = session.activeOrganization?.id {
             presenter.bind(actorID: actor, organizationID: org)
         } else {
             presenter.identity = nil
@@ -138,7 +140,14 @@ final class InboxEmailPresenter: ObservableObject {
         identity = (actorID, organizationID, origin, generation); self.current = current
     }
     func unbind() { identity = nil; current = nil; opening = nil }
-    func open(_ mail: MailDraft, context: String) {
+    /// False when there is no Inbox email here; the caller hands the draft to the phone's Mail.
+    @discardableResult
+    func open(_ mail: MailDraft, context: String) -> Bool {
+        guard identity != nil else { return false }
+        openBound(mail, context: context)
+        return true
+    }
+    private func openBound(_ mail: MailDraft, context: String) {
         guard let identity, current?() == true else { unbind(); return }
         // Do not replace an unsaved composer through another entry point.
         #if DEBUG
@@ -164,7 +173,8 @@ final class InboxEmailPresenter: ObservableObject {
 
 struct InboxEmailAction {
     @MainActor func callAsFunction(_ mail: MailDraft, context: String) {
-        InboxEmailPresenter.shared.open(mail, context: context)
+        if InboxEmailPresenter.shared.open(mail, context: context) { return }
+        if let url = mail.mailtoURL { UIApplication.shared.open(url) }
     }
     @MainActor func callAsFunction(_ url: URL, context: String) {
         guard let mail = MailDraft(mailtoURL: url) else { return }
@@ -188,6 +198,7 @@ private struct InboxEmailPresenterModifier: ViewModifier {
             .onChange(of: session.user?.id) { _, _ in bind() }
             .onChange(of: session.activeOrganization?.id) { _, _ in bind() }
             .onChange(of: api.requestGeneration) { _, _ in bind() }
+            .onChange(of: InboxMessaging.on(session)) { _, _ in bind() }
             .onDisappear { presenter.unbind() }
             .sheet(item: $presenter.opening) { opening in
                 if presenter.isCurrent(opening) {
@@ -200,7 +211,7 @@ private struct InboxEmailPresenterModifier: ViewModifier {
     }
 
     private func bind() {
-        guard let actor = session.user?.id, let org = session.activeOrganization?.id,
+        guard InboxMessaging.on(session), let actor = session.user?.id, let org = session.activeOrganization?.id,
               let origin = api.normalizedOrigin else { presenter.unbind(); return }
         let generation = session.generation
         let apiGeneration = api.requestGeneration

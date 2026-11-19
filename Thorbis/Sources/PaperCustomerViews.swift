@@ -693,6 +693,7 @@ struct CustomerDetailView: View {
         .task(id: customer.id) { equipment = try? await api.customerEquipment(customer.id) }
         // The hub's Texts and calls and Notes rows: this sign-in's call log and on-phone books.
         .task(id: session.generation) {
+            comms.messagingOn = InboxMessaging.on(session)
             comms.bind(actorID: session.user?.id, organizationID: session.activeOrganization?.id)
             phoneNotes.bind(organizationID: session.activeOrganization?.id)
             if callsAvailable { await comms.refresh(api: api) }

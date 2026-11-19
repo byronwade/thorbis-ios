@@ -142,13 +142,26 @@ enum CommsInboxMoreFilter: String, CaseIterable, Identifiable {
 /// signed in to a workspace has it, with texts and email kept on this device. Calls need
 /// customer.view with call_recording (the server answers 403 otherwise); job notices need
 /// job.view with job_booking_notices.
+/// Texts and email in the Inbox are kept on this phone and do not send, so they stay out of the
+/// app until the server can deliver them. The server switches them on with this feature key.
+enum InboxMessaging {
+    static let feature = "inbox_messaging"
+    @MainActor static func on(_ session: SessionController) -> Bool {
+        #if DEBUG
+        // Design previews show the full Inbox; this flag shows what ships.
+        if PaperPreview.enabled { return !ProcessInfo.processInfo.arguments.contains("--paper-preview-no-messaging") }
+        #endif
+        return session.isFeatureOn(feature)
+    }
+}
+
 struct CommsInboxAccess: Equatable {
     let workspace: Bool
     let notices: Bool
     let calls: Bool
 
     @MainActor init(_ session: SessionController) {
-        self.init(workspace: session.user?.id != nil && session.activeOrganization?.id != nil,
+        self.init(workspace: session.user?.id != nil && session.activeOrganization?.id != nil && InboxMessaging.on(session),
                   notices: session.can("job.view", feature: "job_booking_notices"), calls: CallLogRules.available(session))
     }
 

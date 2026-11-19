@@ -4,9 +4,9 @@ import UIKit
 // MARK: - Account and data (Paper v2: 67 Account and data, 68 Delete account — confirm)
 //
 // App Store rule 5.1.1(v): an app that lets people sign up lets them start deleting the account in
-// the app. The request goes to the canonical API (POST /v1/account-lifecycle/deletion-requests);
-// the phone holds no deletion rules of its own. The server requires a recent re-authentication
-// proof for the request; until it issues one, it refuses and the sheet says so plainly.
+// the app. The phone holds no deletion rules of its own. It first proves it is still the account's
+// owner (POST /v1/account-lifecycle/reauthentications with the password, which is sent once and
+// never kept), then sends the request with that proof (POST /v1/account-lifecycle/deletion-requests).
 
 /// GET /v1/account-lifecycle/deletion-requests/current. Only the fields the screen shows.
 struct AccountDeletionStatus: Decodable, Equatable {
@@ -23,10 +23,21 @@ struct AccountDeletionRequestBody: Encodable {
     let reason = "self_service_account_deletion"
 }
 
+/// The server's answer to a fresh sign-in check: an id the deletion request carries once.
+struct AccountReauthentication: Decodable, Equatable {
+    let reauthenticationId: String
+}
+
 extension APIClient {
     /// The person's open deletion request, if any. A missing route or no request reads as none.
     func currentAccountDeletion() async -> AccountDeletionStatus? {
         try? await send("GET", "/v1/account-lifecycle/deletion-requests/current") as AccountDeletionStatus
+    }
+
+    /// Proves the person holding the phone knows the account's password, just before deleting.
+    func reauthenticateAccount(password: String) async throws -> AccountReauthentication {
+        struct Body: Encodable { let password: String }
+        return try await send("POST", "/v1/account-lifecycle/reauthentications", body: Body(password: password))
     }
 
     func requestAccountDeletion(reauthenticationID: String) async throws -> AccountDeletionStatus.Request {
@@ -38,13 +49,27 @@ extension APIClient {
 /// What the confirm sheet says after the server answers. Pure, so the words are unit-tested.
 enum AccountDeletionOutcome: Equatable {
     case requested
-    /// The server wants a fresh sign-in check it cannot take from the phone yet.
-    case needsSignInCheck
+    case wrongPassword
+    case tooManyTries
+    /// The server cannot take deletion requests yet (the sign-in check or the rules for what is
+    /// kept are not switched on).
+    case notAvailable
     case failed(String)
 
+    /// The sign-in check's refusal.
+    init(signInCheck status: Int?) {
+        switch status {
+        case 400, 401, 403, 422: self = .wrongPassword
+        case 429: self = .tooManyTries
+        case 404, 409, 501, 503: self = .notAvailable
+        default: self = .failed("Thorbis couldn't check your password. Nothing was deleted. Try again.")
+        }
+    }
+
+    /// The deletion request's refusal.
     init(status: Int?, detail: String?) {
         switch status {
-        case 409: self = .needsSignInCheck
+        case 404, 409: self = .notAvailable
         default: self = .failed(detail ?? "Your account wasn't deleted. Try again.")
         }
     }
@@ -52,13 +77,15 @@ enum AccountDeletionOutcome: Equatable {
     var message: String? {
         switch self {
         case .requested: nil
-        case .needsSignInCheck:
-            "Deleting needs a fresh sign-in check that isn't switched on for your account yet. Nothing was deleted. Ask your company's owner, or try again later."
+        case .wrongPassword: "That password isn't right. Nothing was deleted."
+        case .tooManyTries: "Too many tries. Nothing was deleted. Wait a few minutes, then try again."
+        case .notAvailable:
+            "Thorbis can't take deletion requests in the app yet. Nothing was deleted. Try again later."
         case .failed(let text): text
         }
     }
 
-    /// The word a person types to confirm, in any case, without spaces around it.
+/// The word a person types to confirm, in any case, without spaces around it.
     static func confirms(_ typed: String) -> Bool {
         typed.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "DELETE"
     }
@@ -130,7 +157,7 @@ struct AccountAndDataView: View {
                             .padding(.horizontal, 4).padding(.bottom, 14)
                             .accessibilityIdentifier("account-deletion-pending")
                     } else {
-                        Text("Deleting your account permanently removes your login and personal details. Job and invoice records your company must keep for tax stay with the business.")
+                        Text("Deleting your account removes your login and personal details. Job and invoice records belong to your company and stay with it.")
                             .font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 4).padding(.bottom, 14)
@@ -186,10 +213,13 @@ struct DeleteAccountSheet: View {
     @EnvironmentObject private var api: APIClient
     @Environment(\.dismiss) private var dismiss
     @State private var typed = ""
+    @State private var password = ""
+    @State private var missingPassword = false
     @State private var busy = false
     @State private var outcome: AccountDeletionOutcome?
     @State private var missingWord = false
     @FocusState private var fieldFocused: Bool
+    @FocusState private var passwordFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -197,7 +227,7 @@ struct DeleteAccountSheet: View {
                 Text("Delete account?")
                     .font(Theme.font(22, weight: .bold)).tracking(-0.44)
                     .accessibilityAddTraits(.isHeader)
-                Text("This removes \(name) from \(company). Your company keeps what the law requires; everything personal goes.")
+                Text("This asks Thorbis to delete \(name)\u{2019}s account and remove it from \(company). The business keeps its own records.")
                     .font(Theme.font(15)).foregroundStyle(Theme.subtle)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
@@ -215,7 +245,7 @@ struct DeleteAccountSheet: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Kept by the business").font(Theme.font(15, weight: .semibold))
-                    Text("Completed jobs, invoices and payments stay with \(company) — tax law requires them. Your name becomes \"Former team member\" on those records.")
+                    Text("Jobs, invoices, payments, notes and photos belong to \(company) and stay with it.")
                         .font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -238,6 +268,25 @@ struct DeleteAccountSheet: View {
                     .accessibilityIdentifier("account-delete-confirm-field")
                 if missingWord {
                     Text("Type DELETE in the box to confirm.").font(Theme.font(13)).foregroundStyle(Theme.destructive)
+                        .padding(.top, 6)
+                }
+                Text("Your password").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.top, 18).padding(.bottom, 8)
+                    .accessibilityHidden(true)
+                SecureField("Your password", text: $password, prompt: .placeholder("Password"))
+                    .font(Theme.font(16, weight: .medium))
+                    .textContentType(.password)
+                    .submitLabel(.done)
+                    .focused($passwordFocused)
+                    .onChange(of: password) { _, _ in missingPassword = false; outcome = nil }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 50)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityLabel("Your password")
+                    .accessibilityHint("Checks that it is you before the account is deleted")
+                    .accessibilityIdentifier("account-delete-password")
+                if missingPassword {
+                    Text("Enter your password to confirm it's you.").font(Theme.font(13)).foregroundStyle(Theme.destructive)
                         .padding(.top, 6)
                 }
                 if let message = outcome?.message {
@@ -271,22 +320,32 @@ struct DeleteAccountSheet: View {
         .scrollDismissesKeyboard(.interactively)
         .foregroundStyle(Theme.foreground)
         .thorbisSheetPresentation([.large])
+        .onDisappear { password = "" }
     }
 
     private func submit() async {
         guard AccountDeletionOutcome.confirms(typed) else { missingWord = true; fieldFocused = true; return }
         missingWord = false
-        // The server binds deletion to a recent sign-in check (account-lifecycle reauthentication,
-        // BYR-446/449). Until it can issue that proof to the phone, the phone sends nothing — never
-        // a made-up proof — and says plainly that nothing was deleted.
-        guard let proof = AccountReauthenticationProof.current else {
-            outcome = .needsSignInCheck
-            return
-        }
+        guard !password.isEmpty else { missingPassword = true; passwordFocused = true; return }
         busy = true
         defer { busy = false }
+        // First the sign-in check. The password goes to the server once and is not kept here.
+        let proof: AccountReauthentication
         do {
-            let request = try await api.requestAccountDeletion(reauthenticationID: proof)
+            proof = try await api.reauthenticateAccount(password: password)
+        } catch let problem as Problem {
+            outcome = AccountDeletionOutcome(signInCheck: problem.status)
+            if outcome == .wrongPassword { password = ""; passwordFocused = true }
+            return
+        } catch is CancellationError {
+            return
+        } catch {
+            outcome = .failed("Nothing was deleted. Check your connection and try again.")
+            return
+        }
+        do {
+            let request = try await api.requestAccountDeletion(reauthenticationID: proof.reauthenticationId)
+            password = ""
             outcome = .requested
             onRequested(request)
             dismiss()
@@ -298,10 +357,4 @@ struct DeleteAccountSheet: View {
             outcome = .failed("Your account wasn't deleted. Check your connection and try again.")
         }
     }
-}
-
-/// Where a fresh sign-in check's proof id will come from once the server issues one. There is no
-/// route for it yet, so there is never a proof and the deletion request is not sent.
-enum AccountReauthenticationProof {
-    static var current: String? { nil }
 }

@@ -231,7 +231,9 @@ final class CustomerCommsModel: ObservableObject {
     var denied: Bool { inbox?.callsDenied ?? false }
     var error: String? { inbox?.callsError }
     var hasOlder: Bool { inbox?.callsCursor != nil }
-    var threads: [CommsLocalThread] { local?.threads ?? [] }
+    /// Off until the server can deliver texts and email; drafts kept on this phone stay out of sight.
+    var messagingOn = true
+    var threads: [CommsLocalThread] { messagingOn ? (local?.threads ?? []) : [] }
 
     /// Opens this sign-in's call log and on-phone inbox; another sign-in starts clean.
     func bind(actorID: String?, organizationID: String?) {

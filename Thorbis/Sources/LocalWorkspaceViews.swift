@@ -310,7 +310,9 @@ struct LocalWorkspaceView: View {
     @State private var openedVehicle: LocalWorkspaceRow?
     /// Equipment and Agreements: the company's server book is showing, so this phone's notes are second.
     private var sharedEquipment: Bool {
-        (section == .equipment && hasServerEquipment) || (section == .agreements && hasServerAgreements)
+        // Equipment and maintenance plans are the team's shared book. Units and plans are added on
+        // the customer's page; notes made here before that stay listed, and no new ones are added.
+        section == .equipment || section == .agreements
     }
 
     private var identityKey: String { "\(actorID.lowercased())|\(organizationID.lowercased())" }
@@ -394,7 +396,12 @@ struct LocalWorkspaceView: View {
                     if bound {
                         // Empty: the shared empty state, not a label repeating the title over a one-line card.
                         if rows.isEmpty && sharedEquipment {
-                            EmptyView()
+                            if (section == .equipment && !hasServerEquipment) || (section == .agreements && !hasServerAgreements) {
+                                ListRoomEmpty(glyph: section.emptyGlyph,
+                                              title: section == .equipment ? "No equipment yet" : "No maintenance plans yet",
+                                              message: section == .equipment ? "Open a customer and add a unit there. It shows here for the whole team."
+                                                                             : "Open a customer and add a plan there. It shows here for the whole team.")
+                            }
                         } else if rows.isEmpty {
                             ListRoomEmpty(glyph: section.emptyGlyph, title: "Nothing here yet",
                                           message: "\(section.addTitle) with the + above.")
