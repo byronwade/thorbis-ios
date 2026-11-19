@@ -301,6 +301,16 @@ enum DrawerPanel {
     static let inset: CGFloat = 8
     static let fill = Theme.drawerPanel
     static var shape: RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
+    /// The panel's bottom corners sit 8 from the screen's own rounded corners, so they follow that
+    /// curve (the screen's radius less the gap) instead of being cut by it; never tighter than 30.
+    static func bottomRadius(topInset: CGFloat) -> CGFloat {
+        max(radius, DrawerMotion.cornerRadius(topInset: topInset) - inset)
+    }
+    static func shape(topInset: CGFloat) -> UnevenRoundedRectangle {
+        let bottom = bottomRadius(topInset: topInset)
+        return UnevenRoundedRectangle(topLeadingRadius: radius, bottomLeadingRadius: bottom,
+                                      bottomTrailingRadius: bottom, topTrailingRadius: radius, style: .continuous)
+    }
     /// How dark the place behind goes once the panel is fully open.
     static func scrim(dark: Bool) -> Double { dark ? 0.5 : 0.28 }
 }

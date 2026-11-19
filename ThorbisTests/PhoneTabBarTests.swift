@@ -82,4 +82,13 @@ final class PhoneTabBarTests: XCTestCase {
         // The bar's places come from the role, never from an old saved tab list.
         XCTAssertEqual(PhoneTabs.tabs(role: .technician, opens: { _ in true }), [.schedule, .jobs, .customers, .inbox])
     }
+
+    // The menu panel's bottom corners follow the screen's own curve, 8 in, so the phone's rounded
+    // corner never cuts them; a square-cornered phone keeps Paper's 30.
+    func testMenuPanelBottomCornersFollowTheScreen() {
+        XCTAssertEqual(DrawerPanel.bottomRadius(topInset: 59), 47)
+        XCTAssertEqual(DrawerPanel.bottomRadius(topInset: 62), 47)
+        XCTAssertEqual(DrawerPanel.bottomRadius(topInset: 47), 36)
+        XCTAssertEqual(DrawerPanel.bottomRadius(topInset: 20), 30)
+    }
 }

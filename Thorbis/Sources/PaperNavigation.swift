@@ -276,8 +276,8 @@ struct RootView: View {
             content
                 .frame(width: width)
                 .background(DrawerPanel.fill)
-                .clipShape(DrawerPanel.shape)
-                .overlay { DrawerPanel.shape.strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
+                .clipShape(DrawerPanel.shape(topInset: windowSafeTop))
+                .overlay { DrawerPanel.shape(topInset: windowSafeTop).strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
                 .shadow(color: .black.opacity(colorScheme == .dark ? 0.5 : 0.14), radius: 25, y: 20)
                 .padding(.leading, DrawerPanel.inset).padding(.bottom, DrawerPanel.inset)
                 .ignoresSafeArea(.container, edges: .bottom)
@@ -817,6 +817,12 @@ struct RootView: View {
     }
 
     /// The window's bottom safe area (the home indicator), for placing the bar.
+    /// The status bar's height, which tells a Dynamic Island phone from a notched or Home-button one.
+    private var windowSafeTop: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets.top ?? 0
+    }
+
     private var windowSafeBottom: CGFloat {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets.bottom ?? 0

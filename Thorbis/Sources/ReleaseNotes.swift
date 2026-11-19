@@ -18,6 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "person.crop.circle", title: "Tidier menu",
                       detail: "Your name is one row that opens Settings, Notifications joins the list, and long names no longer cut off."),
+                .init(symbol: "rectangle.roundedbottom", title: "Menu fits the screen's corners",
+                      detail: "The menu's bottom corners now follow your phone's rounded screen instead of being cut by it."),
             ]
         ),
         ReleaseNote(
