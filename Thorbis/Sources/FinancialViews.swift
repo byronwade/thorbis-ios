@@ -171,6 +171,8 @@ struct EstimateDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var autoPresented = false
     @State private var record: EstimateRecord?
+    /// The copy this phone last read, on screen until the live one lands. Looked at, never acted on.
+    @State private var savedCopy: EstimateRecord?
     @State private var error: String?
     @State private var busy = false
     /// "Show customer" in flight; leaving the estimate cancels its job lookup.
@@ -193,11 +195,13 @@ struct EstimateDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 OfflineBanner()
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/estimates/\(id)"))
+                if record == nil, savedCopy != nil, error == nil { CheckingForChangesNote() }
                 if let error {
                     ErrorBanner(message: error, retry: record == nil ? { await load() } : nil)
                         .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8)
                 }
-                if let record {
+                if let record = record ?? savedCopy {
+                    let isLive = self.record != nil
                     let currency = record.lines.first?.unitPrice.currency ?? record.options?.first?.currency ?? "USD"
                     estimateHeader(record, currency: currency)
                         .padding(.horizontal, Theme.gutter).padding(.top, 14)
@@ -219,7 +223,7 @@ struct EstimateDetailView: View {
                                       total: option.totalAmount, currency: option.currency,
                                       memberLine: memberLine(option.lines, currency: option.currency))
                         }
-                        if canEdit(record) {
+                        if isLive, canEdit(record) {
                             Button { showRevisionEditor = true } label: {
                                 Text("Edit").paperButton(.secondary, tone: .quiet, fills: true)
                             }
@@ -573,6 +577,10 @@ struct EstimateDetailView: View {
                 }
             }
         } }
+        .onAppear {
+            guard record == nil, savedCopy == nil else { return }
+            savedCopy = SavedDocumentPreview.estimate(JobDetailCache.estimate(id), id: id, organization: session.activeOrganization?.id)
+        }
         .task { await loadAndMaybePresent() }
         .refreshable { await SavedCopies.$liveOnly.withValue(true) { await load() } }
         .onDisappear { if busy { presentTask?.cancel() } }
@@ -713,11 +721,16 @@ struct EstimateDetailView: View {
         do {
             let loaded = try await api.fieldEstimate(id)
             record = loaded
+            savedCopy = nil
             JobDetailCache.save(estimate: loaded)
             error = nil
             if let customer = record?.customerId { memberPricing = try? await api.memberPricing(customer) }
         }
-        catch is CancellationError {} catch { self.error = error.localizedDescription }
+        catch is CancellationError {} catch {
+            // Refused or gone: the saved copy comes down with it. No signal keeps it on screen.
+            if !error.isConnectivityFailure { savedCopy = nil }
+            self.error = error.localizedDescription
+        }
     }
 }
 
@@ -907,6 +920,9 @@ struct InvoiceDetailView: View {
     @EnvironmentObject private var outbox: FieldOutbox
     @Environment(\.dismiss) private var dismiss
     @State private var record: InvoiceRecord?
+    /// The copy this phone last read, on screen until the live one lands. Looked at only: payments,
+    /// issue, edit, signature and the menu all wait for `record`.
+    @State private var savedCopy: InvoiceRecord?
     @State private var error: String?
     @State private var busy = false
     @State private var confirmIssue = false
@@ -964,11 +980,13 @@ struct InvoiceDetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 OfflineBanner()
                 SavedCopyNote(savedAt: api.savedCopyDate("/v1/invoices/\(id)"))
+                if record == nil, savedCopy != nil, error == nil { CheckingForChangesNote() }
                 if let error {
                     ErrorBanner(message: error, retry: record == nil ? { await load() } : nil)
                         .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8)
                 }
-                if let record {
+                if let record = record ?? savedCopy {
+                    let isLive = self.record != nil
                     // Paper 40C: the reference and status pill, the customer at 28 Bold and what it
                     // bills; then (16 from the edges) the balance card, payments, Edit, the lines.
                     let amounts = invoiceAmounts(record)
@@ -996,7 +1014,7 @@ struct InvoiceDetailView: View {
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
-                    if let paymentModel {
+                    if isLive, let paymentModel {
                         InvoicePaymentsSection(
                             model: paymentModel,
                             invoice: record,
@@ -1005,7 +1023,7 @@ struct InvoiceDetailView: View {
                             invoiceReference: displayReference(record)
                         )
                     }
-                    if record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
+                    if isLive, record.status == "draft", session.can("invoice.edit", feature: "invoicing") {
                         Button { showEditDraft = true } label: {
                             Text("Edit").paperButton(.secondary, tone: .quiet, fills: true)
                         }
@@ -1135,6 +1153,8 @@ struct InvoiceDetailView: View {
         .task(id: session.generation) {
             paymentModel = nil
             record = nil
+            savedCopy = SavedDocumentPreview.invoice(JobDetailCache.invoice(id), id: id,
+                                                     organization: session.activeOrganization?.id, scope: expectedJobScope)
             await load()
             #if DEBUG
             if PaperPreview.enabled, PaperPreview.screen == "invoice-payment" {
@@ -1416,6 +1436,7 @@ struct InvoiceDetailView: View {
         let generation = session.generation
         guard expectedJobScope.map({ $0.organizationID == session.activeOrganization?.id }) != false else {
             record = nil
+            savedCopy = nil
             paymentModel = nil
             return
         }
@@ -1428,6 +1449,8 @@ struct InvoiceDetailView: View {
         await paymentModel.load()
         guard currentAuthority(), session.generation == generation else { return }
         record = paymentModel.invoice
+        // The live read answered (or refused): the saved copy has done its job either way.
+        savedCopy = nil
         if paymentModel.invoice != nil {
             error = nil
         } else if let loadError = paymentModel.loadError {

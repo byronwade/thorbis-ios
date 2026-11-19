@@ -497,8 +497,11 @@ struct RootView: View {
             PhoneTabBar(tabs: tabs, current: selectedTab,
                         messagesUnread: showsInboxDot, messagesUnreadCount: inboxUnreadCount,
                         moreHasNews: moreHasNews(tabs: tabs),
+                        initials: barInitials,
                         select: selectTab,
-                        openMore: { Task { @MainActor in openDrawer() } })
+                        openMore: { Task { @MainActor in openDrawer() } },
+                        openSearch: { openBarSearch() },
+                        openAccount: { showSettings = true })
                 // The page fades out behind the bar and is solid below it, so list rows never
                 // show as slivers under or beneath the floating pill.
                 .background {
@@ -513,6 +516,12 @@ struct RootView: View {
                 .offset(y: safeBottom - tabBarBottomGap(safeBottom: safeBottom))
                 .transition(.opacity)
         }
+    }
+
+    /// The account button's initials: the first letters of the person's first two names.
+    private var barInitials: String {
+        let name = session.user?.name ?? session.user?.email ?? ""
+        return name.split(separator: " ").prefix(2).map { String($0.prefix(1)) }.joined().uppercased()
     }
 
     /// More's dot: what the menu circle's dot said, less the unread Messages its own tab shows.

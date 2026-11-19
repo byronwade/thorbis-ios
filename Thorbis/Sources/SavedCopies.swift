@@ -129,6 +129,21 @@ struct SavedCopyNote: View {
     }
 }
 
+/// "Checking for changes" under a saved copy while the live read is on its way.
+struct CheckingForChangesNote: View {
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text("Saved on this phone \u{00B7} checking for changes")
+        }
+        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Theme.gutter).padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("saved-copy-checking")
+    }
+}
+
 extension APIClient {
     /// Customer names read six at a time (a technician's schedule refresh used to read up to 40
     /// one after another). Unreadable ones are left out, as before.

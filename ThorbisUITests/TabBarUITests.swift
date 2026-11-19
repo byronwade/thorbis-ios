@@ -23,7 +23,7 @@ final class TabBarUITests: XCTestCase {
         XCTAssertTrue(element.waitForExistence(timeout: 5), "Found \(element)", file: file, line: line)
     }
 
-    /// Every slot carries its word (the label drawn under the icon), sits in the full-width bar in
+    /// Every slot names itself (icon only on screen, the word for VoiceOver), sits in the pill in
     /// equal slots at least 56 tall, and is wholly on screen.
     private func assertLabelledSlots(_ app: XCUIApplication, _ words: [String: String],
                                      file: StaticString = #filePath, line: UInt = #line) {
@@ -37,8 +37,9 @@ final class TabBarUITests: XCTestCase {
             XCTAssertTrue(screen.contains(item.frame), "\(id) is fully on screen", file: file, line: line)
             widths.append(item.frame.width)
         }
-        // Equal slots across the width less the 16pt margins and the pill's inset.
-        let expected = (screen.width - 32 - 8 - CGFloat(words.count - 1) * 2) / CGFloat(words.count)
+        // Equal slots in the pill: the width less the 16pt margins, the two 56pt round buttons with
+        // their 8pt gaps, and the pill's inset.
+        let expected = (screen.width - 32 - 2 * (56 + 8) - 8) / CGFloat(words.count)
         for width in widths { XCTAssertEqual(width, expected, accuracy: 2, "Equal full-width slots", file: file, line: line) }
     }
 
@@ -57,13 +58,20 @@ final class TabBarUITests: XCTestCase {
         let all = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tabbar-'"))
         XCTAssertEqual(all.count, ids.count + 1, "Only the role's places and More", file: file, line: line)
         XCTAssertFalse(app.buttons["drawer-menu"].exists, "No menu circle while the bar is on", file: file, line: line)
+        // Shopify's layout: Search on the left of the pill, the account on its right, level with it.
+        let search = app.buttons["bar-search"], account = app.buttons["bar-account"], menu = tab(app, "more")
+        XCTAssertTrue(search.isHittable && account.isHittable, "Search and the account flank the pill", file: file, line: line)
+        XCTAssertLessThan(search.frame.maxX, tab(app, ids[0]).frame.minX, file: file, line: line)
+        XCTAssertGreaterThan(account.frame.minX, menu.frame.maxX, file: file, line: line)
+        XCTAssertEqual(search.frame.midY, menu.frame.midY, accuracy: 1, file: file, line: line)
+        XCTAssertEqual(account.frame.midY, menu.frame.midY, accuracy: 1, file: file, line: line)
     }
 
     func testTechnicianTabs() {
         let app = launch("my-day")
         assertTabs(app, ["schedule", "jobs", "customers", "inbox"])
         XCTAssertTrue(tab(app, "schedule").isSelected)
-        assertLabelledSlots(app, ["schedule": "Schedule", "jobs": "Jobs", "customers": "Customers", "inbox": "Messages", "more": "More"])
+        assertLabelledSlots(app, ["schedule": "Schedule", "jobs": "Jobs", "customers": "Customers", "inbox": "Messages", "more": "Menu"])
         attach(app, "default-text")
         tab(app, "jobs").tap()
         XCTAssertTrue(tab(app, "jobs").waitForSelected())
@@ -78,7 +86,7 @@ final class TabBarUITests: XCTestCase {
         let app = launch("schedule", role: "owner")
         assertTabs(app, ["home", "schedule", "jobs", "money"])
         XCTAssertTrue(tab(app, "home").isSelected, "Owners open on their Dashboard")
-        assertLabelledSlots(app, ["home": "Dashboard", "schedule": "Schedule", "jobs": "Jobs", "money": "Money", "more": "More"])
+        assertLabelledSlots(app, ["home": "Dashboard", "schedule": "Schedule", "jobs": "Jobs", "money": "Money", "more": "Menu"])
     }
 
     func testMoreOpensTheDrawer() {
@@ -162,14 +170,31 @@ final class TabBarUITests: XCTestCase {
         XCTAssertTrue(app.buttons["navigation-bottomBar"].isSelected)
     }
 
-    func testLargestTextShowsWordsUnderTheIcons() {
+    func testSearchAndAccountButtonsOpenSearchAndSettings() {
+        let app = launch("my-day")
+        XCTAssertTrue(app.buttons["bar-account"].waitForExistence(timeout: 30))
+        XCTAssertEqual(app.buttons["bar-search"].label, "Search")
+        XCTAssertEqual(app.buttons["bar-account"].label, "Settings")
+        app.buttons["bar-account"].tap()
+        XCTAssertTrue(app.buttons["settings-menu"].waitForExistence(timeout: 10), "The account button opens Settings")
+        attach(app, "settings-from-account")
+        app.terminate()
+        let again = launch("my-day")
+        XCTAssertTrue(again.buttons["bar-search"].waitForExistence(timeout: 30))
+        again.buttons["bar-search"].tap()
+        XCTAssertTrue(again.textFields.firstMatch.waitForExistence(timeout: 10) || again.searchFields.firstMatch.waitForExistence(timeout: 2),
+                      "Search opens with its field")
+        attach(again, "search-from-bar")
+    }
+
+    func testLargestTextKeepsEverySlotTappable() {
         let app = launch("my-day", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
         assertTabs(app, ["schedule", "jobs", "customers", "inbox"])
         for id in ["schedule", "jobs", "customers", "inbox", "more"] {
             let item = tab(app, id)
             XCTAssertTrue(item.isHittable, "\(id) can be tapped")
             XCTAssertGreaterThanOrEqual(item.frame.height, 56)
-            XCTAssertGreaterThanOrEqual(item.frame.width, 56)
+            XCTAssertGreaterThanOrEqual(item.frame.width, 44)
         }
         attach(app, "largest-text")
         let bar = tab(app, "more").frame

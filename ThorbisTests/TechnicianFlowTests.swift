@@ -21,6 +21,33 @@ final class TechnicianFlowTests: XCTestCase {
                       createdAt: "2026-10-28T00:00:00Z", updatedAt: "2026-10-28T00:00:00Z")
     }
 
+    // A saved estimate or invoice is shown before the live read only when it is this document,
+    // in this company and (opened from a job) on that job.
+    func testSavedPreviewNeedsSameDocumentAndCompany() {
+        let saved = estimate("e1", "sent")
+        XCTAssertEqual(SavedDocumentPreview.estimate(saved, id: "e1", organization: "o")?.id, "e1")
+        XCTAssertNil(SavedDocumentPreview.estimate(saved, id: "e2", organization: "o"))
+        XCTAssertNil(SavedDocumentPreview.estimate(saved, id: "e1", organization: "other"))
+        XCTAssertNil(SavedDocumentPreview.estimate(saved, id: "e1", organization: nil))
+        XCTAssertNil(SavedDocumentPreview.estimate(nil, id: "e1", organization: "o"))
+
+        let bill = invoice("i1", "issued")
+        XCTAssertEqual(SavedDocumentPreview.invoice(bill, id: "i1", organization: "o")?.id, "i1")
+        XCTAssertNil(SavedDocumentPreview.invoice(bill, id: "i2", organization: "o"))
+        XCTAssertNil(SavedDocumentPreview.invoice(bill, id: "i1", organization: "other"))
+        XCTAssertNil(SavedDocumentPreview.invoice(bill, id: "i1", organization: nil))
+    }
+
+    func testSavedInvoicePreviewStaysInsideItsJob() {
+        let bill = invoice("i1", "issued")
+        let same = JobDocumentScope(jobID: "j", organizationID: "o", customerID: "c")
+        let otherJob = JobDocumentScope(jobID: "j2", organizationID: "o", customerID: "c")
+        let otherCustomer = JobDocumentScope(jobID: "j", organizationID: "o", customerID: "c2")
+        XCTAssertNotNil(SavedDocumentPreview.invoice(bill, id: "i1", organization: "o", scope: same))
+        XCTAssertNil(SavedDocumentPreview.invoice(bill, id: "i1", organization: "o", scope: otherJob))
+        XCTAssertNil(SavedDocumentPreview.invoice(bill, id: "i1", organization: "o", scope: otherCustomer))
+    }
+
     private func next(_ status: String, _ transitions: [String] = [], estimates: [EstimateRecord]? = [],
                       invoices: [InvoiceRecord]? = [], can: TechJobAbilities = .all) -> TechJobStep? {
         TechJobFlow.nextStep(status: status, transitions: transitions, estimates: estimates, invoices: invoices, can: can)

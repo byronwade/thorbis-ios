@@ -93,6 +93,8 @@ extension PaperGlyph {
     /// Paper 65's Navigation segments: the sidebar and the bottom bar marks (18pt, stroked 1.5).
     static let navSidebar = PaperGlyph(box: 18, [.rect(2.25, 3.25, 13.5, 11.5, rx: 2.5, 1.5), .stroke("M7 3.25V14.75", 1.5)])
     static let navBottomBar = PaperGlyph(box: 18, [.rect(2.25, 3.25, 13.5, 11.5, rx: 2.5, 1.5), .stroke("M2.25 11H15.75", 1.5)])
+    /// The menu, last in the pill: three lines, as Shopify draws its own.
+    static let tabMenu = PaperGlyph(box: 20, [.stroke("M3.5 5.5H16.5M3.5 10H16.5M3.5 14.5H16.5", 1.6)])
     static let tabMore = PaperGlyph(box: 20, [.circle(4.5, 10, 1.5), .circle(10, 10, 1.5), .circle(15.5, 10, 1.5)])
 
     /// A place's mark in the dock: 18A's own where it draws one, else the drawer's.
@@ -108,13 +110,12 @@ extension PaperGlyph {
 
 // MARK: - The bar
 
-/// The phone's bottom bar. Paper 18A draws an icon-only floating pill; on the owner's instruction
-/// (people should not have to guess what a briefcase or three dots means, and Jobber, Housecall
-/// Pro and ServiceTitan all label their tabs) every item shows its word under the icon at every
-/// text size. It keeps 18A's pill look (radius, 1pt border, deep shadow) on an opaque card ground
-/// so list text scrolling underneath never shows through, spans the screen 16 in from each edge,
-/// and splits it into equal slots, each wholly tappable. The selected slot sits on the brand
-/// surface with a brand icon and word; the others are muted ink.
+/// The phone's bottom bar, laid out as Shopify's mobile app lays out its own (owner's instruction,
+/// 2026-11-19): three floating pieces in one row. A round Search button on the left, a pill of
+/// icon-only places ending in the menu in the middle, and a round account button (the person's
+/// initials, opening Settings) on the right. The place showing sits on a soft brand circle. No
+/// words are drawn, as in Paper 18A; every item still names itself to VoiceOver and shows its
+/// word large on a long press. Opaque card grounds, so list text never shows through.
 struct PhoneTabBar: View {
     let tabs: [MenuItem]
     /// The place showing (a MenuItem id, "local-…" or "notifications").
@@ -122,67 +123,99 @@ struct PhoneTabBar: View {
     /// Messages wears the brand dot while unread notices wait.
     let messagesUnread: Bool
     let messagesUnreadCount: Int?
-    /// More wears the dot for anything else in the drawer that needs the person.
+    /// The menu wears the dot for anything else in it that needs the person.
     let moreHasNews: Bool
+    /// The person's initials for the account button.
+    var initials: String = ""
     let select: (MenuItem) -> Void
     let openMore: () -> Void
+    var openSearch: (() -> Void)? = nil
+    var openAccount: (() -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
 
     /// The side margins: the standard 16.
     static let margin: CGFloat = 16
+    /// The round buttons and the pill share one height.
+    static let height: CGFloat = 56
 
-    /// A place not in the bar (opened from the drawer, a link or a notification) lights More.
+    /// A place not in the bar (opened from the menu, a link or a notification) lights the menu.
     private var moreActive: Bool { !tabs.contains { $0.rawValue == current } }
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(tabs) { item in
-                let unread = item == .inbox && messagesUnread
-                itemButton(title: item.title, glyph: .tab(item), active: current == item.rawValue, dot: unread,
-                           value: unread ? (messagesUnreadCount.map { "\($0) unread" } ?? "Unread") : nil,
-                           id: "tabbar-\(item.rawValue)") { select(item) }
+        HStack(spacing: 8) {
+            if let openSearch {
+                roundButton(label: "Search", id: "bar-search", action: openSearch) {
+                    PaperIcon(.search, size: 22, color: Theme.foreground)
+                }
             }
-            itemButton(title: "More", glyph: .tabMore, active: moreActive, dot: moreHasNews,
-                       value: moreHasNews ? "New items" : nil, id: "tabbar-more", action: openMore)
+            HStack(spacing: 0) {
+                ForEach(tabs) { item in
+                    let unread = item == .inbox && messagesUnread
+                    itemButton(title: item.title, glyph: .tab(item), active: current == item.rawValue, dot: unread,
+                               value: unread ? (messagesUnreadCount.map { "\($0) unread" } ?? "Unread") : nil,
+                               id: "tabbar-\(item.rawValue)") { select(item) }
+                }
+                itemButton(title: "Menu", glyph: .tabMenu, active: moreActive, dot: moreHasNews,
+                           value: moreHasNews ? "New items" : nil, id: "tabbar-more", action: openMore)
+            }
+            .padding(.horizontal, 4)
+            .frame(height: Self.height)
+            .background(Theme.card, in: Capsule())
+            .overlay { Capsule().strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
+            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.14), radius: 12, y: 8)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isTabBar)
+            .accessibilityLabel("Tab bar")
+            .accessibilityIdentifier("tabbar")
+            if let openAccount {
+                roundButton(label: "Settings", id: "bar-account", action: openAccount) {
+                    Text(initials.isEmpty ? "You" : initials)
+                        .font(Theme.font(14, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
+                        .frame(width: 40, height: 40)
+                        .background(Theme.brandSurface, in: Circle())
+                }
+            }
         }
-        .padding(4)
-        .background(Theme.card, in: Capsule())
-        .overlay { Capsule().strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
-        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.14), radius: 12, y: 8)
         .padding(.horizontal, Self.margin)
-        .accessibilityElement(children: .contain)
-        .accessibilityAddTraits(.isTabBar)
-        .accessibilityLabel("Tab bar")
-        .accessibilityIdentifier("tabbar")
+    }
+
+    /// Search and the account: a card circle the pill's height, with the pill's border and shadow.
+    private func roundButton(label: String, id: String, action: @escaping () -> Void,
+                             @ViewBuilder content: () -> some View) -> some View {
+        Button(action: action) {
+            content()
+                .frame(width: Self.height, height: Self.height)
+                .background(Theme.card, in: Circle())
+                .overlay { Circle().strokeBorder(Theme.border, lineWidth: 1).allowsHitTesting(false) }
+                .contentShape(Circle())
+        }
+        .buttonStyle(PressStyle())
+        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.14), radius: 12, y: 8)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(id)
     }
 
     private func itemButton(title: String, glyph: PaperGlyph, active: Bool, dot: Bool, value: String?,
                             id: String, action: @escaping () -> Void) -> some View {
         let ink = active ? Theme.brandText : Theme.muted
         return Button(action: action) {
-            VStack(spacing: 3) {
-                PaperIcon(glyph, size: 22, color: ink)
-                    .frame(width: 28, height: 24)
-                    .overlay(alignment: .topTrailing) {
-                        if dot {
-                            Circle().fill(Theme.brand).frame(width: 8, height: 8)
-                                .padding(1.5).background(Theme.card, in: Circle())
-                                .offset(x: 4, y: -2)
-                                .accessibilityHidden(true)
-                        }
+            PaperIcon(glyph, size: 22, color: ink)
+                .frame(width: 28, height: 24)
+                .overlay(alignment: .topTrailing) {
+                    if dot {
+                        Circle().fill(Theme.brand).frame(width: 8, height: 8)
+                            .padding(1.5).background(Theme.card, in: Circle())
+                            .offset(x: 4, y: -2)
+                            .accessibilityHidden(true)
                     }
-                Text(title)
-                    .font(Theme.font(11, weight: active ? .semibold : .medium))
-                    .foregroundStyle(ink)
-                    // One line, never "…": a long word steps down a little instead. Words stop
-                    // growing at xLarge, as iOS tab bars do; a long press shows them bigger.
-                    .lineLimit(1).minimumScaleFactor(0.75).allowsTightening(true)
-                    .dynamicTypeSize(...DynamicTypeSize.xLarge)
-            }
-            .padding(.horizontal, 2)
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .background { if active { Capsule().fill(Theme.brandSurface) } }
-            .contentShape(Capsule())
+                }
+                .frame(width: 44, height: 44)
+                .background { if active { Circle().fill(Theme.brandSurface) } }
+                // The whole slot takes the tap, not just the circle.
+                .frame(maxWidth: .infinity, minHeight: Self.height)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel(title)
