@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-18-menu-motion",
+            date: "2026-11-18",
+            highlights: [
+                .init(symbol: "sidebar.left", title: "Smoother menu",
+                      detail: "The menu opens faster with a soft landing, closes quicker, and follows the speed of your swipe."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-18-instant-job",
             date: "2026-11-18",
             highlights: [
