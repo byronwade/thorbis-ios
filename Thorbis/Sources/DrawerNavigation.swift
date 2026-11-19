@@ -138,19 +138,29 @@ struct AppDrawer: View {
     private var rows: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                // Notifications is a row like any other place, word and all, not a footer button.
+                if openNotifications != nil || hasMessages || sections.places.contains(.inbox) {
+                    PlaceRow(title: "Notifications", symbol: "bell", tint: Theme.subtle, here: current == "notifications",
+                             count: nil, id: "drawer-notifications", height: role != .technician ? 40 : 46) {
+                        if let openNotifications { openNotifications() } else { openPlace(.inbox) }
+                    }
+                }
                 PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: role) },
                            isCurrent: { current == $0.rawValue }, isCurrentLocal: { current == "local-\($0.rawValue)" },
                            count: count, idPrefix: "drawer", compactRows: role != .technician, showsFavorites: false,
                            openPlace: openPlace, openLocal: openLocal)
             }
             .padding(.horizontal, 8)
-            .padding(.bottom, 24)
+            .padding(.bottom, 20)
         }
         .scrollIndicators(.hidden)
-        // "Where a list continues, fade the edge": the last rows fade into the foot.
+        // "Where a list continues, fade the edge": only the last 20pt soften into the foot, so a
+        // row is never left looking half cut off.
         .mask {
-            LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9),
-                                   .init(color: .black.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 0) {
+                Rectangle()
+                LinearGradient(colors: [.black, .black.opacity(0)], startPoint: .top, endPoint: .bottom).frame(height: 20)
+            }
         }
         .accessibilityIdentifier("drawer-rows")
         #if DEBUG
@@ -168,11 +178,14 @@ struct AppDrawer: View {
                 HStack(spacing: 10) {
                     Text(String(title.prefix(1)).uppercased())
                         .font(Theme.font(14, weight: .bold)).foregroundStyle(.white)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
                         .frame(width: 28, height: 28)
                         .background(Theme.brand, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .accessibilityHidden(true)
+                    // A long company name wraps to a second line rather than ending in "…".
                     Text(title).font(Theme.font(17, weight: .semibold))
-                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1).truncationMode(.tail)
+                        .lineLimit(typeSize.isAccessibilitySize ? 3 : 2).multilineTextAlignment(.leading).truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
@@ -244,62 +257,39 @@ struct AppDrawer: View {
         }
     }
 
-    /// Paper v2: a hairline, then the person (initials on brand surface, name 15 Semibold, role 13),
-    /// the bell (Notifications, Paper 77; Messages without access to notices) and the gear, which
-    /// opens Settings (Paper 65) and wears saved work's dot when it needs the person.
-    /// The person, then Notifications and Settings as worded buttons (owner feedback 2026-11-18:
-    /// a bare bell and gear were two more marks to guess at; Paper 29N draws them icon-only).
+    /// The foot is one row: the person (initials, name, role) with a gear at the trailing edge.
+    /// The whole row opens Settings and wears saved work's dot when it needs the person.
+    /// Notifications is a row in the list above (owner, 2026-11-19: "clean up the user profile side").
     private var footer: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 10) {
+        Button(action: openSettings) {
+            HStack(alignment: .center, spacing: 12) {
                 Text(personInitials)
-                    .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brandText)
-                    .frame(width: 34, height: 34)
+                    .font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .dynamicTypeSize(...DynamicTypeSize.large)
+                    .frame(width: 38, height: 38)
                     .background(Theme.brandSurface, in: Circle())
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(personName).font(Theme.font(15, weight: .semibold)).lineLimit(1)
-                    Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(personName).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.subtleForeground).lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
+                if savedWork?.needsPerson == true { DrawerDot() }
+                PaperIcon(.gear, size: 18, color: Theme.muted)
             }
-            let buttons = Group {
-                if openNotifications != nil || hasMessages || sections.places.contains(.inbox) {
-                    footerButton("Notifications", glyph: .bell, dot: false, id: "drawer-notifications") {
-                        if let openNotifications { openNotifications() } else { openPlace(.inbox) }
-                    }
-                }
-                footerButton("Settings", glyph: .gear, dot: savedWork?.needsPerson == true, id: "drawer-settings",
-                             action: openSettings)
-                    .accessibilityValue(savedWork?.words ?? "")
+            .padding(.horizontal, 16).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
+            .overlay(alignment: .top) {
+                Rectangle().fill(Theme.hairline).frame(height: 1).padding(.horizontal, 16).accessibilityHidden(true)
             }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { buttons }
-                VStack(spacing: 8) { buttons }
-            }
-        }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
-    }
-
-    private func footerButton(_ title: String, glyph: PaperGlyph, dot: Bool, id: String,
-                              action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                PaperIcon(glyph, size: 16, color: Theme.muted)
-                Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                    .lineLimit(1).fixedSize()
-                if dot { DrawerDot() }
-            }
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Theme.well, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .contentShape(Rectangle())
         }
-        .buttonStyle(PressStyle())
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(id)
+        .buttonStyle(RowPressStyle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Settings")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue([personName, roleWord, savedWork?.words].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityIdentifier("drawer-settings")
     }
 }
 

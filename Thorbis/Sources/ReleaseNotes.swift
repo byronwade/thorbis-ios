@@ -13,6 +13,14 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-19-cleaner-menu",
+            date: "2026-11-19",
+            highlights: [
+                .init(symbol: "person.crop.circle", title: "Tidier menu",
+                      detail: "Your name is one row that opens Settings, Notifications joins the list, and long names no longer cut off."),
+            ]
+        ),
+        ReleaseNote(
             id: "2026-11-19-instant-documents",
             date: "2026-11-19",
             highlights: [
