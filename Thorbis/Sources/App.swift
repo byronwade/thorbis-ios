@@ -79,6 +79,7 @@ struct ThorbisApp: App {
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
             JobChecklistStore.clearAll()
+            ChecklistDraftStore.clearAll()
             OfficeContact.clearAll()
             Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
         }
@@ -309,6 +310,8 @@ extension ThorbisApp {
             await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
         }
         await store.refresh(api)
+        // Checklist answers kept on this phone while there was no signal.
+        await ChecklistSync.flushAll(api: api, session: session)
     }
 }
 

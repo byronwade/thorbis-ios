@@ -167,6 +167,9 @@ struct JobDetailView: View {
     @State private var planRevision = 0
     @State private var showScan = false
     @State private var showChecklist = false
+    /// Checklists kept on the server (feature `job_checklists`); unused with the feature off.
+    @StateObject private var checklists = JobChecklistModel()
+    @State private var checklistOpening: String?
     @State private var memberPricing: MemberPricing?
     /// A capture the toolkit asked the media screen to open (camera, scan, measure).
     @State private var mediaLaunch: JobMediaLaunch?
@@ -452,7 +455,16 @@ struct JobDetailView: View {
             if let job { DataPlateScannerSheet(job: job) { showScan = false; Task { await load() } } }
         } }
         .sheet(isPresented: $showChecklist) { SheetSurface {
-            if let job { JobChecklistSheet(job: job) { showChecklist = false; Task { await load() } } }
+            if let job {
+                if ChecklistFeature.isOn(session) {
+                    // Kept on the server: nothing is posted to the notes, so nothing to reload there.
+                    JobServerChecklistSheet(jobID: job.id, model: checklists, opening: checklistOpening) {
+                        showChecklist = false; checklistOpening = nil
+                    }
+                } else {
+                    JobChecklistSheet(job: job) { showChecklist = false; Task { await load() } }
+                }
+            }
         } }
         .thorbisDestination(isPresented: $showWrapUp) {
             JobCloseoutView(jobID: jobId, place: job.flatMap { street($0) }, startsCancel: wrapUpCancels)
@@ -3381,7 +3393,13 @@ struct JobDetailView: View {
     /// card with its progress ring and the next item to do. It opens the checklist. Left out when
     /// no checklist has been started here (the Tools grid starts one).
     @ViewBuilder private func checklistCard(_ job: JobRecord) -> some View {
-        if let run = JobChecklistStore.run(jobID: job.id, session: session),
+        if ChecklistFeature.isOn(session) {
+            // Every run on the job, finished ones too, with who and when.
+            JobChecklistRunsCard(model: checklists) { reference in
+                checklistOpening = reference
+                showChecklist = true
+            }
+        } else if let run = JobChecklistStore.run(jobID: job.id, session: session),
            let template = ChecklistTemplates.template(run.templateID), !template.items.isEmpty {
             let done = run.doneCount(template)
             let total = template.items.count
@@ -3929,6 +3947,7 @@ struct JobDetailView: View {
 
     /// "5 of 8 done" for the checklist under way on this phone.
     private func checklistTileDetail(_ job: JobRecord) -> String {
+        if ChecklistFeature.isOn(session) { return checklists.tileDetail }
         guard let run = JobChecklistStore.run(jobID: job.id, session: session),
               let template = ChecklistTemplates.template(run.templateID), !template.items.isEmpty else {
             return "Start one for this visit"
@@ -5473,6 +5492,22 @@ struct JobDetailView: View {
             }
             outbox.learn(loadedJob)
             JobDetailCache.save(loadedJob)
+            if ChecklistFeature.isOn(session), let owner = ChecklistDraftStore.owner(session) {
+                var sample = false
+                #if DEBUG
+                if PaperPreview.enabled {
+                    sample = true
+                    if !checklists.isPreview {
+                        checklists.preview(runs: ChecklistPreviewData.runs, templates: [ChecklistPreviewData.hvac, ChecklistPreviewData.visit],
+                                           names: ChecklistPreviewData.names, me: session.user?.id)
+                    }
+                }
+                #endif
+                if !sample {
+                    checklists.configure(jobID: loadedJob.id, owner: owner, me: session.user?.id)
+                    Task { await checklists.load(api: api) }
+                }
+            }
             // Everything under the header is asked for at once; each part fills in as it answers.
             let wantsLocations = locationContext != nil
             let wantsContacts = locationContext != nil && (contactsContext != locationContext || !contactsLoaded)

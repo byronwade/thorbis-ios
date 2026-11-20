@@ -255,7 +255,9 @@ struct ChecklistTemplatesView: View {
                     .environment(\.paperDrawer, nil)
                 VStack(alignment: .leading, spacing: 20) {
                     // Paper 99 opens with the card of checklists, then the rules under it.
-                    if canView { templates }
+                    // Kept on the server (feature `job_checklists`): the company's own templates,
+                    // which an owner can change. Otherwise the four that come with the app.
+                    if canView { if ChecklistFeature.isOn(session) { ServerChecklistTemplatesSection() } else { templates } }
                     if !canView {
                         InlineProblem(message: "Ask your office for access to jobs to see the company’s checks.")
                             .padding(.horizontal, 4)
