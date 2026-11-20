@@ -48,6 +48,9 @@ struct NewEstimateView: View {
     @State private var opened = Date.now
     private let jobID: String?
     private let jobLocationID: String?
+    /// The job's customer when the estimate is being made from a job; the create only names the
+    /// job while the estimate is still for that customer.
+    private let jobCustomerID: String?
     private let onCreated: (EstimateRecord) -> Void
 
     init(customerID: String = "", jobID: String? = nil, locationID: String? = nil, title: String = "", onCreated: @escaping (EstimateRecord) -> Void = { _ in }) {
@@ -55,6 +58,7 @@ struct NewEstimateView: View {
         _title = State(initialValue: title)
         self.jobID = jobID
         self.jobLocationID = jobID == nil ? nil : locationID
+        self.jobCustomerID = jobID == nil || customerID.isEmpty ? nil : customerID
         self.onCreated = onCreated
     }
 
@@ -578,7 +582,9 @@ struct NewEstimateView: View {
                              source: line.source ?? .manual,
                              group: presentation.group, showToCustomer: presentation.showToCustomer)
             },
-            locationId: jobLocationID)
+            locationId: jobLocationID,
+            // This editor never sends `options`, so a job's estimate always names its job.
+            jobId: FieldEstimateCreate.linkedJobID(jobID: jobID, customerID: customerID, jobCustomerID: jobCustomerID, hasOptions: false))
     }
 
     private func save() async {
@@ -734,7 +740,7 @@ struct NewEstimateView: View {
             if uncertain {
                 self.error = "The save could not be confirmed. Check Estimates or ask your office before starting another. Your text is still here."
             } else if !(error is CancellationError) {
-                self.error = error.localizedDescription
+                self.error = EstimateCreationRecovery.refusalMessage(error, creating: createStarted)
             }
         }
     }

@@ -826,12 +826,26 @@ struct FieldEstimateCreate: Encodable {
     let title: String
     let lines: [FieldEstimateLineInput]
     let locationId: String?
+    /// The job this estimate is being made from. A server that knows the field creates the
+    /// estimate and adds it to the job in one step (which is what lets a technician create one);
+    /// an older server ignores it and the follow-up link call does the adding. Left out of the
+    /// body when nil.
+    let jobId: String?
 
-    init(customerId: String, title: String, lines: [FieldEstimateLineInput], locationId: String? = nil) {
+    init(customerId: String, title: String, lines: [FieldEstimateLineInput], locationId: String? = nil, jobId: String? = nil) {
         self.customerId = customerId
         self.title = title
         self.lines = lines
         self.locationId = locationId
+        self.jobId = jobId
+    }
+
+    /// The job to name in the create, or nil. Only for an estimate made from a job, for that
+    /// job's own customer, and never beside `options` (the server answers 400 to both together).
+    static func linkedJobID(jobID: String?, customerID: String, jobCustomerID: String?, hasOptions: Bool) -> String? {
+        guard let jobID, !jobID.isEmpty, !hasOptions, let jobCustomerID, !customerID.isEmpty,
+              customerID.lowercased() == jobCustomerID.lowercased() else { return nil }
+        return jobID
     }
 }
 
