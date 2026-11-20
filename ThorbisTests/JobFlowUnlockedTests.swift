@@ -33,7 +33,9 @@ final class JobFlowUnlockedTests: XCTestCase {
             let primary: TechJobStep? = status == "dispatched" ? .transition("en_route") : nil
             let steps = TechJobFlow.sideSteps(status: status, primary: primary, estimates: [],
                                               invoices: [invoice("i1", "issued", paid: 10_000)], can: .all)
-            XCTAssertEqual(steps, [.collect(invoiceID: "i1", due: 38_000, currency: "USD"), .buildEstimate], status)
+            let onSite = !["scheduled", "dispatched", "en_route"].contains(status)
+            let collect = TechJobStep.collect(invoiceID: "i1", due: 38_000, currency: "USD")
+            XCTAssertEqual(steps, onSite ? [collect, .buildEstimate] : [collect], status)
         }
     }
 
@@ -57,8 +59,10 @@ final class JobFlowUnlockedTests: XCTestCase {
         XCTAssertEqual(TechJobFlow.sideSteps(status: "arrived", primary: .transition("in_progress"), estimates: [estimate("e2", "draft")],
                                              invoices: [], can: .all), [.showEstimate(id: "e2")])
         // Approved or declined paper is not shown again; another estimate can still be started.
-        XCTAssertEqual(TechJobFlow.sideSteps(status: "en_route", primary: .transition("arrived"), estimates: [estimate("e3", "approved")],
+        XCTAssertEqual(TechJobFlow.sideSteps(status: "arrived", primary: .transition("in_progress"), estimates: [estimate("e3", "approved")],
                                              invoices: [], can: .all), [.buildEstimate])
+        XCTAssertEqual(TechJobFlow.sideSteps(status: "en_route", primary: .transition("arrived"), estimates: [estimate("e3", "approved")],
+                                             invoices: [], can: .all), [], "No estimate pill on the road; + still starts one")
     }
 
     func testSideStepsFollowTheRole() {

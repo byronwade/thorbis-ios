@@ -167,7 +167,8 @@ extension TechJobFlow {
                 steps.append(.presentEstimates)
             } else if let draft = estimates.first(where: { $0.status == "draft" && canShow($0, can: can) }) {
                 steps.append(.showEstimate(id: draft.id))
-            } else if can.createEstimate {
+            } else if can.createEstimate, !["scheduled", "dispatched", "en_route"].contains(status) {
+                // Before arriving nobody is pricing work; "+" still starts an estimate from there.
                 steps.append(.buildEstimate)
             }
         }
