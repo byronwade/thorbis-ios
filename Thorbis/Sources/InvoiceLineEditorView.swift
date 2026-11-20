@@ -11,6 +11,12 @@ struct InvoiceLineEditorView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var editor: InvoiceLineEditorState
     @State private var showPriceBook = false
+    @State private var showMaterials = false
+    @State private var reopenPriceBook = false
+    /// Paper 33: the price book is Add materials' third segment; leaving it for Scan or Paste
+    /// reopens Add materials in that mode once the picker has closed.
+    @State private var materialsMode = AddMaterialsMode.scan
+    @State private var reopenMaterials = false
     @State private var confirmReload = false
     @State private var confirmIssue = false
     @State private var confirmDiscard = false
@@ -27,18 +33,25 @@ struct InvoiceLineEditorView: View {
         .init(organizationID: session.activeOrganization?.id, sessionGeneration: session.generation, authority: session.priceBookAuthority)
     }
 
-    init(invoice: InvoiceRecord, onSaved: @escaping (InvoiceRecord) -> Void) {
+    /// `revisable`: the workspace has `invoice_revisions` on, so an issued or paid invoice opens
+    /// for editing too. Off (the default) keeps the editor draft-only.
+    init(invoice: InvoiceRecord, revisable: Bool = false, onSaved: @escaping (InvoiceRecord) -> Void) {
         self.invoice = invoice
         self.onSaved = onSaved
-        _editor = State(initialValue: InvoiceLineEditorState(invoice: invoice))
+        _editor = State(initialValue: InvoiceLineEditorState(invoice: invoice, revisable: revisable))
     }
 
     private var canEdit: Bool {
-        editor.invoice.status == "draft" && session.can("invoice.edit", feature: "invoicing")
+        editor.isEditable && session.can("invoice.edit", feature: "invoicing")
     }
 
+    /// Editing an invoice the customer already has: saving makes a new version of it.
+    private var revising: Bool { editor.isEditable && editor.invoice.status != "draft" }
+    private var saveTitle: String { revising ? "Save changes" : "Save draft" }
+
+    /// An issued invoice takes typed lines only (the server refuses a new price book item on it).
     private var canUsePriceBook: Bool {
-        session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD"
+        session.can("pricebook.view", feature: "price_book") && invoice.currency == "USD" && !revising
     }
 
     private var canIssue: Bool {
@@ -65,16 +78,23 @@ struct InvoiceLineEditorView: View {
                     guard let id else { return }
                     withAnimation { proxy.scrollTo(id, anchor: .center) }
                 }
+                // Focus centres the line before the keyboard has taken its room. Centre it again
+                // in what is left, or the line's Done and Remove can end level with the keyboard's
+                // Done bar, which takes every tap across its width.
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                    guard let id = focus?.lineID else { return }
+                    withAnimation { proxy.scrollTo(id, anchor: .center) }
+                }
         }
+        .environment(\.builderDocumentLabel, "INV-\(invoice.id.suffix(4).uppercased())")
         .background(Theme.canvas)
+        .paperPageGround()
         .foregroundStyle(Theme.foreground)
+        // Paper 40: the page draws its own circle row and 34 Bold title; no bar.
         .navigationTitle("Edit invoice")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ThorbisToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { if editor.hasChanges { confirmDiscard = true } else { dismiss() } }.disabled(busy)
-            }
-        }
+        .toolbar(.hidden, for: .navigationBar)
+        .safeAreaInset(edge: .top, spacing: 0) { editorTopBar }
         .keyboardDoneButton()
         .trackKeyboard($keyboardUp)
         .task(id: catalogContext) { await refreshCatalog() }
@@ -89,8 +109,23 @@ struct InvoiceLineEditorView: View {
         .thorbisConfirm("Issue invoice?",
                         message: "The current lines will be saved first if needed, then locked as issued invoice paper.",
                         isPresented: $confirmIssue,
-                        actions: [ThorbisConfirmAction("Issue invoice", role: .destructive) { Task { await issue() } }])
-        .sheet(isPresented: $showPriceBook, onDismiss: openAddedLine) { SheetSurface {
+                        actions: [ThorbisConfirmAction("Issue invoice") { Task { await issue() } }])
+        // The price book opens only once this sheet has finished closing (two sheets can't overlap).
+        .sheet(isPresented: $showMaterials, onDismiss: {
+            openAddedLine()
+            if reopenPriceBook { reopenPriceBook = false; showPriceBook = true }
+        }) { SheetSurface {
+            AddMaterialsSheet(initialMode: materialsMode, canUsePriceBook: canUsePriceBook,
+                              unavailableReason: invoice.currency == "USD" ? nil : "Catalog selection requires a USD invoice.",
+                              addItem: addCatalogItem,
+                              refresh: { await refreshCatalog(force: $0) },
+                              openPriceBook: { reopenPriceBook = true })
+            .environmentObject(session).environmentObject(api)
+        } }
+        .sheet(isPresented: $showPriceBook, onDismiss: {
+            openAddedLine()
+            if reopenMaterials { reopenMaterials = false; showMaterials = true }
+        }) { SheetSurface {
             PriceBookCartPicker(
                 destination: "INV-\(invoice.id.suffix(4).uppercased())",
                 canUsePriceBook: canUsePriceBook,
@@ -100,7 +135,12 @@ struct InvoiceLineEditorView: View {
                 secondaryPriceText: { memberPricing?.secondaryPriceText($0) },
                 addItem: addCatalogItem,
                 addCustomLine: addCustomLine,
-                refresh: { await refreshCatalog(force: $0) }
+                refresh: { await refreshCatalog(force: $0) },
+                materialModes: canUsePriceBook ? AddMaterialsMode.allCases.map { $0.title } : [],
+                switchMode: { name in
+                    materialsMode = AddMaterialsMode.allCases.first(where: { $0.title == name }) ?? .scan
+                    reopenMaterials = true
+                }
             )
             .environmentObject(session).environmentObject(api)
         } }
@@ -113,9 +153,9 @@ struct InvoiceLineEditorView: View {
             memberPricing = pricing
         }
         .thorbisConfirm("Reload the latest invoice?",
-                        message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines.",
+                        message: "The invoice changed on the server. Reloading replaces this form with the latest saved lines and discards your edits.",
                         isPresented: $confirmReload,
-                        actions: [ThorbisConfirmAction("Reload and discard my edits", role: .destructive) { Task { await reloadLatest() } }])
+                        actions: [ThorbisConfirmAction("Reload", role: .destructive) { Task { await reloadLatest() } }])
         #if DEBUG
         .task {
             if PaperPreview.enabled, PaperPreview.screen == "invoice-editor-line" { expandedLine = editor.lines.first?.id }
@@ -127,7 +167,7 @@ struct InvoiceLineEditorView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 18) {
-            if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+            if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
             if staleRevision {
                 Button { confirmReload = true } label: {
                     Label("Review latest invoice", systemImage: "arrow.clockwise")
@@ -137,7 +177,7 @@ struct InvoiceLineEditorView: View {
                 }
                 .accessibilityHint("Reloads the current server version and discards these unsaved edits")
             }
-            if editor.invoice.status != "draft" {
+            if !revising, editor.invoice.status != "draft" {
                 ErrorBanner(message: "This invoice is now \(editor.invoice.status.statusLabel.lowercased()); its line items are final.")
             }
             if editor.hasUnsupportedLineSources {
@@ -145,45 +185,77 @@ struct InvoiceLineEditorView: View {
             }
 
             invoiceEditorHeading
+                .padding(.bottom, 4)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
-                    .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityIdentifier("invoice-line-count")
+            if revising {
+                Text("The customer already has this invoice. Saving makes a new version.")
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 4)
-                PaperCard {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(editor.lines) { line in
-                            lineRow(line)
-                        }
-                        Button { showPriceBook = true } label: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "plus").font(.system(size: 15, weight: .medium))
-                                Text("Add item").font(Theme.font(16, weight: .medium))
-                                Spacer(minLength: 0)
-                            }
-                            .foregroundStyle(Theme.foreground)
-                            .padding(.horizontal, 14).frame(minHeight: 52).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(linesDisabled || editor.lines.count >= 500)
-                        .accessibilityHint(canUsePriceBook ? "Opens the price book" : "Adds a custom line item")
-                        .accessibilityIdentifier("invoice-add-item")
+                    .accessibilityIdentifier("invoice-editor-revising-note")
+            }
+
+            detailsCard
+
+            // Paper 40: Add item as its own field, then "Line items" and the lines on one card.
+            VStack(alignment: .leading, spacing: 10) {
+                Button { showPriceBook = true } label: {
+                    HStack(spacing: 8) {
+                        PaperIcon(.plusLight, size: 18, color: Theme.brandText)
+                        Text("Add item").font(Theme.font(16)).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 8)
+                        Text(canUsePriceBook ? "Price book or custom" : "Custom item").font(Theme.font(13))
+                            .foregroundStyle(Theme.muted).lineLimit(1)
                     }
+                    .padding(.horizontal, 12).frame(minHeight: 48)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(PressStyle())
+                .disabled(linesDisabled || editor.lines.count >= 500)
+                .accessibilityLabel("Add item")
+                .accessibilityHint(canUsePriceBook ? "Opens the price book" : "Adds a custom line item")
+                .accessibilityIdentifier("invoice-add-item")
+                // Tests read the count after the "·", so the label keeps "Line items · N".
+                // Paper 40: "Line items" with the count on the trailing side; spoken (and read by tests) as one.
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Line items").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                    if !editor.lines.isEmpty {
+                        Text("\(editor.lines.count) item\(editor.lines.count == 1 ? "" : "s")").font(Theme.font(13))
+                            .foregroundStyle(Theme.muted)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(editor.lines.isEmpty ? "Line items" : "Line items · \(editor.lines.count)")
+                .accessibilityAddTraits([.isHeader, .isStaticText])
+                .accessibilityIdentifier("invoice-line-count")
+                .padding(.horizontal, 4)
+                if !editor.lines.isEmpty {
+                    PaperCard {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(editor.lines) { line in
+                                lineRow(line)
+                                    .overlay(alignment: .top) {
+                                        if line.id != editor.lines.first?.id { WellDivider(leading: 16) }
+                                    }
+                            }
+                        }
+                    }
+                    Text("Tap an item to edit its name or price. At quantity 1, minus becomes remove.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4).padding(.top, 8)
+                    totalsCard
                 }
             }
 
             if editor.needsPriceBookOverrideReason {
                 priceBookOverrideReasonField
             }
-
-            Text("Line changes are checked against the current invoice revision before saving.")
-                .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 4)
         }
-        .padding(.horizontal, Theme.gutter)
-        .padding(.top, 12)
+        .padding(.horizontal, PaperCardMetrics.margin)
+        .padding(.top, 0)
         .padding(.bottom, 24)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
@@ -208,7 +280,7 @@ struct InvoiceLineEditorView: View {
         return BuilderLineRow(
             description: binding.description, quantity: binding.quantity, unitPrice: binding.unitPrice,
             lineID: line.id, currency: invoice.currency, lineTotal: total, unitLabel: line.unitLabel,
-            note: sourceNote(line), menuItems: items, expanded: expandedLine == line.id,
+            note: nil, menuItems: items, expanded: expandedLine == line.id,
             toggle: {
                 if expandedLine == line.id {
                     // The row disappears when closed, so finish its focused price before
@@ -224,20 +296,89 @@ struct InvoiceLineEditorView: View {
             descriptionIdentifier: "invoice-line-description-\(line.id)",
             quantityIdentifier: "invoice-line-quantity-\(line.id)",
             priceIdentifier: "invoice-line-price-\(line.id)",
-            lineActionsLeading: keyboardUp
+            lineActionsLeading: keyboardUp,
+            sourceLabel: sourceLabel(line)
         )
         .disabled(linesDisabled)
         .accessibilityAction(named: "Move up") { if canMoveUp { moveLine(line.id, offset: -1) } }
         .accessibilityAction(named: "Move down") { if canMoveDown { moveLine(line.id, offset: 1) } }
     }
 
-    private func sourceNote(_ line: InvoiceLineDraft) -> String? {
+    /// Paper 40: where the line came from, before its price ("Price book · $120.00").
+    private func sourceLabel(_ line: InvoiceLineDraft) -> String {
         switch line.source {
-        case .priceBookSelection: "Price Book selection · server verifies the revision"
-        case .retainedPriceBook: "Price Book source retained"
-        case .estimate: "Estimate source retained"
-        default: nil
+        case .priceBookSelection, .retainedPriceBook: return "Price book"
+        case .estimate: return "Estimate"
+        default: return "Custom"
         }
+    }
+
+    /// The lines' sum in cents; nil while a line has no valid price or quantity.
+    private var linesTotal: Int? {
+        var sum = 0
+        for line in editor.lines {
+            guard let cents = InvoiceLineEditorState.priceCents(line.unitPrice),
+                  let quantity = Int(line.quantity.trimmingCharacters(in: .whitespacesAndNewlines)) else { return nil }
+            let (amount, overflow) = cents.multipliedReportingOverflow(by: quantity)
+            let (next, overflowSum) = sum.addingReportingOverflow(amount)
+            guard !overflow, !overflowSum else { return nil }
+            sum = next
+        }
+        return sum
+    }
+
+    /// Paper 40's totals card: the subtotal, then the total at 34 Bold.
+    private var totalsCard: some View {
+        let value = linesTotal.map { money($0, currency: invoice.currency) } ?? "\u{2014}"
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Subtotal").font(Theme.font(15)).foregroundStyle(Theme.subtle)
+                Spacer(minLength: 8)
+                Text(value).font(Theme.monoFont(15)).foregroundStyle(Theme.subtle)
+            }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Total").font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                Spacer(minLength: 8)
+                Text(value).font(Theme.font(28, weight: .bold)).monospacedDigit().tracking(-0.56)
+                    .foregroundStyle(Theme.foreground)
+                    .contentTransition(.numericText())
+                    .lineLimit(1).minimumScaleFactor(0.6)
+            }
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 18)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Paper 40's Details card: who it bills and the job, read only (the server owns both).
+    @ViewBuilder private var detailsCard: some View {
+        let job = editor.invoice.jobId.flatMap { id in store.jobs.first(where: { $0.id == id }) }
+        VStack(alignment: .leading, spacing: 8) {
+            PaperSectionLabel(title: "Details", gap: 0)
+            VStack(alignment: .leading, spacing: 0) {
+                detailRow("Customer", store.customerName(invoice.customerId))
+                if let job {
+                    detailRow("Job", "\(job.title) \u{00B7} JOB-\(job.id.suffix(4).uppercased())")
+                        .overlay(alignment: .top) { WellDivider(leading: 0) }
+                }
+            }
+            .padding(.horizontal, 16)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        }
+    }
+
+    private func detailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(label).font(Theme.font(15)).foregroundStyle(Theme.subtle)
+            Spacer(minLength: 12)
+            Text(value).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 16)
+        .frame(minHeight: 56)
+        .accessibilityElement(children: .combine)
     }
 
     private func lineBinding(_ id: UUID) -> Binding<InvoiceLineDraft> {
@@ -284,33 +425,33 @@ struct InvoiceLineEditorView: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
-        .padding(.horizontal, 20).padding(.top, 10).padding(.bottom, 8)
-        .background(Theme.canvas)
+        .paperActionBarGround(top: commitBlockedReason == nil ? PaperActionBarMetrics.top : PaperActionBarMetrics.topUnderHint)
     }
 
     private var invoiceCommitButtons: some View {
         let accessible = dynamicTypeSize.isAccessibilitySize
-        let layout = accessible ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))
+        let layout = accessible ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 8))
         return layout {
             if canIssue {
                 Button { Task { await save() } } label: {
-                    Text("Save draft")
-                    .font(Theme.font(17, weight: .medium))
+                    // Paper 40: Save draft is the quiet pill beside the commit.
+                    Text(saveTitle)
+                    .font(Theme.font(15, weight: .semibold))
                     .foregroundStyle(Theme.foreground)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, accessible ? 16 : 0)
+                    .padding(.horizontal, accessible ? 16 : 22)
                     .padding(.vertical, accessible ? 12 : 0)
-                    .frame(width: accessible ? nil : 132, height: accessible ? nil : Theme.commitHeight)
-                    .frame(maxWidth: accessible ? .infinity : nil, minHeight: Theme.commitHeight)
-                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius))
-                    .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius))
+                    .frame(height: accessible ? nil : 50)
+                    .frame(maxWidth: accessible ? .infinity : nil, minHeight: 50)
+                    .background(Theme.quietFill, in: Capsule())
+                    .contentShape(Capsule())
                 }
                     .buttonStyle(PressStyle())
                     .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
                 PrimaryButton(title: "Issue invoice", busy: busy) { confirmIssue = true }
                     .disabled(busy || !canEdit || editor.hasUnsupportedLineSources)
             } else {
-                PrimaryButton(title: "Save draft", busy: busy) { Task { await save() } }
+                PrimaryButton(title: saveTitle, busy: busy) { Task { await save() } }
                     .disabled(busy || !canEdit || !editor.hasChanges || editor.hasUnsupportedLineSources)
             }
         }
@@ -335,7 +476,7 @@ struct InvoiceLineEditorView: View {
         Binding(
             get: { line.wrappedValue },
             set: { proposed in
-                guard editor.invoice.status == "draft" else { return }
+                guard editor.isEditable else { return }
                 var next = proposed
                 let quantityText = proposed.quantity.trimmingCharacters(in: .whitespacesAndNewlines)
                 if let quantity = Int(quantityText), (1...100_000).contains(quantity), String(quantity) == quantityText {
@@ -396,20 +537,89 @@ struct InvoiceLineEditorView: View {
                               sessionGeneration: expected.sessionGeneration, authority: expected.authority, force: force)
     }
 
+    /// Paper 40: "INV-2209 · From EST-1042" (and the revision), then pills for the status, the
+    /// customer and the total. The bar keeps "Edit invoice" as the screen's title.
     private var invoiceEditorHeading: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("INV-\(invoice.id.suffix(4).uppercased())")
-                .font(Theme.monoFont(12, weight: .medium)).foregroundStyle(Theme.muted)
-            HStack(spacing: 10) {
-                // Status is a word and a dot, as on the new estimate and the invoice's rows (was a
-                // warning-tinted badge that made a draft read like a problem).
-                let status = DocumentStatus(invoice: editor.invoice)
-                StatusLabel(tone: status.tone, word: status.word, emphasis: .quiet)
-                Text("Revision \(editor.invoice.linesRevision)")
-                    .font(Theme.font(12)).foregroundStyle(Theme.muted)
+        let status = DocumentStatus(invoice: editor.invoice)
+        let customer = store.customerName(invoice.customerId)
+        let source: String? = invoice.sourceEstimateId.map { "From EST-\($0.suffix(4).uppercased())" }
+        let pieces: [String?] = ["INV-\(invoice.id.suffix(4).uppercased())", source,
+                                 "Revision \(editor.invoice.linesRevision)"]
+        let parts = pieces.compactMap { $0 }
+        return VStack(alignment: .leading, spacing: 16) {
+            PaperPageTitle(title: "Edit invoice", subtitle: parts.joined(separator: " \u{00B7} "), columnInset: PaperCardMetrics.margin)
+            FlowRow(spacing: 8, lineSpacing: 8) {
+                headingPill(symbol: status.word == "Draft" ? "circle.dashed" : "circle", text: status.word)
+                    .accessibilityLabel("Status, \(status.word)")
+                HStack(spacing: 6) {
+                    Text(initials(customer)).font(Theme.font(11, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .frame(width: 22, height: 22)
+                        .background(Theme.brandSurface, in: Circle())
+                        .dynamicTypeSize(...DynamicTypeSize.large)
+                        .accessibilityHidden(true)
+                    Text(shortCustomer(customer)).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.subtle).lineLimit(1)
+                }
+                .padding(.leading, 6).padding(.trailing, 12).frame(minHeight: 40)
+                .background(Theme.card, in: Capsule())
+                .accessibilityElement(children: .combine)
+                if let total = linesTotal {
+                    headingPill(symbol: nil, text: money(total, currency: invoice.currency))
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Paper 40's pill names the customer "Danielle M.": the first name and the last initial.
+    private func shortCustomer(_ name: String) -> String {
+        let words = name.split(separator: " ")
+        guard words.count > 1, let last = words.last?.first else { return name }
+        return "\(words[0]) \(last)."
+    }
+
+    /// Paper 40's top row: the 44 back circle on the card tone, and "…" for what Paper keeps off the
+    /// page (scan or paste a parts list, discard). Back asks before dropping edits, as Cancel did.
+    private var editorTopBar: some View {
+        PaperPageSheetBar {
+            PaperCircleButton(symbol: "xmark", label: "Cancel", size: 44, fill: Theme.card) {
+                if editor.hasChanges { confirmDiscard = true } else { dismiss() }
+            }
+            .disabled(busy)
+        } trailing: {
+            if !moreItems.isEmpty {
+                ThorbisMenu(items: moreItems, title: "Edit invoice", accessibilityLabel: "More") {
+                    PaperCircleLabel(symbol: "ellipsis", size: 44, fill: Theme.card)
+                }
+                .disabled(busy)
+                .accessibilityIdentifier("invoice-more")
+            }
+        }
+        .background(Theme.background)
+    }
+
+    private var moreItems: [ThorbisMenuItem] {
+        var items: [ThorbisMenuItem] = []
+        if canUsePriceBook, !linesDisabled, editor.lines.count < 500 {
+            items.append(ThorbisMenuItem("Scan materials", icon: "barcode.viewfinder") { materialsMode = .scan; showMaterials = true })
+            items.append(ThorbisMenuItem("Paste a parts list", icon: "doc.on.clipboard") { materialsMode = .paste; showMaterials = true })
+        }
+        if editor.hasChanges {
+            items.append(ThorbisMenuItem("Discard changes", icon: "trash", role: .destructive) { confirmDiscard = true })
+        }
+        return items
+    }
+
+    private func headingPill(symbol: String?, text: String) -> some View {
+        HStack(spacing: 6) {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+                    .accessibilityHidden(true)
+            }
+            Text(text).font(Theme.font(14, weight: .medium)).monospacedDigit().foregroundStyle(Theme.subtle)
+        }
+        .padding(.leading, symbol == nil ? 12 : 10).padding(.trailing, 12).frame(minHeight: 40)
+        .background(Theme.card, in: Capsule())
+        .accessibilityElement(children: .combine)
     }
 
     private func editorDetail(_ label: String, _ value: String) -> some View {
@@ -438,8 +648,10 @@ struct InvoiceLineEditorView: View {
             dismiss()
         } catch is CancellationError {
         } catch {
-            self.error = error.localizedDescription
-            staleRevision = (error as? Problem)?.status == 409
+            // A named refusal reads in plain words; one the latest invoice would not fix keeps
+            // the edits without offering a reload. Every other conflict is handled as before.
+            self.error = InvoiceRevisionWords.lineEditMessage(error)
+            staleRevision = (error as? Problem)?.status == 409 && !InvoiceRevisionWords.lineEditKeepsEdits(error)
         }
     }
 
@@ -462,7 +674,7 @@ struct InvoiceLineEditorView: View {
         do {
             let current = try await api.liveFieldInvoice(invoice.id)
             addedLineSelection = nil
-            editor = InvoiceLineEditorState(invoice: current)
+            editor = InvoiceLineEditorState(invoice: current, revisable: editor.revisable)
             staleRevision = false
             error = nil
         } catch is CancellationError {
@@ -484,7 +696,7 @@ struct InvoiceLineEditorView: View {
             if editor.hasChanges {
                 current = try await api.replaceFieldInvoiceLines(invoice.id, request: editor.makeRequest())
                 addedLineSelection = nil
-                editor = InvoiceLineEditorState(invoice: current)
+                editor = InvoiceLineEditorState(invoice: current, revisable: editor.revisable)
                 onSaved(current)
             }
             let issued = try await api.issueFieldInvoice(invoice.id, expectedLinesRevision: current.linesRevision)

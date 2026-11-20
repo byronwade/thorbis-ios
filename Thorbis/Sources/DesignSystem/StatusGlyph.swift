@@ -107,11 +107,21 @@ struct StatusGlyph: View {
         self.init(tone: StatusTone(jobStatus: status, hasTime: hasTime), label: status.statusLabel, pending: pending)
     }
 
+    /// Paper's done check, in the glyph's 14 box.
+    private static let check = PaperGlyph(box: 14, [.stroke("M4.2 7.2L6.2 9.1L9.8 5.2", 1.5)])
+
     var body: some View {
-        let line = max(1.5, size * 0.1)
+        // Paper 18 / 20 draw the glyph in a 14 box: a 1.4 ring of radius 6 (0.5 in from the box),
+        // the half disc at radius 3.8, the done disc at 6.5 with a 1.5 check in the card's colour.
+        // A booked job that has not started is a plain `border-strong` ring, never a colour.
+        let unit = size / 14
+        let line = max(1.5, unit * 1.4)
         ZStack {
-            if tone.fill >= 1 {
-                Circle().fill(tone.hue)
+            if tone == .done {
+                Circle().fill(tone.hue).padding(unit * 0.5)
+                PaperIcon(Self.check, size: size, color: Theme.card)
+            } else if tone.fill >= 1 {
+                Circle().fill(tone.hue).padding(unit * 0.5)
                 if let mark = tone.mark {
                     Image(systemName: mark)
                         .font(.system(size: size * 0.55, weight: .medium))
@@ -119,11 +129,13 @@ struct StatusGlyph: View {
                 }
             } else {
                 Circle()
-                    .strokeBorder(tone.hue, style: StrokeStyle(lineWidth: line, dash: tone == .unscheduled ? [line * 1.4, line * 1.4] : []))
+                    .strokeBorder(tone == .scheduled ? Theme.borderStrong : tone.hue,
+                                  style: StrokeStyle(lineWidth: line, dash: tone == .unscheduled ? [line * 1.4, line * 1.4] : []))
+                    .padding(unit * 0.3)
                 if tone.fill > 0 {
                     RingSlice(fraction: tone.fill)
                         .fill(tone.hue)
-                        .padding(line * 2)
+                        .padding(unit * 3.2)
                 }
             }
         }
@@ -313,12 +325,13 @@ struct InitialsAvatar: View {
     }
 
     var body: some View {
+        // Paper's avatar chip (20 Jobs, 53 Office schedule, the drawer's foot): brand text on the
+        // brand surface for everyone, 11 Semibold at 28pt. `hues` stays for callers that colour a mark.
         Text(initials(name))
-            .font(.system(size: size * 0.4, weight: .medium))
-            .foregroundStyle(.white)
+            .font(.custom("Inter-Regular", fixedSize: max(10, (size * 0.4).rounded())).weight(.semibold))
+            .foregroundStyle(Theme.brandText)
             .frame(width: size, height: size)
-            .background(Self.hue(for: name), in: Circle())
-            .dynamicTypeSize(...DynamicTypeSize.large)
+            .background(Theme.brandSurface, in: Circle())
             .accessibilityLabel(name)
     }
 }
@@ -357,16 +370,18 @@ struct Well<Content: View>: View {
     }
 }
 
-/// Where rows of a panel meet. v2 (design.thorbis.com: "never a line between two jobs"): it draws
-/// nothing and keeps the rows' own padding as the pause. `leading` is kept so call sites compile.
+/// Where rows of one grouped card meet. Paper v2 (2026-11-16): a hairline inset to the rows' text,
+/// only inside a card, never between cards or under a heading.
 struct WellDivider: View {
     var leading: CGFloat = PaperCardMetrics.inset
+    @Environment(\.displayScale) private var displayScale
     var body: some View {
-        Color.clear.frame(height: 0).accessibilityHidden(true)
+        Rectangle().fill(Theme.hairline).frame(height: 1 / max(displayScale, 1))
+            .padding(.leading, leading).accessibilityHidden(true)
     }
 }
 
-/// A collection on one panel; space, not lines, between rows.
+/// A collection on one panel, a hairline between rows.
 struct WellList<Data: RandomAccessCollection, Row: View>: View where Data.Element: Identifiable {
     let data: Data
     var dividerInset: CGFloat = PaperCardMetrics.inset

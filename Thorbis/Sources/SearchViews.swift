@@ -107,8 +107,16 @@ struct SearchAction: Identifiable {
     }
 
     /// The creates, Settings and places every search host offers, gated by the host's own lists.
+    /// Every place a person may open, whether or not their menu lists it: Search is the one door
+    /// that reaches them all (Notification rules included, which no menu lists).
+    static func everyPlace(permitted: (MenuItem) -> Bool) -> [MenuItem] {
+        MenuItem.allCases.filter(permitted)
+    }
+
     static func standard(creates: [(title: String, symbol: String, run: () -> Void)], settings: (() -> Void)?,
-                         places: [MenuItem], openPlace: @escaping (MenuItem) -> Void) -> [SearchAction] {
+                         places: [MenuItem], openPlace: @escaping (MenuItem) -> Void,
+                         records: [LocalWorkspaceSection] = [],
+                         openRecord: @escaping (LocalWorkspaceSection) -> Void = { _ in }) -> [SearchAction] {
         var actions: [SearchAction] = creates.map { create in
             switch create.title {
             case "New job":
@@ -133,6 +141,10 @@ struct SearchAction: Identifiable {
             SearchAction(id: "place-\(place.rawValue)", title: place.title, subtitle: place.subtitle ?? "Go to \(place.title)",
                          symbol: place.symbol, keywords: place.searchKeywords, run: { openPlace(place) })
         }
+        actions += records.map { record in
+            SearchAction(id: "place-local-\(record.rawValue)", title: record.title, subtitle: "Go to \(record.title)",
+                         symbol: record.moreSymbol, keywords: record.searchKeywords, run: { openRecord(record) })
+        }
         return actions
     }
 }
@@ -148,6 +160,20 @@ extension MenuItem {
         case .priceBook: words += ["pricebook", "catalog", "parts"]
         case .team: words += ["permissions", "people"]
         default: break
+        }
+        return words
+    }
+}
+
+extension LocalWorkspaceSection {
+    /// Words someone might type to go to these records.
+    var searchKeywords: [String] {
+        var words = [title.lowercased()]
+        switch self {
+        case .fleet: words += ["vehicles", "trucks", "vans"]
+        case .equipment: words += ["units", "assets"]
+        case .agreements: words += ["agreements", "memberships", "plans", "service plans"]
+        case .team: words += ["team", "people not in thorbis"]
         }
         return words
     }
@@ -613,6 +639,9 @@ private struct SearchScreen: View {
     @EnvironmentObject private var session: SessionController
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var recents = RecentItems.shared
+    /// Starred jobs and customers. They left the phone's menu (Paper's menu lists places only), so
+    /// they lead Search before anything is typed.
+    @ObservedObject private var favorites = ScopedRecordFavorites.shared
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var path = NavigationPath()
     /// Groups opened past their first rows with "Show all".
@@ -648,14 +677,21 @@ private struct SearchScreen: View {
                     .foregroundStyle(Theme.foreground)
                     .background(Theme.canvas)
                     .safeAreaInset(edge: .top, spacing: 0) { sheetField }
-                    .navigationTitle("Search")
+                    // The 34 Bold "Search" sits over the field (Paper 76), so the bar stays quiet.
+                    .navigationTitle("")
                     .navigationBarTitleDisplayMode(.inline)
                     .task {
                         if model.query.isEmpty, !initialQuery.isEmpty { model.query = initialQuery }
                     }
                     .toolbar {
                         if !embedded {
-                            ThorbisToolbarItem(placement: .confirmationAction, prominent: true) { Button("Done") { dismiss() } }
+                            // Paper 76: the 44pt card circle with a cross, top left. It still
+                            // answers to "Done" for VoiceOver and the tests.
+                            ThorbisToolbarItem(placement: .topBarLeading) {
+                                Button { dismiss() } label: { CreamCircleLabel(symbol: "xmark") }
+                                    .buttonStyle(PressStyle())
+                                    .accessibilityLabel("Done")
+                            }
                         }
                     }
                     .paperDestinations()
@@ -665,25 +701,34 @@ private struct SearchScreen: View {
 
     /// The sheet's field (iPad ⌘F). A Thorbis field rather than the system bar so the arrow keys
     /// can move through the results while the cursor stays in it.
+    /// Paper 76: the 34 Bold title, then the field on a 46-tall card (radius 14), its rim in brand
+    /// while words are in it.
     private var sheetField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "magnifyingglass").font(.system(size: 17, weight: .medium)).foregroundStyle(Theme.muted)
-                .accessibilityHidden(true)
-            SearchKeyField(text: $model.query, placeholder: "Jobs, customers, phone, invoice number",
-                           focusOnAppear: !embedded, onSubmit: openSelected, onMove: move)
-                .frame(height: 44)
-            if !model.query.isEmpty {
-                Button { model.query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 17)).foregroundStyle(Theme.muted)
-                        .frame(width: 32, height: 44).contentShape(Rectangle())
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return VStack(alignment: .leading, spacing: 14) {
+            PaperPageTitle(title: "Search", columnInset: PaperCardMetrics.margin, top: 0)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(model.query.isEmpty ? Theme.muted : Theme.foreground)
+                    .accessibilityHidden(true)
+                SearchKeyField(text: $model.query, placeholder: "Jobs, customers, phone, invoice number",
+                               focusOnAppear: !embedded, onSubmit: openSelected, onMove: move)
+                    .frame(height: 44)
+                if !model.query.isEmpty {
+                    Button { model.query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                            .frame(width: 40, height: 44).contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Clear search")
                 }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Clear search")
             }
+            .padding(.leading, 12).padding(.trailing, 6)
+            .frame(minHeight: 46)
+            .background(Theme.card, in: shape)
+            .overlay { if !model.query.isEmpty { shape.strokeBorder(Theme.brand, lineWidth: 1.5) } }
         }
-        .padding(.vertical, -10)
-        .fieldWell()
-        .padding(.horizontal, Theme.gutter).padding(.vertical, 8)
+        .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 4)
         .background(Theme.canvas)
     }
 
@@ -772,33 +817,84 @@ private struct SearchScreen: View {
             savedNote
         }
         if let top = built.top {
-            ListGroupLabel(title: "Top hit", first: true)
-            row(top)
+            card("Top hit") { row(top) }
         }
-        ForEach(Array(built.groups.enumerated()), id: \.element.id) { index, group in
+        ForEach(built.groups) { group in
             let shown = visible(group)
-            ListGroupLabel(title: group.title, count: group.hits.count, first: built.top == nil && index == 0)
-            ForEach(shown) { hit in row(hit) }
-            if shown.count < group.hits.count {
-                Button { expanded.insert(group.id) } label: {
-                    Text("Show all \(group.hits.count)").font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.horizontal, ListRoom.gutter).contentShape(Rectangle())
+            card(group.title, count: group.hits.count) {
+                hitRows(shown)
+                if shown.count < group.hits.count {
+                    WellDivider(leading: 16)
+                    Button { expanded.insert(group.id) } label: {
+                        Text("Show all \(group.hits.count)").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .padding(.horizontal, 16).contentShape(Rectangle())
+                    }
+                    .buttonStyle(RowPressStyle())
                 }
-                .buttonStyle(RowPressStyle())
             }
         }
         if waiting || model.searching {
             VStack(alignment: .leading, spacing: 0) {
-                ListGroupLabel(title: "Searching…", first: built.isEmpty)
+                Text("Searching\u{2026}").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 20).padding(.top, 20)
                 ListRoomSkeleton(count: built.isEmpty ? 3 : 2, threeLines: false, label: false)
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Searching")
         } else if built.isEmpty {
             // design.thorbis.com States: say what found nothing and the next move.
-            ListRoomEmpty(title: "No matches for \u{201C}\(terms.text)\u{201D}.", message: "Try a street or a phone number.")
+            ListRoomEmpty(symbol: "magnifyingglass", title: "No matches for \u{201C}\(terms.text)\u{201D}", message: "Try a street or a phone number.")
         }
+    }
+
+    /// Paper 76: a 13 Semibold label (its count at the trailing edge) 8 above one card of rows,
+    /// 16 from the screen's edges and 20 below the section before it.
+    private func card<Rows: View>(_ title: String, count: Int? = nil, @ViewBuilder rows: () -> Rows) -> some View {
+        card(title, count: count, rows: rows) { EmptyView() }
+    }
+
+    private func card<Rows: View, Trailing: View>(_ title: String, count: Int? = nil, @ViewBuilder rows: () -> Rows,
+                                                  @ViewBuilder trailing: () -> Trailing) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                    .accessibilityAddTraits(.isHeader)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let count, count > 0 {
+                    Text("\(count)").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                }
+                trailing()
+            }
+            .frame(minHeight: 18)
+            .padding(.horizontal, 4).padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 0) { rows() }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: shape)
+                .clipShape(shape)
+        }
+        .padding(.horizontal, 16).padding(.top, 20)
+    }
+
+    /// A card's rows, a hairline between them that starts at the words (Paper 76), past a
+    /// customer's circle or a row's small symbol.
+    @ViewBuilder private func hitRows(_ hits: [SearchHit], removable: Bool = false) -> some View {
+        ForEach(Array(hits.enumerated()), id: \.element.id) { index, hit in
+            if index > 0 { WellDivider(leading: dividerInset(hit)) }
+            // A recent search's title is its words, which is what the × removes.
+            row(hit, removeSearch: removable ? hit.title : nil)
+        }
+    }
+
+    /// 16 to the row's edge, then its leading mark (40 or 22) and the 12 after it.
+    private func dividerInset(_ hit: SearchHit) -> CGFloat {
+        if typeSize.isAccessibilitySize { return 16 }
+        if hit.jobStatus != nil { return 46 }
+        if case .customer = hit.glyph { return 68 }
+        if case .icon = hit.glyph { return 50 }
+        if case .icon = hit.leading { return 50 }
+        return 16
     }
 
     private func visible(_ group: SearchGroup) -> [SearchHit] {
@@ -829,22 +925,21 @@ private struct SearchScreen: View {
     /// marked), what and who follow; the status word, or an amount over a document's word, trails.
     /// Records carry no leading glyph (the group's label names the kind); recent searches and
     /// actions keep their small symbol.
-    private func row(_ hit: SearchHit) -> some View {
+    /// `removeSearch` (a recent search's words) adds Paper 76's × at the row's end: a 44pt target
+    /// beside the row's own button, 6 from the card's edge.
+    private func row(_ hit: SearchHit, removeSearch: String? = nil) -> some View {
         let selected = isSelected(hit)
         let stacked = typeSize.isAccessibilitySize
+        // Paper 76: records are 64 tall, recent searches and actions 56.
+        let record: Bool = { if case .open = hit.target { return true } else { return false } }()
+        let opensCustomer: Bool = { if case .open(.customer(_)) = hit.target { return true } else { return false } }()
         let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-                             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                             : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
         let label = layout {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if case .icon(let symbol) = hit.glyph {
-                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(width: 20).accessibilityHidden(true)
-                } else if case .icon(let symbol) = hit.leading {
-                    Image(systemName: symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.muted)
-                        .frame(width: 20).accessibilityHidden(true)
-                }
+            HStack(alignment: .center, spacing: 12) {
+                if !stacked { leadingMark(hit) }
                 VStack(alignment: .leading, spacing: 2) {
-                    PaperHighlight.text(hit.title, words: terms.marks).font(Theme.font(15, weight: .medium))
+                    PaperHighlight.text(hit.title, words: terms.marks, size: 16).font(Theme.font(16, weight: .medium))
                         .foregroundStyle(hit.dimmed ? Theme.muted : Theme.foreground)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -856,36 +951,70 @@ private struct SearchScreen: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if hit.amount != nil || hit.status != nil || hit.jobStatus != nil {
+            if hit.amount != nil || hit.status != nil {
                 VStack(alignment: stacked ? .leading : .trailing, spacing: 3) {
                     if let amount = hit.amount {
                         Text(amount).font(Theme.font(14, weight: .medium)).monospacedDigit().foregroundStyle(Theme.foreground)
                     }
                     if let status = hit.status { status }
-                    // v2: a job's status is a word with its mark, never a coloured glyph alone.
-                    if let job = hit.jobStatus { StatusLabel(jobStatus: job.status, hasTime: job.hasTime, emphasis: .quiet) }
                 }
                 .fixedSize(horizontal: !stacked, vertical: true)
             }
+            if opensCustomer && !stacked { PaperRowChevron() }
         }
-        .padding(.horizontal, ListRoom.gutter).padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .padding(.leading, 16).padding(.trailing, removeSearch == nil ? 16 : 2).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: record ? 64 : 56, alignment: .leading)
         .contentShape(Rectangle())
-        .background {
-            if selected {
-                RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.brandSurface).padding(.horizontal, 8).padding(.vertical, 2)
+        return HStack(spacing: 0) {
+            Group {
+                if case .none = hit.target {
+                    label.opacity(0.6)
+                } else {
+                    Button { open(hit) } label: { label }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            if let words = removeSearch {
+                Button { recents.removeSearch(words) } label: {
+                    Image(systemName: "xmark").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .padding(.trailing, 6)
+                .accessibilityLabel("Remove \(words) from recent searches")
             }
         }
-        return Group {
-            if case .none = hit.target {
-                label.opacity(0.6)
-            } else {
-                Button { open(hit) } label: { label }
-                    .buttonStyle(RowPressStyle())
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
+        // The card shows through; the arrow keys' row sits on the brand tint.
+        .background(selected ? Theme.brandSurface : Color.clear)
         .id(hit.id)
+    }
+
+    /// Paper 76's leading lane: a customer's initials on a 40pt circle; a recent search or an
+    /// action keeps its small symbol in a 22pt column. Records otherwise lead with their words.
+    @ViewBuilder private func leadingMark(_ hit: SearchHit) -> some View {
+        if let job = hit.jobStatus {
+            // Paper 76: a job leads with its status mark (18); VoiceOver hears the word.
+            StatusGlyph(tone: StatusTone(jobStatus: job.status, hasTime: job.hasTime), label: job.status.statusLabel, size: 18)
+        } else if case .customer(let name) = hit.glyph {
+            Text(Self.initials(name)).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.foreground)
+                .lineLimit(1).minimumScaleFactor(0.7)
+                .dynamicTypeSize(...DynamicTypeSize.large)
+                .frame(width: 40, height: 40)
+                .background(Theme.quietFill, in: Circle())
+                .accessibilityHidden(true)
+        } else if case .icon(let symbol) = hit.glyph {
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                .frame(width: 22).accessibilityHidden(true)
+        } else if case .icon(let symbol) = hit.leading {
+            Image(systemName: symbol).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                .frame(width: 22).accessibilityHidden(true)
+        }
+    }
+
+    private static func initials(_ name: String) -> String {
+        let letters = name.split(separator: " ").prefix(2).compactMap(\.first).filter { $0.isLetter || $0.isNumber }
+        return letters.isEmpty ? "?" : String(letters).uppercased()
     }
 
     // MARK: Before anything is typed
@@ -933,10 +1062,12 @@ private struct SearchScreen: View {
         let open = (canViewJobs ? store.jobs : []).filter { !["completed", "canceled"].contains($0.status) }
             .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }.prefix(6)
         let searches = recents.searches.map { words in
-            SearchHit(id: "search:\(words)", leading: .icon("clock.arrow.circlepath"), title: words,
+            SearchHit(id: "search:\(words)", leading: .icon("clock"), title: words,
                       target: .run(SearchAction(id: "search:\(words)", title: words, symbol: "clock", keywords: [], run: { model.query = words })))
         }
         if !searches.isEmpty { groups.append(SearchGroup(id: "searches", title: "Recent searches", hits: searches)) }
+        let starred = favoriteHits(builder)
+        if !starred.isEmpty { groups.append(SearchGroup(id: "favorites", title: "Favorites", hits: starred)) }
         let opened = recentlyOpened
         let split = focus.split(opened.map(\.0))
         // One "Recently viewed" (Linear's search): the place's own records first, then the rest.
@@ -957,30 +1088,72 @@ private struct SearchScreen: View {
         return groups
     }
 
+    private var favoriteScope: ScopedRecordFavorites.Scope? { ScopedRecordFavorites.currentScope(session: session, api: api) }
+    private func canOpenFavorite(_ kind: ScopedRecordFavorites.Kind) -> Bool {
+        switch kind {
+        case .job: session.can("job.view", feature: "jobs")
+        case .customer: session.can("customer.view", feature: "core_crm")
+        }
+    }
+
+    /// The starred records this person may still open, as rows that open them.
+    private func favoriteHits(_ builder: SearchResultsBuilder) -> [SearchHit] {
+        guard favorites.isBound(to: favoriteScope) else { return [] }
+        return favorites.visible.filter { canOpenFavorite($0.entry.kind) }.map { item in
+            let id = item.entry.id
+            switch item.entry.kind {
+            case .job:
+                if let job = store.jobs.first(where: { $0.id == id }) { return builder.jobHit(job) }
+                return SearchHit(id: "favorite:\(item.id)", leading: .icon("star"), title: item.title, target: .open(.route(.job(id))))
+            case .customer:
+                if let customer = store.customers.first(where: { $0.id == id }) { return builder.customerHit(customer) }
+                return SearchHit(id: "favorite:\(item.id)", leading: .icon("star"), title: item.title,
+                                 target: .run(SearchAction(id: "favorite:\(item.id)", title: item.title, symbol: "star", keywords: [],
+                                                           run: { store.requestedRecord = .customer(id) })))
+            }
+        }
+    }
+
+    private struct FavoritesReload: Equatable {
+        let scope: ScopedRecordFavorites.Scope?
+        let entries: [ScopedRecordFavorites.Entry]
+    }
+
     @ViewBuilder private var emptyQuery: some View {
         let groups = emptyGroups
-        if recents.searches.isEmpty && recents.items.isEmpty {
-            ListRoomEmpty(title: "Nothing viewed yet.",
+        // Reads the starred records' names once Search shows, as the menu used to.
+        Color.clear.frame(height: 0).accessibilityHidden(true)
+            .task(id: FavoritesReload(scope: favoriteScope, entries: favorites.entries)) {
+                let expected = favoriteScope
+                favorites.bind(expected)
+                guard expected != nil else { return }
+                await favorites.refresh(api: api, canOpen: canOpenFavorite, isCurrent: { favoriteScope == expected })
+            }
+        if recents.searches.isEmpty && recents.items.isEmpty && groups.isEmpty {
+            ListRoomEmpty(glyph: .search, title: "Nothing viewed yet",
                           message: "Search for a job by street, a customer by name or phone, or an invoice by number.")
         }
-        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
-            ListGroupLabel(title: group.title, first: index == 0) {
+        ForEach(groups) { group in
+            card(group.title) {
+                hitRows(group.hits, removable: group.id == "searches")
+            } trailing: {
                 if group.id == "searches" {
                     clearButton("Clear recent searches") { recents.clearSearches() }
                 } else if group.id == "opened" {
                     clearButton("Clear recently viewed") { recents.clearOpened() }
                 }
             }
-            ForEach(group.hits) { hit in row(hit) }
         }
     }
 
     private func clearButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Text("Clear").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.foreground)
+            Text("Clear").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.brandText)
                 .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
+        // The 44pt target reaches past the label's line without pushing the card down.
+        .padding(.vertical, -13)
         .accessibilityLabel(label)
     }
 }

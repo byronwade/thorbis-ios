@@ -10,7 +10,10 @@ final class KeyboardShortcutUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", screen]
         app.launch()
-        XCTAssertTrue(app.staticTexts["5 active"].waitForExistence(timeout: 30), "The Jobs list has loaded")
+        // The subtitle adds "· 4 need attention" once the sample day's visits are past their times,
+        // so it is matched by how it starts, not by the hour the test runs at.
+        let loaded = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "5 active")).firstMatch
+        XCTAssertTrue(loaded.waitForExistence(timeout: 30), "The Jobs list has loaded")
         app.waitForShell()
         return app
     }

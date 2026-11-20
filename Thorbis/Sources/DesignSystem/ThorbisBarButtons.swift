@@ -13,14 +13,16 @@ import UIKit
 
 // MARK: - Back
 
-/// The round back control for a pushed screen: `chevron.left` in a bordered card circle,
-/// 44pt hit area, labelled "Back" so VoiceOver, Voice Control and UI tests find it as before.
+/// The round back control for a pushed screen (Paper: a 44pt card circle): `chevron.left`,
+/// labelled "Back" so VoiceOver, Voice Control and UI tests find it as before. The quiet rim stays
+/// so the circle still reads on a card-tone sheet.
 struct ThorbisBackButton: View {
     @Environment(\.dismiss) private var dismiss
     var action: (() -> Void)? = nil
 
     var body: some View {
-        PaperCircleButton(symbol: "chevron.left", label: "Back", fill: Theme.card, bordered: true) {
+        // Paper 21: a 44pt circle on the card fill with the 20pt chevron; no rim.
+        PaperCircleButton(symbol: "chevron.left", label: "Back", size: 44, fill: Theme.card) {
             if let action { action() } else { dismiss() }
         }
     }
@@ -185,8 +187,9 @@ struct ThorbisKeyboardDoneBar: ToolbarContent {
     }
 }
 
-/// The bar's text pill: Inter medium on a bordered card capsule, or ink for the confirming
-/// action. 36pt visible, 44pt to the finger, presses like every Thorbis button (MA-07).
+/// The bar's text pill (Paper 21T's Cancel and Done): 16 Medium on the field fill, or white
+/// 16 Semibold on brand blue for the confirming action. 44pt tall, presses like every Thorbis
+/// button (MA-07).
 struct ThorbisBarButtonStyle: ButtonStyle {
     var prominent = false
     var customerFacing = false
@@ -195,15 +198,15 @@ struct ThorbisBarButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font((customerFacing ? Theme.customerFont(17, weight: .medium) : Theme.font(15, weight: .medium)))
+            .font(customerFacing ? Theme.customerFont(17, weight: .medium)
+                                 : Theme.font(16, weight: prominent ? .semibold : .medium))
             .lineLimit(1)
             // iOS 26 bars propose a circle-sized width to items; keep the whole word ("Cancel", not "C").
             .fixedSize(horizontal: true, vertical: false)
-            .foregroundStyle(prominent ? Theme.onInk : Theme.foreground)
-            .padding(.horizontal, 14)
-            .frame(minWidth: customerFacing ? 48 : 36, minHeight: customerFacing ? 48 : 36)
-            .background(prominent ? Theme.ink : Theme.card, in: Capsule())
-            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: prominent ? 0 : 1))
+            .foregroundStyle(prominent ? Color.white : Theme.foreground)
+            .padding(.horizontal, 16)
+            .frame(minWidth: customerFacing ? 48 : 44, minHeight: customerFacing ? 48 : 44)
+            .background(prominent ? Theme.brand : Theme.fill, in: Capsule())
             .opacity(isEnabled ? 1 : 0.4)
             .frame(minHeight: customerFacing ? 56 : 44)
             .contentShape(Rectangle())

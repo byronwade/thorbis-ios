@@ -137,7 +137,8 @@ struct OfficeContact: Equatable {
 /// Two quiet circles, Call office and Text office, shown only when the workspace has a business
 /// phone this person can read. Drop it in a header or a toolkit row.
 struct OfficeContactActions: View {
-    var size: CGFloat = 36
+    /// Paper v2: header circles are 44.
+    var size: CGFloat = 44
     @EnvironmentObject private var api: APIClient
     @EnvironmentObject private var session: SessionController
     @Environment(\.openURL) private var openURL
@@ -179,11 +180,22 @@ struct OnsiteToolsPreview: View {
                 JobChecklistSheet(jobID: PaperPreview.jobID,
                                   previewRun: ChecklistRun(templateID: "hvac-service", done: ["thermostat", "filter", "pressure-suction", "amps"],
                                                            readings: ["pressure-suction": "118", "amps": "14.6"], photos: ["filter": 1])) {}
+            case "tool-checklist-server":
+                ServerChecklistPreviewHost()
             default:
                 JobChecklistSheet(jobID: PaperPreview.jobID) {}
             }
         }
         .task { if session.phase != .ready { await session.restore() } }
+    }
+}
+
+/// The server-kept checklist sheet on sample data (`--paper-preview-screen tool-checklist-server`).
+private struct ServerChecklistPreviewHost: View {
+    @State private var sample = ChecklistPreviewData.model()
+
+    var body: some View {
+        JobServerChecklistSheet(jobID: PaperPreview.jobID, model: sample.0, opening: sample.1, startsOnList: sample.1 == nil) {}
     }
 }
 #endif

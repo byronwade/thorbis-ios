@@ -14,7 +14,7 @@ enum CommsInboxSection: String, CaseIterable, Identifiable {
     /// The word in the title menu and on the screen's title.
     var title: String {
         switch self {
-        case .all: "Inbox"
+        case .all: "Messages"
         case .calls: "Calls"
         case .voicemail: "Voicemail"
         case .texts: "Texts"
@@ -43,17 +43,125 @@ enum CommsInboxSection: String, CaseIterable, Identifiable {
     var showsLocal: Bool { [.all, .texts, .email].contains(self) }
 }
 
+/// Messages' one short filter (Paper 49N keeps the list itself one list): a row of chips under
+/// the search field, one on at a time, All first. Each is a lens over the same scope the list has
+/// always used: which section, which folder, which quick filter.
+enum CommsInboxFilter: String, CaseIterable, Identifiable {
+    case all, unread, calls, texts, email, drafts
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .unread: "Unread"
+        case .calls: "Calls"
+        case .texts: "Texts"
+        case .email: "Email"
+        case .drafts: "Drafts"
+        }
+    }
+
+    var section: CommsInboxSection {
+        switch self {
+        case .calls: .calls
+        case .texts: .texts
+        case .email: .email
+        default: .all
+        }
+    }
+
+    var folder: CommsFolder { self == .drafts ? .drafts : .inbox }
+    var quick: CommsQuickFilter { self == .unread ? .unread : .all }
+
+    /// The chips this person has: Calls needs the call log; texts, email and drafts live on this
+    /// phone for anyone signed in to a workspace.
+    static func available(_ access: CommsInboxAccess) -> [CommsInboxFilter] {
+        var chips: [CommsInboxFilter] = [.all, .unread]
+        if access.calls { chips.append(.calls) }
+        if access.workspace { chips += [.texts, .email, .drafts] }
+        return chips
+    }
+}
+
+/// The rarer lenses the old filter menu offered, kept one tap behind the header's "…": two quick
+/// filters and the folders a conversation is moved to. While one is on, no chip is lit and the
+/// search field carries it as a removable chip.
+enum CommsInboxMoreFilter: String, CaseIterable, Identifiable {
+    case needsReply, starred, sent, archive, bin
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .needsReply: "Needs reply"
+        case .starred: "Starred"
+        case .sent: "Sent"
+        case .archive: "Archive"
+        case .bin: "Bin"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .needsReply: "arrowshape.turn.up.left"
+        case .starred: "star"
+        case .sent: CommsFolder.sent.symbol
+        case .archive: CommsFolder.archive.symbol
+        case .bin: CommsFolder.bin.symbol
+        }
+    }
+
+    var folder: CommsFolder {
+        switch self {
+        case .sent: .sent
+        case .archive: .archive
+        case .bin: .bin
+        default: .inbox
+        }
+    }
+
+    var quick: CommsQuickFilter {
+        switch self {
+        case .needsReply: .needsReply
+        case .starred: .starred
+        default: .all
+        }
+    }
+
+    var isFolder: Bool { folder != .inbox }
+
+    /// Stars, archive and bin are kept on this phone for calls too; Sent is texts and email only.
+    static func available(_ access: CommsInboxAccess) -> [CommsInboxMoreFilter] {
+        guard access.workspace else { return [] }
+        return allCases
+    }
+}
+
 /// Who sees which part of the Inbox. Like the web beta, the Inbox itself is personal: anyone
 /// signed in to a workspace has it, with texts and email kept on this device. Calls need
 /// customer.view with call_recording (the server answers 403 otherwise); job notices need
 /// job.view with job_booking_notices.
+/// Texts and email in the Inbox are kept on this phone and do not send, so they stay out of the
+/// app until the server can deliver them. The server switches them on with this feature key.
+enum InboxMessaging {
+    static let feature = "inbox_messaging"
+    @MainActor static func on(_ session: SessionController) -> Bool {
+        #if DEBUG
+        // Design previews show the full Inbox; this flag shows what ships.
+        if PaperPreview.enabled { return !ProcessInfo.processInfo.arguments.contains("--paper-preview-no-messaging") }
+        #endif
+        return session.isFeatureOn(feature)
+    }
+}
+
 struct CommsInboxAccess: Equatable {
     let workspace: Bool
     let notices: Bool
     let calls: Bool
 
     @MainActor init(_ session: SessionController) {
-        self.init(workspace: session.user?.id != nil && session.activeOrganization?.id != nil,
+        self.init(workspace: session.user?.id != nil && session.activeOrganization?.id != nil && InboxMessaging.on(session),
                   notices: session.can("job.view", feature: "job_booking_notices"), calls: CallLogRules.available(session))
     }
 

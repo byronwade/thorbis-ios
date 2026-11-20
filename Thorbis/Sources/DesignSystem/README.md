@@ -9,23 +9,25 @@ Linear's mobile app sets the layout grammar; design.thorbis.com is the law for t
 controls, forms, words, places and states ("Linear grammar. Not Linear dress"). The full rules are
 at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
 
-- **Palette:** dark is Linear's greys (canvas `#0A0A0A`, panel `#171717`), cream type `#F7F4EE`,
-  cool grey body, dimmer marker. Light is the warm cream sheet (canvas `#F7F4EE`, panel `#FDFCFA`).
-  `Theme.field` is the sunk well under a field or select; `Theme.fill` is a chip or circle. One
-  electric-blue accent (`Theme.brand`) for selected, focus and the one live thing. Status hues are
-  the site's success/error/info/warning, tuned in lightness only. Place marks: `markOlive`,
-  `markForest`, `markPumpkin`, `markBurnt`, `markAccent`. `python3 scripts/tests/contrast.py`
-  reports 0 failures (4.5:1 text, 3:1 marks, both themes, Increase Contrast).
-- **Type:** 400 and 500 only (`Theme.allowed()` maps semibold and heavier to 500). The staff ramp
+- **Palette (Paper v2, 16 November 2026):** Paper's tokens. Dark: canvas `#1F1F1F`, card
+  `#232323`, sidebar `#141414`, type `#EDEDED`. Light: canvas `#FAF9F6`, card `#FFFFFF`, sidebar
+  `#F3F2EE`, type `#1A1A1A`. `Theme.field` is the sunk well under a field or select; `Theme.fill`
+  is a chip or circle; `Theme.sidebar` / `sidebarAccent` are the drawer and its chosen place. One
+  electric blue, `#2F6BFF` (`Theme.brand`), for selected, focus, switches and the one live thing.
+  `Theme.ai*` is Paper's purple, for AI help only. Place marks: `markOlive`, `markForest`,
+  `markPumpkin`, `markBurnt`, `markAccent`. `python3 scripts/tests/contrast.py` reports 0
+  failures (4.5:1 text, 3:1 marks, both themes, Increase Contrast).
+- **Type:** Inter 400 to 700 (`Theme.allowed()` maps heavy and black to bold). The staff ramp
   (`Theme.onRamp`) is compact: body/row title 15, secondary 14, chrome 13 Medium, captions 12,
-  sheet titles 16–17, detail titles 24, root titles 26, money hero 30. Customer-facing views use
+  sheet titles 16–17, detail titles 24, root titles 34, money hero 30. Customer-facing views use
   `Theme.customerFont` (the older ramp) to keep their 17pt / 56pt floors.
 - **Depth:** Rest (planar sheets and panels), Sink (`fieldWell()`, `ThorbisSelect`,
   `ThorbisSheetGroup`: one step darker, inset, 1px rim), Lift (`.inkCommit()` / `.dangerCommit()`:
   ink, radius 10, 1px rim, light from above, 1px drop, press sinks through `PressStyle`), Overlay
   (`ThorbisMenu` popovers only). No fifth.
-- **No separators:** `WellDivider` and `ThorbisSheetDivider` draw nothing; `PaperCard` has no rim;
-  no coloured side rails. A 1px rim is for fields, commits, chips and photos only.
+- **Separators (Paper v2):** `WellDivider` and `ThorbisSheetDivider` draw a hairline between rows
+  inside one grouped card, inset to the row text. Never between cards or under a heading;
+  `PaperCard` has no rim; no coloured side rails.
 - **Status is a word:** `StatusLabel` (a small `StatusMark` in the hue, then the word). Rows lead
   with the street; the status word sits in the subtitle (`JobListRowContent`,
   `DocumentListRowContent`) or at the trailing edge (`CustomerListRowContent`, search). Never a
@@ -57,9 +59,13 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
   left — `PaperHeader` draws it when the shell sets `\.paperDrawer` (roots only); roots without a
   Paper header or with a visible bar get it in the bar (`DrawerCircleInBar`). Pushed screens keep
   `ThorbisBackButton` alone (`.thorbisBackButton()` / `thorbisDestination`), as C-Job shows. Edge swipe opens the drawer on roots; on pushed screens it is Back.
-  Which places it lists comes from `DrawerSections.make` (`../CreamSheet.swift`): every place the
-  role can open, grouped under Work, Money, Shop and On this phone (Fleet, Equipment, Agreements,
-  saved work), with explicit Edit-menu pins leading in a Pinned section; nothing is folded away.
+  Which places it lists comes from `DrawerSections.make` (`../CreamSheet.swift`): exactly Paper's
+  rows for the role (Navigation 29N / 57N / 58N) — the main places, then one headed group. Every
+  other place opens from the screen Paper's Map gives it (`PlaceDoors`, `../PlaceDoors.swift`:
+  Estimates and Invoices from Money, My scorecard from Reports, Team additions from Team, the
+  rest under Settings › Other places) and from Search, which lists every place. The gear opens
+  Settings; the workspace name opens Switch workspace; the menu's order is set in Settings ›
+  Menu and start screen.
   Cream sheet (C-Nav.dc.html): the drawer sits on the canvas; 18pt business name + search circle;
   `PlacesList` rows (18pt mark in the place's quiet hue, filled when here, 15pt word, a tabular
   count at the trailing edge, the selected place on `Theme.fill`), 12pt section headings, Recent
@@ -74,6 +80,29 @@ at the top of `docs/design/ios-golden-rules.md`. Later passes must follow these:
 no `Menu {}`, `Picker`, `confirmationDialog`, `.buttonStyle(.bordered*)`, or `.borderedProminent`.
 Everything is built from `Theme` tokens (see `../Theme.swift`) so it looks the same everywhere,
 in light and dark, and scales with Dynamic Type.
+
+## Paper primitives (fidelity pass, 17 November 2026)
+
+Paper ("Thorbis Mobile", board "DS · Thorbis Mobile primitives") is the source of truth. These
+carry Paper's own values; build screens from them before writing a one-off.
+
+| Paper element | Use | Where |
+|---------------|-----|-------|
+| Any Paper icon, from its SVG path data | `PaperIcon(.menu, size: 20, color:)`, `PaperGlyph` (add new glyphs as `static let`) | `PaperIcon.swift` |
+| Place header: menu circle with dot, blue +, 34 Bold title, muted subtitle | `PaperHeader(title:subtitle:showsCreate:)` | `../PaperComponents.swift` |
+| Search field with filter chips and the filter circle | `PaperSearchBar(placeholder:chips:) { PaperFilterCircle(active:) }` + `PaperFilterChip` | `PaperPrimitives.swift` |
+| Segments (Today / Week / Map) | `PaperTabs(options:selection:)`, `labelSize: 13` on a record | `../PaperComponents.swift` |
+| Group label with count | `PaperCardLabel(title:count:)` or `countText: "4 jobs"` | `PaperPrimitives.swift` |
+| One card of rows | `PaperRowsCard { rows }` with `WellDivider(leading:)` between rows | `PaperPrimitives.swift` |
+| The blue pill / its tinted twin | `PaperPillLabel(title:glyph:height:tinted:)` | `PaperPrimitives.swift` |
+| Any other pill button (ramp: field 60 / commit 50 / card 48 / secondary 44 / compact 36; tones brand, tinted, quiet, danger, dangerQuiet) | `PaperButtonLabel(title:glyph:symbol:size:tone:fills:busy:)` or `.paperButton(_:tone:fills:)` on a custom label | `PaperPrimitives.swift` |
+| A status word (26 tall, 13 Semibold) / a row's chevron | `PaperStatusPill(text:ink:surface:)` / `PaperChevron()` | `PaperPrimitives.swift` |
+| Quiet 48pt round button (call, message) | `PaperRoundButton(glyph:label:action:)`, `PaperRoundLabel` | `PaperPrimitives.swift` |
+| Avatar chip (initials) | `PaperInitials(name:size:)` / `InitialsAvatar` | `PaperPrimitives.swift`, `StatusGlyph.swift` |
+| Status glyph (ring, half, check) | `StatusGlyph(tone:label:pending:size:)` | `StatusGlyph.swift` |
+| Sheet chips and sort segments | `PaperChoiceChip`, `PaperSheetSegments` | `PaperPrimitives.swift` |
+| Fills | `Theme.quietFill` (ink 9%), `Theme.brandTint` (brand 24%), `Theme.borderStrong`, `Theme.subtleForeground` | `PaperPrimitives.swift` |
+| Times | `date.clockTime` "10:30 AM", `date.visitLabel()` "Today, 2:30 PM" | `../PaperWorkViews.swift`, `../Theme.swift` |
 
 ## What to reach for
 
@@ -117,7 +146,9 @@ in light and dark, and scales with Dynamic Type.
 | Danger commit (Cancel job, Void invoice) | `.dangerCommit()` | `../Theme.swift` |
 | **Select row** (replaces menu/default `Picker`) | **`ThorbisSelect`** | `ThorbisControls.swift` |
 | **Pill segmented** (replaces `.pickerStyle(.segmented)`) | **`ThorbisSegmented`** | `ThorbisControls.swift` |
-| **Confirm sheet** (replaces `.confirmationDialog`) | **`.thorbisConfirm`** | `ThorbisControls.swift` |
+| **Confirm card** (replaces `.confirmationDialog` and `.alert`; Paper P4, centred over a scrim) | **`.thorbisConfirm`** | `ThorbisControls.swift` |
+| Banner (offline, failed read, permission; Paper 73 / 74 strip) | `ErrorBanner`, `OfflineBanner`, `PermissionNotice`, `ListErrorRow` (all draw `PaperBannerStrip`) | `ThorbisStates.swift` |
+| Inline "nothing here" line, spinner with words | `PaperInlineEmpty`, `ThorbisLoadingLine` | `ThorbisStates.swift` |
 | Selectable chip | `ThorbisChipToggle` / `ThorbisChipGroup` | `ThorbisSheet.swift` |
 | Empty state (tinted glyph, title, sentence, action) | `PaperEmptyState(tint:)`, `EmptyGlyph` | `ThorbisStates.swift` |
 | Loading list / rows | `SkeletonList`, `SkeletonRows`, `SkeletonPulse` | `ThorbisStates.swift` |
@@ -190,9 +221,13 @@ ThorbisSegmented(options: [("residential", "Residential"), ("commercial", "Comme
 
 ## ThorbisConfirm (confirmationDialog)
 
-`.thorbisConfirm` presents a confirm modal — a clean panel sheet with the question, the
-consequence, the commit (a destructive one in the danger tone) and an automatic Cancel. Use the `isPresented:` form for a Bool, or the `item:` form in
-place of `.confirmationDialog(presenting:)` (it clears the item on dismiss, so swipe-away = Cancel).
+`.thorbisConfirm` presents the one confirm card (Paper P4): 342pt wide, centred over a 45% scrim,
+radius 28, the question as a 20 Bold title that names the thing, one 15pt muted line that says
+what happens, then 50pt pills: Cancel on the left, the action on the right (red when
+`.destructive`, brand otherwise). The red pill repeats the verb alone ("Delete", "Remove",
+"Discard", "Archive"). Several actions stack with Cancel last. `actions: []` is a notice with one
+"OK"; `reason:` adds one required or optional field; `fields:` edits bound values; `cancelTitle:`
+renames Cancel where the action is itself a cancel ("Keep job"). Never use `.alert`.
 
 ```swift
 .thorbisConfirm("Remove this item?", isPresented: $confirm,
@@ -200,7 +235,7 @@ place of `.confirmationDialog(presenting:)` (it clears the item on dismiss, so s
 
 .thorbisConfirm(item: $toRemove, title: { _ in "Remove location?" },
                 message: { "Removes it from \($0.customer)." },
-                actions: { loc in [ThorbisConfirmAction("Remove \(loc.label)", role: .destructive) { remove(loc) }] })
+                actions: { loc in [ThorbisConfirmAction("Remove", role: .destructive) { remove(loc) }] })
 ```
 
 > **Capture the value before dismiss.** When a Bool-driven confirm's action reads the same state

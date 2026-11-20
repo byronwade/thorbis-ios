@@ -82,7 +82,9 @@ final class CustomerPresentationTests: XCTestCase {
         var flow = CustomerEstimateFlow(estimate: estimate(options: options))
         flow.choose("better")
         flow.review()
-        try flow.useIssuedRevision(issued(options: [options[0]]))
+        let remaining = FieldEstimateOption(id: "good", title: "Repair", description: "",
+                                            lines: [line("repair", 1, 48_000)], totalAmount: 48_000, currency: "USD")
+        try flow.useIssuedRevision(issued(options: [remaining]))
         XCTAssertNil(flow.selectedOptionID)
         XCTAssertEqual(flow.step, .choose)
         XCTAssertFalse(flow.canReview)
@@ -105,10 +107,13 @@ final class CustomerPresentationTests: XCTestCase {
     }
 
     func testCustomerTypeStepsUpOnIPad() {
-        XCTAssertEqual(CustomerType(.compact).body, 20)
+        // The phone wears Paper's sizes (37, 38, 38A); iPad keeps the step up.
+        XCTAssertEqual(CustomerType(.compact).body, 16)
         XCTAssertEqual(CustomerType(.regular).body, 22)
         XCTAssertEqual(CustomerType(.compact).total, 34)
-        XCTAssertEqual(CustomerType(nil).small, 17)
+        XCTAssertEqual(CustomerType(nil).small, 15)
+        XCTAssertEqual(CustomerType(.regular).small, 17)
+        XCTAssertEqual(CustomerType(.compact).target, 50)
         XCTAssertEqual(CustomerType(.regular).target, 56)
     }
 
@@ -127,9 +132,16 @@ final class CustomerPresentationTests: XCTestCase {
                                      kind: "price_book", originalUnitPrice: FieldMoney(amount: 20_000, currency: "USD"))))
         let lines = [member, marked, invoiced, line("x", 1, 9_000)]
         XCTAssertEqual(customerSavings(lines), 9_000)
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: true),
-                       [CustomerAmountRow(label: "Member savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
-        XCTAssertEqual(customerSavingsRows(lines, currency: "USD", isMember: false).first?.label, "Savings")
-        XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD", isMember: true).isEmpty)
+        XCTAssertEqual(customerSavingsRows(lines, currency: "USD"),
+                       [CustomerAmountRow(label: "Savings", amount: "−\(money(9_000, currency: "USD"))", emphasis: false)])
+        XCTAssertTrue(customerSavingsRows([marked, line("x", 1, 9_000)], currency: "USD").isEmpty)
+    }
+
+    func testPriceBookMarkdownUsesNeutralSavingsLabel() {
+        let markdown = FieldLine(id: "member", description: "Repair", quantity: 1,
+                                 unitPrice: FieldMoney(amount: 8_000, currency: "USD"),
+                                 source: FieldLineSource(kind: "price_book", originalUnitPrice: FieldMoney(amount: 10_000, currency: "USD")))
+        XCTAssertEqual(customerSavingsRows([markdown], currency: "USD"),
+                       [CustomerAmountRow(label: "Savings", amount: "−\(money(2_000, currency: "USD"))", emphasis: false)])
     }
 }

@@ -148,6 +148,12 @@ final class SessionController: ObservableObject {
         can(capability, feature: feature)
     }
 
+    /// Paper 65B: after the server saved a new name, show it everywhere without a full restore.
+    func applySavedName(_ name: String) {
+        guard let current = user else { return }
+        user = SessionUser(id: current.id, name: name, email: current.email)
+    }
+
     func restore() async {
         guard !signingOut else { return }
         let requestGeneration = invalidate(next: .restoring)
@@ -369,6 +375,8 @@ final class SessionController: ObservableObject {
         snapshots.clear()
         invalidate(next: .failed)
         api.clearSessionCookies()
+        // The Home and Lock Screen widgets stop showing customers once the session is gone.
+        TodaySnapshot.clear()
         error = "Your session expired. Sign in again."
     }
 
@@ -529,7 +537,8 @@ final class SessionController: ObservableObject {
     }
 
     private func scheduleExpiry(generation requestGeneration: UUID, deadline: Date) {
-        let nanoseconds = UInt64(max(0, deadline.timeIntervalSinceNow) * 1_000_000_000)
+        // Capped at a year so a far-future expiry from the server can't overflow the conversion.
+        let nanoseconds = UInt64(min(max(0, deadline.timeIntervalSinceNow), 31_536_000) * 1_000_000_000)
         expiryTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: nanoseconds)
             guard !Task.isCancelled, let self, self.generation == requestGeneration else { return }

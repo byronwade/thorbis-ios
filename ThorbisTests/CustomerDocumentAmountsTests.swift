@@ -35,6 +35,38 @@ final class CustomerDocumentAmountsTests: XCTestCase {
         XCTAssertEqual(amounts.due, 12500)
     }
 
+    func testEstimateBreakdownUsesOnlyCustomerVisibleLines() throws {
+        let work = line("Service", amount: 5000)
+        let hiddenCharge = FieldLine(id: "hidden-charge", description: "Internal material", quantity: 1, unitPrice: .init(amount: 10000, currency: "USD"), source: nil, showToCustomer: false)
+        let hiddenCredit = FieldLine(id: "hidden-credit", description: "Internal credit", quantity: 1, unitPrice: .init(amount: -2000, currency: "USD"), source: nil, showToCustomer: false)
+        let display = try XCTUnwrap(customerEstimateDisplay([work, hiddenCharge, hiddenCredit], currency: "USD"))
+        XCTAssertEqual(display.lines.map(\.description), ["Service", "Materials"])
+        XCTAssertEqual(display.amounts.subtotal, 13000)
+        XCTAssertEqual(display.amounts.credits, 0)
+        XCTAssertEqual(display.amounts.total, 13000)
+        XCTAssertEqual(customerAmountRows(display.amounts, currency: "USD", invoice: false).map(\.label), ["Total"])
+    }
+
+    func testVisibleDiscountStaysExplicitWithHiddenAdjustments() throws {
+        let work = line("Service", amount: 5000)
+        let visibleCredit = line("Courtesy discount", amount: -3000)
+        let hiddenCharge = FieldLine(id: "hidden-charge", description: "Internal material", quantity: 1, unitPrice: .init(amount: 10000, currency: "USD"), source: nil, showToCustomer: false)
+        let hiddenCredit = FieldLine(id: "hidden-credit", description: "Internal credit", quantity: 1, unitPrice: .init(amount: -2000, currency: "USD"), source: nil, showToCustomer: false)
+        let display = try XCTUnwrap(customerEstimateDisplay([work, visibleCredit, hiddenCharge, hiddenCredit], currency: "USD"))
+        XCTAssertEqual(display.lines.map(\.description), ["Service", "Courtesy discount", "Materials"])
+        XCTAssertEqual(display.amounts.subtotal, 13000)
+        XCTAssertEqual(display.amounts.credits, -3000)
+        XCTAssertEqual(display.amounts.total, 10000)
+        XCTAssertEqual(customerAmountRows(display.amounts, currency: "USD", invoice: false, totalLabel: "Option total").map(\.label),
+                       ["Subtotal", "Discounts and credits", "Option total"])
+    }
+
+    func testEstimateDisplayRejectsUnverifiableAmounts() {
+        XCTAssertNil(customerEstimateDisplay([line("Overflow", quantity: 2, amount: .max)], currency: "USD"))
+        XCTAssertNil(customerEstimateDisplay([line("Wrong currency", amount: 100, currency: "EUR")], currency: "USD"))
+        XCTAssertNil(customerEstimateDisplay([line("Negative total", amount: -100)], currency: "USD"))
+    }
+
     func testInvoiceHeadlineRespectsDraftPaymentEvidenceAndStaleness() throws {
         let zero = try XCTUnwrap(CustomerDocumentAmounts(lines: [], currency: "USD"))
         let unpaid = try XCTUnwrap(CustomerDocumentAmounts(lines: [line("Work", amount: 10000)], currency: "USD"))

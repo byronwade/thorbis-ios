@@ -31,6 +31,13 @@ struct JobActivityAttributes: ActivityAttributes {
     var subline: String {
         [address == nil ? nil : title, customer.isEmpty ? nil : customer].compactMap { $0 }.joined(separator: " · ")
     }
+
+    /// The Lock Screen card's title (Paper 94): the problem.
+    var cardTitle: String { title.isEmpty ? headline : title }
+    /// Under the card's title: "Danielle Marlowe · 412 Birchwood Ln".
+    var cardDetail: String {
+        [customer.isEmpty ? nil : customer, address].compactMap { $0 }.joined(separator: " · ")
+    }
 }
 
 extension JobActivityAttributes.ContentState {
@@ -101,7 +108,7 @@ struct JobNextStep: Equatable {
     static func after(_ status: String) -> JobNextStep? {
         switch status {
         case "scheduled", "dispatched": JobNextStep(target: "en_route", title: "On my way", symbol: "car.fill")
-        case "en_route": JobNextStep(target: "arrived", title: "Arrive", symbol: "mappin.and.ellipse")
+        case "en_route": JobNextStep(target: "arrived", title: "I've arrived", symbol: "mappin.and.ellipse")
         case "arrived": JobNextStep(target: "in_progress", title: "Start work", symbol: "wrench.and.screwdriver.fill")
         default: nil
         }

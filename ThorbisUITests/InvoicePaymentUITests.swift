@@ -2,6 +2,81 @@ import XCTest
 
 @MainActor
 final class InvoicePaymentUITests: XCTestCase {
+    func testValidInvoiceStillOffersSignatureAndCollection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-collection-authorized"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons["Collect payment"].waitForExistence(timeout: 10))
+        // Paper 40C: asking for a signature lives in the invoice's menu.
+        app.buttons["Customer view, edit or open the PDF"].tap()
+        XCTAssertTrue(app.buttons["Get customer signature"].waitForExistence(timeout: 10))
+    }
+    func testValidInvoiceDetailOpensItsCollectionSheet() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-collection-authorized"]
+        app.launch()
+        let collect = app.buttons["Collect payment"]
+        XCTAssertTrue(collect.waitForExistence(timeout: 30))
+        XCTAssertTrue(collect.isEnabled)
+        collect.tap()
+        XCTAssertTrue(app.buttons["received-payment-methods"].waitForExistence(timeout: 15))
+    }
+    func testValidDraftCanBeIssued() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-collection-authorized"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 30))
+        let issue = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Issue")).firstMatch
+        XCTAssertTrue(issue.waitForExistence(timeout: 10))
+        XCTAssertTrue(issue.isEnabled)
+    }
+    func testInvalidInvoiceAmountDoesNotOfferSignatureOrCollection() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-overflow"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30), "An invalid amount needs an explicit unavailable state")
+        XCTAssertFalse(app.buttons["Get customer signature"].exists)
+        XCTAssertFalse(app.buttons["Collect payment"].exists)
+    }
+
+    func testInvalidDraftAmountCannotBeIssued() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-overflow"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
+        let issue = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Issue")).firstMatch
+        if issue.exists { XCTAssertFalse(issue.isEnabled, "An unverified amount must not be issued") }
+    }
+
+    func testValidDraftCanOpenDiscount() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-discount-authorized"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-detail-title"].waitForExistence(timeout: 30))
+        let menu = app.buttons["Customer view, edit or open the PDF"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+        let discount = app.buttons["Add discount or credit"]
+        XCTAssertTrue(discount.waitForExistence(timeout: 10)); discount.tap()
+        XCTAssertTrue(app.buttons["invoice-discount-apply"].waitForExistence(timeout: 10))
+    }
+
+    func testInvalidDraftCannotOpenDiscount() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "invoice-detail", "--paper-preview-invoice-detail-draft", "--paper-preview-invoice-overflow", "--paper-preview-invoice-discount-authorized"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["invoice-invalid-total"].waitForExistence(timeout: 30))
+        let menu = app.buttons["Customer view, edit or open the PDF"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 10)); menu.tap()
+        XCTAssertFalse(app.buttons["Add discount or credit"].exists)
+    }
     func testReceivedPaymentMenuKeepsBankAndCardChoicesAndDirectCashCheck() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -74,7 +149,15 @@ final class InvoicePaymentUITests: XCTestCase {
         XCTAssertTrue(app.buttons["share-invoice-payment-link"].exists)
         app.buttons["Copy link"].tap()
         XCTAssertTrue(app.buttons["Link copied"].waitForExistence(timeout: 3))
-        app.buttons["check-invoice-payment-status"].tap()
+        // Paper 39C pins "Text the link instead" over the bottom edge. Check payment status is the
+        // last thing on the page and starts under that pill, so bring it clear before tapping.
+        let check = app.buttons["check-invoice-payment-status"]
+        let share = app.buttons["share-invoice-payment-link"]
+        let content = app.scrollViews.containing(.image, identifier: "invoice-payment-qr").firstMatch
+        func clear() -> Bool { check.isHittable && check.frame.maxY <= share.frame.minY }
+        for _ in 0..<5 where !clear() { content.swipeUp() }
+        XCTAssertTrue(clear(), "Check payment status must scroll clear of the pinned link pill")
+        check.tap()
         XCTAssertTrue(code.waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["Invoice paid"].exists)
         capture(app, "Invoice scan to pay")

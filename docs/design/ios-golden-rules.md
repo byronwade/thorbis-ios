@@ -7,7 +7,43 @@ They describe the required direction; they do not certify existing implementatio
 > Quiet chrome. Dominant work. One obvious next action. Place before database ID.
 > System UI stays native. State is never hidden. Offline work is real work.
 
-## Design direction (v2, 31 October 2026) — read this first
+## Paper v2 tokens (16 November 2026) — supersedes the token, type and separator points below
+
+The owner chose the "Thorbis Mobile" Paper files over the v2 design.thorbis.com values
+("Swap to papers"). Where this section and anything below disagree, this section wins.
+The port plan is [paper-v2-port-plan.md](paper-v2-port-plan.md).
+
+- **Tokens** (`Theme.swift`) are Paper's. Light: canvas `#FAF9F6`, card `#FFFFFF`,
+  sidebar `#F3F2EE`, type `#1A1A1A`. Dark: canvas `#1F1F1F`, card `#232323`,
+  sidebar `#141414`, type `#EDEDED`. Brand `#2F6BFF` (`Theme.brand`), for selected,
+  focus, switches and the one live thing. Status words use Paper's `-text` colours and
+  marks use the plain hue. `Theme.ai*` is Paper's purple for AI help only. Seven Paper
+  values are one shade off (1–4%) so that `scripts/tests/contrast.py` still passes
+  with 0 failures; `Theme.swift` lists them.
+- **Canvas:** every screen sits on Paper's `sidebar` tone (`Theme.background` =
+  `#F3F2EE` / `#141414`) with grouped cards (`Theme.card`, radius 20) on top; Paper's own
+  `background` (`#FAF9F6` / `#1F1F1F`) only frames the drawer in its mock-ups.
+- **Type:** Inter 400 to 700 (`Theme.allowed` maps heavy and black to bold). Paper's own sizes
+  (`Theme.onRamp`): 12 captions, 13 labels (Semibold section labels with the count at the trailing
+  edge), 14 subtitles, 15 body, 16 rows, 17 / 22 sheet titles, 24 totals, and **34 Bold for every
+  screen title**, list or record (27+ → 34, drawn bold). Three sizes are asked for by name where
+  Paper draws them: `Theme.heading()` 28 Bold (a stop's street, "You're here", a pushed sub-page
+  title), `Theme.display()` 44 Bold (dashboard and money heroes) and `Theme.paymentAmountFont()`
+  52 Bold (the amount being collected).
+- **Menus, sheets, confirms:** a page's own ••• menu is a bottom sheet (`ThorbisMenu(presentation:
+  .sheet)`); row menus and selects stay anchored popovers. Sheets use one of Paper's three headers
+  (`ThorbisSheetCloseStyle`): Cancel pill under the commit, a close circle, or a Done pill in the
+  header. A destructive choice that needs a reason uses `thorbisConfirm(… reason:)`, never a system
+  alert. Ask for a permission through `PermissionPrimerPresenter.ask` so the explainer comes first.
+- **Controls:** the commit is a brand-blue pill, 50 tall, white 16 Semibold (`.inkCommit()`);
+  the danger commit is the same pill in red. Secondary actions (Call, Text, Directions) are pills
+  on the field fill. Header circles are 44 on the card; the create circle is brand blue. Segments
+  sit in a card track (radius 11) with the chosen one raised (radius 9).
+- **Separators:** a hairline (`Theme.hairline`, black 10% / white 8%) between rows
+  inside one grouped card (`WellDivider`), inset to the row text. Never between
+  cards, under a heading, or as a coloured side rail.
+
+## Design direction (v2, 31 October 2026)
 
 **Linear grammar on design.thorbis.com tokens; the drawer is an owner-approved
 exception.** The owner asked for "linear.app mobile app and design.thorbis.com".
@@ -182,6 +218,8 @@ source evidence; verify platform/API/version claims before relying on them.
     hues (`Theme.status*`) each have a mark colour, a text-safe colour and a
     tinted surface. `scripts/tests/contrast.py` and `AppearanceTests` hold every
     text token at 4.5:1 and every mark at 3:1 in light, dark and Increase Contrast.
+    *Paper v2, 16 November 2026:* Paper's palette, weights up to 700, the 34pt
+    root title and in-card hairlines replace the v2 values (see the top section).
 11. **Let system chrome be system chrome.** Use native typography and geometry in
     tabs/toolbars/navigation. Use accessible Inter and the existing money/mono
     styles in content. Liquid Glass belongs to supported system navigation/action

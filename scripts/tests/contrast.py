@@ -36,7 +36,11 @@ checks = {
     "statusScheduledText": grounds[:2] + ["statusScheduledSurface"],
     "statusInvoicedText": grounds[:2] + ["statusInvoicedSurface"],
     "onInk": ["foreground"],
+    # Paper v2: the drawer / iPad sidebar and its chosen place; the AI accent as text.
+    "ai": grounds[:2] + ["aiSurface"],
 }
+for t in ["foreground", "muted", "subtle"]:
+    checks[t] = checks[t] + ["sidebar", "sidebarAccent"]
 fails = 0
 for mode in ["light", "dark", "highLight", "highDark"]:
     print(f"== {mode}")
@@ -50,7 +54,7 @@ for mode in ["light", "dark", "highLight", "highDark"]:
         print(f"  {text:22} " + " | ".join(row))
 # Non-text (WCAG 1.4.11): each status glyph hue against the grounds it is drawn on: the screen,
 # the well, and its own chip surface (unscheduled and cancelled chips sit on `fill`). 3:1, counted.
-tokens["statusDispatched"] = {m: "3A6AE0" for m in ["light", "dark", "highLight", "highDark"]}  # = brand, Color(hex:)
+tokens["statusDispatched"] = {m: "2F6BFF" for m in ["light", "dark", "highLight", "highDark"]}  # = brand, Color(hex:)
 glyphs = {
     "statusUnscheduled": "fill",
     "statusScheduled": "statusScheduledSurface",
@@ -89,12 +93,13 @@ for mode in ["light", "dark"]:
     ok = r >= 4.5
     fails += not ok
     print(f"  {mode:5} {r:.2f}{'' if ok else ' FAIL'}")
-# The 1px rim's job is done by the field being one step darker than the panel (sink), never lighter.
-print("== field sinks below the panel")
+# Paper v2: a field is ink at 9% over the card, so it always reads apart from the card it sits on
+# (darker in light, lighter in dark). It must never be the card's own tone.
+print("== field reads apart from the card")
 for mode in ["light", "dark"]:
-    ok = lum(tokens["field"][mode]) < lum(tokens["card"][mode])
+    ok = abs(lum(tokens["field"][mode]) - lum(tokens["card"][mode])) > 0.004
     fails += not ok
-    print(f"  {mode:5} field {tokens['field'][mode]} < panel {tokens['card'][mode]}{'' if ok else ' FAIL'}")
+    print(f"  {mode:5} field {tokens['field'][mode]} vs card {tokens['card'][mode]}{'' if ok else ' FAIL'}")
 # The dark toast capsule (ThorbisToast) and its words.
 print("== toast")
 for mode in ["light", "dark", "highLight", "highDark"]:

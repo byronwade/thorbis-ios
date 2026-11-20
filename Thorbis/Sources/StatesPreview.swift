@@ -18,10 +18,16 @@ struct StatesPreview: View {
             case "state-errors": NavigationStack { ErrorStatesGallery() }
             case "state-loading": NavigationStack { LoadingStatesGallery() }
             case "state-customer": NavigationStack { CustomerStatesGallery() }
-            case "state-sheets": SheetStatesGallery()
+            case "state-sheets":
+                // `--state-variant confirm | confirm-plain | confirm-many | confirm-reason | confirm-notice`
+                // shows the shared confirm card with the copy its call sites use.
+                if let variant = Self.variant, variant.hasPrefix("confirm") { ConfirmStatesGallery(variant: variant) }
+                else { SheetStatesGallery() }
             case "state-toasts": NavigationStack { ToastStatesGallery() }
             case "state-workspaces":
                 if forced { WorkspaceGateView() } else { SessionLoadingView(message: "Opening your workspace…") }
+            case let name where name.hasPrefix("acct-"):
+                if forced { AccountPreview(screen: name) } else { SessionLoadingView(message: "Opening your workspace…") }
             default:
                 if forced { LoginView(attempted: screen == "state-login-error") } else { SessionLoadingView(message: "Opening your workspace…") }
             }
@@ -38,6 +44,55 @@ struct StatesPreview: View {
             default: break
             }
             forced = true
+        }
+    }
+}
+
+extension StatesPreview {
+    static var variant: String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let index = args.firstIndex(of: "--state-variant"), args.indices.contains(index + 1) else { return nil }
+        return args[index + 1]
+    }
+}
+
+/// The shared confirm card over a screen, as its call sites present it.
+private struct ConfirmStatesGallery: View {
+    let variant: String
+    @State private var shown = false
+    @State private var name = ""
+
+    var body: some View {
+        let base = VStack(alignment: .leading, spacing: 12) {
+            Text("Rooftop unit, Building B").font(Theme.font(28, weight: .bold))
+            Text("EST-1035 \u{00B7} Hollis Property Group \u{00B7} Draft").font(Theme.font(15)).foregroundStyle(Theme.muted)
+            Spacer()
+        }
+        .padding(Theme.gutter).padding(.top, 40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.canvas)
+        .task { try? await Task.sleep(for: .milliseconds(600)); shown = true }
+        switch variant {
+        case "confirm-plain":
+            base.thorbisConfirm("Complete this job?", message: "Everything before wrap up is done.", isPresented: $shown,
+                                actions: [ThorbisConfirmAction("Complete job") {}])
+        case "confirm-many":
+            base.thorbisConfirm("Keep your changes?", message: "Save this draft on your device or discard your changes.",
+                                isPresented: $shown, cancelTitle: "Keep editing",
+                                actions: [ThorbisConfirmAction("Save draft") {}, ThorbisConfirmAction("Discard changes", role: .destructive) {}])
+        case "confirm-reason":
+            base.thorbisConfirm("New role", message: "Then choose what this role can do.", isPresented: $shown,
+                                reason: ThorbisConfirmReason(label: "Role name", placeholder: "Role name", required: true),
+                                actionTitle: "Create") { _ in }
+        case "confirm-notice":
+            base.thorbisConfirm("The file didn\u{2019}t download", message: "No connection. Check your signal and try again.",
+                                isPresented: $shown, actions: [])
+        case "confirm-cancel":
+            base.thorbisConfirm("Cancel job", message: "JOB-2214 \u{00B7} AC not cooling", isPresented: $shown, cancelTitle: "Keep job",
+                                actions: [ThorbisConfirmAction("Cancel job", role: .destructive) {}])
+        default:
+            base.thorbisConfirm("Delete this receipt?", message: "It and its photo are removed from this phone. This can\u{2019}t be undone.",
+                                isPresented: $shown, actions: [ThorbisConfirmAction("Delete", role: .destructive) {}])
         }
     }
 }
@@ -69,6 +124,16 @@ private struct ErrorStatesGallery: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 4) {
+                // Paper 73C Couldn't load and 73D No access, as a screen's own state.
+                PaperEmptyState(symbol: "exclamationmark.circle", title: "Couldn’t load this job",
+                                message: "Something went wrong on our side. Your work on this phone is safe.",
+                                actionTitle: "Try again", tint: Theme.warning, problem: true) {}
+                PaperEmptyState(symbol: "lock", title: "You don’t have access to Reports",
+                                message: "Your role is Technician. An owner or manager can give you access.", problem: true)
+                // A refused save is Paper 48A's red strip; connection and server trouble stay amber.
+                label("Couldn't save")
+                ErrorBanner(message: "That email is already on another customer. Change it and save again.",
+                            tint: Theme.destructive)
                 label("No signal")
                 ErrorBanner(error: Problem(title: "Network error", status: nil, detail: "No connection. Check your signal and try again."),
                             retry: {})
@@ -119,7 +184,7 @@ private struct CustomerStatesGallery: View {
                 label("Changed under the customer")
                 CustomerStateMessage(symbol: "hand.raised", title: "Please hand the device back",
                                      message: "Your technician needs to reload this job.",
-                                     actionTitle: "Hand back to the technician") {}
+                                     actionTitle: "Hand back to technician") {}
                 label("Public link ended")
                 CustomerStateMessage(symbol: "link.badge.exclamationmark", title: "This estimate link has ended",
                                      message: "This estimate link is expired, replaced, or no longer current. Ask the company for a new link.",
@@ -182,8 +247,8 @@ enum StatesPreviewFixtures {
     static let statusPickerTitle = "Status"
     /// The same rows `PaperJobDetailView.statusControl` builds for a dispatched job.
     static var statusPickerItems: [ThorbisMenuItem] {
-        [ThorbisMenuItem("Dispatched", status: .dispatched, isSelected: true) {}] + [("On my way", "en_route"), ("Arrive", "arrived"), ("Start work", "in_progress"),
-         ("Pause job…", "paused"), ("Move back to scheduled", "scheduled")].map { title, target in
+        [ThorbisMenuItem("Dispatched", status: .dispatched, isSelected: true) {}] + [("On my way", "en_route"), ("I've arrived", "arrived"), ("Start work", "in_progress"),
+         ("Pause job", "paused"), ("Move back to scheduled", "scheduled")].map { title, target in
             ThorbisMenuItem(title, status: StatusTone(jobStatus: target)) {}
         }
     }

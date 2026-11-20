@@ -1,6 +1,6 @@
 import XCTest
 
-/// Screenshots of the Inbox preview for design review: every section, a folder, each kind of
+/// Screenshots of the Inbox preview for design review: every filter chip, the "…" folders, each kind of
 /// thread, light and dark, and the largest text size. Each is attached to the result; with
 /// `TEST_RUNNER_INBOX_SHOTS_DIR` set, it is also written there as a PNG.
 @MainActor
@@ -34,12 +34,14 @@ final class CommsInboxScreenshotUITests: XCTestCase {
 
     private func sweep(_ mode: String, extra: [String] = [], prefix: String) {
         let base = ["-thorbis.appearance", mode] + extra
-        capture("\(prefix)-all", base, wait: "inbox-section-menu")
-        for section in ["calls", "voicemail", "texts", "email", "notices"] {
-            capture("\(prefix)-\(section)", base + ["--paper-preview-inbox-section", section], wait: "inbox-section-menu")
+        capture("\(prefix)-all", base, wait: "inbox-filter-all")
+        for chip in ["unread", "calls", "texts", "email", "drafts"] {
+            capture("\(prefix)-\(chip)", base + ["--paper-preview-inbox-filter", chip], wait: "inbox-filter-all")
         }
-        capture("\(prefix)-drafts", base + ["--paper-preview-inbox-folder", "drafts"], wait: "inbox-folder-menu")
-        capture("\(prefix)-call-thread", base + ["--paper-preview-inbox-thread", "calls"], text: "Incoming call")
+        for folder in ["sent", "archive", "bin"] {
+            capture("\(prefix)-\(folder)", base + ["--paper-preview-inbox-folder", folder], wait: "inbox-filter-all")
+        }
+        capture("\(prefix)-call-thread", base + ["--paper-preview-inbox-thread", "calls"], text: "Inbound")
         capture("\(prefix)-text-thread", base + ["--paper-preview-inbox-thread", "text"], wait: "inbox-text-field")
         capture("\(prefix)-email-thread", base + ["--paper-preview-inbox-thread", "email"], wait: "inbox-email-reply")
     }
@@ -49,9 +51,9 @@ final class CommsInboxScreenshotUITests: XCTestCase {
 
     func testLargestTextScreens() {
         let big = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
-        capture("xxxl-all", ["-thorbis.appearance", "light"] + big, wait: "inbox-section-menu")
-        capture("xxxl-calls", ["-thorbis.appearance", "light", "--paper-preview-inbox-section", "calls"] + big, wait: "inbox-section-menu")
-        capture("xxxl-call-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "calls"] + big, text: "Incoming call")
+        capture("xxxl-all", ["-thorbis.appearance", "light"] + big, wait: "inbox-filter-all")
+        capture("xxxl-calls", ["-thorbis.appearance", "light", "--paper-preview-inbox-section", "calls"] + big, wait: "inbox-filter-all")
+        capture("xxxl-call-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "calls"] + big, text: "Inbound")
         capture("xxxl-text-thread", ["-thorbis.appearance", "light", "--paper-preview-inbox-thread", "text"] + big, wait: "inbox-text-field")
     }
 
@@ -60,7 +62,7 @@ final class CommsInboxScreenshotUITests: XCTestCase {
         for (section, label) in [("texts", "New text"), ("email", "New email")] {
             for (mode, extra) in [("light", [String]()), ("xxxl", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])] {
                 capture("\(mode)-compose-\(section)", ["-thorbis.appearance", "light", "--paper-preview-inbox-section", section] + extra,
-                        wait: "inbox-section-menu") { app in
+                        wait: "inbox-filter-all") { app in
                     let pencil = app.buttons[label].firstMatch
                     if pencil.waitForExistence(timeout: 10) { pencil.tap() }
                 }

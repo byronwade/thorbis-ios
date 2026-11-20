@@ -36,7 +36,6 @@ struct PublicEstimateActionView: View {
     var body: some View {
         VStack(spacing: 0) {
             brandBar
-            Rectangle().fill(Theme.border).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     if model.isLoading && model.action == nil {
@@ -54,20 +53,19 @@ struct PublicEstimateActionView: View {
                     }
                 }
                 .frame(maxWidth: 640, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.top, 20)
+                .padding(.horizontal, PaperCardMetrics.margin)
+                .padding(.top, 4)
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
         }
-        .background(Theme.canvas)
-        .safeAreaInset(edge: .bottom, spacing: 0) { approvalFooter }
+        .background(Theme.background)
         .task(id: token) { await model.load(api: api, token: token) }
         .thorbisConfirm("Decline this estimate?",
                         message: "The company will be notified that you declined this estimate.",
                         isPresented: $confirmsDecline,
-                        actions: [ThorbisConfirmAction("Decline estimate", role: .destructive) { decline() }])
+                        actions: [ThorbisConfirmAction("Decline", role: .destructive) { decline() }])
         .onChange(of: model.signerName) { _, value in
             if value.count > 120 { model.signerName = String(value.prefix(120)) }
         }
@@ -95,78 +93,81 @@ struct PublicEstimateActionView: View {
 
     private var brandBar: some View {
         HStack(spacing: 9) {
-            ThorbisLogoLockup(markSize: 30, wordmarkSize: 16)
-            Spacer()
+            // Paper 39E draws no brand bar: the page is the company's estimate. Closing stays, as
+            // Paper's quiet 44pt close circle (37) in the leading corner.
             Button(action: onClose) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.muted)
+                PaperIcon(.closeLarge, size: 20, color: Theme.foreground)
                     .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    .background(Theme.card, in: Circle())
+                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressStyle())
             .accessibilityLabel("Close estimate")
+            Spacer()
         }
-        .padding(.leading, 18)
-        .padding(.trailing, 10)
-        .frame(minHeight: 56)
-        .background(Theme.surface)
+        .padding(.horizontal, PaperCardMetrics.margin)
+        .padding(.top, 2)
+        .background(Theme.background)
     }
 
+    /// Paper 39E: the brand commit sits right under the estimate, above "Ask for changes".
     @ViewBuilder
-    private var approvalFooter: some View {
+    private var approvalButton: some View {
         if let action = model.action,
            action.signingOffered || action.plainApprovalOffered {
-            VStack(spacing: 5) {
+            VStack(spacing: 6) {
                 Button(action: approve) {
                     HStack(spacing: 8) {
                         if model.isSubmitting { ProgressView().tint(.white) }
-                        Text(approvalTitle(action)).font(Theme.customerFont(15, weight: .semibold))
+                        Text(approvalTitle(action)).font(Theme.font(16, weight: .semibold))
+                            .multilineTextAlignment(.center)
                     }
                     .foregroundStyle(approvalEnabled ? Color.white : Theme.muted)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(approvalEnabled ? Theme.brand : Theme.fill, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.horizontal, 16)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    // Paper v2: the commit is a brand pill.
+                    .background(approvalEnabled ? Theme.brand : Theme.fill, in: Capsule())
                 }
                 .disabled(!approvalEnabled || model.isSubmitting)
                 .accessibilityIdentifier("public-estimate-approve")
                 .accessibilityHint(approvalEnabled ? "Records approval of this issued estimate." : (action.amountsAvailableForApproval ? "Choose an option, enter your name, and provide consent to continue." : "The amount cannot be verified. Ask the company for an updated estimate."))
                 if !action.amountsAvailableForApproval {
                     Text("We can’t verify the estimate amount. Ask the company for an updated estimate.")
-                        .font(Theme.customerFont(12)).foregroundStyle(Theme.muted)
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if model.isSubmitting {
                     Text("Saving your decision. Wait for confirmation.")
-                        .font(Theme.customerFont(12))
+                        .font(Theme.font(14))
                         .foregroundStyle(Theme.muted)
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 10)
-            .padding(.bottom, footerBottomPadding)
-            .background(Theme.surface)
-            .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
         }
     }
 
     @ViewBuilder
     private func estimateContent(_ action: PublicEstimateAction) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            statusLabel(action.status)
-            Text(action.title)
-                .font(Theme.customerFont(26, weight: .semibold))
-                .tracking(-0.35)
-                .foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
+        // Paper 39E: a centred hero. The quiet label, the price in the largest Bold, what it is for.
+        VStack(alignment: .center, spacing: 2) {
+            // Paper 39E shows no status over an estimate still waiting on the customer.
+            if action.status != .sent { statusLabel(action.status) }
             // MF-01/CP-02: the price is the biggest thing on the estimate, labelled.
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Total").font(Theme.customerFont(15)).foregroundStyle(Theme.muted)
-                Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: selectedOption?.currency ?? action.currency))
-                    .moneyStyle(.hero).foregroundStyle(Theme.foreground)
-                    .accessibilityIdentifier("public-estimate-total")
-            }
-            .padding(.top, 6)
-            .accessibilityElement(children: .combine)
+            // Paper 39E: the price is the hero (52 Bold), what it is for under it (15). Paper also
+            // names the business above and "valid 30 days"; the link's payload carries neither.
+            Text(money(selectedOption?.totalAmount ?? action.totalAmount, currency: selectedOption?.currency ?? action.currency))
+                .font(Theme.paymentAmountFont()).tracking(Theme.paymentAmountTracking)
+                .lineLimit(1).minimumScaleFactor(0.5)
+                .foregroundStyle(Theme.foreground)
+                .accessibilityIdentifier("public-estimate-total")
+                .padding(.top, 6)
+            Text(action.title)
+                .font(Theme.font(15))
+                .foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
         }
+        .frame(maxWidth: .infinity)
 
         if let message = model.actionError {
             // The server's own words are for staff; a homeowner reads what happened and what to do.
@@ -178,33 +179,40 @@ struct PublicEstimateActionView: View {
                 sectionTitle("Issued estimate")
                 IssuedEstimatePreview(html: preview)
                     .frame(height: 470)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
                     .accessibilityLabel("Issued estimate document preview")
             }
         } else if let lines = action.scopeLines, !lines.isEmpty {
-            VStack(alignment: .leading, spacing: 10) {
-                sectionTitle("Issued scope")
-                VStack(spacing: 0) {
-                    ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(line.description).font(Theme.customerFont(14, weight: .medium)).foregroundStyle(Theme.foreground)
-                                Text("\(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each")
-                                    .font(Theme.customerFont(15)).monospacedDigit().foregroundStyle(Theme.muted)
-                            }
-                            Spacer(minLength: 8)
-                            Text(action.currency == "USD" ? (PublicEstimateMoney.lineTotal(quantity: line.quantity, unitPrice: line.unitPrice).map { PublicEstimateMoney.format(cents: $0) } ?? "Amount unavailable") : "Amount unavailable")
-                                .moneyStyle(.row).foregroundStyle(Theme.foreground)
+            // Paper 39E: the lines on one card with hairlines between, then the total row.
+            VStack(spacing: 0) {
+                ForEach(Array(lines.enumerated()), id: \.element.id) { index, line in
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(line.description).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("\(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each")
+                                .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.vertical, 12)
-                        if index != lines.count - 1 { Rectangle().fill(Theme.border).frame(height: 1) }
+                        Spacer(minLength: 8)
+                        Text(action.currency == "USD" ? (PublicEstimateMoney.lineTotal(quantity: line.quantity, unitPrice: line.unitPrice).map { PublicEstimateMoney.format(cents: $0) } ?? "Amount unavailable") : "Amount unavailable")
+                            .font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
                     }
+                    .padding(.vertical, 14)
+                    if index != lines.count - 1 { WellDivider(leading: 0) }
                 }
-                .padding(.horizontal, 14)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
+                WellDivider(leading: 0)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Total").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Text(money(action.totalAmount, currency: action.currency))
+                        .font(Theme.font(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+                }
+                .padding(.vertical, 14)
+                .accessibilityElement(children: .combine)
             }
+            .padding(.horizontal, 16)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
 
         if action.status == .approved {
@@ -225,7 +233,12 @@ struct PublicEstimateActionView: View {
             }
         } else {
             approvalForm(action)
-            customerActions(action)
+            // Paper 39E: the actions 10 apart, 16 under the estimate.
+            VStack(spacing: 10) {
+                approvalButton
+                customerActions(action)
+            }
+            .padding(.top, -2)
         }
     }
 
@@ -235,52 +248,49 @@ struct PublicEstimateActionView: View {
             VStack(alignment: .leading, spacing: 14) {
                 sectionTitle("Review and approve")
                 Text("Approval uses the issued scope and price. Your name records who approved it.")
-                    .font(Theme.customerFont(13)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 if let options = action.options, !options.isEmpty {
                     Text("Choose one complete option")
-                        .font(Theme.customerFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     ForEach(options) { option in optionButton(option) }
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Full name").font(Theme.customerFont(13, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Text("Full name").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     TextField("Type your name", text: $model.signerName, prompt: .placeholder("Type your name"))
                         .textContentType(.name)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
                         .submitLabel(.done)
                         .focused($focusedField, equals: .signer)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 48)
-                        .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.border, lineWidth: 1))
+                        .padding(.horizontal, 16)
+                        .frame(minHeight: 56)
+                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .accessibilityLabel("Full name for electronic signature")
                 }
                 if let consentText = action.consentText {
                     Toggle(isOn: $model.consent) {
-                        Text(consentText).font(Theme.customerFont(13)).foregroundStyle(Theme.foreground)
+                        Text(consentText).font(Theme.font(15)).foregroundStyle(Theme.foreground)
                     }
                     .tint(Theme.brand)
-                    .padding(12)
-                    .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
+                    .padding(16)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .accessibilityIdentifier("public-estimate-consent")
                 }
             }
             .padding(16)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         } else if action.canApprovePlainly {
             VStack(alignment: .leading, spacing: 12) {
                 sectionTitle("Approve without signing")
                 Text("This records your approval of the issued scope and price without an electronic signature.")
-                    .font(Theme.customerFont(13)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
                 ForEach(action.scopeLines ?? []) { line in
                     Label("\(line.description) — \(quantity(line.quantity)) × \(money(line.unitPrice, currency: action.currency)) each", systemImage: "checkmark")
-                        .font(Theme.customerFont(15)).monospacedDigit().foregroundStyle(Theme.foreground)
+                        .font(Theme.font(15)).monospacedDigit().foregroundStyle(Theme.foreground)
                 }
             }
             .padding(16)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.border, lineWidth: 1))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
     }
 
@@ -290,21 +300,22 @@ struct PublicEstimateActionView: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(option.title).font(Theme.customerFont(14, weight: .semibold)).foregroundStyle(Theme.foreground)
+                        Text(option.title).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
                         Spacer(minLength: 6)
                         Text(money(option.totalAmount, currency: option.currency)).moneyStyle(.total).foregroundStyle(Theme.foreground)
                     }
-                    Text(option.description).font(Theme.customerFont(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    Text(option.description).font(Theme.font(15)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
                 Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 20, weight: .regular))
                     .foregroundStyle(selected ? Theme.brand : Theme.muted)
             }
-            .padding(12)
+            .padding(16)
             .frame(maxWidth: .infinity, minHeight: 68, alignment: .leading)
-            .background(selected ? Theme.brandSurface : Theme.background, in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(selected ? Theme.brand : Theme.border, lineWidth: selected ? 1.5 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .background(selected ? Theme.brandSurface : Theme.fill, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .strokeBorder(Theme.brand, lineWidth: selected ? 1.5 : 0))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
@@ -316,21 +327,10 @@ struct PublicEstimateActionView: View {
     @ViewBuilder
     private func customerActions(_ action: PublicEstimateAction) -> some View {
         if action.canRequestChanges || action.canDecline {
-            VStack(alignment: .leading, spacing: 12) {
+            // Paper 39E: on the canvas under the approval. The quiet "Ask for changes" pill, the box
+            // for what to change, then "Decline" as red words.
+            VStack(alignment: .leading, spacing: 10) {
                 if action.canRequestChanges {
-                    sectionTitle("Request changes")
-                    TextField("Tell the company what needs clarification", text: $model.changeMessage, prompt: .placeholder("Tell the company what needs clarification"), axis: .vertical)
-                        .lineLimit(3...5)
-                        .focused($focusedField, equals: .message)
-                        .padding(12)
-                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.border, lineWidth: 1))
-                        .accessibilityLabel("Message requesting estimate changes")
-                    HStack {
-                        Text("The company will send a new estimate.").font(Theme.customerFont(12)).foregroundStyle(Theme.muted)
-                        Spacer()
-                        Text("\(model.changeMessage.count)/500").font(Theme.customerMonoFont(11)).foregroundStyle(Theme.muted)
-                    }
                     Button {
                         focusedField = nil
                         guard let nonce = action.nonce else { return }
@@ -338,30 +338,46 @@ struct PublicEstimateActionView: View {
                             await model.submit(.requestChanges(revisionNumber: action.revisionNumber, nonce: nonce, message: model.changeMessage), api: api, token: token)
                         }
                     } label: {
-                        Label(model.isSubmitting ? "Sending request…" : "Request changes", systemImage: "bubble.left")
-                            .font(Theme.customerFont(14, weight: .medium))
-                            .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(Theme.fill, in: RoundedRectangle(cornerRadius: 11))
+                        Text(model.isSubmitting ? "Sending request…" : "Ask for changes")
+                            .font(Theme.font(16, weight: .semibold))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .background(Theme.quietFill, in: Capsule())
+                            .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .disabled(model.isSubmitting)
                     .accessibilityIdentifier("public-estimate-request-changes")
+                    TextField("Tell us what to change", text: $model.changeMessage, prompt: .placeholder("Tell us what to change"), axis: .vertical)
+                        .lineLimit(3...5)
+                        .focused($focusedField, equals: .message)
+                        .font(Theme.font(16))
+                        .padding(.horizontal, 16).padding(.vertical, 14)
+                        .frame(minHeight: 96, alignment: .topLeading)
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .accessibilityLabel("Message requesting estimate changes")
+                    HStack {
+                        Text("The company will send a new estimate.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Text("\(model.changeMessage.count)/500").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    .padding(.horizontal, 4)
                 }
                 if action.canDecline {
                     Button(role: .destructive) { confirmsDecline = true } label: {
-                        Label("Decline estimate", systemImage: "xmark.circle")
-                            .font(Theme.customerFont(14, weight: .medium))
-                            .frame(maxWidth: .infinity, minHeight: 46)
-                            .background(Theme.destructiveSurface, in: RoundedRectangle(cornerRadius: 11))
+                        Text("Decline")
+                            .font(Theme.font(16, weight: .semibold))
+                            .foregroundStyle(Theme.destructive)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(model.isSubmitting)
+                    .accessibilityLabel("Decline estimate")
                     .accessibilityIdentifier("public-estimate-decline")
                 }
             }
-            .padding(16)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.border, lineWidth: 1))
         }
     }
 
@@ -373,7 +389,7 @@ struct PublicEstimateActionView: View {
         case .changesRequested: ("Changes requested", Theme.warning)
         }
         return Text(title.uppercased())
-            .font(Theme.customerMonoFont(11, weight: .semibold))
+            .font(Theme.font(15, weight: .semibold))
             .tracking(0.6)
             .foregroundStyle(color)
             .padding(.horizontal, 9)
@@ -385,13 +401,12 @@ struct PublicEstimateActionView: View {
 
     private func statusCard<Content: View>(title: String, symbol: String, color: Color, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: symbol).font(Theme.customerFont(15, weight: .semibold)).foregroundStyle(color)
-            content().font(Theme.customerFont(13)).foregroundStyle(Theme.muted)
+            Label(title, systemImage: symbol).font(Theme.font(15, weight: .semibold)).foregroundStyle(color)
+            content().font(Theme.font(15)).foregroundStyle(Theme.muted)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Theme.border, lineWidth: 1))
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -413,7 +428,7 @@ struct PublicEstimateActionView: View {
     }
 
     private func sectionTitle(_ value: String) -> some View {
-        Text(value).font(Theme.customerFont(16, weight: .semibold)).foregroundStyle(Theme.foreground)
+        Text(value).font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.foreground)
     }
 
     private func approvalTitle(_ action: PublicEstimateAction) -> String {
@@ -423,7 +438,8 @@ struct PublicEstimateActionView: View {
             return "Choose an option to approve"
         }
         let amount = selectedOption?.totalAmount ?? action.totalAmount
-        return "Approve \(money(amount, currency: selectedOption?.currency ?? action.currency))"
+        // Paper 39E: "Approve · $340.00".
+        return "Approve \u{00B7} \(money(amount, currency: selectedOption?.currency ?? action.currency))"
     }
 
     private func approve() {

@@ -3,19 +3,21 @@ import SwiftUI
 /// Everything an owner can place in the tab bar or the More menu. Search and More stay fixed so
 /// nothing can be lost: whatever is not in the tab bar is in More (or under Hidden in Customize).
 enum MenuItem: String, CaseIterable, Codable, Identifiable {
-    case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, scorecard, team, notices, drafts
+    case home, schedule, jobs, customers, properties, attention, inbox, estimates, invoices, billing, priceBook, money, reports, scorecard, team, notices, drafts, businessSettings
+    // Paper places kept on this phone until the server has them (29N, 57N, 58N).
+    case timeClock, receipts, truckStock, training, pipeline, vendors, marketing
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .home: "Home"
+        case .home: "Dashboard"
         case .schedule: "Schedule"
         case .jobs: "Jobs"
         case .customers: "Customers"
         case .properties: "Properties"
         case .attention: "Needs attention"
-        case .inbox: "Inbox"
+        case .inbox: "Messages"
         case .estimates: "Estimates"
         case .invoices: "Invoices"
         case .billing: "Billing schedules"
@@ -23,9 +25,17 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .money: "Money"
         case .reports: "Reports"
         case .scorecard: "My scorecard"
-        case .team: "Team & permissions"
+        case .team: "Team"
         case .notices: "Notification rules"
         case .drafts: "Message drafts"
+        case .businessSettings: "Business settings"
+        case .timeClock: "Time clock"
+        case .receipts: "Receipts"
+        case .truckStock: "Truck stock"
+        case .training: "Training"
+        case .pipeline: "Pipeline"
+        case .vendors: "Vendors and POs"
+        case .marketing: "Marketing"
         }
     }
 
@@ -51,23 +61,31 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var symbol: String {
         switch self {
-        case .home: "house"
+        case .home: "square.grid.2x2"
         case .schedule: "calendar"
         case .jobs: "briefcase"
-        case .customers: "person.2"
-        case .properties: "mappin.and.ellipse"
+        case .customers: "person"
+        case .properties: "house"
         case .attention: "exclamationmark.circle"
-        case .inbox: "tray"
+        case .inbox: "bubble.left"
         case .estimates: "doc.text"
         case .invoices: "doc.plaintext"
         case .billing: "list.bullet.rectangle"
         case .priceBook: "book.closed"
-        case .money: "chart.bar"
-        case .reports: "chart.xyaxis.line"
+        case .money: "banknote"
+        case .reports: "chart.bar"
         case .scorecard: "target"
-        case .team: "person.2.badge.gearshape"
+        case .team: "person.2"
         case .notices: "bell.badge"
-        case .drafts: "bubble.left"
+        case .drafts: "square.and.pencil"
+        case .businessSettings: "building.2"
+        case .timeClock: "clock"
+        case .receipts: "receipt"
+        case .truckStock: "cube"
+        case .training: "graduationcap"
+        case .pipeline: "line.3.horizontal.decrease"
+        case .vendors: "cart"
+        case .marketing: "megaphone"
         }
     }
 
@@ -84,7 +102,8 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .invoices, .billing, .money: Theme.markForest
         case .priceBook: Theme.markBurnt
         case .reports, .scorecard: Theme.markOlive
-        case .team, .notices, .drafts: Theme.markGrey
+        case .team, .notices, .drafts, .businessSettings, .timeClock, .receipts, .truckStock, .training,
+             .pipeline, .vendors, .marketing: Theme.markGrey
         }
     }
 
@@ -108,7 +127,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
 
     var group: Group {
         switch self {
-        case .team, .notices: .business
+        case .team, .notices, .businessSettings: .business
         case .drafts: .phone
         default: .work
         }
@@ -132,6 +151,14 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .team: .team
         case .notices: .notices
         case .drafts: .drafts
+        case .businessSettings: .businessSetup
+        case .timeClock: .timeClock
+        case .receipts: .receipts
+        case .truckStock: .truckStock
+        case .training: .training
+        case .pipeline: .pipeline
+        case .vendors: .vendors
+        case .marketing: .marketing
         }
     }
 
@@ -143,8 +170,7 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     init?(serverTab id: String) { self.init(rawValue: id == "revenue" ? "money" : id) }
 
     /// Whether the place is listed in the menu, the iPad sidebar and Customize menu. Notification
-    /// rules live in Settings; Reports sits inside Money for anyone who can open Money, so a role
-    /// without Money still finds Reports on its own. Neither changes what a role can open.
+    /// rules live in Settings. Paper v2 lists Reports as a place of its own for office and owners.
     @MainActor func listed(_ session: SessionController) -> Bool {
         Self.listed(self, permitted: { $0.permitted(session) })
     }
@@ -152,7 +178,6 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     static func listed(_ item: MenuItem, permitted: (MenuItem) -> Bool) -> Bool {
         switch item {
         case .notices: false
-        case .reports: permitted(.reports) && !permitted(.money)
         default: permitted(item)
         }
     }
@@ -160,8 +185,8 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
     @MainActor func permitted(_ session: SessionController) -> Bool {
         switch self {
         case .schedule, .jobs: session.can("job.view", feature: "jobs")
-        // The owner's day at a glance; other roles keep their menus exactly as they were.
-        case .home: session.can("job.view", feature: "jobs") && WorkRole(session) == .owner
+        // Paper v2: the Dashboard leads the office and owner menus (52, 58).
+        case .home: session.can("job.view", feature: "jobs") && WorkRole(session) != .technician
         case .customers, .properties: session.can("customer.view", feature: "core_crm")
         case .attention: session.can("invoice.view", feature: "invoicing") || session.can("estimate.view", feature: "estimates")
         case .inbox: CommsInboxAccess(session).visible
@@ -175,7 +200,14 @@ enum MenuItem: String, CaseIterable, Codable, Identifiable {
         case .team: session.can("organization.members.manage") || session.can("organization.permissions.manage")
         case .notices: session.can("organization.settings.edit", feature: "job_booking_notices")
             || PushNotifications.receivesMorningDigest(session)
-        case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil
+        case .drafts: session.user?.id != nil && session.activeOrganization?.id != nil && InboxMessaging.on(session)
+        // Paper 58N: the owner's menu ends on Business settings (61N).
+        case .businessSettings: session.can("organization.settings.edit")
+        // Kept on this phone: anyone who works jobs has a clock, receipts, a truck and training.
+        case .timeClock, .receipts, .truckStock, .training: session.can("job.view", feature: "jobs")
+        case .pipeline: session.can("customer.view", feature: "core_crm") && WorkRole(session) != .technician
+        case .vendors: WorkRole(session) != .technician
+        case .marketing: session.can("organization.settings.edit")
         }
     }
 }
@@ -248,8 +280,31 @@ final class MenuLayout: ObservableObject {
     private let defaults: UserDefaults
     private let key = "thorbis.menuLayout.v1"
 
-    init(defaults: UserDefaults = .standard) {
+    /// Bottom bar or sidebar on this iPhone (Paper 65A "Navigation"). Saved under its own key, never
+    /// through `changed()`: it is this device's choice, not part of a company layout.
+    @Published var navigationStyle: PhoneNavigationStyle {
+        didSet {
+            guard navigationStyle != oldValue, !isPad, !preview else { return }
+            defaults.set(navigationStyle.rawValue, forKey: PhoneNavigationStyle.key)
+        }
+    }
+    /// iPad keeps its sidebar and does not offer the choice.
+    let isPad: Bool
+    /// The design preview keeps its choice in memory so a test never changes the next one's.
+    private let preview: Bool
+
+    /// The bottom bar is on (an iPhone, or a narrow window that is not an iPad).
+    var usesBottomBar: Bool { navigationStyle == .bottomBar }
+
+    init(defaults: UserDefaults = .standard, isPad: Bool? = nil, preview: Bool? = nil, previewFlag: String? = nil) {
         self.defaults = defaults
+        let isPad = isPad ?? (UIDevice.current.userInterfaceIdiom == .pad)
+        let preview = preview ?? PhoneNavigationStyle.isPreview
+        self.isPad = isPad
+        self.preview = preview
+        self.navigationStyle = PhoneNavigationStyle.resolve(
+            saved: preview ? nil : defaults.string(forKey: PhoneNavigationStyle.key), isPad: isPad,
+            preview: preview, previewFlag: previewFlag ?? (preview ? PhoneNavigationStyle.previewFlag : nil))
         let stored = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(Stored.self, from: $0) }
         // Unknown ids (from a newer or older app) are ignored rather than breaking the layout.
         let tabs = stored?.tabs.compactMap(MenuItem.init(rawValue:)) ?? Self.defaultTabs
@@ -394,85 +449,346 @@ struct CompanyMobileLayout: Codable {
     let updatedBy: String?
 }
 
-/// More → Customize menu: pick and order up to four tabs, and hide what a role never uses.
+/// Paper 65A Menu and start screen, in its three sections: "Open the app to" (the start screen),
+/// "Your menu" (the role's main rows, dragged into the person's order) and "More" (What's new),
+/// with the reset pill under them. On iPad (Paper T10B) where the app opens sits beside the menu.
+/// Pinning to the top and hiding places are gone: the menu is Paper's rows for the role.
 struct CustomizeMenuView: View {
     @EnvironmentObject private var layout: MenuLayout
     @EnvironmentObject private var session: SessionController
     @EnvironmentObject private var api: APIClient
+    @State private var startupDestination: StartupDestination = .automatic
+    @State private var showingWhatsNew = false
+    @State private var showingNavigation = false
 
-    private var isOwner: Bool { session.can("organization.settings.edit") }
     private var company: Bool { layout.source == .company }
-    /// Members follow the owner's company layout; only owners change it.
-    private var editable: Bool { !company || isOwner }
-    private func canBeTab(_ item: MenuItem) -> Bool { layout.canBeTab(item) }
+    /// A company layout is set on the web for everyone; the order here is this phone's own.
+    private var editable: Bool { !company }
+    private var role: WorkRole { WorkRole(session) }
+
+    /// Two columns need this much room; a narrower iPad window keeps the phone's one list.
+    private static let wideWidth: CGFloat = 640
+    /// Paper 65A: rows are 56 tall, their words 16 from the card's edge.
+    private static let rowInsets = EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16)
+
+    /// The role's main menu rows this person can open, in the order their menu shows them.
+    private var menuRows: [MenuItem] {
+        MenuArrangement.rows(role: role, order: editable ? layout.menuOrder : [], opens: { $0.permitted(session) })
+    }
+
+    var body: some View {
+        Group {
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                GeometryReader { geometry in
+                    if geometry.size.width >= Self.wideWidth { tabletColumns } else { phoneList }
+                }
+            } else {
+                phoneList
+            }
+        }
+        .background(Theme.background.ignoresSafeArea())
+        .navigationBarTitleDisplayMode(.inline)
+        .thorbisDestination(isPresented: $showingWhatsNew) { WhatsNewHistoryView() }
+        .thorbisDestination(isPresented: $showingNavigation) { NavigationChoiceView() }
+        .task { await layout.refreshCompanyLayout(api: api) }
+        .task(id: StartupDestination.scope(session: session, api: api)?.key) {
+            startupDestination = StartupDestination.scope(session: session, api: api).map { StartupDestinationPreferences().get(for: $0) } ?? .automatic
+        }
+        .accessibilityIdentifier("menu-and-start-screen")
+    }
+
+    /// The phone's screen: one list, top to bottom.
+    private var phoneList: some View {
+        List {
+            // Paper 65A: the title in 34 Bold on the canvas, one muted line under it.
+            Section {
+                titleBlock
+                    .listRowBackground(Color.clear)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 14)
+                    .listRowInsets(EdgeInsets(top: PaperHeaderMetrics.titleTopUnderBar, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
+            }
+            startSection
+            menuSection
+            moreSection
+            actionSection
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(22)
+        .listRowSeparatorTint(Theme.hairline)
+        .contentMargins(.horizontal, PaperCardMetrics.margin, for: .scrollContent)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .environment(\.defaultMinListRowHeight, 56)
+        .environment(\.editMode, .constant(editable ? .active : .inactive))
+        .scrollContentBackground(.hidden)
+    }
+
+    /// Paper T10B (iPad): the title across the top; "Open the app to", More and the layout action on
+    /// the left, "Your menu" on the right.
+    private var tabletColumns: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            titleBlock
+                .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 4)
+            HStack(alignment: .top, spacing: 0) {
+                List {
+                    startSection
+                    moreSection
+                    actionSection
+                }
+                .listStyle(.insetGrouped)
+                .listSectionSpacing(20)
+                .listRowSeparatorTint(Theme.hairline)
+                .scrollContentBackground(.hidden)
+                List {
+                    menuSection
+                }
+                .listStyle(.insetGrouped)
+                .listSectionSpacing(20)
+                .listRowSeparatorTint(Theme.hairline)
+                .environment(\.editMode, .constant(editable ? .active : .inactive))
+                .scrollContentBackground(.hidden)
+            }
+        }
+    }
+
+    private var titleBlock: some View {
+        // The list row places the block (its own insets); the shared title draws the words.
+        PaperPageTitle(title: "Menu and start screen", subtitle: "Make the menu yours", columnInset: Theme.gutter, top: 0)
+    }
+
+    /// What the start-screen control shows as chosen: a place this role lost falls back to Automatic.
+    private var chosenStart: StartupDestination {
+        startupDestination.permitted(session) ? startupDestination : .automatic
+    }
+
+    /// Paper 65A "Open the app to": Automatic and the role's main rows, each with a radio mark. A
+    /// start screen chosen in an older build that is not one of those rows keeps its own row, so it
+    /// still shows as chosen and still opens.
+    @ViewBuilder private var startSection: some View {
+        if let scope = StartupDestination.scope(session: session, api: api) {
+            let choices = MenuArrangement.startChoices(rows: menuRows, chosen: chosenStart)
+            Section {
+                ForEach(choices, id: \.rawValue) { destination in
+                    startRadioRow(destination, scope: scope)
+                }
+                .moveDisabled(true)
+                .deleteDisabled(true)
+                .listRowBackground(Theme.card)
+                .listRowInsets(Self.rowInsets)
+            } header: {
+                sectionLabel("Open the app to")
+            }
+        }
+    }
+
+    /// Paper 65A's start-screen row: the place in 16 Medium, a 22pt radio mark at the trailing edge.
+    private func startRadioRow(_ destination: StartupDestination, scope: StartupDestinationScope) -> some View {
+        let chosen = chosenStart == destination
+        return Button {
+            StartupDestinationPreferences().set(destination, for: scope)
+            startupDestination = destination
+        } label: {
+            HStack(spacing: 12) {
+                Text(destination.displayTitle).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                ZStack {
+                    Circle().strokeBorder(chosen ? Theme.brand : Theme.borderStrong, lineWidth: chosen ? 2 : 1.5)
+                    if chosen { Circle().fill(Theme.brand).frame(width: 10, height: 10) }
+                }
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityHint("Applies the next time you open the app on this device")
+        .accessibilityIdentifier("start-\(destination.rawValue)")
+    }
+
+    /// Paper 65A "Your menu": the role's main rows; drag one to change the order the menu lists them.
+    private var menuSection: some View {
+        Section {
+            ForEach(menuRows) { item in
+                Text(item.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .accessibilityIdentifier("menu-row-\(item.rawValue)")
+            }
+            .onMove { source, destination in
+                guard editable else { return }
+                var rows = menuRows
+                rows.move(fromOffsets: source, toOffset: destination)
+                layout.menuOrder = rows
+                UISelectionFeedbackGenerator().selectionChanged()
+            }
+            .moveDisabled(!editable)
+            .deleteDisabled(true)
+            .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
+        } header: {
+            sectionLabel("Your menu")
+        } footer: {
+            if company {
+                sectionNote("Set by \(session.activeOrganization?.name ?? "your company").")
+            }
+        }
+    }
+
+    /// Paper 65A / T10B "More": Navigation (bottom bar or sidebar, iPhone only: iPad keeps its
+    /// sidebar) and what changed in the app, one tap away.
+    private var moreSection: some View {
+        Section {
+            if !layout.isPad {
+                Button { showingNavigation = true } label: {
+                    HStack(spacing: 8) {
+                        Text("Navigation").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Text(layout.navigationStyle.title).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.trailing)
+                        PaperIcon(.acctChevron, size: 14, color: Theme.muted)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Navigation")
+                .accessibilityValue(layout.navigationStyle.title)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("menu-navigation")
+                .moveDisabled(true)
+                .deleteDisabled(true)
+                .listRowBackground(Theme.card)
+                .listRowInsets(Self.rowInsets)
+            }
+            // A button, not a link: the phone's list is in edit mode, where row links don't open.
+            Button { showingWhatsNew = true } label: {
+                HStack(spacing: 8) {
+                    Text("What's new").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    Spacer(minLength: 8)
+                    PaperIcon(.acctChevron, size: 14, color: Theme.muted)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(RowPressStyle())
+            .moveDisabled(true)
+            .deleteDisabled(true)
+            .listRowBackground(Theme.card)
+            .listRowInsets(Self.rowInsets)
+        } header: {
+            sectionLabel("More")
+        }
+    }
+
+    /// Paper 65A: one quiet pill at the end, shown once this phone's layout differs from the
+    /// standard one (an order dragged here, or pins and hidden places kept from an older build).
+    @ViewBuilder private var actionSection: some View {
+        if !company && !layout.isDefault {
+            Section {
+                Button { withAnimation { layout.reset() } } label: { RimmedButtonLabel(title: "Reset to the standard layout", symbol: "arrow.counterclockwise") }
+                    .buttonStyle(PressStyle())
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets())
+                    .accessibilityIdentifier("menu-reset")
+            }
+        }
+    }
+
+    /// Paper's section label: 13 Semibold, muted, sentence case.
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title).font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted).textCase(nil)
+            .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 8, trailing: 4))
+    }
+
+    private func sectionNote(_ text: String) -> some View {
+        Text(text).font(Theme.font(13)).foregroundStyle(Theme.muted)
+    }
+}
+
+/// Paper 65 / 65A "Navigation": how this iPhone moves between places. Two radio rows in Menu and
+/// start screen's grammar; the choice is this device's own and applies at once.
+struct NavigationChoiceView: View {
+    @EnvironmentObject private var layout: MenuLayout
 
     var body: some View {
         List {
             Section {
-                ForEach(layout.tabs) { item in
-                    Label(item.title, systemImage: item.symbol)
-                        .opacity(item.permitted(session) ? 1 : 0.45)
-                }
-                .onMove { if editable { layout.tabs.move(fromOffsets: $0, toOffset: $1) } }
-                .onDelete { offsets in if editable { offsets.map { layout.tabs[$0] }.forEach(layout.removeTab) } }
-                .moveDisabled(!editable)
-                .deleteDisabled(!editable)
-            } header: {
-                Text("Pinned to the top")
-            } footer: {
-                Text(footer)
+                PaperPageTitle(title: "Navigation", subtitle: "Choose how you move around the app", columnInset: Theme.gutter, top: 0)
+                    .listRowBackground(Color.clear)
+                    .padding(.horizontal, 4)
+                    .padding(.bottom, 14)
+                    .listRowInsets(EdgeInsets(top: PaperHeaderMetrics.titleTopUnderBar, leading: 0, bottom: 0, trailing: 0))
+                    .listRowSeparator(.hidden)
             }
-
-            let addable = MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && canBeTab($0) }
-            if editable, layout.tabs.count < MenuLayout.maxTabs, !addable.isEmpty {
-                Section("Pin to the top") {
-                    ForEach(addable) { item in
-                        Button { withAnimation { layout.addTab(item) } } label: {
-                            Label(item.title, systemImage: item.symbol)
-                                .foregroundStyle(Theme.foreground)
-                        }
-                    }
-                }
-            }
-
             Section {
-                ForEach(MenuItem.allCases.filter { !layout.tabs.contains($0) && $0.listed(session) && $0.route != nil }) { item in
-                    Toggle(isOn: Binding(get: { !layout.hidden.contains(item) },
-                                         set: { show in if show { layout.hidden.remove(item) } else { layout.hidden.insert(item) } })) {
-                        Label(item.title, systemImage: item.symbol)
-                    }
-                    .disabled(!editable)
+                ForEach(PhoneNavigationStyle.allCases) { style in
+                    row(style)
                 }
-            } header: {
-                Text("Show in menu")
+                .listRowBackground(Theme.card)
+                .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             } footer: {
-                Text("Hidden places stay here to turn back on; nothing is removed.")
-            }
-
-            if isOwner && !company {
-                Section {
-                    Button("Use this layout for everyone") { withAnimation { layout.makeCompanyLayout() } }
-                } footer: {
-                    Text("Everyone in \(session.activeOrganization?.name ?? "your company") gets these pinned places and this menu.")
-                }
-            } else if !company && !layout.isDefault {
-                Section {
-                    Button("Reset to the standard layout") { withAnimation { layout.reset() } }
-                }
+                Text("The bottom bar keeps your main places one tap away; More opens the full menu. The sidebar opens from the menu button at the top of each place.")
+                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
             }
         }
-        .environment(\.editMode, .constant(editable ? .active : .inactive))
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(22)
+        .listRowSeparatorTint(Theme.hairline)
+        .contentMargins(.horizontal, PaperCardMetrics.margin, for: .scrollContent)
+        .contentMargins(.top, 0, for: .scrollContent)
+        .environment(\.defaultMinListRowHeight, 56)
         .scrollContentBackground(.hidden)
-        .background(Theme.canvas)
-        .navigationTitle("Customize menu")
+        .background(Theme.background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .task { await layout.refreshCompanyLayout(api: api) }
+        .accessibilityIdentifier("navigation-choice")
     }
 
-    private var footer: String {
-        let name = session.activeOrganization?.name ?? "your company"
-        if company && isOwner { return "Up to \(MenuLayout.maxTabs) pinned places. Changes apply to everyone in \(name)." }
-        if company { return "Set by \(name). Ask an owner to change it." }
-        return "Up to \(MenuLayout.maxTabs) pinned places. Drag to reorder, swipe to remove."
+    private func row(_ style: PhoneNavigationStyle) -> some View {
+        let chosen = layout.navigationStyle == style
+        return Button {
+            layout.navigationStyle = style
+        } label: {
+            HStack(spacing: 12) {
+                PaperIcon(style == .bottomBar ? .navBottomBar : .navSidebar, size: 18, color: Theme.muted)
+                Text(style.title).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                ZStack {
+                    Circle().strokeBorder(chosen ? Theme.brand : Theme.borderStrong, lineWidth: chosen ? 2 : 1.5)
+                    if chosen { Circle().fill(Theme.brand).frame(width: 10, height: 10) }
+                }
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityIdentifier("navigation-\(style.rawValue)")
+    }
+}
+
+/// What Menu and start screen arranges, kept pure so it is unit-tested: the role's main menu rows
+/// in the person's order, and the start screens offered.
+enum MenuArrangement {
+    /// The role's main rows (Paper 29N / 57N / 58N, first group) this person can open, in their
+    /// saved order. Ids in a saved order that are not main rows are ignored.
+    static func rows(role: WorkRole, order: [MenuItem], opens: (MenuItem) -> Bool) -> [MenuItem] {
+        DrawerSections.make(order: order, role: role, opens: opens).sections.first { $0.kind == .primary }?.places ?? []
+    }
+
+    /// Automatic, then the main rows. A start screen chosen earlier that is not a main row (older
+    /// builds offered every place) is listed too, so it stays visible and can be changed.
+    static func startChoices(rows: [MenuItem], chosen: StartupDestination) -> [StartupDestination] {
+        var choices = [StartupDestination.automatic] + rows.compactMap { StartupDestination(rawValue: $0.rawValue) }
+        if !choices.contains(chosen) { choices.append(chosen) }
+        return choices
     }
 }

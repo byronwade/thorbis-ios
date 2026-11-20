@@ -12,7 +12,8 @@ struct JobLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: JobActivityAttributes.self) { context in
             JobLockScreenView(attributes: context.attributes, state: context.state)
-                .activityBackgroundTint(WidgetInk.ground)
+                // Paper 94: the card colour at 88% over the Lock Screen's blur.
+                .activityBackgroundTint(WidgetInk.panel.opacity(0.88))
                 .activitySystemActionForegroundColor(WidgetInk.ink)
                 .widgetURL(JobActivityLink.url(jobID: context.attributes.jobID))
         } dynamicIsland: { context in
@@ -33,13 +34,16 @@ struct JobLiveActivityWidget: Widget {
                         .padding(.horizontal, 4)
                 }
             } compactLeading: {
-                // The status is always a word; the dot only reinforces it.
-                GlanceStatusWord(text: context.state.shortLabel, tint: WidgetInk.tint(context.state.status, island: true),
-                                 size: 13, textColor: WidgetInk.Island.text)
-                    .fixedSize()
+                // Paper 94: the status mark alone beside the timer; VoiceOver still gets the word,
+                // and the expanded island and the Lock Screen card spell it out.
+                Circle()
+                    .fill(WidgetInk.tint(context.state.status, island: true))
+                    .frame(width: 8, height: 8)
+                    .padding(.leading, 4)
+                    .accessibilityLabel(context.state.shortLabel)
             } compactTrailing: {
                 ElapsedText(since: context.state.since)
-                    .font(WidgetInk.number(13, relativeTo: .footnote))
+                    .font(WidgetInk.number(14, weight: .semibold, relativeTo: .footnote))
                     .foregroundStyle(WidgetInk.Island.text)
                     .frame(maxWidth: 52)
             } minimal: {

@@ -38,8 +38,21 @@ enum JobFiltering {
     /// formatters are made once (ISO8601DateFormatter is thread-safe; their options never change).
     static func date(_ raw: String?) -> Date? {
         guard let raw else { return nil }
-        return isoFractional.date(from: raw) ?? isoPlain.date(from: raw)
+        // Lists filter and sort on these on every redraw; parsing a few thousand timestamps each
+        // time was most of the wait when opening a large company. Each string is parsed once.
+        parsedLock.lock()
+        if let known = parsed[raw] { parsedLock.unlock(); return known.date }
+        parsedLock.unlock()
+        let date = isoFractional.date(from: raw) ?? isoPlain.date(from: raw)
+        parsedLock.lock()
+        if parsed.count >= 60_000 { parsed.removeAll(keepingCapacity: true) }
+        parsed[raw] = Parsed(date: date)
+        parsedLock.unlock()
+        return date
     }
+    private struct Parsed { let date: Date? }
+    nonisolated(unsafe) private static var parsed: [String: Parsed] = [:]
+    private static let parsedLock = NSLock()
     nonisolated(unsafe) static let isoFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -153,6 +166,109 @@ enum JobFiltering {
             let left = date($0.scheduledFor) ?? .distantFuture
             let right = date($1.scheduledFor) ?? .distantFuture
             return left == right ? $0.id < $1.id : left < right
+        }
+    }
+}
+
+/// The Jobs filter sheet's choices (Paper 20A) that go past `JobFiltering.board`: whose jobs, and
+/// when they are booked. Pure, so the sheet's filtering is unit-tested without the view.
+enum JobBoardFilter {
+    /// "Assigned to" past Me: anyone, no one yet, or one tech from the roster.
+    enum Who: Equatable {
+        case anyone, unassigned
+        case tech(String)
+    }
+
+    /// "Date": by the visit's booked time.
+    enum When: String, CaseIterable {
+        case any, today, week, overdue
+
+        var label: String {
+            switch self {
+            case .any: "Any date"
+            case .today: "Today"
+            case .week: "This week"
+            case .overdue: "Overdue"
+            }
+        }
+    }
+
+    /// How the board is ordered ("Sort by"), in the sheet's words.
+    static func sortLabel(_ ordering: DisplayOptions.Ordering) -> String {
+        switch ordering {
+        case .scheduled: "Time"
+        case .recent: "Updated"
+        case .name: "Name"
+        }
+    }
+
+    static let sortOrder: [DisplayOptions.Ordering] = [.scheduled, .recent, .name]
+
+    /// Paper 20A's status chips. Each stands for a group of the server's statuses.
+    struct StatusGroup: Identifiable {
+        let title: String
+        let statuses: Set<String>
+        var id: String { title }
+    }
+
+    static let statusGroups: [StatusGroup] = [
+        StatusGroup(title: "In progress", statuses: ["en_route", "arrived", "in_progress"]),
+        StatusGroup(title: "Scheduled", statuses: ["scheduled", "dispatched"]),
+        StatusGroup(title: "On hold", statuses: ["paused", "on_hold"]),
+        StatusGroup(title: "Done", statuses: ["completed"]),
+        StatusGroup(title: "Cancelled", statuses: ["canceled"])
+    ]
+
+    /// The groups a status filter touches, in the sheet's order.
+    static func groups(in statuses: Set<String>) -> [StatusGroup] {
+        statusGroups.filter { !$0.statuses.isDisjoint(with: statuses) }
+    }
+
+    /// A booked visit whose time has passed.
+    static func isOverdue(_ job: Job, now: Date = Date()) -> Bool {
+        guard ["scheduled", "dispatched"].contains(job.status), let time = JobFiltering.date(job.scheduledFor) else { return false }
+        return time < now
+    }
+
+    /// "Pick dates": booked from the start of the first day to the end of the last, either order.
+    static func isBooked(_ job: Job, from: Date, to: Date, calendar: Calendar = .current) -> Bool {
+        guard let time = JobFiltering.date(job.scheduledFor) else { return false }
+        let first = calendar.startOfDay(for: min(from, to))
+        let lastDay = calendar.startOfDay(for: max(from, to))
+        guard let end = calendar.date(byAdding: .day, value: 1, to: lastDay) else { return false }
+        return time >= first && time < end
+    }
+
+    /// "Nov 16", or "Nov 16 – Nov 21" when the range spans more than one day.
+    static func datesLabel(from: Date, to: Date, calendar: Calendar = .current) -> String {
+        let first = min(from, to), last = max(from, to)
+        let style = Date.FormatStyle().month(.abbreviated).day()
+        if calendar.isDate(first, inSameDayAs: last) { return first.formatted(style) }
+        return "\(first.formatted(style)) \u{2013} \(last.formatted(style))"
+    }
+
+    /// - Parameter dates: a picked range of days; when set it decides the date instead of `when`.
+    static func apply(_ jobs: [Job], who: Who, when: When, dates: (from: Date, to: Date)? = nil,
+                      now: Date = Date(), calendar: Calendar = .current) -> [Job] {
+        jobs.filter { job in
+            switch who {
+            case .anyone: break
+            case .unassigned: if job.assignedToUserId != nil { return false }
+            case .tech(let userID): if job.assignedToUserId != userID { return false }
+            }
+            if let dates { return isBooked(job, from: dates.from, to: dates.to, calendar: calendar) }
+            switch when {
+            case .any:
+                return true
+            case .today:
+                guard let time = JobFiltering.date(job.scheduledFor) else { return false }
+                return calendar.isDate(time, inSameDayAs: now)
+            case .week:
+                guard let time = JobFiltering.date(job.scheduledFor) else { return false }
+                return calendar.dateInterval(of: .weekOfYear, for: now)?.contains(time) ?? false
+            case .overdue:
+                return isOverdue(job, now: now)
+            }
         }
     }
 }

@@ -60,5 +60,7 @@ final class JobHoursTests: XCTestCase {
         XCTAssertEqual(JobHours.duration(59), "0 h 0 min")
         XCTAssertEqual(JobHours.duration(3_660), "1 h 1 min")
         XCTAssertEqual(JobHours.duration(-30), "0 h 0 min")
+        XCTAssertEqual(JobHours.duration(23 * 3_600 + 59 * 60), "23 h 59 min")
+        XCTAssertEqual(JobHours.duration(20 * 86_400 + 3 * 3_600 + 12 * 60), "20 d 3 h")
     }
 }

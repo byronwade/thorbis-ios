@@ -20,6 +20,17 @@ struct DataPlateReading: Equatable {
     var isEmpty: Bool { brands.isEmpty && models.isEmpty && serials.isEmpty && dates.isEmpty }
 }
 
+/// What the technician confirmed on the scan screen, handed to a form that asked for a scan
+/// (the equipment editor). Blank fields are nil.
+struct DataPlateValues: Equatable {
+    var brand: String?
+    var model: String?
+    var serial: String?
+    var made: String?
+
+    var isEmpty: Bool { brand == nil && model == nil && serial == nil && made == nil }
+}
+
 enum DataPlateParser {
     /// Common HVAC, water-heater, plumbing and electrical makers. Edit freely; matching is whole-word.
     static let brands = [
@@ -181,12 +192,26 @@ private extension CGImagePropertyOrientation {
 
 /// Entry point: present as a sheet from the job (`.sheet { DataPlateScannerSheet(job: job) { … } }`).
 /// `onDone` runs when the technician closes it; reload notes then.
+/// A form that only wants the values (the equipment editor's "Scan data plate") uses
+/// `DataPlateScannerSheet(onRead:onDone:)`: the commit hands back what was read and nothing is
+/// written to a job.
 struct DataPlateScannerSheet: View {
     let jobID: String
     let customerID: String
     let onDone: () -> Void
     /// DEBUG fixtures: canned OCR lines shown as if a photo had been read.
     var previewLines: [String]? = nil
+    /// Set by a form: receives the confirmed values instead of a job note being added.
+    var onRead: ((DataPlateValues) -> Void)? = nil
+
+    /// For a form: scan, check the values, "Use these values".
+    init(onRead: @escaping (DataPlateValues) -> Void, onDone: @escaping () -> Void) {
+        self.jobID = ""
+        self.customerID = ""
+        self.previewLines = nil
+        self.onDone = onDone
+        self.onRead = onRead
+    }
 
     init(job: JobRecord, onDone: @escaping () -> Void) {
         self.init(jobID: job.id, customerID: job.customerId, onDone: onDone)
@@ -247,11 +272,15 @@ struct DataPlateScannerSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.canvas)
-            .navigationTitle("Scan data plate")
+            .navigationTitle("Scan the data plate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) {
-                    Button(saved ? "Done" : "Close", action: finish).accessibilityIdentifier("data-plate-close")
+                    // Paper 21M: a 44pt card circle with a cross.
+                    Button(action: finish) { PaperCircleLabel(symbol: "xmark", size: 44, fill: Theme.card) }
+                        .buttonStyle(PressStyle())
+                        .accessibilityLabel(saved ? "Done" : "Close")
+                        .accessibilityIdentifier("data-plate-close")
                 }
             }
             .safeAreaInset(edge: .bottom) { commitBar }
@@ -288,22 +317,37 @@ struct DataPlateScannerSheet: View {
     private var liveScanner: some View {
         ZStack(alignment: .topTrailing) {
             LiveDataPlateScanner { lines, barcodes in absorb(lines: lines, barcodes: barcodes) }
-                .frame(height: 280)
-                .clipShape(RoundedRectangle(cornerRadius: PaperCardMetrics.radius, style: .continuous))
+                .frame(height: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .accessibilityLabel("Camera. Point it at the equipment tag.")
             if AVCaptureDevice.default(for: .video)?.hasTorch == true {
-                PaperCircleButton(symbol: torchOn ? "flashlight.on.fill" : "flashlight.off.fill",
-                                  label: torchOn ? "Turn light off" : "Turn light on", fill: Theme.card) { setTorch(!torchOn) }
-                    .padding(6)
+                // Paper 21M: the light as a 44pt card circle.
+                Button { setTorch(!torchOn) } label: {
+                    CreamCircleLabel(symbol: torchOn ? "bolt.fill" : "bolt")
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel(torchOn ? "Turn light off" : "Turn light on")
+                .padding(10)
             }
         }
-        .overlay(alignment: .bottomLeading) {
-            Text("Hold steady on the tag. Tap what it found below.")
-                .font(Theme.font(13, weight: .medium)).foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(.black.opacity(0.55), in: Capsule())
-                .padding(10)
+        .overlay(alignment: .bottom) {
+            // Paper 21M: a dark pill at the foot of the frame, "Plate read · 3 values found".
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.fill").font(.system(size: 11)).foregroundStyle(Theme.brand)
+                    .accessibilityHidden(true)
+                Text(scanStatus).font(Theme.font(13, weight: .medium)).foregroundStyle(.white)
+            }
+            .padding(.horizontal, 12).frame(minHeight: 28)
+            .background(.black.opacity(0.55), in: Capsule())
+            .padding(.bottom, 22)
         }
+    }
+
+    /// "Plate read · 3 values found" once anything is filled; until then, how to aim.
+    private var scanStatus: String {
+        let count = [brand, model, serial, made].filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+        if count == 0 { return "Hold steady on the tag" }
+        return "Plate read · \(count) value\(count == 1 ? "" : "s") found"
     }
 
     @ViewBuilder private var photoFallback: some View {
@@ -342,8 +386,11 @@ struct DataPlateScannerSheet: View {
                 .padding(.horizontal, 4)
             PaperCard {
                 field("Brand", text: $brand, candidates: found.brands, capitalization: .words)
+                WellDivider()
                 field("Model", text: $model, candidates: found.models)
+                WellDivider()
                 field("Serial", text: $serial, candidates: found.serials)
+                WellDivider()
                 field("Made", text: $made, candidates: found.dates, placeholder: "Only if the tag prints it")
             }
             Text("Read on this phone. Check each value against the tag before saving.")
@@ -354,15 +401,20 @@ struct DataPlateScannerSheet: View {
     private func field(_ title: String, text: Binding<String>, candidates: [String],
                        capitalization: TextInputAutocapitalization = .characters, placeholder: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Paper 21M: the label 15 muted in a 64pt lane, the value 16 Medium, a green tick once read.
             HStack(spacing: 12) {
-                Text(title).font(Theme.font(14)).foregroundStyle(Theme.muted).frame(width: 56, alignment: .leading)
+                Text(title).font(Theme.font(15)).foregroundStyle(Theme.muted).frame(width: 64, alignment: .leading)
                 TextField(placeholder ?? title, text: text, prompt: .placeholder(placeholder ?? title))
-                    .font(Theme.font(16, weight: .medium)).monospacedDigit()
+                    .font(Theme.font(16, weight: .medium)).tracking(-0.16).monospacedDigit()
                     .textInputAutocapitalization(capitalization).autocorrectionDisabled()
                     .accessibilityLabel(title)
                     .accessibilityIdentifier("data-plate-\(title.lowercased())")
+                if !text.wrappedValue.trimmingCharacters(in: .whitespaces).isEmpty {
+                    Image(systemName: "checkmark").font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.success).accessibilityHidden(true)
+                }
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: 48)
             if !candidates.isEmpty {
                 FlowRow(spacing: 8, lineSpacing: 8) {
                     ForEach(candidates.prefix(6), id: \.self) { value in
@@ -377,21 +429,68 @@ struct DataPlateScannerSheet: View {
         .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 6)
     }
 
-    private var commitBar: some View {
-        // Not pre-disabled when nothing has been read yet: pressing says what to do, under the
-        // fields. Without the note permission it stays off, and the sentence under it says why.
-        PaperActionBar(title: saved ? "Done" : "Add to job notes", symbol: saved ? nil : "text.bubble",
-                       busy: busy, disabled: !saved && !JobNotePoster.canPost(session),
-                       disabledReason: "Your role can't add job notes. Ask your office.") {
-            if saved { finish() }
-            else if noteText == nil { problem = "Scan the tag, or type the brand, model or serial, to add a note." }
-            else { Task { await saveNote() } }
-        } secondary: {
-            if canEditEquipment {
-                PaperSquareButton(symbol: "wrench.and.screwdriver", label: "Add as equipment") { Task { await openEquipment() } }
-                    .disabled(model.isEmpty && serial.isEmpty && brand.isEmpty)
+    @ViewBuilder private var commitBar: some View {
+        if let onRead {
+            // Opened from a form: hand the values back; nothing goes on a job.
+            PaperActionBar(title: "Use these values", symbol: "checkmark", identifier: "data-plate-use", action: {
+                let values = confirmedValues
+                if values.isEmpty {
+                    problem = "Scan the tag, or type the brand, model or serial."
+                } else {
+                    onRead(values)
+                    finish()
+                }
+            })
+        } else if canEditEquipment, !saved {
+            // Paper 21M: "Save to equipment" is the commit; the note is the quiet pill under it.
+            // Neither is pre-disabled when nothing has been read: pressing says what to do.
+            VStack(spacing: 0) {
+                PaperActionBar(title: "Save to equipment", identifier: "data-plate-equipment", action: {
+                    if model.isEmpty && serial.isEmpty && brand.isEmpty {
+                        problem = "Scan the tag, or type the brand, model or serial."
+                    } else {
+                        Task { await openEquipment() }
+                    }
+                })
+                if JobNotePoster.canPost(session) {
+                    Button {
+                        if noteText == nil { problem = "Scan the tag, or type the brand, model or serial, to add a note." }
+                        else { Task { await saveNote() } }
+                    } label: {
+                        Text("Add to job notes").paperButton(.commit, tone: .quiet, fills: true)
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(busy)
+                    .accessibilityIdentifier("data-plate-note")
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 8)
+                }
+            }
+            .background(Theme.background)
+        } else {
+            // Not pre-disabled when nothing has been read yet: pressing says what to do, under the
+            // fields. Without the note permission it stays off, and the sentence under it says why.
+            PaperActionBar(title: saved ? "Done" : "Add to job notes", symbol: saved ? nil : "text.bubble",
+                           busy: busy, disabled: !saved && !JobNotePoster.canPost(session),
+                           disabledReason: "Your role can't add job notes. Ask your office.") {
+                if saved { finish() }
+                else if noteText == nil { problem = "Scan the tag, or type the brand, model or serial, to add a note." }
+                else { Task { await saveNote() } }
+            } secondary: {
+                if canEditEquipment {
+                    PaperSquareButton(symbol: "wrench.and.screwdriver", label: "Add as equipment") { Task { await openEquipment() } }
+                        .disabled(model.isEmpty && serial.isEmpty && brand.isEmpty)
+                }
             }
         }
+    }
+
+    /// The four fields as they stand, blanks dropped.
+    private var confirmedValues: DataPlateValues {
+        let clean = { (value: String) -> String? in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return DataPlateValues(brand: clean(brand), model: clean(model), serial: clean(serial), made: clean(made))
     }
 
     // MARK: Actions
@@ -464,11 +563,9 @@ private struct QuietCapsuleLabel: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol).font(.system(size: 14, weight: .medium))
-            Text(title).font(Theme.font(15, weight: .medium))
+            Text(title)
         }
-        .foregroundStyle(Theme.foreground)
-        .padding(.horizontal, 14).frame(minHeight: 44)
-        .background(Theme.fill, in: Capsule())
+        .paperButton(.secondary, tone: .quiet)
     }
 }
 

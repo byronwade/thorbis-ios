@@ -21,6 +21,11 @@ struct APIRead<Value> {
     let value: Value
     let provenance: APIReadProvenance
 }
+struct CustomerConditionalRead {
+    let value: CustomerRecord
+    let provenance: APIReadProvenance
+    let supportsConditionalWrites: Bool
+}
 extension APIRead: Sendable where Value: Sendable {}
 
 struct Customer: Codable, Identifiable, Hashable {
@@ -64,7 +69,40 @@ struct Problem: Codable, Error, LocalizedError {
     let title: String?
     let status: Int?
     let detail: String?
+    /// The server's machine-readable reason, when it sends one (RFC 9457 extension member).
+    var code: String? = nil
+    /// The server's stable kind of refusal ("authorization", "feature_unavailable", "validation").
+    var category: String? = nil
+    /// The fields a validation refusal names (`errors[].path`), when the server sends them.
+    var errors: [ProblemIssue]? = nil
     var errorDescription: String? { detail ?? title ?? "Request failed (\(status ?? 0))" }
+
+    /// True when a validation refusal names this field, or one under it ("multipart.parts.3").
+    func names(_ path: String) -> Bool {
+        errors?.contains { $0.path == path || $0.path?.hasPrefix(path + ".") == true } ?? false
+    }
+}
+
+/// One entry of a validation refusal: the field and what was wrong with it.
+struct ProblemIssue: Codable, Equatable {
+    let path: String?
+    let message: String?
+}
+
+extension Problem {
+    private enum Keys: String, CodingKey { case title, status, detail, code, category, errors }
+
+    /// Reads the answer leniently: an `errors` list in a shape this app doesn't know is dropped,
+    /// never a reason to lose the title and detail.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        self.init(title: try c.decodeIfPresent(String.self, forKey: .title),
+                  status: try c.decodeIfPresent(Int.self, forKey: .status),
+                  detail: try c.decodeIfPresent(String.self, forKey: .detail),
+                  code: try c.decodeIfPresent(String.self, forKey: .code),
+                  category: try c.decodeIfPresent(String.self, forKey: .category),
+                  errors: try? c.decodeIfPresent([ProblemIssue].self, forKey: .errors))
+    }
 }
 
 struct MeAccount: Codable { let id: String; let name: String?; let email: String? }
@@ -256,16 +294,24 @@ final class APIClient: ObservableObject {
     struct EmptyResponse: Decodable { init(from decoder: Decoder) throws {} }
     private struct AuthError: Decodable { let code: String?; let message: String? }
 
+    private static func pageKey<R: Identifiable>(_ record: R) -> AnyHashable { AnyHashable(record.id) }
+
     private func allPages<T: Codable>(_ path: String) async throws -> [T] {
         let generation = requestGeneration
         var all: [T] = []
         var cursor: String?
         var seen: Set<String> = []
+        var ids: Set<AnyHashable> = []
         repeat {
             try Task.checkCancellation()
             guard generation == requestGeneration else { throw CancellationError() }
             let page: Items<T> = try await send("GET", path, cursor: cursor)
-            all.append(contentsOf: page.items)
+            // Pages can overlap when a record moves while the list is being read. Keep the first
+            // copy of each record so no list ever carries the same id twice.
+            for item in page.items {
+                if let record = item as? any Identifiable, !ids.insert(Self.pageKey(record)).inserted { continue }
+                all.append(item)
+            }
             cursor = page.nextCursor
             if let cursor, !seen.insert(cursor).inserted || cursor.isEmpty {
                 throw Problem(title: "Pagination cursor loop", status: nil, detail: "Repeated or empty cursor")
@@ -280,9 +326,21 @@ final class APIClient: ObservableObject {
         return try decodeResponse(response)
     }
 
-    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil) async throws -> APIRead<T> {
-        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor)
+    func sendWithProvenance<T: Decodable>(_ path: String, cursor: String? = nil, requireFresh: Bool = false,
+                                           saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> APIRead<T> {
+        let response = try await sendData("GET", path, body: Optional<String>.none, cursor: cursor, requireFresh: requireFresh, saveIfCurrent: saveIfCurrent)
         return APIRead(value: try decodeResponse(response), provenance: response.provenance)
+    }
+
+    /// Capability is valid only for this fresh, authorized response and its authority scope.
+    func customerConditionalRead(_ id: String) async throws -> CustomerConditionalRead {
+        guard UUID(uuidString: id) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: id) }
+        let response = try await sendData("GET", "/v1/customers/\(id)", body: Optional<String>.none, requireFresh: true)
+        guard response.provenance.generation == requestGeneration,
+              response.provenance.savedCopyScopeRevision == savedCopyScopeRevision,
+              response.provenance.savedCopyScope == savedCopyScope else { throw CancellationError() }
+        return CustomerConditionalRead(value: try decodeResponse(response), provenance: response.provenance,
+            supportsConditionalWrites: response.provenance.source == .urlSession(cacheBypassed: true) && response.conditionalWritesHeader == "1")
     }
 
     func send<T: Decodable, B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true) async throws -> T {
@@ -454,9 +512,10 @@ final class APIClient: ObservableObject {
         let status: Int
         let contentType: String?
         let provenance: APIReadProvenance
+        var conditionalWritesHeader: String? = nil
     }
 
-    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil) async throws -> DataResponse {
+    private func sendData<B: Encodable>(_ method: String, _ path: String, body: B?, queryItems: [URLQueryItem] = [], cursor: String? = nil, authed: Bool = true, accept: String = "application/json", handleCookies: Bool = true, requireFresh: Bool = false, raw: (data: Data, contentType: String)? = nil, saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> DataResponse {
         let generation = requestGeneration
         guard var origin = Self.validatedOrigin(baseURL), path.hasPrefix("/"), !path.hasPrefix("//") else {
             throw Problem(title: "Bad API URL", status: nil, detail: baseURL)
@@ -560,7 +619,7 @@ final class APIClient: ObservableObject {
         guard (200..<300).contains(code) else {
             if let decoded = try? JSONDecoder().decode(Problem.self, from: data),
                decoded.title != nil || decoded.detail != nil {
-                throw Problem(title: decoded.title, status: code, detail: decoded.detail)
+                throw Problem(title: decoded.title, status: code, detail: decoded.detail, code: decoded.code, category: decoded.category, errors: decoded.errors)
             }
             if let decoded = try? JSONDecoder().decode(AuthError.self, from: data),
                decoded.code != nil || decoded.message != nil {
@@ -569,13 +628,14 @@ final class APIClient: ObservableObject {
             throw Problem(title: "HTTP \(code)", status: code, detail: nil)
         }
         let response = DataResponse(data: data, status: code, contentType: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type"),
-                                    provenance: provenance(.urlSession(cacheBypassed: freshRead)))
-        if let reuseKey, mutationEpoch == epoch {
+                                    provenance: provenance(.urlSession(cacheBypassed: freshRead)),
+                                    conditionalWritesHeader: (resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Thorbis-Customer-Conditional-Writes"))
+        if let reuseKey, mutationEpoch == epoch, savedCopyScopeRevision == copyScopeRevision, saveIfCurrent() {
             recentReads[reuseKey] = RecentRead(response: response, at: Date(), epoch: epoch, generation: generation)
             if recentReads.count > 200 { recentReads = recentReads.filter { Date().timeIntervalSince($0.value.at) < Self.recentReadWindow } }
         }
-        if savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }
-        if let copyScope, let keptKey, savedCopyScope == copyScope, code == 200,
+        if savedCopyScopeRevision == copyScopeRevision, saveIfCurrent(), savedCopyPaths[path] != nil { savedCopyPaths[path] = nil }
+        if let copyScope, let keptKey, savedCopyScope == copyScope, savedCopyScopeRevision == copyScopeRevision, saveIfCurrent(), code == 200,
            response.contentType?.lowercased().hasPrefix("application/json") != false {
             SavedCopyStore.shared.write(data, scope: copyScope, key: keptKey)
         }

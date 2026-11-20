@@ -2,6 +2,88 @@ import XCTest
 
 @MainActor
 final class CustomerDocumentBookMoneyUITests: XCTestCase {
+    func testMixedCurrencyInvoiceDoesNotShowMisleadingOverviewAmount() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money", "--paper-preview-job-invoice-mixed-currency"]
+        app.launch()
+        let actions = app.buttons["Job actions"]
+        XCTAssertTrue(actions.waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        let door = thorbisCustomerViewMenuItem(app)
+        XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        XCTAssertTrue(invoice.label.contains("Amount needs verification"))
+        XCTAssertFalse(invoice.label.contains("$300.00"))
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["These amounts couldn't be verified. Hand the device back to your technician."].waitForExistence(timeout: 20))
+    }
+
+    func testPartPaidInvoiceOverviewDoesNotSayUnpaid() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        // The row settles once the invoice's payments arrive; read it after that.
+        let settled = expectation(for: NSPredicate(format: "label CONTAINS %@", "due"), evaluatedWith: invoice)
+        wait(for: [settled], timeout: 10)
+        XCTAssertTrue(invoice.label.contains("$150.00"), invoice.label)
+        XCTAssertFalse(invoice.label.contains("Unpaid"), invoice.label)
+        invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Issued")).firstMatch.exists)
+    }
+    func testInvoiceOverviewAtNormalText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Invoice overview normal text"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(invoice.isHittable); invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))
+    }
+    func testInvoiceOverviewAtLargestText() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "--paper-preview-job-documents-money", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 20)); app.buttons["job-share"].tap()
+        let door = thorbisCustomerViewMenuItem(app); XCTAssertTrue(door.waitForExistence(timeout: 10)); door.tap()
+        let invoice = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
+        XCTAssertTrue(invoice.waitForExistence(timeout: 20)); thorbisRevealInCustomerView(invoice, in: app)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Invoice overview largest text"; shot.lifetime = .keepAlways; add(shot)
+        XCTAssertTrue(invoice.isHittable); invoice.tap()
+        XCTAssertTrue(app.staticTexts["customer-invoice-summary"].waitForExistence(timeout: 20))
+    }
+    func testPayExplainsWhenFreshPaymentHistoryCannotBeVerified() {
+        let app = openPrimary(extra: ["--paper-preview-job-documents-money", "--paper-preview-job-invoice-signed", "--paper-preview-payment-recheck-fails"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        let message = app.staticTexts["Payment isn't ready. Ask your technician to check this invoice."]
+        XCTAssertTrue(message.waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        app.buttons["Choose a job document"].tap()
+        app.buttons["INV-2240"].tap()
+        XCTAssertTrue(app.navigationBars["INV-2240"].waitForExistence(timeout: 10))
+        XCTAssertFalse(message.exists, "A payment warning must not follow the customer to another invoice")
+    }
+
+    func testPayCannotLeaveCustomerViewAfterAuthorityIsRetiredDuringUnlock() {
+        let app = openPrimary(extra: ["--paper-preview-job-invoice-signed", "--paper-preview-owner-auth", "approved", "--paper-preview-payment-retire-on-unlock"])
+        let pay = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Pay $")).firstMatch
+        XCTAssertTrue(pay.waitForExistence(timeout: 20)); pay.tap()
+        XCTAssertTrue(app.staticTexts["This document isn’t available any more"].waitForExistence(timeout: 20))
+        XCTAssertFalse(app.navigationBars["Collect payment"].exists)
+        XCTAssertFalse(app.buttons["Job actions"].isHittable)
+    }
     func testLongInvoiceDescriptionOpensReadOnlyAndReturnsToInvoice() {
         let app = openPrimary(extra: ["--paper-preview-long-document-description", "--paper-preview-job-invoice-signed"])
         let more = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Show more")).firstMatch
@@ -21,7 +103,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
                                "--paper-preview-job-documents", "--paper-preview-job-documents-money", "--paper-preview-job-invoice-signed"]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["Job actions"].tap()
+        app.buttons["job-share"].tap()
         thorbisCustomerViewMenuItem(app).tap()
         let primary = app.buttons["customer-invoice-00000000-0000-4000-8000-000000002209"]
         XCTAssertTrue(primary.waitForExistence(timeout: 10))
@@ -174,6 +256,8 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.buttons["Choose a job document"].tap(); app.buttons["INV-2240"].tap()
         XCTAssertTrue(app.staticTexts["Deposit invoice"].waitForExistence(timeout: 10))
         assertText("Payments couldn't be loaded", in: app)
+        assertText("Try again to see payment history", in: app)
+        XCTAssertFalse(text("The invoice's paid amount is shown above", in: app).exists)
         assertText("No balance due", in: app)
         XCTAssertFalse(text("Paid in full", in: app).exists)
         assertMoneyRow("Paid", "$340.00", in: app)
@@ -185,7 +269,7 @@ final class CustomerDocumentBookMoneyUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents"] + extra
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["Job actions"].tap()
+        app.buttons["job-share"].tap()
         let customerView = thorbisCustomerViewMenuItem(app)
         XCTAssertTrue(customerView.waitForExistence(timeout: 10))
         customerView.tap()

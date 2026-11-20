@@ -26,26 +26,26 @@ struct WrappingPropertyChip<Leading: View>: View {
         HStack(spacing: 6) {
             leading
             Text(text)
-                .font(Theme.font(13, weight: .medium))
+                .font(Theme.font(14, weight: .medium))
                 .foregroundStyle(textColor)
                 .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
             if showsChevron {
                 Image(systemName: "chevron.down")
-                    .font(Theme.font(10, weight: .medium))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(textColor)
                     .accessibilityHidden(true)
             }
         }
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .frame(minHeight: Theme.chipHeight)
+        // Paper's header chip (the job header's): a 40pt pill, no rim, 12 to each side.
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .frame(minHeight: 40)
         .background(tint, in: Capsule())
-        .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 1))
-        // 44pt tall to the finger, 28 to the eye.
-        .padding(.vertical, 8)
+        // 44pt tall to the finger, 40 to the eye.
+        .padding(.vertical, 2)
         .contentShape(Rectangle())
-        .padding(.vertical, -8)
+        .padding(.vertical, -2)
     }
 }
 

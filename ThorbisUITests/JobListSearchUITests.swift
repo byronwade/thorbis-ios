@@ -18,7 +18,7 @@ final class JobListSearchUITests: XCTestCase {
         // sheet has its own field. Both are `search-field` and take the typing straight away.
         let field = app.searchField
         XCTAssertTrue(field.waitForExistence(timeout: 10))
-        if !app.usesTabletLayout { XCTAssertEqual(field.placeholderValue, "Street, name, phone or number") }
+        if !app.usesTabletLayout { XCTAssertEqual(field.placeholderValue, "Search or ask") }
         field.typeText("Kitchen")
         // Each result is one button whose label combines street, title, customer, number and status.
         let kitchen = NSPredicate(format: "label CONTAINS %@", "Kitchen sink backup")
@@ -40,7 +40,7 @@ final class JobListSearchUITests: XCTestCase {
         }
         XCTAssertTrue(app.staticTexts["AC not cooling"].waitForExistence(timeout: 10))
         app.buttons["Filter jobs"].tap()
-        XCTAssertTrue(app.staticTexts["Ordering"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Sort by"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["Filters"].exists)
     }
 
@@ -50,8 +50,9 @@ final class JobListSearchUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "jobs"]
         app.launch()
-        // The Jobs list's subtitle, on the phone layout and the iPad's list column alike.
-        XCTAssertTrue(app.staticTexts["5 active"].waitForExistence(timeout: 30))
+        // The Jobs list's subtitle, on the phone layout and the iPad's list column alike. Later in
+        // the day it adds "· 4 need attention" (the sample visits are past their times).
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "5 active")).firstMatch.waitForExistence(timeout: 30))
         XCTAssertFalse(app.buttons["New job"].exists, "No hidden shortcut button may be in the tree")
         XCTAssertTrue(app.pressShortcut("n", .command, expecting: app.descendants(matching: .any)["book-job-caller"], timeout: 10),
                       "⌘N opens New job")
@@ -76,11 +77,15 @@ final class JobListSearchUITests: XCTestCase {
         XCTAssertTrue(customer.waitForExistence(timeout: 10))
         let commit = app.buttons["book-job-commit"]
         XCTAssertTrue(commit.exists)
-        XCTAssertLessThan(customer.frame.minY, commit.frame.minY)
+        // Paper 75: the commit is the header's arrow, above the caller.
+        XCTAssertLessThan(commit.frame.minY, customer.frame.minY)
         // Since #216 the commit is never pre-disabled ("Don't lock the commit"): pressed without a
         // caller it books nothing, stays on the sheet and says what is missing under the caller.
         commit.tap()
-        XCTAssertTrue(app.staticTexts["Pick who's calling, or add them as a new customer."].waitForExistence(timeout: 5))
+        // Paper 09A: the error is one `field-problem` element read as "Error: <message>".
+        let problem = app.descendants(matching: .any).matching(identifier: "field-problem")
+            .matching(NSPredicate(format: "label == %@", "Error: Pick who's calling, or add them as a new customer.")).firstMatch
+        XCTAssertTrue(problem.waitForExistence(timeout: 5))
         XCTAssertTrue(customer.exists)
         XCTAssertTrue(commit.exists)
     }

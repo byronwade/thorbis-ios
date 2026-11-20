@@ -65,9 +65,15 @@ struct InvoiceLineEditorState: Equatable {
     let invoice: InvoiceRecord
     var lines: [InvoiceLineDraft]
     var priceBookOverrideReason = ""
+    /// The workspace has invoice revisions on, so an issued or paid invoice's lines can change too.
+    let revisable: Bool
 
-    init(invoice: InvoiceRecord) {
+    /// Lines can change: a draft always, an issued or paid invoice only when `revisable`.
+    var isEditable: Bool { InvoiceRevisionWords.linesEditable(status: invoice.status, flagOn: revisable) }
+
+    init(invoice: InvoiceRecord, revisable: Bool = false) {
         self.invoice = invoice
+        self.revisable = revisable
         self.lines = invoice.lines.map { line in
             let source: FieldInvoiceLineSourceInput?
             let unitLabel: String?
@@ -156,7 +162,7 @@ struct InvoiceLineEditorState: Equatable {
     }
 
     mutating func addManualLine() {
-        guard invoice.status == "draft", lines.count < 500 else { return }
+        guard isEditable, lines.count < 500 else { return }
         lines.append(InvoiceLineDraft(description: "", quantity: "1", unitPrice: "",
                                       source: .manual))
     }
@@ -170,7 +176,7 @@ struct InvoiceLineEditorState: Equatable {
     }
 
     mutating func moveLine(id: UUID, to destinationIndex: Int) {
-        guard invoice.status == "draft",
+        guard isEditable,
               let sourceIndex = lines.firstIndex(where: { $0.id == id }),
               lines.indices.contains(destinationIndex), sourceIndex != destinationIndex else { return }
         let line = lines.remove(at: sourceIndex)
@@ -288,7 +294,7 @@ struct InvoiceLineEditorState: Equatable {
     }
 
     private func requireDraft() throws {
-        guard invoice.status == "draft" else { throw InvoiceLineEditorError.notDraft }
+        guard isEditable else { throw InvoiceLineEditorError.notDraft }
     }
 
     /// Cents for a finished price. Incomplete text such as "4." or "" returns nil so a field can keep it.

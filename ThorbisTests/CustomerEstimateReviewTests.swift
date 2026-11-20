@@ -9,6 +9,49 @@ final class CustomerEstimateReviewTests: XCTestCase {
     private let locationID = "00000000-0000-4000-8000-000000000104"
     private let paperHash = String(repeating: "a", count: 64)
 
+    func testIssuedRevisionRejectsEmptyBaseScope() throws {
+        var invalid = revision
+        invalid["lines"] = []
+        invalid["totalAmount"] = 0
+        XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionRejectsEmptyOptionScope() throws {
+        var invalid = revision
+        invalid["options"] = [["id": "00000000-0000-4000-8000-000000000201", "title": "Package",
+                               "description": "Example", "lines": [], "totalAmount": 0, "currency": "USD"]]
+        XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionAllowsNonemptyZeroPricedScope() throws {
+        var valid = revision
+        valid["lines"] = [["id": "line-1", "description": "No charge visit", "quantity": 1,
+                           "unitPrice": ["amount": 0, "currency": "USD"]]]
+        valid["totalAmount"] = 0
+        valid["options"] = [["id": "option-1", "title": "No charge", "description": "Included",
+                             "lines": valid["lines"]!, "totalAmount": 0, "currency": "USD"]]
+        XCTAssertNoThrow(try decodedRevision(valid).validate(for: localEstimate()))
+    }
+
+    func testIssuedRevisionRejectsUnsupportedCurrencyAndMismatchedBaseTotal() throws {
+        for mutation: [String: Any] in [["currency": "EUR"], ["totalAmount": 13_201]] {
+            var invalid = revision
+            invalid.merge(mutation) { _, new in new }
+            XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+        }
+    }
+
+    func testIssuedRevisionRejectsUnsupportedCurrencyAndMismatchedOptionTotal() throws {
+        for mutation: [String: Any] in [["currency": "EUR"], ["totalAmount": 13_201]] {
+            var option: [String: Any] = ["id": "option-1", "title": "Package", "description": "Example",
+                                         "lines": revision["lines"]!, "totalAmount": 13_200, "currency": "USD"]
+            option.merge(mutation) { _, new in new }
+            var invalid = revision
+            invalid["options"] = [option]
+            XCTAssertThrowsError(try decodedRevision(invalid).validate(for: localEstimate()))
+        }
+    }
+
     func testReviewReadsCurrentAggregateThenExactImmutableTerms() async throws {
         let api = client([.init(200, try json(aggregate)), .init(200, try json(revision))])
         let review = try await api.customerIssuedEstimateRevision(for: localEstimate())
@@ -19,6 +62,39 @@ final class CustomerEstimateReviewTests: XCTestCase {
         XCTAssertEqual(URLProtocolFixture.recorded.map(\.url?.path), [
             "/v1/estimates/\(estimateID)", "/v1/estimates/\(estimateID)/revisions/2"
         ])
+    }
+
+    func testIssuedRevisionDoesNotUseSavedCopyAfterConnectionDrops() async throws {
+        let api = client([.init(200, try json(aggregate)), URLProtocolFixture.offline])
+        let scope = "revision-review-\(UUID().uuidString)"
+        api.savedCopyScope = scope
+        let path = "/v1/estimates/\(estimateID)/revisions/2"
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        let saved = Data(try json(revision).utf8)
+        SavedCopyStore.shared.write(saved, scope: scope, key: key)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        XCTAssertEqual(SavedCopyStore.shared.read(scope: scope, key: key)?.data, saved)
+        do { _ = try await api.customerIssuedEstimateRevision(for: localEstimate()); XCTFail("A saved revision cannot satisfy a live review") }
+        catch let problem as Problem { XCTAssertEqual(problem.title, "Network error"); XCTAssertNil(problem.status) }
+        XCTAssertEqual(URLProtocolFixture.recorded.map(\.url?.path), ["/v1/estimates/\(estimateID)", path])
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
+    }
+
+    func testIssuedRevisionDenialCannotFallBackToSavedCopy() async throws {
+        let api = client([.init(200, try json(aggregate)), .init(403, #"{"status":403,"title":"Forbidden"}"#)])
+        let scope = "revision-denied-\(UUID().uuidString)"
+        api.savedCopyScope = scope
+        let path = "/v1/estimates/\(estimateID)/revisions/2"
+        let key = SavedCopies.key(origin: "https://app.thorbis.com", path: path, query: [])
+        let saved = Data(try json(revision).utf8)
+        SavedCopyStore.shared.write(saved, scope: scope, key: key)
+        SavedCopyStore.shared.waitForQueuedWrites()
+        XCTAssertEqual(SavedCopyStore.shared.read(scope: scope, key: key)?.data, saved)
+        do { _ = try await api.customerIssuedEstimateRevision(for: localEstimate()); XCTFail("A denied revision cannot fall back to a saved copy") }
+        catch let problem as Problem { XCTAssertEqual(problem.status, 403) }
+        XCTAssertEqual(URLProtocolFixture.recorded.count, 2)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.url?.path, path)
+        XCTAssertEqual(URLProtocolFixture.recorded.last?.cachePolicy, .reloadIgnoringLocalCacheData)
     }
 
     func testRetainedDetailsRejectSameEstimateAfterRevisionChanges() throws {

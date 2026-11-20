@@ -43,7 +43,7 @@ struct WellSection<Data: RandomAccessCollection, Row: View, Trailing: View>: Vie
         let items = Array(data)
         if !items.isEmpty {
             SectionHeader(title: title, count: count) { trailing }
-                .padding(.top, 12).padding(.bottom, 2)
+                .padding(.top, 12)
             ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 row(item).wellSlice(first: index == 0, last: index == items.count - 1, dividerInset: dividerInset)
             }
@@ -97,7 +97,7 @@ struct JobListRowContent: View {
                     .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
                 if street != nil {
-                    Text(job.title).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                    Text(job.title).font(Theme.font(14)).foregroundStyle(Theme.muted)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -179,7 +179,7 @@ struct CustomerListRowContent: View {
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                     if let detail, !detail.isEmpty {
-                        Text(detail).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                        Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
                             .lineLimit(stacked ? nil : 1)
                     }
                     if let meta, !meta.isEmpty {

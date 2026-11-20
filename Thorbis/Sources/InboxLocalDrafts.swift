@@ -111,69 +111,84 @@ struct InboxLocalDraftView: View {
         composer = draft
     }
 
+    /// "2 drafts · Current session only", as Paper's "3 things waiting to send".
+    private func subtitle(bound: Bool) -> String {
+        let count = bound ? inbox.messages.count : 0
+        let things = count == 1 ? "1 draft" : "\(count) drafts"
+        return "\(things) \u{00B7} On this phone, current session only"
+    }
+
+    /// One draft: who it's for, what it says, and its state as a coloured word on the right.
+    private func draftRow(_ message: InboxLocalMessage) -> some View {
+        let queued = message.status == .queued
+        let items: [ThorbisMenuItem] = message.status == .draft
+            ? [ThorbisMenuItem("Edit", icon: "pencil") { present(InboxComposer(message: message)) },
+               ThorbisMenuItem("Discard", icon: "trash", role: .destructive) { inbox.discard(message.id) }]
+            : (message.scheduledAt != nil
+                ? [ThorbisMenuItem("Cancel schedule", icon: "xmark.circle") { inbox.cancelScheduled(message.id) }]
+                : [])
+        return HStack(alignment: .center, spacing: 0) {
+            PaperListRow(title: message.recipient,
+                         subtitle: [message.channel == .email && !message.subject.isEmpty ? message.subject : nil, message.body]
+                             .compactMap { $0 }.joined(separator: " · "),
+                         meta: message.scheduledAt.map { "Scheduled locally for \($0) · Will not auto-send" },
+                         subtitleLines: 2) {
+                Text(queued ? "Queued" : "Draft")
+                    .font(Theme.font(14, weight: .medium))
+                    .foregroundStyle(queued ? Theme.warning : Theme.muted)
+                    .lineLimit(1).fixedSize()
+            }
+            if !items.isEmpty {
+                ThorbisMenu(items: items, accessibilityLabel: "Options for the draft to \(message.recipient)") {
+                    Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .padding(.trailing, 4)
+            }
+        }
+    }
+
     var body: some View {
         // design 2026-10-30: the list system — each draft a row with its state as a word; its
         // actions (Edit, Discard, Cancel schedule) moved into the row's ••• menu; New draft is the commit.
         let bound = inbox.actorID == actorID && inbox.organizationID == organizationID
+        // Paper 73B: the 34 Bold title and a count, one card of rows with the state as a coloured
+        // word on the right, a footnote under it, and the commit pinned at the bottom.
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Message drafts").font(Theme.font(30, weight: .medium)).tracking(-0.6)
-                        .accessibilityAddTraits(.isHeader)
-                    DotLine(["On this device", "Current session only"]).font(Theme.font(15)).foregroundStyle(Theme.muted)
-                }
-                .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                if let actionError {
-                    Text(actionError).font(Theme.font(15)).foregroundStyle(Theme.destructive)
-                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
-                }
-                if bound {
-                    // Empty: the shared empty state, not a label over a one-line card.
-                    if inbox.messages.isEmpty {
-                        ListRoomEmpty(title: "No drafts yet.", message: "Start one with New draft below.")
-                            .padding(.horizontal, -PaperCardMetrics.margin)
-                    } else {
-                    PaperSection("Drafts and queued", count: inbox.messages.count) {
-                        Group {
-                            VStack(alignment: .leading, spacing: 0) {
-                                ForEach(inbox.messages) { message in
-                                    HStack(alignment: .top, spacing: 0) {
-                                        PaperListRow(title: message.recipient,
-                                                     subtitle: [message.channel == .email && !message.subject.isEmpty ? message.subject : nil, message.body]
-                                                         .compactMap { $0 }.joined(separator: " · "),
-                                                     meta: message.scheduledAt.map { "Scheduled locally for \($0) · Will not auto-send" },
-                                                     subtitleLines: 2) {
-                                            StatusWord(text: message.status.rawValue.capitalized,
-                                                       tint: message.scheduledAt != nil ? Theme.warning : nil)
-                                        }
-                                        let items: [ThorbisMenuItem] = message.status == .draft
-                                            ? [ThorbisMenuItem("Edit", icon: "pencil") { present(InboxComposer(message: message)) },
-                                               ThorbisMenuItem("Discard", icon: "trash", role: .destructive) { inbox.discard(message.id) }]
-                                            : message.scheduledAt != nil
-                                                ? [ThorbisMenuItem("Cancel schedule", icon: "xmark.circle") { inbox.cancelScheduled(message.id) }]
-                                                : []
-                                        if !items.isEmpty {
-                                            ThorbisMenu(items: items, accessibilityLabel: "Options for the draft to \(message.recipient)") {
-                                                Image(systemName: "ellipsis").foregroundStyle(Theme.muted)
-                                                    .frame(width: 44, height: 44).contentShape(Rectangle())
-                                            }
-                                            .padding(.trailing, 4).padding(.top, 4)
-                                        }
+            VStack(alignment: .leading, spacing: 0) {
+                PaperHeader(title: "Message drafts", subtitle: subtitle(bound: bound))
+                VStack(alignment: .leading, spacing: 12) {
+                    if let actionError {
+                        Text(actionError).font(Theme.font(15)).foregroundStyle(Theme.destructive)
+                            .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                    }
+                    if bound {
+                        // Empty: the shared empty state, not a label over a one-line card.
+                        if inbox.messages.isEmpty {
+                            ListRoomEmpty(glyph: .bubble, title: "No drafts yet", message: "Start one with New draft below.")
+                                .padding(.horizontal, -PaperCardMetrics.margin)
+                        } else {
+                            PaperCard {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    ForEach(inbox.messages) { message in
+                                        if message.id != inbox.messages.first?.id { WellDivider() }
+                                        draftRow(message)
                                     }
                                 }
                             }
-                            .padding(.vertical, PaperCardMetrics.edge)
                         }
                     }
-                    }
+                    // Paper 73B: the footnote under the card is 14 muted.
+                    Text("Drafts and queued messages are not sent. Scheduling here does not start a timer or notify the recipient.")
+                        .font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
                 }
-                Text("Drafts and queued messages are not sent. Scheduling here does not start a timer or notify the recipient.")
-                    .font(Theme.font(13)).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, Theme.gutter - PaperCardMetrics.margin)
+                .paperCardMargin().padding(.top, 8)
             }
-            .paperCardMargin().padding(.top, 8).padding(.bottom, 24)
+            .padding(.bottom, 24)
         }
-        .background(Theme.canvas)
+        .background(Theme.background)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             PaperActionBar(title: "New draft", symbol: "square.and.pencil", disabled: !bound) { present(InboxComposer()) }
@@ -253,11 +268,11 @@ private struct InboxLocalComposerView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.canvas)
-            .navigationTitle("Compose")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ThorbisToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            // Paper 27A: a sheet that is a form leads with the task bar, not a system bar title.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                PaperTaskBar(title: "Compose") { dismiss() }.background(Theme.canvas)
             }
+            .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 0) {
                     PaperActionBar(title: "Save draft") { save(.draft) }

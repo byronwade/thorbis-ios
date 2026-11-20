@@ -118,7 +118,7 @@ final class JobRowSwipeTests: XCTestCase {
 
     func testStepWordsMatchTheJobScreen() {
         XCTAssertEqual(JobMoves.title("en_route"), "On my way")
-        XCTAssertEqual(JobMoves.title("arrived"), "Arrive")
+        XCTAssertEqual(JobMoves.title("arrived"), "I've arrived")
         XCTAssertEqual(JobMoves.title("in_progress"), "Start work")
     }
 

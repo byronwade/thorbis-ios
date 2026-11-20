@@ -189,26 +189,35 @@ enum FilteredRecords {
     }
 }
 
-/// The filter's name and one tap to clear it, at the top of a filtered list (TG-19).
+/// The filter's name and one tap to clear it, at the top of a filtered list (TG-19). Paper P2
+/// draws a chosen filter as a brand-surface chip with a brand rim and 15 Semibold brand text;
+/// the way back out is 16 Medium brand text.
 struct RecordFilterBar: View {
     let filter: RecordFilter
     let missing: Int
     let clear: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(filter.title).font(Theme.font(15, weight: .medium))
-                Spacer()
-                Button("Show all", action: clear).font(Theme.font(15))
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(filter.title).paperButton(.compact, tone: .tinted)
+                    .overlay(Capsule().strokeBorder(Theme.brand, lineWidth: 1.5))
+                Spacer(minLength: 8)
+                Button(action: clear) {
+                    Text("Show all").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.brandText)
+                        .frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
             }
             if missing > 0 {
                 Text(missing == 1 ? "1 record isn't on this phone yet." : "\(missing) records aren't on this phone yet.")
                     .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 4)
             }
         }
         .frame(minHeight: 44)
-        .padding(.vertical, 6)
+        // 16 from the screen edges, like the search field and the cards under it.
+        .padding(.horizontal, PaperCardMetrics.margin).padding(.vertical, 6)
     }
 }
 
@@ -239,8 +248,9 @@ struct FilteredJobsView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                // The one pushed-page header: the title on the page, not in the bar.
+                PaperPageTitle(title: "Jobs done", subtitle: filter.title)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(filter.title).font(Theme.font(15, weight: .medium))
                     let missing = filter.ids.count - jobs.count
                     if missing > 0 {
                         Text(missing == 1 ? "1 job isn't on this phone yet." : "\(missing) jobs aren't on this phone yet.")
@@ -261,7 +271,7 @@ struct FilteredJobsView: View {
         .background(Theme.background)
         .task { await load() }
         .refreshable { await load() }
-        .navigationTitle("Jobs done")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

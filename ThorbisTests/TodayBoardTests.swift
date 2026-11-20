@@ -28,8 +28,8 @@ final class TodayBoardTests: XCTestCase {
         let date = try XCTUnwrap(Calendar.current.date(from: parts))
         let uses24 = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: .current)?.contains("a") == false
         XCTAssertEqual(date.columnTime, uses24 ? "13:00" : "1:00")
-        XCTAssertEqual(date.periodMark, uses24 ? nil : "p.m.")
-        XCTAssertEqual(date.clockTime, uses24 ? "13:00" : "1:00 p.m.")
+        XCTAssertEqual(date.periodMark, uses24 ? nil : "PM")
+        XCTAssertEqual(date.clockTime, uses24 ? "13:00" : "1:00 PM")
     }
 
     func testJobMoneyAlwaysHasTwoDecimals() {

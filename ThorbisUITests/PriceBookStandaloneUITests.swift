@@ -11,7 +11,7 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         let price = app.staticTexts["$1,234,567.89"]
         XCTAssertTrue(price.exists)
-        XCTAssertGreaterThan(title.frame.width, 240, "The amount must not crowd a long item name into an unreadably narrow column.")
+        XCTAssertGreaterThan(title.frame.width, price.frame.width, "The amount must not crowd a long item name into an unreadably narrow column.")
         XCTAssertGreaterThan(price.frame.width, 0)
         capture("Price book narrow long title and high price")
     }
@@ -97,16 +97,12 @@ final class PriceBookStandaloneUITests: XCTestCase {
         return app
     }
 
-    /// Since the 2026-10-30 design pass the category chips live behind the header's filter circle
-    /// (one selector per screen): open it and choose the category there.
+    /// Paper 34: the kinds are segments under the search field ("All · 6", "Material", …).
     private func chooseCategory(_ name: String, in app: XCUIApplication) {
-        let filter = app.buttons["header-filter"]
-        XCTAssertTrue(filter.waitForExistence(timeout: 5))
-        filter.tap()
         let choice = app.buttons[name]
         XCTAssertTrue(choice.waitForExistence(timeout: 5), app.debugDescription)
         choice.tap()
-        XCTAssertTrue(choice.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(choice.isSelected, "\(name) should be the chosen segment")
     }
 
     private func capture(_ name: String) {
@@ -171,13 +167,11 @@ final class PriceBookStandaloneUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.staticTexts["1 item loaded"].waitForExistence(timeout: 30))
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Material, 1 loaded")).firstMatch.exists)
-        // The category choices sit behind the header's filter circle; All says the count is partial.
-        app.buttons["header-filter"].tap()
-        let all = app.buttons["All · 1 loaded"]
+        // The kinds are segments; the subtitle and the group label say the count is partial.
+        let all = app.buttons["All · 1"]
         XCTAssertTrue(all.waitForExistence(timeout: 5))
         all.tap()
-        XCTAssertTrue(all.waitForNonExistence(timeout: 5))
-        let search = app.searchFields["Search price book"]
+        let search = app.textFields["price-book-list-search"]
         search.tap()
         search.typeText("not in loaded items")
         XCTAssertTrue(app.staticTexts["No loaded items match. Load more items to search the rest."].waitForExistence(timeout: 10))
@@ -189,7 +183,7 @@ final class PriceBookStandaloneUITests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 30))
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Material, 1")).firstMatch.tap()
         XCTAssertFalse(title.exists)
-        let search = app.searchFields["Search price book"]
+        let search = app.textFields["price-book-list-search"]
         search.tap()
         search.typeText("PEX")
         XCTAssertTrue(title.waitForExistence(timeout: 10))

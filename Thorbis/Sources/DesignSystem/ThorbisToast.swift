@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Linear's toast (phase 4): a dark capsule with a glyph, a few words and at most one action
-/// ("Undo"). It confirms something the screen already shows changed; it never carries an error
-/// (errors stay in an `ErrorBanner` where the problem is) and never stands alone as proof that a
-/// consequential operation succeeded (golden rule 14). VoiceOver hears the words when it appears.
+/// The toast (Paper 74 "Status update sent"): a 52pt card pill with a hairline rim and a soft
+/// shadow, a 22pt mark (a green tick for a confirmation), the words in 15 Semibold and at most one
+/// action in brand-text ("View", "Undo"). It confirms something the screen already shows changed;
+/// it never carries an error (errors stay in an `ErrorBanner` where the problem is) and never
+/// stands alone as proof that a consequential operation succeeded (golden rule 14). VoiceOver
+/// hears the words when it appears.
 struct ThorbisToast: View {
     let symbol: String
     let message: String
@@ -12,34 +14,44 @@ struct ThorbisToast: View {
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.toastText)
-                .accessibilityHidden(true)
+        HStack(spacing: 12) {
+            // Paper 74: a confirmation leads with the 22pt green disc and its white tick.
+            Group {
+                if symbol.hasPrefix("checkmark") {
+                    Image(systemName: "checkmark.circle.fill")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Theme.statusDone)
+                        .font(.system(size: 22, weight: .semibold))
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(Theme.foreground)
+                }
+            }
+            .frame(width: 22, height: 22)
+            .accessibilityHidden(true)
             Text(message)
-                .font(Theme.font(15, weight: .medium))
-                .foregroundStyle(Theme.toastText)
+                .font(Theme.font(15, weight: .semibold))
+                .foregroundStyle(Theme.foreground)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: typeSize.isAccessibilitySize ? .infinity : nil, alignment: .leading)
             if let actionTitle, let action {
                 Spacer(minLength: 4)
                 Button(action: action) {
                     Text(actionTitle)
-                        .font(Theme.font(15, weight: .medium))
-                        .foregroundStyle(Theme.toastText)
-                        .padding(.horizontal, 12).frame(minHeight: 30)
-                        .background(Theme.toastText.opacity(0.14), in: Capsule())
+                        .font(Theme.font(15, weight: .semibold))
+                        .foregroundStyle(Theme.brandText)
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
             }
         }
-        .padding(.leading, 16).padding(.trailing, action == nil ? 18 : 6)
-        .frame(minHeight: 48)
-        .background(Theme.toastFill, in: Capsule())
-        .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
+        .padding(.leading, 14).padding(.trailing, 18)
+        .frame(minHeight: 52)
+        .background(Theme.card, in: Capsule())
+        .overlay(Capsule().strokeBorder(Theme.hairline))
+        .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
         .accessibilityElement(children: .combine)
         .onAppear { AccessibilityNotification.Announcement(message).post() }
     }

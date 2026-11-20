@@ -32,6 +32,11 @@ final class DayPrefetch {
     func waitUntilIdle() async { await task?.value }
 
     func start(jobs: [Job], api: APIClient, session: SessionController) {
+        #if DEBUG
+        // The legacy-route sample answers a job's first invoice read and refuses the rest. A
+        // read-ahead would spend that first answer before the job screen asks.
+        if ProcessInfo.processInfo.arguments.contains("--paper-preview-job-invoices-legacy") { return }
+        #endif
         guard !constrained, !session.isOffline, session.phase == .ready, session.can("job.view", feature: "jobs") else { return }
         let actor = session.user?.id
         var today = JobFiltering.schedule(jobs, range: .today, assignedTo: actor)

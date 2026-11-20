@@ -143,8 +143,21 @@ final class BookingCallPlayer: ObservableObject {
     @Published private(set) var failed = false
     @Published private(set) var current: TimeInterval = 0
     @Published private(set) var duration: TimeInterval = 0
+    /// Playback speed (Paper 51's "1x" pill): 1, 1.5 or 2.
+    @Published private(set) var rate: Float = 1
     private var player: AVAudioPlayer?
     private var ticker: Task<Void, Never>?
+
+    /// "1x", "1.5x", "2x".
+    var rateLabel: String {
+        rate == 1.5 ? "1.5x" : "\(Int(rate))x"
+    }
+
+    /// Steps the speed 1 → 1.5 → 2 → 1; a playing recording changes at once.
+    func cycleRate() {
+        rate = rate == 1 ? 1.5 : (rate == 1.5 ? 2 : 1)
+        player?.rate = rate
+    }
 
     func toggle(api: APIClient, path: String) async {
         if let player {
@@ -157,6 +170,7 @@ final class BookingCallPlayer: ObservableObject {
         do {
             let data = try await api.audioData(path)
             let loaded = try AVAudioPlayer(data: data)
+            loaded.enableRate = true
             loaded.prepareToPlay()
             player = loaded
             duration = loaded.duration
@@ -183,6 +197,7 @@ final class BookingCallPlayer: ObservableObject {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
         try? AVAudioSession.sharedInstance().setActive(true)
         if player.currentTime >= player.duration - 0.05 { player.currentTime = 0 }
+        player.rate = rate
         player.play()
         isPlaying = true
         ticker?.cancel()
@@ -224,7 +239,18 @@ struct JobBookingCallSection: View {
             VStack(alignment: .leading, spacing: 12) {
                 byline
                 if let summary = call.summary {
-                    Text(summary.text).font(Theme.font(15)).lineSpacing(4).textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 4) {
+                        // Paper 76: a summary the model wrote says so, in the brand's words colour.
+                        if summary.source == "model" {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold))
+                                    .accessibilityHidden(true)
+                                Text("AI summary").font(Theme.font(13, weight: .semibold))
+                            }
+                            .foregroundStyle(Theme.brandText)
+                        }
+                        Text(summary.text).font(Theme.font(16, weight: .medium)).lineSpacing(3).textSelection(.enabled)
+                    }
                 }
                 if let path = call.playablePath {
                     playerRow(path)
@@ -233,13 +259,13 @@ struct JobBookingCallSection: View {
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
                     }
                 } else if let note = call.recordingNote {
-                    Text(note).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    Text(note).font(Theme.font(14)).foregroundStyle(Theme.muted)
                 }
                 if !call.transcript.isEmpty { transcript }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             // v2 Record room: no box around the section (never a 1px rim); its words meet the label.
-            .padding(.horizontal, recordRoom ? RecordRoom.labelInset : 14).padding(.vertical, recordRoom ? 6 : 14)
+            .padding(.horizontal, recordRoom ? RecordRoom.labelInset : PaperCardMetrics.inset).padding(.vertical, recordRoom ? 6 : 14)
             .background(recordRoom ? AnyShapeStyle(Color.clear) : AnyShapeStyle(ThorbisPanelStyle()), in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
         }
         .onDisappear { player.stop() }
@@ -250,10 +276,10 @@ struct JobBookingCallSection: View {
             Image(systemName: call.status == "missed" ? "phone.arrow.down.left" : "phone.arrow.down.left.fill")
                 .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                 .accessibilityHidden(true)
-            Text(call.caller).font(Theme.font(15, weight: .medium))
+            Text(call.caller).font(Theme.font(16, weight: .medium))
             if let when = JobFiltering.date(call.startedAt) {
                 Text("· \(when.stampLabel(year: false))")
-                    .font(Theme.font(15)).foregroundStyle(Theme.muted)
+                    .font(Theme.font(14)).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 8)
             if let length = call.length {
@@ -270,13 +296,14 @@ struct JobBookingCallSection: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 Button { Task { await player.toggle(api: api, path: path) } } label: {
+                    // Paper 76: the play circle is the brand's, its glyph white.
                     ZStack {
-                        Circle().fill(Theme.foreground)
+                        Circle().fill(Theme.brand)
                         if player.isLoading {
-                            ProgressView().tint(Theme.background)
+                            ProgressView().tint(Color.white)
                         } else {
                             Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 16, weight: .medium)).foregroundStyle(Theme.background)
+                                .font(.system(size: 16, weight: .medium)).foregroundStyle(Color.white)
                         }
                     }
                     .frame(width: 44, height: 44)
@@ -289,7 +316,7 @@ struct JobBookingCallSection: View {
                         self.scrubbing = nil
                     }
                 }
-                .tint(Theme.foreground)
+                .tint(Theme.brand)
                 .disabled(player.duration == 0)
                 .accessibilityLabel("Recording position")
                 .accessibilityValue(BookingCallRecord.clock(Int(position)))
@@ -309,29 +336,29 @@ struct JobBookingCallSection: View {
         }
     }
 
+    /// Paper 82: the "Transcript" label, the first thing said, then "Show full transcript" in the
+    /// brand's words colour. Opened, every segment shows and the link reads "Hide transcript".
     private var transcript: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Button { withMotion(.snappy) { showTranscript.toggle() } } label: {
-                HStack {
-                    Text(showTranscript ? "Hide transcript" : "Transcript")
-                        .font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.brandText)
-                    Spacer()
-                    Image(systemName: "chevron.down").rotationEffect(.degrees(showTranscript ? 180 : 0))
-                        .font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+        let segments = showTranscript ? call.transcript : Array(call.transcript.prefix(1))
+        return VStack(alignment: .leading, spacing: 8) {
+            PaperSectionLabel(title: "Transcript", inset: 0, gap: 0)
+            ForEach(segments) { segment in
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(segment.label).font(Theme.font(15, weight: .semibold))
+                        .foregroundStyle(Theme.foreground)
+                    Text(segment.text).font(Theme.font(15)).lineSpacing(1)
+                        .foregroundStyle(Theme.subtle).textSelection(.enabled)
+                        .lineLimit(showTranscript ? nil : 3)
                 }
-                .frame(minHeight: 44).contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+            }
+            Button { withMotion(.snappy) { showTranscript.toggle() } } label: {
+                Text(showTranscript ? "Hide transcript" : "Show full transcript")
+                    .font(Theme.font(15, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if showTranscript {
-                ForEach(call.transcript) { segment in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(segment.label).font(Theme.font(13, weight: .medium))
-                            .foregroundStyle(segment.speaker == "caller" ? Theme.foreground : Theme.muted)
-                        Text(segment.text).font(Theme.font(15)).textSelection(.enabled)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
         }
     }
 }

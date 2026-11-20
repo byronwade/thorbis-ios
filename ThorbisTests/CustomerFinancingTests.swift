@@ -71,4 +71,28 @@ final class CustomerFinancingTests: XCTestCase {
         XCTAssertNil(FinancingWords.usMobile("555-0134"))
         XCTAssertNil(FinancingWords.usMobile("(155) 201-3344"), "area codes never start with 1")
     }
+    @MainActor
+    func testFinancingResponsesStayOnRequestedInvoice() async throws {
+        let invoice = "00000000-0000-4000-8000-000000000101"
+        let other = "00000000-0000-4000-8000-000000000102"
+        func response(_ invoiceID: String) throws -> String {
+            let item: [String: Any] = ["id": "00000000-0000-4000-8000-000000000103", "invoiceId": invoiceID,
+                "provider": "wisetack", "providerName": "Wisetack", "status": "sent", "amount": ["amount": 100000, "currency": "USD"],
+                "sentToLast4": "3344", "createdAt": "2026-11-13T12:00:00Z", "updatedAt": "2026-11-13T12:00:00Z"]
+            return String(decoding: try JSONSerialization.data(withJSONObject: item), as: UTF8.self)
+        }
+        let valid = try response(invoice), foreign = try response(other)
+        let api = APIClient(session: URLProtocolFixture.session([.init(201, valid), .init(201, foreign), .init(200, "{\"applications\":[\(foreign)]}"), .init(200, valid)]), baseURL: "https://app.thorbis.com")
+        let key = "00000000-0000-4000-8000-000000000104"
+        let sent = try await api.sendFinancingApplication(invoiceID: invoice, idempotencyKey: key, phone: nil)
+        XCTAssertEqual(sent.invoiceId, invoice)
+        do { _ = try await api.sendFinancingApplication(invoiceID: invoice, idempotencyKey: key, phone: nil); XCTFail("Foreign invoice response must fail") }
+        catch let problem as Problem { XCTAssertNil(problem.status, "An ambiguous result must preserve the request key") }
+        catch { XCTFail("Expected a verification error") }
+        do { _ = try await api.refreshFinancingApplications(invoiceID: invoice); XCTFail("Foreign invoice history must fail") } catch { }
+        let otherApplication = "00000000-0000-4000-8000-000000000105"
+        do { _ = try await api.cancelFinancingApplication(invoiceID: invoice, applicationID: otherApplication); XCTFail("A different application cannot be accepted") } catch { }
+        XCTAssertEqual(URLProtocolFixture.recorded.map { $0.url?.path }, ["/v1/invoices/\(invoice)/financing-applications", "/v1/invoices/\(invoice)/financing-applications", "/v1/invoices/\(invoice)/financing-applications/refresh", "/v1/invoices/\(invoice)/financing-applications/\(otherApplication)/cancel"])
+    }
+
 }

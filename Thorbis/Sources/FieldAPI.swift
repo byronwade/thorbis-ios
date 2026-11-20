@@ -826,12 +826,26 @@ struct FieldEstimateCreate: Encodable {
     let title: String
     let lines: [FieldEstimateLineInput]
     let locationId: String?
+    /// The job this estimate is being made from. A server that knows the field creates the
+    /// estimate and adds it to the job in one step (which is what lets a technician create one);
+    /// an older server ignores it and the follow-up link call does the adding. Left out of the
+    /// body when nil.
+    let jobId: String?
 
-    init(customerId: String, title: String, lines: [FieldEstimateLineInput], locationId: String? = nil) {
+    init(customerId: String, title: String, lines: [FieldEstimateLineInput], locationId: String? = nil, jobId: String? = nil) {
         self.customerId = customerId
         self.title = title
         self.lines = lines
         self.locationId = locationId
+        self.jobId = jobId
+    }
+
+    /// The job to name in the create, or nil. Only for an estimate made from a job, for that
+    /// job's own customer, and never beside `options` (the server answers 400 to both together).
+    static func linkedJobID(jobID: String?, customerID: String, jobCustomerID: String?, hasOptions: Bool) -> String? {
+        guard let jobID, !jobID.isEmpty, !hasOptions, let jobCustomerID, !customerID.isEmpty,
+              customerID.lowercased() == jobCustomerID.lowercased() else { return nil }
+        return jobID
     }
 }
 
@@ -928,10 +942,14 @@ struct FieldMediaRegistrationRequest: Encodable {
     let capturedAt: String?
     let tags: [String]?
     let caption: String?
+    /// The SHA-256 of each 8 MiB part, in order. Sent only for a file over 8 MiB; left out (never
+    /// an empty list) for anything smaller, which the server refuses otherwise.
+    let partHashes: [String]?
 
     init(clientAssetId: String, kind: String, mime: String, sizeBytes: Int,
          originalFilename: String, contentHash: String, capturedAt: String? = nil,
-         tags: [String]? = nil, caption: String? = nil) {
+         tags: [String]? = nil, caption: String? = nil, partHashes: [String]? = nil) {
+        self.partHashes = partHashes
         self.clientAssetId = clientAssetId
         self.kind = kind
         self.mime = mime
@@ -955,6 +973,23 @@ struct FieldResumablePart: Decodable {
     let partNumber: Int
     let url: String
     let expiresAt: String
+    /// Exact length of this part. Absent from a server that cannot finish large uploads yet.
+    let sizeBytes: Int?
+    /// Headers the PUT must carry. Absent from a server that cannot finish large uploads yet.
+    let headers: [String: String]?
+    /// Set when storage already holds exactly this part: it is not sent again.
+    let etag: String?
+}
+
+/// `POST /v1/media/{id}/confirm` for a file sent in parts.
+struct FieldMultipartConfirmation: Encodable, Equatable {
+    struct Part: Encodable, Equatable {
+        let partNumber: Int
+        let etag: String
+        let contentHash: String
+    }
+    let uploadId: String
+    let parts: [Part]
 }
 
 struct FieldResumableUpload: Decodable {
@@ -986,6 +1021,11 @@ struct FieldMediaRegistration: Decodable {
 
 private struct FieldPage<T: Decodable>: Decodable {
     let items: [T]
+    let nextCursor: String?
+}
+
+struct JobEstimateLinkPage: Decodable {
+    let items: [JobEstimateLink]
     let nextCursor: String?
 }
 
@@ -1050,6 +1090,11 @@ extension APIClient {
         return page.items
     }
 
+    /// Recovery must inspect the complete collection before the technician confirms an uncertain contact.
+    func allContactsForRecovery(_ customerID: String, currentAuthority: @MainActor () -> Bool) async throws -> [CustomerContactRecord] {
+        try await allFieldPages(fieldPath("/v1/customers", id: customerID, suffix: "/contacts"), isCurrent: currentAuthority)
+    }
+
     func createFieldContact(_ customerID: String, request: FieldContactCreate) async throws -> CustomerContactRecord {
         try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/contacts"), body: request)
     }
@@ -1057,6 +1102,10 @@ extension APIClient {
     func updateFieldContact(_ customerID: String, _ contactID: String, request: FieldContactUpdate) async throws -> CustomerContactRecord {
         let path = try fieldContactPath(customerID, contactID)
         return try await send("POST", path, body: request)
+    }
+
+    func updateFieldContactConditionally(_ customerID: String, _ contactID: String, request: ConditionalContactUpdate) async throws -> CustomerContactRecord {
+        try await send("POST", fieldContactPath(customerID, contactID), body: request)
     }
 
     func removeFieldContact(_ customerID: String, _ contactID: String) async throws {
@@ -1074,6 +1123,10 @@ extension APIClient {
         return page.items
     }
 
+    func allLocationsForRecovery(_ customerID: String, currentAuthority: @MainActor () -> Bool) async throws -> [ServiceLocationRecord] {
+        try await allFieldPages(fieldPath("/v1/customers", id: customerID, suffix: "/locations"), isCurrent: currentAuthority)
+    }
+
     func createFieldLocation(_ customerID: String, request: FieldLocationCreate) async throws -> ServiceLocationRecord {
         try await send("POST", fieldPath("/v1/customers", id: customerID, suffix: "/locations"), body: request)
     }
@@ -1081,6 +1134,10 @@ extension APIClient {
     func updateFieldLocation(_ customerID: String, _ locationID: String, request: FieldLocationUpdate) async throws -> ServiceLocationRecord {
         let path = try fieldLocationPath(customerID, locationID)
         return try await send("POST", path, body: request)
+    }
+
+    func updateFieldLocationConditionally(_ customerID: String, _ locationID: String, request: ConditionalLocationUpdate) async throws -> ServiceLocationRecord {
+        try await send("POST", fieldLocationPath(customerID, locationID), body: request)
     }
 
     func removeFieldLocation(_ customerID: String, _ locationID: String) async throws {
@@ -1120,12 +1177,39 @@ extension APIClient {
     func fieldEstimate(_ id: String, requireFresh: Bool = false) async throws -> EstimateRecord {
         try await send("GET", fieldPath("/v1/estimates", id: id), requireFresh: requireFresh)
     }
+    func fieldEstimateWithProvenance(_ id: String, requireFresh: Bool = false, saveIfCurrent: @MainActor () -> Bool = { true }) async throws -> APIRead<EstimateRecord> {
+        try await sendWithProvenance(fieldPath("/v1/estimates", id: id), requireFresh: requireFresh, saveIfCurrent: saveIfCurrent)
+    }
     func createFieldEstimate(_ request: FieldEstimateCreate) async throws -> EstimateRecord {
         try await send("POST", "/v1/estimates", body: request)
     }
     /// Estimates related to a job (`GET /v1/jobs/{id}/estimates`), as link records.
     func fieldJobEstimateLinks(_ jobID: String, isCurrent: @MainActor () -> Bool = { true }) async throws -> [JobEstimateLink] {
         try await allFieldPages(fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), isCurrent: isCurrent)
+    }
+    /// One uncached job/estimate association; never use a saved copy for issued terms.
+    func liveFieldJobEstimateLink(_ jobID: String, estimateID: String) async throws -> JobEstimateLink {
+        guard UUID(uuidString: estimateID) != nil else { throw Problem(title: "Invalid record ID", status: nil, detail: estimateID) }
+        return try await send("GET", fieldPath("/v1/jobs", id: jobID, suffix: "/estimates/\(estimateID)"), requireFresh: true)
+    }
+    /// Reads exactly one job-scoped membership page. A saved copy is for reading only;
+    /// only the returned provenance describes this specific response's source.
+    func fieldJobEstimateLinkPage(_ jobID: String, cursor: String? = nil,
+                                  requireFresh: Bool = false,
+                                  isCurrent: @MainActor () -> Bool) async throws -> APIRead<JobEstimateLinkPage> {
+        let generation = requestGeneration
+        let scopeRevision = savedCopyScopeRevision
+        let origin = normalizedOrigin
+        try Task.checkCancellation()
+        guard isCurrent(), origin != nil else { throw CancellationError() }
+        let response: APIRead<JobEstimateLinkPage> = try await sendWithProvenance(
+            fieldPath("/v1/jobs", id: jobID, suffix: "/estimates"), cursor: cursor, requireFresh: requireFresh, saveIfCurrent: isCurrent)
+        try Task.checkCancellation()
+        guard isCurrent(), generation == requestGeneration, scopeRevision == savedCopyScopeRevision,
+              origin == normalizedOrigin, response.provenance.generation == generation,
+              response.provenance.savedCopyScopeRevision == scopeRevision,
+              APIClient.normalizedOrigin(response.provenance.origin) == origin else { throw CancellationError() }
+        return response
     }
     /// Links an existing estimate to a job without changing the job's origin.
     func linkFieldEstimate(jobID: String, estimateID: String) async throws -> JobEstimateLink {
@@ -1168,8 +1252,12 @@ extension APIClient {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), body: request)
     }
 
-    func confirmFieldMedia(_ mediaID: String) async throws -> MediaAssetRecord {
-        try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/confirm"), body: EmptyObject())
+    /// A file of up to 8 MiB confirms with an empty body; one sent in parts names them.
+    func confirmFieldMedia(_ mediaID: String, multipart: FieldMultipartConfirmation? = nil) async throws -> MediaAssetRecord {
+        struct Body: Encodable { let multipart: FieldMultipartConfirmation }
+        let path = try fieldPath("/v1/media", id: mediaID, suffix: "/confirm")
+        if let multipart { return try await send("POST", path, body: Body(multipart: multipart)) }
+        return try await send("POST", path, body: EmptyObject())
     }
 
     /// Archive a stored photo or document (`POST /v1/media/{id}/archive`, no body, `job.edit`).
@@ -1227,7 +1315,7 @@ struct CustomerSmsConsent: Codable, Hashable {
 extension APIClient {
     /// Nil until a decision has been recorded.
     func customerSmsConsent(_ customerID: String) async throws -> CustomerSmsConsent? {
-        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"))
+        try await send("GET", fieldPath("/v1/customers", id: customerID, suffix: "/sms-consent"), requireFresh: true)
     }
 
     /// Records an explicit decision the customer gave staff. Online only; the key makes a retry safe.

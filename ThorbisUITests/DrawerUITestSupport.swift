@@ -1,9 +1,10 @@
 import XCTest
 
-/// The phone drawer (simplified 2026-10-31): the menu circle on any screen of a place opens it, and
-/// every row carries a `drawer-<id>` identifier (`drawer-jobs`, `drawer-inbox`, `drawer-search`).
-/// Every place the role can reach is listed, grouped (Work, Money, Shop, On this phone); `openFromDrawer`
-/// scrolls the list until the row is reachable.
+/// The phone drawer: the menu circle on any screen of a place opens it, and every row carries a
+/// `drawer-<id>` identifier (`drawer-jobs`, `drawer-inbox`, `drawer-search`). It lists Paper's rows
+/// for the role and nothing else (Navigation 29N / 57N / 58N); a place Paper reaches from inside
+/// another screen (Estimates and Invoices from Money, My scorecard from Reports…) opens from that
+/// screen's `door-<id>` row or from Search. `openFromDrawer` scrolls the list until the row is reachable.
 extension XCUIApplication {
     /// The menu circle at the top left of the place showing.
     var drawerMenu: XCUIElement { buttons["drawer-menu"] }
@@ -35,19 +36,6 @@ extension XCUIApplication {
     /// Opens the drawer and picks a row in it, scrolling to it when it sits low in the list.
     func openFromDrawer(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
         openDrawer(file: file, line: line)
-        if !drawerRow(id).exists {
-            let workspace: String? = switch id {
-            case "jobs", "estimates", "invoices", "team": "work"
-            case "customers", "properties": "customers"
-            case "billing", "scorecard", "attention", "notices", "drafts": "other"
-            default: nil
-            }
-            if let workspace, drawerRow("workspace-\(workspace)").exists {
-                revealDrawerRow("workspace-\(workspace)")
-                drawerRow("workspace-\(workspace)").tap()
-                openDrawer(file: file, line: line)
-            }
-        }
         revealDrawerRow(id)
         let row = drawerRow(id)
         XCTAssertTrue(row.waitForExistence(timeout: 5), "No drawer row \(id)", file: file, line: line)
@@ -66,14 +54,21 @@ extension XCUIApplication {
         }
     }
 
-    /// Opens saved work's review from the gear (it left the drawer's list in the simplified drawer).
-    func openSavedWorkFromDrawer(file: StaticString = #filePath, line: UInt = #line) {
+    /// Opens Settings from the drawer's gear (Paper 65: the gear opens Settings directly).
+    func openSettingsFromDrawer(file: StaticString = #filePath, line: UInt = #line) {
         openDrawer(file: file, line: line)
         let gear = drawerRow("settings")
         XCTAssertTrue(gear.waitForExistence(timeout: 5), "No gear circle", file: file, line: line)
-        gear.tap()
-        let saved = buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND identifier != %@", "Saved on this phone", "drawer-saved-work")).firstMatch
-        XCTAssertTrue(saved.waitForExistence(timeout: 5), "No saved work in the gear menu", file: file, line: line)
+        thorbisTapCentre(gear)
+        XCTAssertTrue(buttons["settings-account-data"].waitForExistence(timeout: 10), "Settings did not open from the gear", file: file, line: line)
+    }
+
+    /// Opens saved work's review: the gear opens Settings, where "Saved on this phone" is a row.
+    func openSavedWorkFromDrawer(file: StaticString = #filePath, line: UInt = #line) {
+        openSettingsFromDrawer(file: file, line: line)
+        let saved = buttons["settings-saved-work"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 5), "No saved work row in Settings", file: file, line: line)
+        for _ in 0..<4 where !saved.isHittable { swipeUp(velocity: .slow) }
         saved.tap()
     }
 }

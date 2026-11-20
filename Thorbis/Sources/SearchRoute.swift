@@ -54,12 +54,16 @@ private struct SearchRouteContent: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                PaperCircleButton(symbol: "chevron.left", label: "Close search", size: 36) { close() }
+            // Paper 76: the 44pt card circle with a cross, 16 from the edge; 14 under it "Search"
+            // (34/40 Bold) 20 in; 14 under that the field.
+            VStack(alignment: .leading, spacing: 14) {
+                PaperCircleButton(symbol: "xmark", label: "Close search", size: 44) { close() }
+                PaperPageTitle(title: "Search", columnInset: PaperCardMetrics.margin, top: 0)
                 field
             }
-            .padding(.leading, Theme.gutter - 4).padding(.trailing, Theme.gutter)
-            .padding(.top, 4).padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, PaperCardMetrics.margin)
+            .padding(.top, 2).padding(.bottom, 6)
             PaperGlobalSearch(model: model, openResult: host.open, focus: host.focus, actions: host.actions)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("bar-search-results")
@@ -82,12 +86,13 @@ private struct SearchRouteContent: View {
         .onDisappear { host.showing(false) }
     }
 
-    /// Sink (design.thorbis.com Depth): the field is a well one step darker than the canvas.
+    /// Paper 76: the field on the card (radius 14, 46 tall, 12 in), an 18pt glass in ink once
+    /// words are in it, and the brand rim while it is being typed in.
     private var field: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
-                .accessibilityHidden(true)
-            TextField("Street, name, phone or number", text: $model.query, prompt: .placeholder("Street, name, phone or number"))
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return HStack(spacing: 8) {
+            PaperIcon(.search, size: 18, color: model.query.isEmpty ? Theme.muted : Theme.foreground)
+            TextField("Search or ask", text: $model.query, prompt: .placeholder("Search or ask"))
                 .font(Theme.font(16))
                 .focused($fieldFocused)
                 .submitLabel(.search)
@@ -95,16 +100,21 @@ private struct SearchRouteContent: View {
                 .autocorrectionDisabled()
                 .accessibilityIdentifier("search-field")
                 .textInputAutocapitalization(.never)
+                .frame(minHeight: 44)
             if !model.query.isEmpty {
                 Button { model.query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 16)).foregroundStyle(Theme.muted)
-                        .frame(width: 28, height: 36).contentShape(Rectangle())
+                    PaperIcon(.close, size: 12, color: Theme.foreground)
+                        .frame(width: 40, height: 40)
+                        .background(Theme.quietFill, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel("Clear search")
             }
         }
-        .padding(.vertical, -4)
-        .fieldWell()
+        .padding(.leading, 12).padding(.trailing, model.query.isEmpty ? 12 : 4)
+        .frame(minHeight: 46)
+        .background(Theme.card, in: shape)
+        .overlay { if fieldFocused || !model.query.isEmpty { shape.strokeBorder(Theme.brand, lineWidth: 1.5) } }
     }
 }

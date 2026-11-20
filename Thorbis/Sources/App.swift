@@ -16,10 +16,25 @@ struct ThorbisApp: App {
     @StateObject private var menuLayout = MenuLayout()
     @StateObject private var whatsNew: WhatsNew
     @State private var publicEstimateToken: String?
+    /// Paper 05A–05C: an invitation being accepted, from a link or the login screen's paste.
+    @ObservedObject private var pendingInvitation = PendingInvitation.shared
+    /// Paper 01–03: the intro shows once, before the first sign-in on this phone.
+    @State private var showsIntro = ThorbisApp.introOnLaunch()
+
+    /// Screenshot and UI-test runs (`--paper-preview`) go straight to Login, as they always have.
+    private static func introOnLaunch() -> Bool {
+        #if DEBUG
+        if PaperPreview.enabled { return false }
+        #endif
+        return AppIntroGate.shouldShow()
+    }
     @State private var lastSavedCopyCheck = Date.distantPast
-    @StateObject private var estimateHandoff = JobEstimateHandoffPresenter()
+    @StateObject private var estimateHandoff: JobEstimateHandoffPresenter
+    @StateObject private var legacyHandoff = LegacyCustomerPresenter()
 
     init() {
+        _estimateHandoff = StateObject(wrappedValue: JobEstimateHandoffPresenter(
+            arbiter: CustomerHandoffArbiter(), sceneWindow: CustomerProtectedSceneWindow()))
         // Popovers put the keyboard away before opening; they need to know whether it is up.
         ThorbisKeyboard.watch()
         #if DEBUG
@@ -45,12 +60,13 @@ struct ThorbisApp: App {
             return try await Store.fetchAuthorized(api: api, session: session)
         }
         session.onInvalidate = { [weak store, weak pendingMedia] in
+            CommsLocalStore.invalidateCached()
             DayPrefetch.shared.cancel()
             store?.invalidate()
             pendingMedia?.bind(nil)
             JobLiveActivity.retire()
         }
-        session.onJobAuthorityRevoked = { JobLiveActivity.retire() }
+        session.onJobAuthorityRevoked = { JobLiveActivity.retire(); TodaySnapshot.clear() }
         session.onSignedOut = { [weak store, weak outbox, weak pendingMedia, weak api] in
             DayPrefetch.shared.cancel()
             api?.savedCopyScope = nil
@@ -63,6 +79,7 @@ struct ThorbisApp: App {
             TodaySnapshot.clear()
             JobInvoiceMemory.clear()
             JobChecklistStore.clearAll()
+            ChecklistDraftStore.clearAll()
             OfficeContact.clearAll()
             Task { @MainActor in RecentItems.shared.clear(); SpotlightIndex.shared.clear() }
         }
@@ -106,7 +123,7 @@ struct ThorbisApp: App {
         }
         // Lock Screen and Dynamic Island step buttons run here, through the same session and outbox.
         JobStepIntentRunner.configure(api: api, session: session, outbox: outbox, store: store)
-        PushNotifications.shared.start(api: api, store: store)
+        PushNotifications.shared.start(api: api, store: store, pushOn: { [weak session] in session?.isOn(.staffPush) ?? false })
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
@@ -135,17 +152,29 @@ struct ThorbisApp: App {
                 self.publicEstimateToken = nil
             }
             .id(publicEstimateToken)
+        } else if let invitationID = pendingInvitation.id {
+            // Hosted above the phase switch: signing in or creating the account mid-flow must not
+            // tear the invitation down.
+            JoinTeamFlow(invitationID: invitationID,
+                         onClose: { pendingInvitation.id = nil },
+                         onFinished: { pendingInvitation.id = nil })
+                .id(invitationID)
         } else {
             switch session.phase {
             case .restoring:
                 SessionLoadingView(message: session.signingOut ? String(localized: "Signing out…") : String(localized: "Opening your workspace…"))
+            case .signedOut where showsIntro:
+                AppIntroView { _ in
+                    AppIntroGate.markSeen()
+                    showsIntro = false
+                }
             case .signedOut, .failed:
                 LoginView()
                     .onAppear { whatsNew.signedInThisLaunch = true }
             case .choosingWorkspace, .noWorkspace:
                 WorkspaceSelectionView()
             case .ready:
-                RootView().id(session.generation).businessSetupPrompt().inboxTextPresenter()
+                RootView().id(session.generation).businessSetupPrompt().inboxTextPresenter().inboxEmailPresenter()
             }
         }
     }
@@ -173,7 +202,7 @@ struct ThorbisApp: App {
                 #endif
             }
             }
-            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil }, set: { _ in })) {
+            .fullScreenCover(isPresented: Binding(get: { estimateHandoff.active != nil && !estimateHandoff.usesSceneWindow }, set: { _ in })) {
                 if let model = estimateHandoff.active {
                     JobEstimateProtectedOwner(model: model, presenter: estimateHandoff)
                 }
@@ -181,6 +210,7 @@ struct ThorbisApp: App {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.canvas)
             .environmentObject(estimateHandoff)
+            .environmentObject(legacyHandoff)
             .environmentObject(api)
             .environmentObject(store)
             .environmentObject(session)
@@ -243,7 +273,9 @@ struct ThorbisApp: App {
             }
             .onOpenURL { url in
                 whatsNew.skipThisLaunch = true
-                if let token = PublicEstimateActionLink.token(from: url) {
+                if let invitationID = InvitationLink.id(from: url) {
+                    pendingInvitation.id = invitationID
+                } else if let token = PublicEstimateActionLink.token(from: url) {
                     publicEstimateToken = token
                 } else if let query = SearchLink.query(from: url) {
                     store.requestedSearch = query
@@ -278,6 +310,8 @@ extension ThorbisApp {
             await outbox.drain(api: api, useCommandEndpoint: session.isFeatureOn("offline_sync"))
         }
         await store.refresh(api)
+        // Checklist answers kept on this phone while there was no signal.
+        await ChecklistSync.flushAll(api: api, session: session)
     }
 }
 
@@ -344,7 +378,11 @@ final class Store: ObservableObject {
     @Published var requestedSearch: String? {
         didSet { if requestedSearch != nil { openedForRecord = true } }
     }
-    @Published var customers: [Customer] = []
+    @Published var customers: [Customer] = [] {
+        didSet { customerNames = Dictionary(customers.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }) }
+    }
+    /// Names by id, so each row's lookup does not walk the whole customer list.
+    private var customerNames: [String: String] = [:]
     @Published var error: String?
     @Published var loading = false
     /// When the shown jobs came from the on-device copy instead of the server.
@@ -459,7 +497,7 @@ final class Store: ObservableObject {
     }
 
     func customerName(_ id: String?) -> String {
-        customers.first { $0.id == id }?.name ?? "Customer"
+        id.flatMap { customerNames[$0] } ?? "Customer"
     }
 }
 

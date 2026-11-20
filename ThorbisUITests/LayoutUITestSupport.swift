@@ -142,11 +142,14 @@ extension XCUIApplication {
     func thorbisFrontButton(matching predicate: NSPredicate) -> XCUIElement {
         let query = buttons.matching(predicate)
         _ = query.firstMatch.waitForExistence(timeout: 5)
-        let matches = query.allElementsBoundByIndex
-        if let usable = matches.reversed().first(where: { thorbisUsableFrame(of: $0) != nil }) {
-            return usable
+        // Bind by index: an element taken from `allElementsBoundByIndex` re-resolves by its label,
+        // which is ambiguous when a page button behind the menu has the same name.
+        let count = query.count
+        for index in stride(from: count - 1, through: 0, by: -1) {
+            let candidate = query.element(boundBy: index)
+            if thorbisUsableFrame(of: candidate) != nil { return candidate }
         }
-        return matches.last ?? query.firstMatch
+        return count > 0 ? query.element(boundBy: count - 1) : query.firstMatch
     }
 
     func thorbisFrameDump(_ element: XCUIElement, name: String) -> String {

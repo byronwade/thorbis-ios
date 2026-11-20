@@ -103,7 +103,9 @@ final class NoteDictation: ObservableObject {
         UIImpactFeedbackGenerator(style: .soft).impactOccurred()
     }
 
-    private static func authorize() async -> Bool {
+    /// Not on the main actor: Speech calls the handler on a background queue, and a main-actor
+    /// closure there fails Swift 6's queue check and ends the app (as PrivacyPermissions does).
+    private nonisolated static func authorize() async -> Bool {
         let speech: SFSpeechRecognizerAuthorizationStatus = await withCheckedContinuation { done in
             let current = SFSpeechRecognizer.authorizationStatus()
             guard current == .notDetermined else { done.resume(returning: current); return }
@@ -160,18 +162,20 @@ private final class DictationEngine: @unchecked Sendable {
     private enum DictationError: Error { case noInput }
 }
 
-/// The quiet row of one-tap phrases above the note field.
+/// The quiet row of one-tap phrases above the note field. Paper F7's chips: a pill on the field
+/// fill with a Semibold word and no rim, a full 44pt tall so a gloved thumb lands on it.
 struct QuickNotesRow: View {
     let insert: (String) -> Void
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(QuickNotes.phrases, id: \.self) { phrase in
-                    ThorbisChipToggle(label: phrase, isOn: false) { insert(phrase) }
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("Add “\(phrase)”")
-                        .accessibilityIdentifier("quick-note")
+                    Button { insert(phrase) } label: {
+                        Text(phrase).paperButton(.secondary, tone: .quiet)
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Add “\(phrase)”")
+                    .accessibilityIdentifier("quick-note")
                 }
             }
         }
@@ -180,7 +184,8 @@ struct QuickNotesRow: View {
     }
 }
 
-/// The mic beside the note field: a quiet circle, ink while listening.
+/// The mic beside the note field (Paper F7): a quiet circle on the field fill, brand blue with a
+/// white glyph while listening.
 struct DictateNoteButton: View {
     let isListening: Bool
     let action: () -> Void
@@ -188,9 +193,9 @@ struct DictateNoteButton: View {
         Button(action: action) {
             Image(systemName: isListening ? "stop.fill" : "mic")
                 .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(isListening ? Theme.onInk : Theme.foreground)
+                .foregroundStyle(isListening ? Color.white : Theme.foreground)
                 .frame(width: 44, height: 44)
-                .background(isListening ? Theme.ink : Theme.fill, in: Circle())
+                .background(isListening ? Theme.brand : Theme.fill, in: Circle())
                 .symbolEffect(.pulse, isActive: isListening)
         }
         .buttonStyle(PressStyle())

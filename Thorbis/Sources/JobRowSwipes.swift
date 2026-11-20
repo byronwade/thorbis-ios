@@ -4,7 +4,7 @@ import UIKit
 // Job row swipes on Today and Jobs (owner-approved 31 Oct 2026):
 // - Swipe right (leading): Call and Directions, from the number and the job's own service location
 //   the screen already has or reads once when the row is first swiped.
-// - Swipe left (trailing): the next status move (On my way, Arrive, Start work), from the same
+// - Swipe left (trailing): the next status move (On my way, I've arrived, Start work), from the same
 //   allowed moves the job's status popover and Today's Now panel use. List items carry no allowed
 //   moves, so the row reads GET /v1/jobs/{id} the first time it is swiped ("Checking"), and shows
 //   nothing when the server allows no forward move. Moves are never guessed online.
@@ -64,7 +64,8 @@ enum JobMoves {
     static func title(_ step: String) -> String {
         switch step {
         case "en_route": "On my way"
-        case "arrived": "Arrive"
+        // Paper F2: the arrive step reads "I've arrived" wherever it is a button.
+        case "arrived": "I've arrived"
         case "in_progress": "Start work"
         default: step.statusLabel
         }

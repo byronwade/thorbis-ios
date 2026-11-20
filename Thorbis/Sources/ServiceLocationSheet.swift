@@ -40,157 +40,151 @@ struct ServiceLocationSheet: View {
     private var canAttemptSave: Bool { !busy && session.can("customer.edit", feature: "core_crm") }
 
     var body: some View {
-        VStack(spacing: 14) {
-            Capsule().fill(Theme.border).frame(width: 36, height: 4).padding(.top, 10)
-
-            ZStack {
-                Text(isEditing ? "Edit location" : "New location")
-                    .font(Theme.font(17, weight: .medium))
-                // MA-16: Cancel leading; the one commit is the ink button at the bottom.
-                HStack {
-                    Button("Cancel") { dismiss() }
-                        .font(Theme.font(15))
-                        .foregroundStyle(Theme.foreground)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityLabel("Cancel location changes")
-                        .disabled(busy)
-                    Spacer()
-                }
-            }
-            .frame(minHeight: 44)
-
+        // Paper 87B: Cancel and Save in the title row, then the place as grouped cards on the canvas.
+        VStack(spacing: 0) {
+            header
             ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    paperField("Label", placeholder: "Main house", text: $draft.label, field: .label)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Type").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        HStack(spacing: 6) {
-                            kindChip("Service", value: "service")
-                            kindChip("Billing", value: "billing")
-                        }
+                VStack(alignment: .leading, spacing: 16) {
+                    if let error {
+                        Text(error).font(Theme.font(13)).foregroundStyle(Theme.destructive)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                            .accessibilityIdentifier("service-location-save-error")
                     }
-
-                    paperField("Address", placeholder: "Street, city", text: $draft.address, field: .address, multiline: true)
-                    paperField("Notes", placeholder: "Entry instructions or site context", text: $draft.notes, field: .notes, multiline: true)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Map pin").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        HStack(spacing: 8) {
-                            paperField("Latitude", placeholder: "37.7749", text: $draft.latitude, field: .latitude, keyboard: .numbersAndPunctuation, capitalization: .never)
-                            paperField("Longitude", placeholder: "-122.4194", text: $draft.longitude, field: .longitude, keyboard: .numbersAndPunctuation, capitalization: .never)
-                        }
-                        Text("Optional. Clear both coordinates to remove the map pin.")
-                            .font(Theme.font(12)).foregroundStyle(Theme.muted)
+                    if !busy && !canAttemptSave {
+                        // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
+                        Text("Your role can't change addresses. Ask your office.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
                     }
-
-                    Text("Access and parking")
-                        .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-                        .padding(.top, 2)
-                    paperField("Gate code", placeholder: "Optional", text: $draft.gateCode, field: .gateCode, capitalization: .never)
-                    paperField("Alarm code", placeholder: "Optional", text: $draft.alarmCode, field: .alarmCode, capitalization: .never)
-                    paperField("Dogs on site", placeholder: "Name or instructions", text: $draft.dogOnSite, field: .dogOnSite)
-                    paperField("Parking", placeholder: "Where to park", text: $draft.parking, field: .parking)
+                    card {
+                        stackedField("Address", placeholder: "Street, city", text: $draft.address, field: .address, multiline: true)
+                        WellDivider(leading: 16)
+                        stackedField("Place name", placeholder: "Main house", text: $draft.label, field: .label)
+                        WellDivider(leading: 16)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Type").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            ThorbisSegmented(options: [("service", "Service"), ("billing", "Billing")], selection: $draft.kind)
+                        }
+                        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    card {
+                        stackedField("Gate code", placeholder: "1907#", text: $draft.gateCode, field: .gateCode, capitalization: .never)
+                        WellDivider(leading: 16)
+                        stackedField("Alarm code", placeholder: "Optional", text: $draft.alarmCode, field: .alarmCode, capitalization: .never)
+                        WellDivider(leading: 16)
+                        stackedField("Pets", placeholder: "Dog in the backyard", text: $draft.dogOnSite, field: .dogOnSite)
+                        WellDivider(leading: 16)
+                        stackedField("Parking", placeholder: "Park on the street", text: $draft.parking, field: .parking)
+                        WellDivider(leading: 16)
+                        stackedField("Access notes", placeholder: "Text before you open the side gate", text: $draft.notes, field: .notes, multiline: true)
+                    }
+                    card {
+                        inlineField("Latitude", placeholder: "37.7749", text: $draft.latitude, field: .latitude)
+                        WellDivider(leading: 16)
+                        inlineField("Longitude", placeholder: "-122.4194", text: $draft.longitude, field: .longitude)
+                    }
+                    // Paper 87B's line first; the map pin's own rule after it.
+                    Text("Gate code and notes show on every job here. The map pin is optional; clear both to remove it.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.subtle)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 4)
                 }
-                .padding(.bottom, 4)
+                .padding(.horizontal, 16).padding(.top, 20).padding(.bottom, 32)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollDismissesKeyboard(.interactively)
             .disabled(busy)
-
-            VStack(spacing: 8) {
-                if let error {
-                    Text(error).font(Theme.font(13)).foregroundStyle(Theme.destructive)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityIdentifier("service-location-save-error")
-                }
-                Button { Task { await save() } } label: {
-                    Group {
-                        if busy { ProgressView().tint(Theme.onInk) }
-                        else { Text(isEditing ? "Save changes" : "Add location") }
-                    }
-                    .inkCommit(enabled: canAttemptSave)
-                }
-                .buttonStyle(PressStyle())
-                .disabled(!canAttemptSave)
-                // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
-                if !busy && !canAttemptSave {
-                    Text("Your role can't change addresses. Ask your office.").font(Theme.font(13)).foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
         }
-        .padding(.horizontal, 20)
-        .padding(.bottom, 16)
         .foregroundStyle(Theme.foreground)
-        .background(Theme.canvas)
+        .background(Theme.background.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .presentationDetents([.height(600), .large])
-        .presentationDragIndicator(.hidden)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
         .presentationCornerRadius(Theme.cardRadius)
         .thorbisSheetSurface()
         .interactiveDismissDisabled(busy)
     }
 
-    private func paperField(
+    /// Paper's title row: Cancel on a card pill, the title, Save on the brand pill.
+    private var header: some View {
+        PaperTaskBar(title: isEditing ? "Edit property" : "Add property", cancelDisabled: busy,
+                     cancelAccessibilityLabel: "Cancel location changes",
+                     commit: ThorbisSheetHeaderAction(title: "Save", busy: busy, enabled: canAttemptSave || busy,
+                                                      accessibilityLabel: isEditing ? "Save changes" : "Add location") {
+                         Task { await save() }
+                     }) { dismiss() }
+    }
+
+    /// One Paper card: the card tone, radius 20, rows separated by an inset hairline.
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 0) { content() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    }
+
+    /// A label above its answer (13 muted over 17 Medium), typed in place.
+    private func stackedField(
         _ title: String,
         placeholder: String,
         text: Binding<String>,
         field: LocationField,
-        keyboard: UIKeyboardType = .default,
         multiline: Bool = false,
         capitalization: TextInputAutocapitalization = .sentences
     ) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted)
-            TextField(placeholder, text: text, prompt: .placeholder(placeholder), axis: multiline ? .vertical : .horizontal)
-                // design.thorbis.com mobile: input type is at least 16.
-                .font(field == .latitude || field == .longitude || field == .gateCode || field == .alarmCode ? Theme.monoFont(16) : Theme.font(16))
-                .keyboardType(keyboard)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+            TextField("", text: text, prompt: .placeholder(placeholder), axis: multiline ? .vertical : .horizontal)
+                .font(field == .notes ? Theme.font(15) : Theme.font(17, weight: .medium))
+                .lineLimit(multiline ? 1...4 : 1...1)
                 .textInputAutocapitalization(capitalization)
-                .autocorrectionDisabled(field == .latitude || field == .longitude || field == .gateCode || field == .alarmCode)
+                .autocorrectionDisabled(field == .gateCode || field == .alarmCode)
                 .textContentType(field == .address ? .fullStreetAddress : nil)
                 .focused($focusedField, equals: field)
                 // MA-16: return moves to the next field (multi-line fields keep return for new lines).
-                .submitLabel(field == .parking ? .done : .next)
+                .submitLabel(field == .longitude ? .done : .next)
                 .onSubmit { focusedField = next(after: field) }
-                .padding(.horizontal, 14)
-                .frame(minHeight: multiline ? 70 : 48, maxHeight: multiline ? 84 : 48, alignment: .topLeading)
-                .background(Theme.field, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .stroke(focusedField == field ? Theme.foreground : Theme.border,
-                                lineWidth: focusedField == field ? 1.5 : 1)
-                }
+                .accessibilityLabel(title)
         }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// A label on the left, its answer (muted, right-aligned) on the right, 56 tall.
+    private func inlineField(_ title: String, placeholder: String, text: Binding<String>, field: LocationField) -> some View {
+        HStack(spacing: 8) {
+            Text(title).font(Theme.font(16)).foregroundStyle(Theme.foreground).accessibilityHidden(true)
+            Spacer(minLength: 8)
+            TextField("", text: text, prompt: .placeholder(placeholder))
+                .font(Theme.monoFont(16)).foregroundStyle(Theme.muted)
+                .multilineTextAlignment(.trailing)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .focused($focusedField, equals: field)
+                .submitLabel(field == .longitude ? .done : .next)
+                .onSubmit { focusedField = next(after: field) }
+                .accessibilityLabel(title)
+        }
+        .padding(.horizontal, 16).frame(minHeight: 56)
     }
 
     private func next(after field: LocationField) -> LocationField? {
         switch field {
-        case .label: .address
-        case .address: .notes
-        case .notes: .latitude
-        case .latitude: .longitude
-        case .longitude: .gateCode
+        case .address: .label
+        case .label: .gateCode
         case .gateCode: .alarmCode
         case .alarmCode: .dogOnSite
         case .dogOnSite: .parking
-        case .parking: nil
+        case .parking: .notes
+        case .notes: .latitude
+        case .latitude: .longitude
+        case .longitude: nil
         }
-    }
-
-    private func kindChip(_ title: String, value: String) -> some View {
-        let selected = draft.kind == value
-        return Button { draft.kind = value } label: {
-            Text(title)
-                .font(Theme.font(13, weight: selected ? .semibold : .medium))
-                .foregroundStyle(selected ? Theme.onInk : Theme.muted)
-                .padding(.horizontal, 12)
-                .frame(height: 30)
-                .background(selected ? Theme.ink : Theme.fill, in: Capsule())
-                .frame(minHeight: 44)
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private func save() async {

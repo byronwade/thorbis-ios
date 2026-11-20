@@ -25,28 +25,44 @@ final class AppearanceTests: XCTestCase {
         }
     }
 
-    // v2 (design.thorbis.com): weights 400 and 500 only; anything heavier is 500; nothing under 12.
-    func testTypeRampKeepsTwoWeightsAndAFloor() {
-        for heavy: Font.Weight in [.semibold, .bold, .heavy, .black] {
-            XCTAssertEqual(Theme.allowed(heavy), .medium)
+    // Paper v2 (2026-11-16): Inter 400 to 700; heavier is bold, lighter is regular; nothing under 12.
+    func testTypeRampKeepsPaperWeightsAndAFloor() {
+        for weight: Font.Weight in [.regular, .medium, .semibold, .bold] {
+            XCTAssertEqual(Theme.allowed(weight), weight)
         }
-        XCTAssertEqual(Theme.allowed(.regular), .regular)
-        XCTAssertEqual(Theme.allowed(.medium), .medium)
+        for heavy: Font.Weight in [.heavy, .black] {
+            XCTAssertEqual(Theme.allowed(heavy), .bold)
+        }
+        for light: Font.Weight in [.ultraLight, .thin, .light] {
+            XCTAssertEqual(Theme.allowed(light), .regular)
+        }
         XCTAssertEqual(Theme.minimumSize, 12)
     }
 
-    // v2 (owner: "the font size is too big"): staff screens use the compact ramp; customer-facing
-    // presentation keeps the older ramp so its 17pt floor holds.
+    // Paper's electric blue, not the retired #3A6AE0.
+    func testBrandIsPaperBlue() {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        XCTAssertTrue(UIColor(Theme.brand).getRed(&r, green: &g, blue: &b, alpha: &a))
+        XCTAssertEqual(Int((r * 255).rounded()), 0x2F)
+        XCTAssertEqual(Int((g * 255).rounded()), 0x6B)
+        XCTAssertEqual(Int((b * 255).rounded()), 0xFF)
+    }
+
+    // Paper v2: Paper's own sizes (rows 16, subtitles 14, labels 13, sheet titles 17/22) and a
+    // 34pt bold title on every screen; customer-facing presentation keeps its 17pt floor.
     func testEverySizeLandsOnTheRamp() {
-        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 24, 26]
+        let ramp: Set<CGFloat> = [12, 13, 14, 15, 16, 17, 20, 22, 24, 28, 30, 34]
         for size in stride(from: CGFloat(8), through: 40, by: 1) {
             XCTAssertTrue(ramp.contains(Theme.onRamp(size)), "\(size) snapped to \(Theme.onRamp(size))")
         }
-        XCTAssertEqual(Theme.onRamp(15), 14)
-        XCTAssertEqual(Theme.onRamp(16), 15)
-        XCTAssertEqual(Theme.onRamp(17), 15)
-        XCTAssertEqual(Theme.onRamp(30), 24)
-        XCTAssertEqual(Theme.onRamp(34), 26)
+        XCTAssertEqual(Theme.onRamp(14), 14)
+        XCTAssertEqual(Theme.onRamp(15), 15)
+        XCTAssertEqual(Theme.onRamp(16), 16)
+        XCTAssertEqual(Theme.onRamp(17), 17)
+        XCTAssertEqual(Theme.onRamp(22), 22)
+        XCTAssertEqual(Theme.onRamp(30), 30, "Paper draws record titles at 30")
+        XCTAssertEqual(Theme.onRamp(28), 28)
+        XCTAssertEqual(Theme.onRamp(34), 34)
         XCTAssertEqual(Theme.customerRamp(17), 17)
         XCTAssertEqual(Theme.customerRamp(34), 34)
     }

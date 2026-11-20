@@ -110,3 +110,20 @@ enum JobDetailCache {
     static func history(_ jobID: String) -> SavedHistory? { read(SavedHistory.self, "\(jobID).history.json") }
     static func clearAll() { try? FileManager.default.removeItem(at: directory) }
 }
+
+/// The estimate or invoice as this phone last read it, shown for the moment before the live one
+/// arrives so the screen is never blank. It is only ever looked at: every action (send, approve,
+/// issue, edit, take a payment) waits for the live read.
+enum SavedDocumentPreview {
+    static func estimate(_ saved: EstimateRecord?, id: String, organization: String?, scope: JobDocumentScope? = nil) -> EstimateRecord? {
+        guard let saved, let organization, saved.id == id, saved.organizationId == organization else { return nil }
+        if let scope, !scope.contains(saved, requestedID: id) { return nil }
+        return saved
+    }
+
+    static func invoice(_ saved: InvoiceRecord?, id: String, organization: String?, scope: JobDocumentScope? = nil) -> InvoiceRecord? {
+        guard let saved, let organization, saved.id == id, saved.organizationId == organization else { return nil }
+        if let scope, !scope.contains(saved) { return nil }
+        return saved
+    }
+}

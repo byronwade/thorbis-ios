@@ -1,4 +1,6 @@
+import MessageUI
 import SwiftUI
+import UIKit
 
 /// "Before you close": the server's closeout requirements, then the acknowledgement checks its
 /// policy asks for. One source for the checklist screen and the job's on-site panel, so their
@@ -166,11 +168,15 @@ struct JobCloseoutView: View {
     let jobID: String
     /// The job's street when the opener already knows it (street first, the ID after it).
     var place: String? = nil
+    /// Paper 21K / 21T "Cancel job": opened from the job's menu, the cancel confirm shows as soon
+    /// as the job has loaded and the server still allows it.
+    var startsCancel = false
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject var store: Store
     @EnvironmentObject var outbox: FieldOutbox
     @EnvironmentObject var pendingMedia: PendingMediaStore
+    @State private var askedCancel = false
     @State private var closeout: FieldCloseout?
     @State private var job: JobRecord?
     @State private var error: String?
@@ -187,6 +193,16 @@ struct JobCloseoutView: View {
     @State private var unpaidNextAction = ""
     /// Said above Complete job when it is pressed with the closeout not yet satisfied.
     @State private var completeProblem: String?
+    /// The job's bill for Paper F5's Summary, sign-off and Collect (`loadBill`). Nil when this role
+    /// can't see invoices or the job has none this phone has read.
+    @State private var bill: InvoiceRecord?
+    /// Paper F5 (field mode): a job under way wraps up under the visit's five steps, with the
+    /// job in the bar. A finished job, and accessibility sizes, keep Paper 83's titled page.
+    private var fieldMode: Bool {
+        // The saved copy stands in until the job has loaded, so the page opens in its own shape.
+        guard let job = job ?? JobDetailCache.job(jobID) else { return false }
+        return job.status == "in_progress" && !isCompleted && !closeoutTypeSize.isAccessibilitySize
+    }
     private var mayRecordUnpaidDisposition: Bool {
         // Notes, photos and checks waiting on this phone already count; only the unpaid balance is left.
         guard let closeout, !remainingUnmet.isEmpty, session.can("job.edit", feature: "jobs") else { return false }
@@ -288,19 +304,25 @@ struct JobCloseoutView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 6) {
-                    if let place {
-                        PaperEyebrow(text: [place, job.map { store.customerName($0.customerId) }, "JOB-\(jobID.suffix(4).uppercased())"]
-                            .compactMap { $0 }.joined(separator: " · "))
-                    } else {
-                        PaperEyebrow(reference: "JOB-\(jobID.suffix(4).uppercased())", text: job.map { store.customerName($0.customerId) })
-                    }
+                if fieldMode {
+                    // Paper F5: the visit's steps lead, "Wrap up" the current one; the job is in the bar.
+                    JobFieldSteps(current: 3)
+                        .padding(.top, 8).padding(.bottom, 22)
+                } else {
+                // Paper 83: the 34 Bold title, then "JOB-2214 · Marlowe residence" in 15 muted.
+                VStack(alignment: .leading, spacing: 2) {
                     Text(isCompleted ? "Job complete" : "Wrap up this job")
-                        .font(Theme.font(24, weight: .medium)).tracking(-0.36).accessibilityAddTraits(.isHeader)
-                    if completionWaiting { WaitingToSyncLabel() }
+                        .font(Theme.font(34, weight: .bold)).tracking(-0.85)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(closeoutSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if completionWaiting { WaitingToSyncLabel().padding(.top, 4) }
                 }
-                .padding(.bottom, 14)
-                if let error { ErrorBanner(message: error, retry: closeout == nil ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
+                .padding(.horizontal, 4)
+                .padding(.top, PaperHeaderMetrics.titleTopUnderBar).padding(.bottom, 22)
+                }
+                if let error { ErrorBanner(message: error, retry: closeout == nil ? { await load() } : nil).padding(.horizontal, -PaperCardMetrics.margin) }
                 if let closeout {
                     let checks = CloseoutChecklist.acknowledgementChecks(closeout)
                     let waitingChecks = outbox.waitingChecks(jobID: jobID)
@@ -308,14 +330,12 @@ struct JobCloseoutView: View {
                     let progress = (done: closeout.requirements.filter { $0.outcome != "blocked" || waitingSatisfies($0) }.count
                                         + checks.filter { closeout.facts.acknowledgedCheckKeys.contains($0.key) || waitingChecks.contains($0.key) }.count,
                                     total: closeout.requirements.count + checks.count)
-                    PaperGroupHeader(title: "Before you close") {
-                        Text("\(progress.done) of \(progress.total)").font(Theme.monoFont(12))
-                    }
-                    // One white sheet for the checklist, as on the job's On site list.
+                    // Paper 83: "Before you close" with "3 of 4" at the trailing edge, over one card.
                     if !closeout.requirements.isEmpty || !checks.isEmpty {
-                    PaperCard { VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { _, requirement in
+                    PaperSection(title: checklistTitle) { VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(closeout.requirements.enumerated()), id: \.offset) { offset, requirement in
                         let step = CloseoutNextStep(requirement)
+                        if offset > 0 { WellDivider(leading: PaperCardMetrics.inset + markWidth) }
                         let waiting = waitingSatisfies(requirement)
                         let canRecover = !waiting && !session.isOffline && step?.buttonTitle != nil
                             && (step?.capabilities.allSatisfy({ session.can($0, feature: "invoicing") }) ?? false)
@@ -333,6 +353,7 @@ struct JobCloseoutView: View {
                     }
                     ForEach(checks, id: \.key) { check in
                         let waiting = waitingChecks.contains(check.key)
+                        if check.key != checks.first?.key || !closeout.requirements.isEmpty { WellDivider(leading: PaperCardMetrics.inset + markWidth) }
                         let acknowledged = closeout.facts.acknowledgedCheckKeys.contains(check.key) || waiting
                         let canConfirm = !acknowledged && !isCompleted && session.can("job.edit", feature: "jobs")
                         checklistLayout {
@@ -347,14 +368,27 @@ struct JobCloseoutView: View {
                         }
                         .padding(.horizontal, PaperCardMetrics.inset)
                     }
-                    }.padding(.vertical, 6) }
+                    } } accessory: {
+                        // Paper F5 counts what is left ("3 left"); Paper 83, what is done ("3 of 4").
+                        Text(checklistCount(done: progress.done, total: progress.total))
+                            .font(Theme.font(13, weight: fieldMode ? .semibold : .regular)).monospacedDigit()
+                            .foregroundStyle(Theme.muted)
+                    }
                     }
                     if closeout.requirements.isEmpty && checks.isEmpty {
-                        Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted).frame(minHeight: 44)
+                        PaperSection(checklistTitle) {
+                            Text("Nothing else is required before closing.").font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                .padding(.horizontal, PaperCardMetrics.inset).frame(minHeight: 56)
+                        }
+                    }
+                    if fieldMode {
+                        // Paper F5: what the visit came to, then where the customer signs.
+                        summarySection(closeout).padding(.top, 16)
+                        signOffSection.padding(.top, 16)
                     }
                     if closeout.unmet.contains(where: { $0.kind == "payment_or_unpaid_disposition" && $0.outcome == "blocked" }),
                        !unassociatedPendingPayments.isEmpty || !recordedInvoiceIDsToRefresh.isEmpty {
-                        PaperGroupHeader(title: "Payments to check").padding(.top, 18)
+                        PaperGroupHeader(title: "Payments to check").padding(.top, 22).padding(.horizontal, 4)
                         if !unassociatedPendingPayments.isEmpty || !unassociatedRecordedPayments.isEmpty {
                             Text("Some payments on this phone aren't linked to a job, so they can't confirm this checklist yet.")
                                 .font(Theme.font(15)).foregroundStyle(Theme.muted)
@@ -388,50 +422,77 @@ struct JobCloseoutView: View {
                         }
                     }
                     if mayRecordUnpaidDisposition && !isCompleted {
-                        PaperGroupHeader(title: "Unpaid follow-up").padding(.top, 18)
-                        ThorbisSelect(options: [
-                            ("customer_will_pay_later", "Customer will pay later"),
-                            ("office_collection_required", "Office collection required"),
-                            ("payment_attempt_failed", "Payment attempt failed"),
-                            ("other", "Other"),
-                        ], selection: $unpaidReasonCode, label: "Reason")
-                        wellField("Explain the unpaid balance", text: $unpaidReason)
+                        // Paper 83A "Balance still due": the amount large and centred over the
+                        // invoice it belongs to, as this phone last read it.
+                        if let balance = unpaidBalance {
+                            VStack(spacing: 4) {
+                                Text("Balance still due").font(Theme.font(13, weight: .semibold)).foregroundStyle(Theme.muted)
+                                Text(balance.amount).font(Theme.font(34, weight: .bold)).tracking(-0.85).monospacedDigit()
+                                    .lineLimit(1).minimumScaleFactor(0.6)
+                                Text(balance.reference).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 22)
+                            .accessibilityElement(children: .combine)
+                        }
+                        // Paper 83A: the reasons as one radio card under the question.
+                        PaperSection("Why are you leaving without payment?") {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(unpaidReasonOptions, id: \.code) { option in
+                                    if option.code != unpaidReasonOptions.first?.code { WellDivider(leading: PaperCardMetrics.inset + 36) }
+                                    UnpaidReasonRow(title: option.title, selected: unpaidReasonCode == option.code) {
+                                        unpaidReasonCode = option.code
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.top, 22)
+                        wellField("Explain the unpaid balance", text: $unpaidReason).padding(.top, 16)
                         wellField("Office follow-up action", text: $unpaidNextAction).padding(.top, 8)
                         Text("Completing with this leaves payment outstanding and creates an office follow-up.")
-                            .font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 8)
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8).padding(.horizontal, 4)
                     }
                     if job?.status == "completed" && !session.isOffline {
-                        PaperGroupHeader(title: "Billing").padding(.top, 18)
-                        if session.can("invoice.create", feature: "invoicing") {
-                            Button { Task { await completionInvoice() } } label: {
-                                PaperMenuRow("Open completion invoice", symbol: "doc.plaintext")
-                            }.buttonStyle(RowPressStyle()).disabled(busy)
-                        }
-                        if let invoiceID, session.can("invoice.view", feature: "invoicing") {
-                            NavigationLink { InvoiceDetailView(id: invoiceID).thorbisBackButton() } label: { PaperMenuRow("View invoice", symbol: "doc.text") }
+                        PaperSection("Billing") {
+                            if session.can("invoice.create", feature: "invoicing") {
+                                Button { Task { await completionInvoice() } } label: {
+                                    PaperMenuRow("Open completion invoice", symbol: "doc.plaintext", filled: true)
+                                }.buttonStyle(RowPressStyle()).disabled(busy)
+                            }
+                            if let invoiceID, session.can("invoice.view", feature: "invoicing") {
+                                if session.can("invoice.create", feature: "invoicing") { WellDivider(leading: PaperCardMetrics.inset + 36) }
+                                NavigationLink { InvoiceDetailView(id: invoiceID).thorbisBackButton() } label: {
+                                    PaperMenuRow("View invoice", symbol: "doc.text", filled: true)
+                                }
                                 .buttonStyle(RowPressStyle())
+                            }
                         }
+                        .padding(.top, 22)
                     }
                     // OF-09: cancelling races with dispatch, so it needs signal and says so by not offering it.
+                    // Paper F8 / 21U: Cancel job as a red row with its mark on its own card.
                     if !session.isOffline, !isCompleted, session.can("job.cancel", feature: "jobs"), job?.allowedTransitions?.contains("canceled") == true {
-                        Button { confirmCancel = true } label: {
-                            Text("Cancel job").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
-                                .frame(minHeight: 44).contentShape(Rectangle())
+                        PaperCard {
+                            Button { confirmCancel = true } label: {
+                                PaperMenuRow(title: "Cancel job", symbol: "xmark.circle", tint: Theme.destructive, filled: true) { EmptyView() }
+                            }
+                            .buttonStyle(RowPressStyle())
+                            .disabled(busy)
                         }
-                        .buttonStyle(PressStyle())
-                        .padding(.top, 18)
-                        .disabled(busy)
+                        .padding(.top, 22)
                     }
                 } else if error == nil {
                     SkeletonRows(count: 4, leading: false, inset: 0)
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
+            // Paper v2: cards 16 from the edges, titles and labels 20 (4 more inside).
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.canvas)
-        .environment(\.paperRecordRoom, true)
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) {
             if !isCompleted, session.can("job.complete", feature: "jobs"), allowsComplete {
@@ -442,21 +503,27 @@ struct JobCloseoutView: View {
                         FieldProblem(message: completeProblem)
                             .padding(.horizontal, Theme.gutter).padding(.top, 8)
                     }
-                    PaperActionBar(title: "Complete job", symbol: "checkmark", busy: busy, disabled: closeout == nil) {
-                        if canComplete {
-                            completeProblem = nil
-                            confirmComplete = true
-                        } else {
-                            completeProblem = mayRecordUnpaidDisposition
-                                ? "Explain the unpaid balance and the office follow-up to complete this job."
-                                : "Finish the open items above to complete this job."
+                    if fieldMode {
+                        fieldBar
+                    } else {
+                        PaperActionBar(title: "Complete job", symbol: "checkmark", busy: busy, disabled: closeout == nil) {
+                            pressComplete()
                         }
                     }
                 }
                 .background(Theme.background)
             }
         }
-        .task { await load() }
+        .toolbar { fieldToolbar }
+        .task {
+            await load()
+            // Asked for from the job's menu: the same guard as the Cancel job row below.
+            if startsCancel, !askedCancel, !session.isOffline, !isCompleted, session.can("job.cancel", feature: "jobs"),
+               job?.allowedTransitions?.contains("canceled") == true {
+                askedCancel = true
+                confirmCancel = true
+            }
+        }
         .refreshable { await load() }
         // Queued confirmations landed: show the server's checklist instead of the waiting marks.
         .onChange(of: outbox.syncGeneration) { _, _ in Task { await load() } }
@@ -470,7 +537,9 @@ struct JobCloseoutView: View {
         .sensoryFeedback(.success, trigger: completed)
         .thorbisConfirm("Complete this job?", isPresented: $confirmComplete,
                         actions: [ThorbisConfirmAction("Complete job") { Task { await complete() } }])
-        .thorbisConfirm("Cancel this job?", isPresented: $confirmCancel,
+        // Paper 21U: the sheet is named "Cancel job", with the job under it ("JOB-2214 · AC not cooling").
+        .thorbisConfirm("Cancel job", message: job.map { "JOB-\($0.id.suffix(4).uppercased()) \u{00B7} \($0.title)" },
+                        isPresented: $confirmCancel, cancelTitle: "Keep job",
                         actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancel() } }])
     }
     /// Item and action side by side; at accessibility sizes the action goes under the words, whole.
@@ -479,35 +548,260 @@ struct JobCloseoutView: View {
                                               : AnyLayout(HStackLayout(spacing: 12))
     }
 
-    /// A checklist item's own action, as a quiet pill (the Schedule pill's shape) with a 44pt target.
+    /// Paper 83 subtitle: "JOB-2214 · Marlowe residence" (the street first when the opener knows it).
+    private var closeoutSubtitle: String {
+        let reference = "JOB-\(jobID.suffix(4).uppercased())"
+        let customer = job.map { store.customerName($0.customerId) }
+        if let place { return [place, customer, reference].compactMap { $0 }.joined(separator: " · ") }
+        return [reference, customer].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// Paper 83A's heading: what is still owed on the job's invoice ("$340.00") and which invoice
+    /// ("INV-2209 · Marlowe residence"), from the copy this phone last read. Nil when unknown.
+    private var unpaidBalance: (amount: String, reference: String)? {
+        guard let invoices = JobDetailCache.invoices(jobID),
+              let invoice = WrapUpList.billingInvoice(invoices),
+              invoice.status == "issued",
+              let due = TechJobFlow.due(invoice), due > 0 else { return nil }
+        let number = "INV-\(invoice.id.suffix(4).uppercased())"
+        let customer = job.map { store.customerName($0.customerId) }
+        return (amount: jobShortMoney(due, currency: invoice.currency),
+                reference: [number, customer].compactMap { $0 }.joined(separator: " · "))
+    }
+
+    /// The server's unpaid reason codes, in the order the policy lists them.
+    private var unpaidReasonOptions: [UnpaidReasonOption] {
+        [UnpaidReasonOption(code: "customer_will_pay_later", title: "Customer will pay later"),
+         UnpaidReasonOption(code: "office_collection_required", title: "Office collection required"),
+         UnpaidReasonOption(code: "payment_attempt_failed", title: "Payment attempt failed"),
+         UnpaidReasonOption(code: "other", title: "Other")]
+    }
+
+    /// A checklist item's own action: Paper's brand chip ("Now") with a 44pt target. Paper F5
+    /// draws it as a 48pt pill at 16 Semibold ("Add photo").
     private func actionPill(_ title: String) -> some View {
-        Text(title).font(Theme.font(14, weight: .medium)).foregroundStyle(Theme.foreground)
+        Text(title).font(Theme.font(fieldMode ? 16 : 13, weight: .semibold)).foregroundStyle(Theme.brandText)
             .fixedSize()
-            .padding(.horizontal, 14).frame(minHeight: 34)
-            .background(Theme.fill, in: Capsule())
+            .padding(.horizontal, fieldMode ? 16 : 10).frame(minHeight: fieldMode ? 48 : 26)
+            .background(Theme.brandSurface, in: Capsule())
             .frame(minHeight: 44).contentShape(Rectangle())
     }
 
-    private func checklistRow(done: Bool, title: String, detail: String?, showsStatus: Bool = true) -> some View {
-        // v2: the state is a word with its mark ("Done" / "To do"), not a tick's colour.
-        // At accessibility sizes the word sits under the item, so the item keeps the full width.
-        let row = closeoutTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                                               : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-        return row {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.font(15, weight: done ? .regular : .medium))
-                    .foregroundStyle(done ? Theme.muted : Theme.foreground)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let detail { Text(detail).font(Theme.font(13)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true) }
+    /// Paper F5: the job in the bar, centred: its title at 17 Semibold over
+    /// "Danielle Marlowe · JOB-2214" at 13 muted. Paper 83's page keeps its own 34 Bold title.
+    @ToolbarContentBuilder private var fieldToolbar: some ToolbarContent {
+        if fieldMode {
+            ThorbisToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(fieldTitle)
+                        .font(Theme.font(17, weight: .semibold))
+                        .foregroundStyle(Theme.foreground)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(fieldSubtitle)
+                        .font(Theme.font(13)).monospacedDigit()
+                        .foregroundStyle(Theme.muted)
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
+                // Kept between the bar's circles; a long job name truncates instead of running off.
+                .frame(maxWidth: max(140, UIScreen.main.bounds.width - 184))
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if showsStatus {
-                StatusLabel(tone: done ? .done : .unscheduled, word: done ? "Done" : "To do", emphasis: done ? .quiet : .strong)
-                    .fixedSize()
+        }
+    }
+
+    /// Paper F5 "Finish checklist"; Paper 83 "Before you close".
+    private var checklistTitle: String { fieldMode ? "Finish checklist" : "Before you close" }
+
+    /// Paper F5 counts what is left ("3 left"); Paper 83, what is done ("3 of 4").
+    private func checklistCount(done: Int, total: Int) -> String {
+        guard fieldMode else { return "\(done) of \(total)" }
+        let left = max(0, total - done)
+        return left > 0 ? "\(left) left" : "All done"
+    }
+
+    /// The checklist mark's column: Paper F5's 32pt ring and 12 after it; Paper 83's 20pt mark.
+    private var markWidth: CGFloat { fieldMode ? 44 : 34 }
+
+    /// Paper F5's bar title: the job's problem, else its street.
+    private var fieldTitle: String {
+        let title = (job ?? JobDetailCache.job(jobID))?.title ?? ""
+        return title.isEmpty ? (place ?? "Wrap up") : title
+    }
+
+    /// Paper F5's second bar line: "Danielle Marlowe · JOB-2214".
+    private var fieldSubtitle: String {
+        let reference = "JOB-\(jobID.suffix(4).uppercased())"
+        guard let job else { return reference }
+        let customer = store.customerName(job.customerId)
+        return customer == "Customer" ? reference : "\(customer) \u{00B7} \(reference)"
+    }
+
+    /// Who signs, as Paper F5 writes it ("Danielle Marlowe signs here"); "Customer" until the name is known.
+    private var signerName: String {
+        job.map { store.customerName($0.customerId) } ?? "Customer"
+    }
+
+    /// Complete job, as the bar presses it: confirm when the closeout allows it, else say what is left.
+    private func pressComplete() {
+        if canComplete {
+            completeProblem = nil
+            confirmComplete = true
+        } else {
+            completeProblem = mayRecordUnpaidDisposition
+                ? "Explain the unpaid balance and the office follow-up to complete this job."
+                : "Finish the open items above to complete this job."
+        }
+    }
+
+    /// Paper F5 "Collect $340.00": what the job's bill still owes, when this role can take the
+    /// payment here and there is signal. Nil otherwise, and the bar is Complete job alone.
+    private var collectTitle: String? {
+        guard !session.isOffline, session.can("invoice.view", feature: "invoicing"),
+              session.can("invoice.payment.create", feature: "payments"),
+              let bill, bill.status == "issued", let due = TechJobFlow.due(bill), due > 0 else { return nil }
+        return "Collect \(money(due, currency: bill.currency))"
+    }
+
+    /// Paper F5's bar: a quiet 52pt pill over the 60pt commit. With a balance to take, the commit
+    /// collects it (the invoice opens, and comes back here once paid) and Complete job is the pill
+    /// above. Paper words that pill "Send invoice instead"; leaving unpaid here is Complete job
+    /// with the server's unpaid reason, so it keeps its own words.
+    private var fieldBar: some View {
+        VStack(spacing: 10) {
+            if let collect = collectTitle, let bill {
+                Button { pressComplete() } label: {
+                    Text("Complete job").paperButton(.commit, tone: .quiet, fills: true)
+                }
+                .buttonStyle(PressStyle())
+                .disabled(busy || closeout == nil)
+                .accessibilityIdentifier("closeout-complete")
+                Button { openInvoiceID = bill.id } label: {
+                    Text(collect)
+                        .font(Theme.font(18, weight: .semibold)).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                        .inkCommit(height: PaperControl.Size.field.height)
+                }
+                .buttonStyle(PressStyle())
+                .disabled(busy)
+                .accessibilityHint("Opens the invoice to take the payment")
+                .accessibilityIdentifier("closeout-collect")
+            } else {
+                Button { pressComplete() } label: {
+                    HStack(spacing: 10) {
+                        if busy { ProgressView().tint(.white) }
+                        Text("Complete job")
+                            .font(Theme.font(18, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.8)
+                    }
+                    .inkCommit(height: PaperControl.Size.field.height)
+                }
+                .buttonStyle(PressStyle())
+                .disabled(busy || closeout == nil)
+                .accessibilityIdentifier("closeout-complete")
+            }
+        }
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 8)
+    }
+
+    /// Paper F5 "Summary": what the visit came to, in rows of a muted label and a 17 Semibold
+    /// value. Parts and labor is the bill's total as this phone last read it; time on site runs
+    /// from the arrival tap; photos count those still waiting on this phone. A fact the app
+    /// doesn't have leaves its row out.
+    private func summarySection(_ closeout: FieldCloseout) -> some View {
+        PaperSection("Summary") {
+            TimelineView(.everyMinute) { context in
+                let lines = summaryLines(closeout, now: context.date)
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(lines) { line in
+                        if line.id != lines.first?.id { WellDivider(leading: PaperCardMetrics.inset) }
+                        HStack(alignment: .center, spacing: 12) {
+                            Text(line.id).font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(line.value).font(Theme.font(17, weight: .semibold)).monospacedDigit()
+                                .foregroundStyle(Theme.foreground)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                        }
+                        .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+        }
+    }
+
+    private func summaryLines(_ closeout: FieldCloseout, now: Date) -> [CloseoutSummaryLine] {
+        var lines: [CloseoutSummaryLine] = []
+        if let bill, let total = paperLinesTotal(bill.lines) {
+            lines.append(CloseoutSummaryLine(id: "Parts and labor", value: money(total, currency: bill.currency)))
+        }
+        if let arrived = JobFiltering.date(job?.arrivedAt) {
+            lines.append(CloseoutSummaryLine(id: "Time on site", value: JobOnSiteClock.short(arrived: arrived, now: now)))
+        }
+        lines.append(CloseoutSummaryLine(id: "Photos", value: "\(closeout.facts.photoCount + waitingPhotos)"))
+        return lines
+    }
+
+    /// Paper F5 "Customer sign-off": a dashed box that says who signs. The signature is taken on
+    /// the invoice (it holds the lines the customer agrees to), so the box opens it; once the
+    /// bill's current lines are signed it says so. Shown when this role can see the job's bill.
+    @ViewBuilder private var signOffSection: some View {
+        if session.can("invoice.view", feature: "invoicing"), let bill {
+            let signed = bill.customerAuthorization?.linesRevision == bill.linesRevision
+            PaperSection("Customer sign-off") {
+                Button { openInvoiceID = bill.id } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: signed ? "checkmark.circle" : "signature")
+                            .font(.system(size: 24, weight: .regular))
+                            .foregroundStyle(signed ? Theme.success : Theme.muted)
+                            .frame(height: 28)
+                            .accessibilityHidden(true)
+                        Text(signed ? "\(signerName) signed" : "\(signerName) signs here")
+                            .font(Theme.font(17, weight: .medium))
+                            .foregroundStyle(Theme.muted)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 120)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Theme.muted, style: StrokeStyle(lineWidth: 1.5, dash: signed ? [] : [5, 4])))
+                    .padding(12)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(busy)
+                .accessibilityHint(signed ? "Opens the signed invoice" : "Opens the invoice to sign")
+                .accessibilityIdentifier("closeout-sign-off")
+            }
+        }
+    }
+
+    private func checklistRow(done: Bool, title: String, detail: String?, showsStatus: Bool = true) -> some View {
+        // Paper 83: a filled green tick when done, a brand ring when open; the title 16 Medium,
+        // a short detail on the right. At accessibility sizes the detail sits under the title.
+        let row = closeoutTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                                               : AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        // Paper F5 (field mode): a 32pt ring, the title at 17 Medium, rows 64 tall.
+        return HStack(alignment: .center, spacing: 0) {
+            CloseoutMark(done: done, field: fieldMode)
+                .frame(width: markWidth, alignment: .leading)
+            row {
+                Text(title).font(fieldMode ? Theme.font(17, weight: .medium) : Theme.font(16, weight: done ? .medium : .semibold))
+                    .tracking(fieldMode ? 0 : -0.16)
+                    .foregroundStyle(done ? Theme.subtle : Theme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let detail {
+                    Text(detail).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(.vertical, 8)
-        .frame(minHeight: 44)
+        .frame(maxWidth: .infinity, minHeight: fieldMode ? 64 : 56, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel([title, detail].compactMap { $0 }.joined(separator: ", "))
         .accessibilityValue(done ? "Done" : "To do")
@@ -531,6 +825,7 @@ struct JobCloseoutView: View {
             JobDetailCache.save(loadedJob)
             JobDetailCache.save(closeout: loadedCloseout, jobID: jobID)
             error = nil
+            await loadBill()
         } catch is CancellationError {} catch {
             if error.isConnectivityFailure {
                 // OF-04: the last copy of this checklist, so it can still be worked without signal.
@@ -543,6 +838,22 @@ struct JobCloseoutView: View {
             self.error = error.localizedDescription
         }
     }
+    /// The job's bill for Paper F5's Summary, sign-off and Collect: the completion invoice (else the
+    /// first live one) from the copy this phone last read on the job, read again by its id when
+    /// there is signal. Quiet: a failed read keeps the saved copy; no access shows no bill.
+    private func loadBill() async {
+        guard session.can("invoice.view", feature: "invoicing"),
+              let cached = JobDetailCache.invoices(jobID).flatMap({ WrapUpList.billingInvoice($0) }),
+              cached.jobId == jobID, cached.organizationId == session.activeOrganization?.id else {
+            bill = nil
+            return
+        }
+        bill = cached
+        guard !session.isOffline, let fresh = try? await api.fieldInvoice(cached.id),
+              fresh.id == cached.id, fresh.jobId == jobID else { return }
+        bill = fresh
+    }
+
     /// Saves to the phone first when there is no signal, or when the request finds none (OF-01).
     private func queueOffline(_ action: OutboxEntry.Action, label: String? = nil) {
         outbox.enqueue(action, policyVersion: session.policyVersion ?? 0, label: label)
@@ -631,6 +942,100 @@ struct JobCloseoutView: View {
     }
 }
 
+/// One row of Paper F5's Summary: its label (also its identity) and its value.
+private struct CloseoutSummaryLine: Identifiable {
+    let id: String
+    let value: String
+}
+
+/// Paper 83's checklist mark: a filled green circle with a white tick, or an open brand ring.
+/// Paper F5 (field mode) draws it at 32pt, the open ring in the quiet grey.
+private struct CloseoutMark: View {
+    let done: Bool
+    var field = false
+
+    var body: some View {
+        Group {
+            if done {
+                Image(systemName: "checkmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(Color.white, Theme.statusDone)
+            } else {
+                Image(systemName: "circle")
+                    .foregroundStyle(field ? Theme.muted : Theme.brand)
+            }
+        }
+        .font(.system(size: field ? 30 : 20, weight: field ? .light : .regular))
+        .accessibilityHidden(true)
+    }
+}
+
+/// Paper 53B's day tile: weekday over the date, 62 tall, radius 14; brand when chosen.
+private struct ScheduleDayTile: View {
+    let weekday: String
+    /// Nil draws the calendar glyph (any other date).
+    let number: String?
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Text(weekday).font(Theme.font(12, weight: .medium))
+                    .foregroundStyle(selected ? Color.white : Theme.muted)
+                    .lineLimit(1).minimumScaleFactor(0.7)
+                if let number {
+                    Text(number).font(Theme.font(17, weight: selected ? .bold : .semibold)).monospacedDigit()
+                        .foregroundStyle(selected ? Color.white : Theme.foreground)
+                } else {
+                    Image(systemName: "calendar").font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(selected ? Color.white : Theme.foreground)
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 62)
+            .background(selected ? Theme.brand : Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct UnpaidReasonOption {
+    let code: String
+    let title: String
+}
+
+/// Paper 83A: one reason on the radio card, a 22pt ring that fills brand when chosen.
+private struct UnpaidReasonRow: View {
+    let title: String
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().strokeBorder(selected ? Theme.brand : Theme.foreground.opacity(0.4), lineWidth: selected ? 2 : 1.5)
+                        .frame(width: 22, height: 22)
+                    if selected { Circle().fill(Theme.brand).frame(width: 10, height: 10) }
+                }
+                .frame(width: 24, height: 24)
+                .accessibilityHidden(true)
+                Text(title).font(Theme.font(16, weight: .medium)).tracking(-0.16)
+                    .foregroundStyle(Theme.foreground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, PaperCardMetrics.inset).padding(.vertical, 15)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
 /// "Schedule" on a list row that has no time yet: one tap to the schedule sheet instead of
 /// row → job → ••• → Schedule. Only for people who may schedule (`job.assign`).
 struct ScheduleRowButton: View {
@@ -639,14 +1044,9 @@ struct ScheduleRowButton: View {
 
     var body: some View {
         Button(action: action) {
-            Label("Schedule", systemImage: "calendar.badge.plus")
-                .font(Theme.font(13, weight: .medium))
-                .foregroundStyle(Theme.foreground)
-                .padding(.horizontal, 12)
-                .frame(height: Theme.chipHeight + 4)
-                .background(Theme.fill, in: Capsule())
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            // The compact 36pt pill every list row uses (the board's waiting rows too), so a row
+            // with a long title keeps its width for the words.
+            PaperButtonLabel(title: "Schedule", symbol: "calendar.badge.plus", size: .compact, tone: .quiet)
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Schedule \(job.title)")
@@ -705,8 +1105,40 @@ struct QuickScheduleSheet: View {
     }
 }
 
+/// Apple's Messages sheet with the reschedule text filled in (Paper 53B "Let the customer know").
+/// The tech reviews and sends it from their own phone, as Running late does; nothing is stored or
+/// claimed as sent by the server. `done` runs when Messages closes, sent or not.
+private struct ScheduleTextComposer: UIViewControllerRepresentable {
+    let recipient: String
+    let message: String
+    let done: () -> Void
+
+    func makeUIViewController(context: Context) -> MFMessageComposeViewController {
+        let controller = MFMessageComposeViewController()
+        controller.recipients = [recipient]
+        controller.body = message
+        controller.messageComposeDelegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ controller: MFMessageComposeViewController, context: Context) {}
+    func makeCoordinator() -> Coordinator { Coordinator(done: done) }
+
+    final class Coordinator: NSObject, MFMessageComposeViewControllerDelegate {
+        let done: () -> Void
+        init(done: @escaping () -> Void) { self.done = done }
+        func messageComposeViewController(_ controller: MFMessageComposeViewController, didFinishWith result: MessageComposeResult) {
+            done()
+        }
+    }
+}
+
 struct JobScheduleView: View {
     let job: JobRecord
+    /// Paper 25 (the job's own "Schedule" sheet): day chips, four arrival windows on one radio
+    /// card and Save. Off, it is Paper 53B (Schedule's "Move visit"), which also carries the
+    /// assigned tech, the text to the customer and Cancel visit.
+    var compact = false
     var onSaved: (JobRecord) -> Void = { _ in }
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
@@ -718,6 +1150,18 @@ struct JobScheduleView: View {
     @State private var error: String?
     @State private var showsCalendar = false
     @State private var showsCustomTime = false
+    /// Paper 53B "Assigned tech": who has the visit, as this sheet last read it.
+    @State private var assignedID: String?
+    @State private var roster: [FieldAssignee] = []
+    @State private var rosterLoaded = false
+    @State private var showAssign = false
+    /// Paper 53B "Let the customer know": the customer (for a phone number and a first name), the
+    /// switch, and Apple's Messages sheet once the new time is saved.
+    @State private var customer: CustomerRecord?
+    @State private var notifyCustomer = true
+    @State private var composing = false
+    /// Paper 53B "Cancel visit".
+    @State private var confirmCancel = false
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private let invalidLocalTimeMessage = "That local time does not exist on this date. Choose another date or time."
@@ -725,120 +1169,446 @@ struct JobScheduleView: View {
         (8, 0), (10, 30), (13, 0), (15, 30)
     ]
 
-    init(job: JobRecord, onSaved: @escaping (JobRecord) -> Void = { _ in }) {
+    init(job: JobRecord, compact: Bool = false, onSaved: @escaping (JobRecord) -> Void = { _ in }) {
         self.job = job
+        self.compact = compact
         self.onSaved = onSaved
         _date = State(initialValue: JobFiltering.date(job.scheduledFor) ?? Date())
         let initialDate = JobFiltering.date(job.scheduledFor) ?? Date()
         _showsCustomTime = State(initialValue: !Self.timeOptionsContain(initialDate))
+        _assignedID = State(initialValue: job.assignedToUserId)
+    }
+
+    private var canAssign: Bool { session.can("job.assign", feature: "jobs") }
+
+    /// The assigned tech's name: from the roster, or the person holding the phone.
+    private var assigneeName: String? {
+        guard let assignedID else { return nil }
+        if let person = roster.first(where: { $0.userId == assignedID }) { return person.displayName }
+        if assignedID == session.user?.id { return session.user?.name }
+        return nil
+    }
+
+    private var assigneeWords: String {
+        if assignedID == nil { return "No one yet" }
+        if let assigneeName { return assigneeName }
+        return rosterLoaded ? "Outside your roster" : ""
+    }
+
+    /// The customer's mobile number, when this phone can hand a text to Messages.
+    private var textablePhone: String? {
+        guard MFMessageComposeViewController.canSendText() else { return nil }
+        let trimmed = (customer?.phone ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Paper 53B's text: "Hi Danielle, your AC visit with Wade's Plumbing moved to Wed Jul 22,
+    /// 10 AM–12 PM. Reply if that doesn't work." The window is the two hours the schedule saves.
+    private var customerMessage: String {
+        let first = RunningLateDraft.greetingName(customer?.name, commercial: customer?.accountType == "commercial")
+        let greeting = first.map { "Hi \($0)," } ?? "Hi,"
+        let company = (session.activeOrganization?.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let with = company.isEmpty ? "" : " with \(company)"
+        let day = date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        var window = date.tradeTime
+        if let end = JobScheduleSelection.twoHourWindowEnd(from: date) { window += "\u{2013}\(end.tradeTime)" }
+        let verb = job.scheduledFor == nil ? "is booked for" : "moved to"
+        return "\(greeting) your \(job.title) visit\(with) \(verb) \(day), \(window). Reply if that doesn\u{2019}t work."
+    }
+
+    /// Cancelling races with dispatch, so it needs signal and the server's say (as Wrap up's row).
+    private var canCancelVisit: Bool {
+        !session.isOffline && session.can("job.cancel", feature: "jobs")
+            && job.allowedTransitions?.contains("canceled") == true
     }
 
     var body: some View {
+        if compact { compactBody } else { fullBody }
+    }
+
+    /// Paper 25: "Schedule" at 22 Bold with the close circle, the day chips, the windows, Save.
+    private var compactBody: some View {
+        let canSave = session.can("job.assign", feature: "jobs")
+        let calendar = Calendar.current
+        let isToday = calendar.isDateInToday(date)
+        let isTomorrow = calendar.isDateInTomorrow(date)
+        let otherDay = !isToday && !isTomorrow
+        return VStack(spacing: 0) {
+            ThorbisSheetHeader(title: "Schedule", onClose: { dismiss() })
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 8) {
+                            PaperChoiceChip(title: "Today", isOn: isToday && !showsCalendar) {
+                                showsCalendar = false
+                                selectDay(offset: 0)
+                            }
+                            PaperChoiceChip(title: "Tomorrow", isOn: isTomorrow && !showsCalendar) {
+                                showsCalendar = false
+                                selectDay(offset: 1)
+                            }
+                            Button { showsCalendar.toggle() } label: {
+                                let on = showsCalendar || otherDay
+                                HStack(spacing: 6) {
+                                    Text(otherDay ? date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()) : "Pick date")
+                                        .font(Theme.font(14, weight: on ? .semibold : .medium))
+                                        .foregroundStyle(on ? Theme.brandText : Theme.foreground)
+                                        .lineLimit(1)
+                                    PaperIcon(.chevronDown, size: 12, color: on ? Theme.brandText : Theme.muted)
+                                }
+                                .padding(.leading, 14).padding(.trailing, 12)
+                                .frame(minHeight: 40)
+                                .background(on ? Theme.brandTint : Theme.quietFill, in: Capsule())
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressStyle())
+                            .accessibilityLabel(otherDay ? "Pick date, \(date.formatted(.dateTime.weekday(.wide).month(.wide).day()))" : "Pick date")
+                            .accessibilityAddTraits(showsCalendar || otherDay ? .isSelected : [])
+                        }
+                        .padding(.horizontal, PaperCardMetrics.margin)
+                    }
+                    .scrollIndicators(.hidden)
+                    .padding(.top, 6)
+                    if showsCalendar {
+                        DatePicker("Pick date", selection: calendarDateSelection, in: Date.distantPast..., displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .tint(Theme.brand)
+                            .padding(.horizontal, 8)
+                            .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 12)
+                            .accessibilityLabel("Choose schedule date")
+                    }
+                    VStack(spacing: 0) {
+                        ForEach(Array(timeOptions.enumerated()), id: \.element.hour) { index, option in
+                            compactTimeRow(hour: option.hour, minute: option.minute, first: index == 0)
+                        }
+                        if showsCustomTime {
+                            // A time the office set outside the four windows stays chosen until another is picked.
+                            compactRow(label: date.tradeTime, note: "Current time", selected: true, first: false) {}
+                        }
+                    }
+                    .background(Theme.foreground.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 14)
+                    if !canSave {
+                        Text("Your role can't schedule jobs. Ask your office to set the time.")
+                            .font(Theme.font(13)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, Theme.gutter).padding(.top, 10)
+                    }
+                    if let error { ErrorBanner(message: error).padding(.top, 8) }
+                }
+                .padding(.bottom, 8)
+            }
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
+            .disabled(busy)
+            Button { Task { await save() } } label: {
+                HStack(spacing: 8) {
+                    if busy { ProgressView().tint(.white) }
+                    Text(saved ? "Saved" : "Save")
+                }
+                .paperButton(.commit, tone: .brand, fills: true)
+                .opacity(busy || saved || !canSave ? 0.5 : 1)
+            }
+            .buttonStyle(PressStyle())
+            .disabled(busy || saved || !canSave)
+            .accessibilityLabel(saved ? "Schedule saved" : "Save schedule")
+            .accessibilityIdentifier("schedule-save")
+            .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 8)
+        }
+        .foregroundStyle(Theme.foreground)
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize || showsCalendar ? [.large] : [.height(showsCustomTime ? 500 : 444), .large])
+        .interactiveDismissDisabled(busy)
+    }
+
+    private func compactTimeRow(hour: Int, minute: Int, first: Bool) -> some View {
+        let selected = JobScheduleSelection.matchesPreset(date, hour: hour, minute: minute)
+        return compactRow(label: presetLabel(hour: hour, minute: minute), note: "2 hr window", selected: selected, first: first) {
+            if let selectedDate = JobScheduleSelection.date(on: date, hour: hour, minute: minute) {
+                date = selectedDate
+                showsCustomTime = false
+                error = nil
+            } else {
+                error = invalidLocalTimeMessage
+            }
+        }
+    }
+
+    /// Paper 25's window row: a 22pt ring (brand with a white centre when chosen), the start at 16
+    /// Medium (Semibold brand text when chosen), "2 hr window" in 14 muted at the edge; 56 tall,
+    /// the rule from the words' edge.
+    private func compactRow(label: String, note: String, selected: Bool, first: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                ZStack {
+                    if selected {
+                        Circle().fill(Color.white)
+                        Circle().strokeBorder(Theme.brand, lineWidth: 7)
+                    } else {
+                        Circle().strokeBorder(Theme.borderStrong, lineWidth: 1.5)
+                    }
+                }
+                .frame(width: 22, height: 22)
+                .accessibilityHidden(true)
+                HStack(spacing: 12) {
+                    Text(label).font(Theme.font(16, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(selected ? Theme.brandText : Theme.foreground)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(note).font(Theme.font(14)).foregroundStyle(Theme.muted)
+                }
+                .padding(.trailing, 16)
+                .frame(maxWidth: .infinity, minHeight: 56)
+                .overlay(alignment: .top) { if !first { Rectangle().fill(Theme.border).frame(height: 1) } }
+            }
+            .padding(.leading, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityLabel("\(label), \(note)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private var fullBody: some View {
         VStack(spacing: 0) {
             header
             ScrollView {
-                // design 2026-10-30: one column — the day as the one segmented selector, the
-                // arrival times as rows on one panel, the chosen one carrying the accent check.
-                VStack(alignment: .leading, spacing: 16) {
-                    PaperFormField("Day") {
-                        dayOptions
-                        if showsCalendar {
-                            DatePicker("Pick date", selection: calendarDateSelection, in: Date.distantPast..., displayedComponents: .date)
-                                .datePickerStyle(.graphical)
-                                .tint(Theme.brand)
-                                .accessibilityLabel("Choose schedule date")
-                        }
+                // Paper 53B / P1: the visit, a strip of days, then the arrival windows on one card.
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(store.customerName(job.customerId)) · \(job.title)")
+                            .font(Theme.font(20, weight: .bold)).tracking(-0.2)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 2)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(visitSubtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    PaperFormField("Arrival", note: "2 hr window") {
-                        ThorbisSheetGroup {
-                            VStack(spacing: 0) {
-                                ForEach(timeOptions, id: \.hour) { option in
-                                    timeRow(hour: option.hour, minute: option.minute)
-                                    WellDivider()
-                                }
-                                if showsCustomTime {
-                                    HStack {
-                                        Text("Other time").font(Theme.font(16, weight: .medium))
-                                        Spacer()
-                                        DatePicker("Other time", selection: $date, displayedComponents: .hourAndMinute)
-                                            .labelsHidden()
-                                            .datePickerStyle(.compact)
-                                            .accessibilityLabel("Choose a custom start time")
-                                            .onChange(of: date) { _, _ in error = nil }
-                                    }
-                                    .padding(.horizontal, PaperCardMetrics.inset)
-                                    .frame(minHeight: 52)
-                                } else {
-                                    Button { showsCustomTime = true } label: {
-                                        Text("Other time…").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.foreground)
-                                            .padding(.horizontal, PaperCardMetrics.inset)
-                                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
-                                            .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(RowPressStyle())
-                                }
+                    .padding(.horizontal, 4)
+                    dayStrip
+                    if showsCalendar {
+                        DatePicker("Pick date", selection: calendarDateSelection, in: Date.distantPast..., displayedComponents: .date)
+                            .datePickerStyle(.graphical)
+                            .tint(Theme.brand)
+                            .padding(.horizontal, 8)
+                            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                            .accessibilityLabel("Choose schedule date")
+                    }
+                    PaperSection("Arrival window · \(date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))") {
+                        VStack(spacing: 0) {
+                            ForEach(timeOptions, id: \.hour) { option in
+                                timeRow(hour: option.hour, minute: option.minute)
+                                WellDivider()
                             }
-                            .padding(.vertical, PaperCardMetrics.edge)
+                            if showsCustomTime {
+                                HStack(spacing: 12) {
+                                    Text("Other time").font(Theme.font(16, weight: .medium))
+                                    Spacer()
+                                    DatePicker("Other time", selection: $date, displayedComponents: .hourAndMinute)
+                                        .labelsHidden()
+                                        .datePickerStyle(.compact)
+                                        .accessibilityLabel("Choose a custom start time")
+                                        .onChange(of: date) { _, _ in error = nil }
+                                }
+                                .padding(.horizontal, PaperCardMetrics.inset)
+                                .frame(minHeight: 52)
+                            } else {
+                                Button { showsCustomTime = true } label: {
+                                    Text("Other time…").font(Theme.font(16, weight: .medium)).foregroundStyle(Theme.brandText)
+                                        .padding(.horizontal, PaperCardMetrics.inset)
+                                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(RowPressStyle())
+                            }
                         }
                     }
-                    if let error { ErrorBanner(message: error).padding(.vertical, 8) }
-                }
-                .padding(.horizontal, PaperCardMetrics.margin)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .environment(\.paperGroupedWells, true)
-            }
-            .scrollIndicators(.hidden)
-            .disabled(busy)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 4) {
-                    PrimaryButton(title: saved ? "Schedule saved" : "Save schedule", busy: busy) { Task { await save() } }
-                        .disabled(busy || saved || !session.can("job.assign", feature: "jobs"))
-                    if !session.can("job.assign", feature: "jobs") {
+                    if canAssign {
+                        // Paper 53B: who has the visit, then the text to the customer, on one card.
+                        VStack(spacing: 0) {
+                            assignedTechRow
+                            if textablePhone != nil {
+                                customerTextRow.overlay(alignment: .top) { WellDivider(leading: 0) }
+                            }
+                        }
+                        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                    } else {
                         // A disabled commit says why (design.thorbis.com "Disabled needs a reason").
                         Text("Your role can't schedule jobs. Ask your office to set the time.")
                             .font(Theme.font(13)).foregroundStyle(Theme.muted)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4)
                     }
-                    Button("Cancel") { dismiss() }
-                        .font(Theme.font(15, weight: .medium))
-                        .foregroundStyle(Theme.muted)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .disabled(busy)
+                    if let error { ErrorBanner(message: error).padding(.vertical, 8) }
+                    if canCancelVisit {
+                        // Paper 53B: "Cancel visit" in 15 Medium red, centred, 44 tall.
+                        Button { confirmCancel = true } label: {
+                            Text("Cancel visit").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.destructive)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(PressStyle())
+                        .disabled(saved)
+                        .accessibilityIdentifier("schedule-cancel-visit")
+                    }
                 }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 10)
-                    .padding(.bottom, 8)
-                    .background(Theme.surface)
+                .padding(.horizontal, PaperCardMetrics.margin)
+                .padding(.top, 4)
+                .padding(.bottom, 24)
+            }
+            .scrollIndicators(.hidden)
+            .disabled(busy)
+        }
+        // The canvas tone under the sheet, so the day tiles and the window card read as cards.
+        .background(Theme.background)
+        .foregroundStyle(Theme.foreground)
+        .thorbisSheetPresentation(typeSize.isAccessibilitySize ? [.large] : [.height(640), .large])
+        .interactiveDismissDisabled(busy)
+        .task { await loadPeople() }
+        // Paper 53A over 53B: the roster as its own sheet; the row reads the new tech when it closes.
+        .sheet(isPresented: $showAssign, onDismiss: { Task { await reloadAssignee() } }) {
+            SheetSurface { JobAssignmentView(jobID: job.id) }
+        }
+        // The new time is saved first; then Messages opens with the text, and the tech sends it.
+        .sheet(isPresented: $composing, onDismiss: { dismiss() }) {
+            ScheduleTextComposer(recipient: textablePhone ?? "", message: customerMessage) { composing = false }
+                .ignoresSafeArea()
+        }
+        .thorbisConfirm("Cancel job", message: "JOB-\(job.id.suffix(4).uppercased()) \u{00B7} \(job.title)",
+                        isPresented: $confirmCancel, cancelTitle: "Keep job",
+                        actions: [ThorbisConfirmAction("Cancel job", role: .destructive) { Task { await cancelVisit() } }])
+    }
+
+    /// Paper 53B: 32pt initials on the brand surface, "Assigned tech" in 16, the name and a chevron
+    /// in muted; 56 tall. Opens Assign a technician (53A).
+    private var assignedTechRow: some View {
+        Button { showAssign = true } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Theme.brandSurface)
+                    if let assigneeName {
+                        Text(initials(assigneeName)).font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    } else {
+                        Image(systemName: "person").font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.brandText)
+                    }
+                }
+                .frame(width: 32, height: 32)
+                .accessibilityHidden(true)
+                Text("Assigned tech").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text(assigneeWords).font(Theme.font(16)).foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                PaperChevron()
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, PaperCardMetrics.inset)
+            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowPressStyle())
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens Assign a technician")
+        .accessibilityIdentifier("schedule-assigned-tech")
+    }
+
+    /// Paper 53B: the switch, then the text on a fill bubble (14, radius 14). On, saving the new
+    /// time opens Messages with this text; the tech sends it from their own phone.
+    private var customerTextRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $notifyCustomer) {
+                Text("Let the customer know").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+            }
+            .tint(Theme.brand)
+            .accessibilityHint("After you save, Messages opens with this text for you to send")
+            .accessibilityIdentifier("schedule-notify-customer")
+            if notifyCustomer {
+                Text("\u{201C}\(customerMessage)\u{201D}").font(Theme.font(14)).foregroundStyle(Theme.subtle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
-        .background(Theme.surface)
-        .foregroundStyle(Theme.foreground)
-        .thorbisSheetPresentation(typeSize.isAccessibilitySize ? [.large] : [.height(560), .large])
-        .interactiveDismissDisabled(busy)
+        .padding(.horizontal, PaperCardMetrics.inset).padding(.top, 12).padding(.bottom, 14)
     }
 
+    /// The roster (for the assigned tech's name) and the customer (for the text).
+    private func loadPeople() async {
+        guard canAssign else { return }
+        if let people = try? await api.fieldAssignees() { roster = people }
+        rosterLoaded = true
+        guard MFMessageComposeViewController.canSendText() else { return }
+        customer = try? await api.fieldCustomer(job.customerId)
+    }
+
+    /// After Assign a technician closes: who the server says has the visit now.
+    private func reloadAssignee() async {
+        guard let fresh = try? await api.fieldJob(job.id, requireFresh: true), fresh.id == job.id else { return }
+        assignedID = fresh.assignedToUserId
+    }
+
+    /// "Cancel visit": the same cancel the job's Wrap up offers (`POST /v1/jobs/{id}/cancel`).
+    private func cancelVisit() async {
+        guard canCancelVisit, !busy else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let updated = try await api.cancelFieldJob(job.id)
+            onSaved(updated)
+            _ = await store.refresh(api)
+            dismiss()
+        } catch is CancellationError {
+        } catch {
+            self.error = "Could not cancel this visit. \(error.localizedDescription)"
+        }
+    }
+
+    /// Paper 53B: Cancel on the left, the sheet's name centred, the commit as a brand pill.
     private var header: some View {
-        ThorbisSheetHeader(title: job.scheduledFor == nil ? "Schedule" : "Reschedule",
-                           closeLabel: "Close schedule picker", onClose: busy ? nil : { dismiss() })
+        let canSave = session.can("job.assign", feature: "jobs")
+        return PaperTaskBar(title: job.scheduledFor == nil ? "Schedule visit" : "Move visit", cancelDisabled: busy,
+                            commit: ThorbisSheetHeaderAction(title: saved ? "Saved" : (job.scheduledFor == nil ? "Schedule" : "Reschedule"),
+                                                             busy: busy, enabled: !saved && canSave,
+                                                             accessibilityLabel: saved ? "Schedule saved" : "Save schedule") {
+                                Task { await save() }
+                            }) { dismiss() }
     }
 
-    /// Today, Tomorrow or a picked date, as the one segmented selector.
-    private var dayOptions: some View {
+    /// "JOB-2214 · now Tue Jul 21, 10:30 AM" (or "not scheduled yet").
+    private var visitSubtitle: String {
+        let reference = "JOB-\(job.id.suffix(4).uppercased())"
+        if let current = JobFiltering.date(job.scheduledFor) {
+            return "\(reference) · now \(current.visitLabel())"
+        }
+        return "\(reference) · not scheduled yet"
+    }
+
+    /// Paper 53B's day strip: the next six days as tiles, the chosen one in brand, then a
+    /// calendar tile for any other date.
+    private var dayStrip: some View {
         let calendar = Calendar.current
-        let current = calendar.isDateInToday(date) && !showsCalendar ? "Today"
-            : calendar.isDateInTomorrow(date) && !showsCalendar ? "Tomorrow" : "Pick date"
-        return PaperTabs(options: ["Today", "Tomorrow", "Pick date"], selection: Binding(
-            get: { current },
-            set: { picked in
-                switch picked {
-                case "Today": showsCalendar = false; selectDay(offset: 0)
-                case "Tomorrow": showsCalendar = false; selectDay(offset: 1)
-                default: showsCalendar = current == "Pick date" ? !showsCalendar : true
+        let today = calendar.startOfDay(for: Date())
+        let days: [Date] = (0..<6).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
+        let inStrip = days.contains { calendar.isDate($0, inSameDayAs: date) }
+        return HStack(spacing: 6) {
+            ForEach(days, id: \.self) { day in
+                let offset = calendar.dateComponents([.day], from: today, to: day).day ?? 0
+                ScheduleDayTile(weekday: day.formatted(.dateTime.weekday(.abbreviated)),
+                                number: day.formatted(.dateTime.day()),
+                                selected: calendar.isDate(day, inSameDayAs: date) && !showsCalendar) {
+                    showsCalendar = false
+                    selectDay(offset: offset)
                 }
-            }))
-            .padding(.horizontal, -Theme.gutter)
+                .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+            }
+            ScheduleDayTile(weekday: "More", number: nil,
+                            selected: showsCalendar || !inStrip) {
+                showsCalendar.toggle()
+            }
+            .accessibilityLabel("Pick date")
+        }
     }
 
     private func selectDay(offset: Int) {
@@ -880,18 +1650,26 @@ struct JobScheduleView: View {
                 error = invalidLocalTimeMessage
             }
         } label: {
+            // Paper 53B: the window's start, a muted note, the chosen row on brand surface with a
+            // filled brand tick.
             HStack(spacing: 12) {
                 Text(label)
-                    .font(Theme.font(16, weight: .medium)).monospacedDigit()
+                    .font(Theme.font(16, weight: selected ? .semibold : .medium)).monospacedDigit()
                     .foregroundStyle(Theme.foreground)
-                Spacer(minLength: 8)
+                Text("2 hr window").font(Theme.font(14)).foregroundStyle(Theme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if selected {
-                    Image(systemName: "checkmark").font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Theme.brandText).accessibilityHidden(true)
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 22))
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(Color.white, Theme.brand)
+                        .accessibilityHidden(true)
+                } else {
+                    Color.clear.frame(width: 22, height: 22)
                 }
             }
             .padding(.horizontal, PaperCardMetrics.inset)
             .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .background(selected ? Theme.brandSurface : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
@@ -930,7 +1708,8 @@ struct JobScheduleView: View {
                 self.error = "Schedule saved, but the jobs list could not refresh. Close this sheet and refresh Jobs before making another change."
                 return
             case .applied, .superseded:
-                dismiss()
+                // Paper 53B "Let the customer know": Messages opens with the text; closing it closes this.
+                if !compact, notifyCustomer, textablePhone != nil { composing = true } else { dismiss() }
             }
         } catch is CancellationError {
         } catch let problem as Problem where problem.status == 409 {
@@ -952,6 +1731,10 @@ struct JobFollowUpsView: View {
     @EnvironmentObject var api: APIClient
     @EnvironmentObject var session: SessionController
     @EnvironmentObject private var outbox: FieldOutbox
+    @EnvironmentObject private var store: Store
+    /// Paper 21H's reasons, in its order. "Other" opens a field to say why.
+    private static let reasons = ["Part on order", "Second visit", "Seasonal check", "Other"]
+    @State private var reasonChoice: String?
     @State private var records: [FieldFollowUpRecord] = []
     @State private var loading = true
     @State private var busy = false
@@ -970,12 +1753,49 @@ struct JobFollowUpsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                OfflineBanner().padding(.horizontal, -Theme.gutter)
-                Text("Follow-ups").font(Theme.font(24, weight: .medium)).tracking(-0.36)
-                    .accessibilityAddTraits(.isHeader).padding(.bottom, 12)
-                if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -Theme.gutter) }
+                OfflineBanner().padding(.horizontal, -PaperCardMetrics.margin)
+                // Paper 21H: the 34 Bold title and the job under it in 15 muted.
+                PaperPageTitle(title: "Book a follow-up", subtitle: jobLine, columnInset: PaperCardMetrics.margin)
+                    .padding(.bottom, 16)
+                if let error { ErrorBanner(message: error, retry: records.isEmpty ? { await load() } : nil).padding(.horizontal, -PaperCardMetrics.margin) }
                 if let savedNote {
-                    Text(savedNote).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.bottom, 10)
+                    Text(savedNote).font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.bottom, 10).padding(.horizontal, 4)
+                }
+                if session.can("job.edit", feature: "jobs") {
+                    // Paper 21H: "Reason" over its chips, then the note. Paper's "Open times" needs
+                    // the office's free slots, which the server doesn't list, so the request goes to
+                    // the office to book (Paper's "Can't find a time?" path).
+                    PaperSectionLabel(title: "Reason")
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(Self.reasons, id: \.self) { option in
+                                PaperChoiceChip(title: option, isOn: reasonChoice == option) {
+                                    reasonChoice = option
+                                    reason = option == "Other" ? "" : option
+                                    reasonProblem = nil
+                                    if option == "Other" { followUpFocus = 0 }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, PaperCardMetrics.margin)
+                    }
+                    .padding(.horizontal, -PaperCardMetrics.margin)
+                    if reasonChoice == "Other" {
+                        followUpField("What happened?", example: "Part on order, customer away until Friday\u{2026}", text: $reason,
+                                      error: reasonProblem, focusID: 0).padding(.top, 10)
+                    } else if let reasonProblem {
+                        FieldProblem(message: reasonProblem).padding(.top, 6)
+                    }
+                    ThorbisSegmented(options: [
+                        (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
+                        (FieldFollowUpRequest.Kind.notifyOffice, "Notify office"),
+                    ], selection: $kind)
+                    .padding(.top, 16)
+                    followUpField(nil, example: "Note for the visit", text: $nextAction,
+                                  error: nextProblem, focusID: 1).padding(.top, 12)
+                    Text("A return-visit request goes to the office to book; it doesn\u{2019}t reserve a time.")
+                        .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8).padding(.horizontal, 4)
+                        .padding(.bottom, 20)
                 }
                 let waiting = outbox.pendingFollowUps(for: jobID)
                 if !waiting.isEmpty {
@@ -993,8 +1813,7 @@ struct JobFollowUpsView: View {
                         }
                         .padding(.vertical, PaperCardMetrics.edge)
                     }
-                    .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
-                    .padding(.bottom, 14)
+                    .padding(.bottom, 20)
                 }
                 if loading && records.isEmpty { SkeletonRows(count: 4, leading: false, inset: 0) }
                 // design 2026-10-30: follow-ups as rows on one panel, the state as a word; Book the
@@ -1008,28 +1827,13 @@ struct JobFollowUpsView: View {
                         }
                         .padding(.vertical, PaperCardMetrics.edge)
                     }
-                    .padding(.horizontal, PaperCardMetrics.margin - Theme.gutter)
-                    .padding(.bottom, 14)
-                }
-                if session.can("job.edit", feature: "jobs") {
-                    PaperGroupHeader(title: "New follow-up").padding(.top, 8)
-                    ThorbisSegmented(options: [
-                        (FieldFollowUpRequest.Kind.notifyOffice, "Notify office"),
-                        (FieldFollowUpRequest.Kind.officeScheduling, "Schedule a return visit"),
-                    ], selection: $kind)
-                    .padding(.bottom, 10)
-                    followUpField("What happened?", example: "Part on order, customer away until Friday…", text: $reason,
-                                  error: reasonProblem, focusID: 0)
-                    followUpField("What needs to happen next?", example: "Book a return visit to fit the part…", text: $nextAction,
-                                  error: nextProblem, focusID: 1).padding(.top, 12)
-                    Text("A return-visit request goes to the office to book; it doesn't reserve a time.")
-                        .font(Theme.font(13)).foregroundStyle(Theme.muted).padding(.top, 8)
+                    .padding(.bottom, 20)
                 }
                 if !loading && records.isEmpty && !session.can("job.edit", feature: "jobs") {
                     PaperEmptyState(symbol: "list.bullet", title: "No follow-ups on this job")
                 }
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 4).padding(.bottom, 24)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
         }
         .foregroundStyle(Theme.foreground)
         .scrollDismissesKeyboard(.interactively)
@@ -1041,7 +1845,7 @@ struct JobFollowUpsView: View {
         .safeAreaInset(edge: .bottom) {
             if session.can("job.edit", feature: "jobs") {
                 // Never pre-disabled: pressed with a question unanswered, it says which under it.
-                PaperActionBar(title: "Send follow-up", symbol: "paperplane", busy: busy) {
+                PaperActionBar(title: kind == .officeScheduling ? "Ask the office to schedule" : "Send to the office", busy: busy) {
                     if showFollowUpProblems() { Task { await create() } }
                 }
             }
@@ -1051,15 +1855,33 @@ struct JobFollowUpsView: View {
     }
 
     /// The question stays above the field once typing starts (GR-26); the placeholder is only an example.
-    private func followUpField(_ label: String, example: String, text: Binding<String>, error: String?, focusID: Int) -> some View {
-        PaperFormField(label, error: error) {
-            TextField(example, text: text, prompt: .placeholder(example), axis: .vertical)
-                .font(Theme.font(16)).lineLimit(2...5)
-                .fieldWell()
-                .focused($followUpFocus, equals: focusID)
-                .onChange(of: text.wrappedValue) { _, _ in if focusID == 0 { reasonProblem = nil } else { nextProblem = nil } }
-                .accessibilityLabel(label)
+    private func followUpField(_ label: String?, example: String, text: Binding<String>, error: String?, focusID: Int) -> some View {
+        let field = TextField(example, text: text, prompt: .placeholder(example), axis: .vertical)
+            .font(Theme.font(16)).lineLimit(2...5)
+            .fieldWell()
+            .focused($followUpFocus, equals: focusID)
+            .onChange(of: text.wrappedValue) { _, _ in if focusID == 0 { reasonProblem = nil } else { nextProblem = nil } }
+            .accessibilityLabel(label ?? example)
+        return Group {
+            if let label {
+                PaperFormField(label, error: error) { field }
+            } else {
+                // Paper 21H "Note for the visit": the field alone, its name as the placeholder.
+                VStack(alignment: .leading, spacing: 6) {
+                    field
+                    if let error { FieldProblem(message: error) }
+                }
+            }
         }
+    }
+
+    /// Paper 21H's second line: "AC not cooling · Danielle Marlowe"; the job's number until it loads.
+    private var jobLine: String {
+        let number = "JOB-\(jobID.suffix(4).uppercased())"
+        guard let job = store.jobs.first(where: { $0.id == jobID }) else { return number }
+        let customer = store.customerName(job.customerId)
+        let parts = [job.title, customer == "Customer" ? "" : customer].filter { !$0.isEmpty }
+        return parts.isEmpty ? number : parts.joined(separator: " \u{00B7} ")
     }
 
     /// Says what's missing or too long under each question and moves to the first; true when ready.
@@ -1069,9 +1891,9 @@ struct JobFollowUpsView: View {
             if trimmed.isEmpty { return missing }
             return text.utf16.count > 2000 ? "Keep this to 2,000 characters." : nil
         }
-        reasonProblem = problem(reason, missing: "Say what happened, like \u{201C}Part on order.\u{201D}")
-        nextProblem = problem(nextAction, missing: "Say what needs to happen next, like \u{201C}Book a return visit.\u{201D}")
-        if reasonProblem != nil { followUpFocus = 0 } else if nextProblem != nil { followUpFocus = 1 }
+        reasonProblem = problem(reason, missing: reasonChoice == "Other" ? "Say what happened, like \u{201C}Part on order.\u{201D}" : "Pick a reason.")
+        nextProblem = problem(nextAction, missing: "Add a note for the visit, like \u{201C}Fit the new capacitor.\u{201D}")
+        if reasonProblem != nil { if reasonChoice == "Other" { followUpFocus = 0 } } else if nextProblem != nil { followUpFocus = 1 }
         return reasonProblem == nil && nextProblem == nil
     }
 
@@ -1137,6 +1959,7 @@ struct JobFollowUpsView: View {
                 return
             }
             reason = ""
+            reasonChoice = nil
             nextAction = ""
             error = nil
             savedNote = "Saved on this phone · sends to the office when you’re back online."
@@ -1145,6 +1968,7 @@ struct JobFollowUpsView: View {
         do {
             _ = try await api.requestFieldFollowUp(jobID, request: .init(kind: kind, reason: payload.reason, nextAction: payload.nextAction))
             reason = ""
+            reasonChoice = nil
             nextAction = ""
             await load()
         } catch is CancellationError {} catch {
@@ -1187,18 +2011,24 @@ struct FollowUpBookingSheet: View {
             // design 2026-10-30: one column, labels above, answers in field wells, the one ink
             // commit pinned above the keyboard.
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    PaperFormField("Arrival window") {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Paper 21H: the 34 Bold title, the follow-up's reason under it.
+                    PaperPageTitle(title: "Book a follow-up", subtitle: followUp.reason, columnInset: PaperCardMetrics.margin)
+                        .padding(.bottom, 4)
+                    PaperSection("Arrival window") {
                         VStack(spacing: 0) {
                             DatePicker("Day", selection: $day, in: Date()..., displayedComponents: .date)
-                                .font(Theme.font(16)).frame(minHeight: 44)
+                                .font(Theme.font(16, weight: .medium)).frame(minHeight: 56)
+                                .padding(.horizontal, PaperCardMetrics.inset)
+                            WellDivider()
                             DatePicker("Arrive from", selection: $start, displayedComponents: .hourAndMinute)
-                                .font(Theme.font(16)).frame(minHeight: 44)
+                                .font(Theme.font(16, weight: .medium)).frame(minHeight: 56)
+                                .padding(.horizontal, PaperCardMetrics.inset)
+                            WellDivider()
                             Stepper("Window: \(hours) hour\(hours == 1 ? "" : "s")", value: $hours, in: 1...8)
-                                .font(Theme.font(16)).frame(minHeight: 44)
+                                .font(Theme.font(16, weight: .medium)).frame(minHeight: 56)
+                                .padding(.horizontal, PaperCardMetrics.inset)
                         }
-                        .padding(.horizontal, 12).padding(.vertical, 4)
-                        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
                         .tint(Theme.brand)
                     }
                     PaperFormField("What the visit is for", error: needProblem) {
@@ -1207,14 +2037,14 @@ struct FollowUpBookingSheet: View {
                             .focused($needFocused)
                             .onChange(of: need) { _, _ in needProblem = nil }
                     }
+                    .padding(.top, 8)
                     if let result { Label(result, systemImage: "checkmark.circle").font(Theme.font(15)).foregroundStyle(Theme.success) }
                     if let error { Text(error).font(Theme.font(15)).foregroundStyle(Theme.destructive) }
                 }
-                .padding(.horizontal, Theme.gutter).padding(.top, 8).padding(.bottom, 24)
+                .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 24)
             }
             .scrollDismissesKeyboard(.interactively)
             .background(Theme.canvas)
-            .navigationTitle("Book return visit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ThorbisToolbarItem(placement: .topBarLeading) { Button(result == nil ? "Cancel" : "Done") { if result != nil { onDone() }; dismiss() } }
@@ -1222,7 +2052,7 @@ struct FollowUpBookingSheet: View {
             .safeAreaInset(edge: .bottom) {
                 if result == nil {
                     // Never pre-disabled: pressed without a purpose, it says so under the field.
-                    PaperActionBar(title: "Book visit", busy: busy) {
+                    PaperActionBar(title: bookTitle, busy: busy) {
                         if need.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             needProblem = "Say what the visit is for, like \u{201C}Fit the new capacitor.\u{201D}"
                             needFocused = true
@@ -1236,6 +2066,12 @@ struct FollowUpBookingSheet: View {
         }
         .interactiveDismissDisabled(busy)
         .presentationCornerRadius(Theme.cardRadius)
+    }
+
+    /// Paper 21H: the commit names the window, "Book Thu, Jul 23, 8:00 a.m.".
+    private var bookTitle: String {
+        guard let begins = window?.0 else { return "Book visit" }
+        return "Book \(begins.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())), \(begins.tradeTime)"
     }
 
     private var window: (Date, Date)? {

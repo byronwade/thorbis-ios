@@ -20,6 +20,15 @@ struct EstimateCreationRecovery {
         return [400, 403, 404, 409, 413, 422].contains(status)
     }
 
+    static let createRefused = "You can\u{2019}t create estimates yet. Your office needs to turn this on."
+
+    /// What to show when saving fails for sure. A 403 on the create itself gets plain words
+    /// instead of the server's; everything else keeps its own message.
+    static func refusalMessage(_ error: Error, creating: Bool) -> String {
+        if creating, let problem = error as? Problem, problem.status == 403 { return createRefused }
+        return error.localizedDescription
+    }
+
     var canEdit: Bool { !isSaving && savedEstimateID == nil }
 
     /// Verify the create response against the submitted scope and money, allowing the server

@@ -74,7 +74,7 @@ struct MediaCaptureFlow: View {
             case .review:
                 if let heldImage { tagStep(heldImage) } else { Color.black.ignoresSafeArea() }
             case .markup(let image, let tags):
-                PhotoMarkupView(image: image, onSave: { flattened in
+                PhotoMarkupView(image: image, stage: mediaStageWord(tags), onSave: { flattened in
                     try fileMarkup(flattened, tags)
                     afterMarkup()
                 }, onCancel: afterMarkup)
@@ -90,6 +90,7 @@ struct MediaCaptureFlow: View {
                 do {
                     try file(data, MediaStageChoice.tags(burst.stage), nil)
                     burst.count += 1
+                    burst.lastShot = image.preparingThumbnail(of: CGSize(width: 160, height: 160)) ?? image
                     burst.problem = nil
                 } catch { burst.problem = error.localizedDescription }
             }
@@ -117,21 +118,22 @@ struct MediaCaptureFlow: View {
                     Text("\(filed) saved").font(Theme.monoFont(13, weight: .medium)).foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 0)
-                PaperCircleButton(symbol: "pencil.tip.crop.circle", label: "Mark up this photo", size: 44, fill: Theme.card, bordered: true) {
-                    startMarkup(image)
-                }
-                .accessibilityIdentifier("media-tag-markup")
+                // Paper v2: the header's 44pt card circle.
+                Button { startMarkup(image) } label: { CreamCircleLabel(symbol: "pencil.tip.crop.circle") }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Mark up this photo")
+                    .accessibilityIdentifier("media-tag-markup")
             }
-            .padding(.horizontal, Theme.gutter).padding(.top, 8)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.top, 8)
 
             Image(uiImage: image).resizable().scaledToFit()
-                .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, Theme.gutter)
+                .padding(.horizontal, PaperCardMetrics.margin)
                 .accessibilityLabel("The photo you just took")
 
             VStack(spacing: 12) {
-                if let error { ErrorBanner(message: error).padding(.horizontal, -Theme.gutter) }
+                if let error { ErrorBanner(message: error).padding(.horizontal, -PaperCardMetrics.margin) }
                 captionRow
                 if let problem = dictation.problem {
                     Text(problem.message).font(Theme.font(13)).foregroundStyle(Theme.muted)
@@ -149,7 +151,7 @@ struct MediaCaptureFlow: View {
                 .sensoryFeedback(.selection, trigger: stage)
                 commitRow
             }
-            .padding(.horizontal, Theme.gutter).padding(.bottom, 8)
+            .padding(.horizontal, PaperCardMetrics.margin).padding(.bottom, 8)
         }
         .background(Theme.canvas)
         .foregroundStyle(Theme.foreground)
@@ -160,10 +162,10 @@ struct MediaCaptureFlow: View {
             TextField("Caption (optional)", text: $caption, prompt: .placeholder("Caption (optional)"))
                 .font(Theme.font(16))
                 .submitLabel(.done)
-                .padding(.horizontal, 14)
-                .frame(minHeight: 52)
-                .panelBackground(cornerRadius: Theme.controlRadius)
-                .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.border))
+                // Paper's note field: a 50pt card, radius 14, no rim.
+                .padding(.horizontal, 16)
+                .frame(minHeight: 50)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .accessibilityIdentifier("media-tag-caption")
             Button {
                 if dictation.isListening { dictation.stop() } else {
@@ -173,8 +175,8 @@ struct MediaCaptureFlow: View {
                 Image(systemName: dictation.isListening ? "stop.fill" : "mic")
                     .font(.system(size: 18, weight: .medium))
                     .foregroundStyle(dictation.isListening ? Theme.onInk : Theme.foreground)
-                    .frame(width: 52, height: 52)
-                    .background(dictation.isListening ? Theme.ink : Theme.fill, in: Circle())
+                    .frame(width: 50, height: 50)
+                    .background(dictation.isListening ? Theme.ink : Theme.card, in: Circle())
             }
             .buttonStyle(PressStyle())
             .accessibilityLabel(dictation.isListening ? "Stop dictating" : "Say a caption")
@@ -184,14 +186,14 @@ struct MediaCaptureFlow: View {
     @ViewBuilder private var commitRow: some View {
         if request.mode == .library {
             Button { if fileHeld() { onClose() } } label: {
-                Label("Save photo", systemImage: "square.and.arrow.down").inkCommit(height: 56)
+                Label("Save photo", systemImage: "square.and.arrow.down").inkCommit()
             }
             .buttonStyle(PressStyle())
             .accessibilityIdentifier("media-tag-save")
         } else {
             HStack(spacing: 8) {
                 Button { if fileHeld() { phase = .camera } } label: {
-                    Label("Take another", systemImage: "camera").inkCommit(height: 56)
+                    Label("Take another", systemImage: "camera").inkCommit()
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityIdentifier("media-tag-take-another")
@@ -265,9 +267,34 @@ final class BurstCameraModel: ObservableObject {
     @Published var stage = "Other"
     @Published var shooting = false
     @Published var problem: String?
+    /// A small copy of the last shot saved, shown beside the shutter (Paper F7).
+    @Published var lastShot: UIImage?
+    /// Paper 21C's flash circle: on for every shot, or left to the camera (automatic).
+    @Published var flashOn = false
+    /// Paper 21C's flip circle: the front camera instead of the back one.
+    @Published var front = false
     var onPhoto: (UIImage) -> Void = { _ in }
     var onDone: () -> Void = {}
     weak var picker: UIImagePickerController?
+
+    var canFlash: Bool { UIImagePickerController.isFlashAvailable(for: front ? .front : .rear) }
+    var canFlip: Bool {
+        UIImagePickerController.isCameraDeviceAvailable(.front) && UIImagePickerController.isCameraDeviceAvailable(.rear)
+    }
+
+    func toggleFlash() {
+        guard canFlash else { return }
+        flashOn.toggle()
+        picker?.cameraFlashMode = flashOn ? .on : .auto
+    }
+
+    func flip() {
+        guard canFlip, let picker, !shooting else { return }
+        front.toggle()
+        picker.cameraDevice = front ? .front : .rear
+        if !canFlash { flashOn = false }
+        picker.cameraFlashMode = flashOn ? .on : .auto
+    }
 
     func shoot() {
         guard !shooting, let picker else { return }
@@ -329,48 +356,119 @@ struct BurstCameraOverlay: View {
     @ObservedObject var model: BurstCameraModel
 
     var body: some View {
+        // Paper F7 / 21C: close top left, the count on a dark pill in the middle, the flash circle
+        // top right, the stage chips, then the last shot, the shutter and the flip circle.
         VStack(spacing: 14) {
-            HStack {
-                Text(model.count == 0 ? "Burst · shots save as you take them" : "\(model.count) saved")
-                    .font(Theme.font(15, weight: .medium)).monospacedDigit()
+            HStack(spacing: 8) {
+                Button { model.onDone() } label: {
+                    if model.count == 0 {
+                        Image(systemName: "xmark").font(.system(size: 17, weight: .medium)).foregroundStyle(.white)
+                            .frame(width: 48, height: 48)
+                            .background(.black.opacity(0.55), in: Circle())
+                            .contentShape(Circle())
+                    } else {
+                        Text("Done").font(Theme.font(16, weight: .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 18).frame(minHeight: 44)
+                            .background(Theme.brand, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel(model.count == 0 ? "Close" : "Done")
+                .accessibilityIdentifier("burst-done")
+                Spacer()
+                Text(model.count == 0 ? "Shots save as you take them" : "\(model.count) photo\(model.count == 1 ? "" : "s") saved")
+                    .font(Theme.font(14, weight: .semibold)).monospacedDigit()
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 14).frame(minHeight: 44)
+                    .lineLimit(1).minimumScaleFactor(0.8)
+                    .padding(.horizontal, 14).frame(minHeight: 36)
                     .background(.black.opacity(0.55), in: Capsule())
                 Spacer()
-                Button(model.count == 0 ? "Close" : "Done") { model.onDone() }
-                    .buttonStyle(ThorbisBarButtonStyle(prominent: model.count > 0))
-                    .accessibilityIdentifier("burst-done")
+                if model.canFlash {
+                    Button { model.toggleFlash() } label: {
+                        Image(systemName: model.flashOn ? "bolt.fill" : "bolt").font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(model.flashOn ? Color.black : Color.white)
+                            .frame(width: 48, height: 48)
+                            .background(model.flashOn ? Color.white : Color.black.opacity(0.55), in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .accessibilityLabel("Flash")
+                    .accessibilityValue(model.flashOn ? "On" : "Automatic")
+                    .accessibilityIdentifier("burst-flash")
+                } else {
+                    Color.clear.frame(width: 48, height: 48)
+                }
             }
             if let problem = model.problem {
                 Text(problem).font(Theme.font(14)).foregroundStyle(.white)
                     .padding(10).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: Theme.controlRadius))
             }
             Spacer()
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 ForEach(MediaStageChoice.all, id: \.value) { choice in
                     let on = model.stage == choice.value
                     Button { model.stage = choice.value } label: {
+                        // Paper F7: the chosen stage on brand surface in brand text, the rest dark.
                         Text(choice.value == "Other" ? "No stage" : choice.label)
-                            .font(Theme.font(15, weight: .medium))
-                            .foregroundStyle(on ? .black : .white)
-                            .padding(.horizontal, 14).frame(minHeight: 44)
-                            .background(on ? Color.white : Color.black.opacity(0.5), in: Capsule())
+                            .font(Theme.font(16, weight: .semibold))
+                            .foregroundStyle(on ? Theme.brandText : Color.white)
+                            .padding(.horizontal, 15).frame(minHeight: 48)
+                            .background(on ? Theme.brandSurface : Color.black.opacity(0.5), in: Capsule())
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
-            Button { model.shoot() } label: {
-                Circle().fill(.white).frame(width: 72, height: 72)
-                    .overlay(Circle().strokeBorder(.black.opacity(0.25), lineWidth: 3).padding(5))
+            // Paper F7's shutter row: the last shot as a 52pt thumbnail, the shutter, and an empty
+            // slot the same width so the shutter stays centred.
+            HStack(spacing: 42) {
+                ZStack {
+                    if let last = model.lastShot {
+                        Image(uiImage: last).resizable().scaledToFill()
+                            .frame(width: 52, height: 52)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .strokeBorder(Color.white.opacity(0.4), lineWidth: 1.5)
+                            }
+                    }
+                }
+                .frame(width: 52, height: 52)
+                .accessibilityHidden(true)
+                Button { model.shoot() } label: {
+                    // Paper F7: a 76pt white ring around a 60pt white disc.
+                    ZStack {
+                        Circle().strokeBorder(Color.white, lineWidth: 4).frame(width: 76, height: 76)
+                        Circle().fill(Color.white).frame(width: 60, height: 60)
+                    }
                     .opacity(model.shooting ? 0.5 : 1)
                     .frame(width: 88, height: 88)
                     .contentShape(Circle())
+                }
+                .buttonStyle(PressStyle())
+                .disabled(model.shooting)
+                .accessibilityLabel("Take photo")
+                .accessibilityIdentifier("burst-shutter")
+                if model.canFlip {
+                    Button { model.flip() } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 18, weight: .medium))
+                            .foregroundStyle(.white)
+                            .frame(width: 52, height: 52)
+                            .background(.black.opacity(0.55), in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(PressStyle())
+                    .disabled(model.shooting)
+                    .accessibilityLabel(model.front ? "Use the back camera" : "Use the front camera")
+                    .accessibilityIdentifier("burst-flip")
+                } else {
+                    Color.clear.frame(width: 52, height: 52)
+                }
             }
-            .buttonStyle(PressStyle())
-            .disabled(model.shooting)
-            .accessibilityLabel("Take photo")
-            .accessibilityIdentifier("burst-shutter")
+            Text("Photos attach to this job automatically")
+                .font(Theme.font(14, weight: .medium)).foregroundStyle(.white.opacity(0.8))
+                .multilineTextAlignment(.center)
         }
         .padding(.horizontal, Theme.gutter).padding(.top, 56).padding(.bottom, 34)
     }

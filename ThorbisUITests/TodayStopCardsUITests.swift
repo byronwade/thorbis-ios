@@ -5,7 +5,11 @@ import XCTest
 @MainActor
 final class TodayStopCardsUITests: XCTestCase {
     override func setUpWithError() throws {
-        try skipOnTablet(because: "iPad Schedule lists the day beside the selected job's detail; the one-stop-at-a-time pager and its list toggle are the phone's Today (ScheduleView), which TabletRoot does not build. The iPad sidebar's edge swipe is covered by DrawerGearMenuUITests.")
+        // Paper 18 (fidelity pass, 2026-11-17): the Schedule shows one "Next up" card and "Later
+        // today" rows; the swipeable stop cards and the Cards / List toggle are not in Paper's
+        // Schedule. The pager belongs to Field mode (Paper F1), so these checks wait for it there.
+        throw XCTSkip("The stop-card pager left the Schedule (Paper 18); it returns with Field mode (Paper F1).")
+        // When Field mode lands: try skipOnTablet(because: "iPad Schedule lists the day beside the selected job's detail; the one-stop-at-a-time pager and its list toggle are the phone's Today (ScheduleView), which TabletRoot does not build. The iPad sidebar's edge swipe is covered by DrawerGearMenuUITests.")
     }
 
     private let dispatched = "today-stop-card-00000000-0000-4000-8000-000000002214"

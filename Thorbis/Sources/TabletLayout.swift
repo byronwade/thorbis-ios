@@ -211,6 +211,10 @@ struct TabletRoot: View {
 
     static let sidebarWidth: CGFloat = 280
     static let readableWidth: CGFloat = 720
+    /// Paper T12E: places laid out in columns of figures (Money) get this much instead.
+    static let wideWidth: CGFloat = 1040
+    /// Schedule ranges that take the whole width, with no list column beside them.
+    static let wideRanges: Set<String> = ["Week", "Board"]
     /// From here the sidebar sits beside the columns (iPad landscape); narrower, it slides over them.
     static let inlineSidebarWidth: CGFloat = 1100
 
@@ -294,7 +298,7 @@ struct TabletRoot: View {
         .sheet(isPresented: $workspace) { SheetSurface { WorkspaceSelectionView() } }
         .sheet(isPresented: $createJob) { SheetSurface { NewJobSheet() } }
         .sheet(isPresented: $newEstimate) { SheetSurface { NewEstimateView() } }
-        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet() } }
+        .sheet(isPresented: $newCustomer) { SheetSurface { NewCustomerSheet(offersBooking: true) } }
         .sheet(isPresented: $createMenuOpen, onDismiss: {
             let run = pendingCreate
             pendingCreate = nil
@@ -384,8 +388,12 @@ struct TabletRoot: View {
     // MARK: Columns
 
     @ViewBuilder private func columns(width: CGFloat) -> some View {
-        if tab.isSplit && !(tab == .schedule && scheduleRange == "Week") {
-            let listWidth: CGFloat = width >= 1000 ? 380 : 340
+        // Board is full width only for someone who can assign; anyone else keeps the list column.
+        let wideRange = Self.wideRanges.contains(scheduleRange)
+            && (scheduleRange != "Board" || session.can("job.assign", feature: "jobs"))
+        if tab.isSplit && !(tab == .schedule && wideRange) {
+            // Paper T01: a 332 list column, 8 from the sidebar and from the detail beside it.
+            let listWidth: CGFloat = 332 + PaperTabletSchedule.margin * 2
             HStack(spacing: 0) {
                 NavigationStack {
                     listColumn
@@ -399,8 +407,14 @@ struct TabletRoot: View {
                 detailStack
             }
         } else if tab == .schedule {
-            // Week and Map use the whole width.
+            // Week and Board use the whole width.
             detailStack
+        } else if tab == .place(.money) {
+            // Paper T12E: Money's figures sit beside each other, so it takes a wider column.
+            detailStack
+                .frame(maxWidth: Self.wideWidth)
+                .frame(maxWidth: .infinity)
+                .background(Theme.canvas)
         } else {
             // A place with no list (Inbox, Money, Reports…): the whole column, bar included, keeps
             // the readable width, so its bar buttons sit at the edge of what they act on rather
@@ -416,7 +430,8 @@ struct TabletRoot: View {
         switch tab {
         case .schedule:
             PaperTabletSchedule(range: $scheduleRange, selectedID: $scheduleSelection, addresses: addresses,
-                                newJob: canCreateJob ? { createJob = true } : nil)
+                                newJob: canCreateJob ? { createJob = true } : nil,
+                                search: { search = true })
         case .jobs: JobsView()
         case .customers: CustomersView()
         case .place(let item): if let route = item.route { PaperRouteView(route: route) }
@@ -430,7 +445,7 @@ struct TabletRoot: View {
                 .background(Theme.canvas)
                 .paperDestinations()
         }
-        .environment(\.paperReadableWidth, Self.readableWidth)
+        .environment(\.paperReadableWidth, tab == .place(.money) ? Self.wideWidth : Self.readableWidth)
     }
 
     @ViewBuilder private var detailRoot: some View {
@@ -447,6 +462,9 @@ struct TabletRoot: View {
             case "Week":
                 TabletWeekBoard(range: $scheduleRange, addresses: addresses) { path.append($0) }
                     .toolbar(.hidden, for: .navigationBar)
+            case "Board" where session.can("job.assign", feature: "jobs"):
+                // Paper T12C: the dispatcher's day. It draws its own title, segments and scroll.
+                DispatchBoardView(tabletRange: $scheduleRange)
             default:
                 if let id = scheduleSelection {
                     jobDetail(id)
@@ -532,10 +550,11 @@ struct TabletRoot: View {
 
     private func sidebar(fold: @escaping () -> Void) -> some View {
         TabletSidebar(
-            sections: DrawerSections.make(pins: layout.visibleTabs(session),
-                                          explicitPins: layout.source == .company || layout.tabs != layout.roleDefaultTabs,
-                                          roleDefaults: layout.roleDefaultTabs, hidden: layout.hidden, order: layout.menuOrder,
-                                          local: localSections, opens: { $0.permitted(session) }),
+            // The same rows as the phone drawer: Paper's for the role. A company layout only hides
+            // places; the order from Menu and start screen is this device's own.
+            sections: DrawerSections.make(hidden: layout.source == .phone ? [] : layout.hidden,
+                                          order: layout.source == .phone ? layout.menuOrder : [],
+                                          local: localSections, role: WorkRole(session), opens: { $0.permitted(session) }),
             current: tab,
             section: section(for:),
             count: sidebarCount,
@@ -563,6 +582,11 @@ struct TabletRoot: View {
             create: { createMenuOpen = true },
             workspace: { workspace = true },
             settings: { settings = true },
+            notifications: CommsInboxAccess(session).notices ? {
+                withAnimation(motion) { sidebarOpen = false }
+                // Paper 77: the bell opens Notifications, over the place showing.
+                path.append(PaperRoute.notifications)
+            } : nil,
             reviewSavedWork: {
                 withAnimation(motion) { sidebarOpen = false }
                 reviewScope = savedWorkScope
@@ -640,7 +664,7 @@ struct TabletRoot: View {
         switch item {
         case .schedule:
             let left = TodayNumbers.left(TodayNumbers.visits(store.jobs, assignee: nil))
-            return left > 0 ? PlaceCount(text: "\(left) left", spoken: "\(left) stop\(left == 1 ? "" : "s") left today") : nil
+            return PlaceCount.number(left, spoken: "\(left) stop\(left == 1 ? "" : "s") left today")
         case .jobs:
             let open = TodayNumbers.open(store.jobs)
             return PlaceCount.number(open, spoken: "\(open) open")
@@ -670,7 +694,7 @@ struct TabletRoot: View {
         return .savedWork(.make(scope: scope, entries: outbox.entries, media: pendingMedia.items,
                                 mediaErrors: pendingMedia.errors, unverifiedMediaIDs: pendingMedia.unverifiedIDs,
                                 uploadingMediaID: pendingMedia.uploadingID, commandsSyncing: outbox.syncing,
-                                jobs: store.jobs, listingWarning: pendingMedia.storageWarning))
+                                jobs: store.jobs, listingWarning: pendingMedia.storageWarning ?? outbox.storageWarning))
     }
 
     /// The same creates as the phone's +, in the same order.
@@ -690,8 +714,11 @@ struct TabletRoot: View {
     private var searchActions: [SearchAction] {
         let later: (@escaping () -> Void) -> () -> Void = { run in { afterSearch = run; search = false } }
         let creates = createChoices.map { item in (item.title, item.icon ?? "plus", later(item.action)) }
-        return SearchAction.standard(creates: creates, settings: later { settings = true }, places: menuPlaces,
-                                     openPlace: { place in afterSearch = nil; search = false; show(section(for: place)) })
+        return SearchAction.standard(creates: creates, settings: later { settings = true },
+                                     places: SearchAction.everyPlace(permitted: { $0.permitted(session) }),
+                                     openPlace: { place in afterSearch = nil; search = false; show(section(for: place)) },
+                                     records: localSections,
+                                     openRecord: { record in afterSearch = nil; search = false; show(.local(record)) })
     }
 
     // MARK: Deep links
@@ -752,6 +779,7 @@ struct TabletRoot: View {
         case "schedule", "my-day": show(.schedule)
         case "schedule-week": show(.schedule); scheduleRange = "Week"
         case "schedule-map": show(.schedule); scheduleRange = "Map"
+        case "dispatch-board": show(.schedule); scheduleRange = "Board"
         case "jobs", "jobs-filters":
             show(.jobs)
             if let job { picks[.jobs] = TabletPick(id: job.id, value: job) }
@@ -789,7 +817,7 @@ struct TabletRoot: View {
         case "search", "search-typed": search = true
         case "invoice-editor", "invoice-editor-line": show(.schedule); previewInvoiceEditor = true
         case "invoice-detail", "invoice-payment": show(.schedule); previewInvoiceDetail = true
-        case "estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line":
+        case "estimate-revision", "estimate-draft", "builder-options", "builder-picker", "builder-line", "builder-text":
             show(.schedule); previewEstimateRevision = true
         case "new-customer": show(.customers); previewNewCustomer = true
         case "new-estimate": previewNewEstimate = true
@@ -825,23 +853,26 @@ struct TabletSidebar: View {
     let create: () -> Void
     let workspace: () -> Void
     let settings: () -> Void
+    /// Paper 77: opens Notifications. Nil without access to job notices; the bell then opens Messages.
+    var notifications: (() -> Void)? = nil
     var reviewSavedWork: () -> Void = {}
     var fold: (() -> Void)? = nil
 
     var body: some View {
+        // Paper v2 tablet sidebar (same grammar as the phone drawer, 29N/57N/58N): the company and the
+        // + circle, Search, the role's places, then the job on now and the person at the foot.
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 businessSwitcher
                 if let fold {
                     PaperCircleButton(symbol: "sidebar.left", label: "Hide sidebar", action: fold)
                 }
-            }
-            .padding(.bottom, 10)
-            HStack(spacing: 8) {
-                TabletSearchField(compact: false, action: search)
                 if canCreate {
                     Button(action: create) {
-                        CreamCircleLabel(symbol: "plus", size: 44, ink: true)
+                        Image(systemName: "plus").font(.system(size: 17, weight: .medium))
+                            .foregroundStyle(Theme.foreground)
+                            .frame(width: 44, height: 44)
+                            .background(Theme.card, in: Circle())
                     }
                     .buttonStyle(PressStyle())
                     .accessibilityLabel("Create")
@@ -849,19 +880,16 @@ struct TabletSidebar: View {
                     .accessibilityIdentifier("sidebar-create")
                 }
             }
-            .padding(.bottom, 4)
+            .padding(.bottom, 10)
+            TabletSearchField(compact: false, action: search)
+                .padding(.bottom, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    // Cream sheet: the phone drawer's grouping (Work, Money, Shop, On this iPad).
                     PlacesList(sections: sections, title: { DrawerPlaces.title($0, role: WorkRole(session)) }, isCurrent: { current == section($0) },
                                isCurrentLocal: { current == .local($0) }, count: count, idPrefix: "sidebar",
                                phoneHeading: "On this iPad", savedWork: savedWork, savedWorkTitle: "Saved on this iPad",
                                openPlace: { select(section($0)) }, openLocal: { select(.local($0)) },
                                openSavedWork: reviewSavedWork, openFavorite: openFavorite)
-                    // The places' own row, so the gear and its word sit in the places' columns.
-                    PlaceRow(title: "Settings", symbol: "gearshape", tint: Theme.markGrey, here: false,
-                             count: nil, id: "sidebar-settings", action: settings)
-                        .padding(.top, 14)
                 }
                 .padding(.bottom, 24)
             }
@@ -871,27 +899,78 @@ struct TabletSidebar: View {
                 LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.92),
                                        .init(color: .black.opacity(0), location: 1)], startPoint: .top, endPoint: .bottom)
             }
-            if let currentJob { currentJobCard(currentJob) }
-            SidebarAccountButton(name: session.user?.name ?? "", action: settings)
-                .padding(.top, 8)
+            if let currentJob { currentJobCard(currentJob).padding(.bottom, 8) }
+            footer
         }
-        .padding(.vertical, 12).padding(.horizontal, 12)
+        .padding(.vertical, 12).padding(.horizontal, 8)
         .frame(maxHeight: .infinity, alignment: .top)
-        // The phone drawer's panel, edge to edge.
-        .background(Theme.card.ignoresSafeArea())
+        .background(Theme.sidebar.ignoresSafeArea())
         .foregroundStyle(Theme.foreground)
+    }
+
+    private var personName: String { session.user?.name ?? session.user?.email ?? "You" }
+
+    /// Paper v2: a hairline, the person (initials, name, role), the bell (Notifications, Paper 77) and the gear.
+    private var footer: some View {
+        HStack(spacing: 10) {
+            Button(action: settings) {
+                HStack(spacing: 10) {
+                    Text(personName.split(separator: " ").prefix(2).map { String($0.prefix(1)) }.joined().uppercased())
+                        .font(Theme.font(12, weight: .semibold)).foregroundStyle(Theme.brandText)
+                        .frame(width: 34, height: 34).background(Theme.brandSurface, in: Circle())
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(personName).font(Theme.font(15, weight: .semibold)).lineLimit(1)
+                        Text(roleWord).font(Theme.font(13)).foregroundStyle(Theme.muted)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Settings, \(personName)")
+            .accessibilityAddTraits(.isButton)
+            if notifications != nil || sections.places.contains(.inbox) {
+                Button {
+                    if let notifications { notifications() } else { select(section(.inbox)) }
+                } label: {
+                    Image(systemName: "bell").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityLabel("Notifications")
+                .accessibilityIdentifier("sidebar-notifications")
+            }
+            Button(action: settings) {
+                Image(systemName: "gearshape").font(.system(size: 17)).foregroundStyle(Theme.muted)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Settings")
+            .accessibilityIdentifier("sidebar-settings")
+        }
+        .padding(.horizontal, 6).padding(.top, 12)
+        .overlay(alignment: .top) { Rectangle().fill(Theme.hairline).frame(height: 1) }
+    }
+
+    private var roleWord: String {
+        switch WorkRole(session) {
+        case .technician: "Technician"
+        case .office: "Office"
+        case .owner: "Owner"
+        }
     }
 
     private var businessSwitcher: some View {
         Button(action: workspace) {
             HStack(spacing: 10) {
-                Image("ThorbisMark").resizable().scaledToFit().padding(5)
-                    .frame(width: 30, height: 30)
-                    .panelBackground(cornerRadius: 8)
-                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.border))
+                Text(String((session.activeOrganization?.name ?? "W").prefix(1)).uppercased())
+                    .font(Theme.font(14, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Theme.brand, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .accessibilityHidden(true)
                 Text(session.activeOrganization?.name ?? "Workspace")
-                    .font(Theme.font(16, weight: .medium)).lineLimit(1)
+                    .font(Theme.font(17, weight: .semibold)).lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down").font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.muted)
                 Spacer(minLength: 0)
@@ -933,21 +1012,19 @@ struct TabletSearchField: View {
     let action: () -> Void
 
     var body: some View {
+        // Paper v2: "Search" (sidebar) / "Search or ask" (list column) on the card, radius 12, no rim.
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                Text("Search").lineLimit(1)
+                Text(compact ? "Search or ask" : "Search").lineLimit(1)
                 Spacer(minLength: 0)
-                Text("⌘F").font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.muted.opacity(0.8))
-                    .accessibilityHidden(true)
             }
             .font(Theme.font(15))
             .foregroundStyle(Theme.muted)
             .padding(.horizontal, 12)
-            .frame(maxWidth: .infinity, minHeight: compact ? 40 : 44)
-            .panelBackground(cornerRadius: Theme.controlRadius)
-            .overlay(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).strokeBorder(Theme.border))
-            .contentShape(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: compact ? 44 : 42)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(PressStyle())
         .accessibilityLabel("Search")
@@ -989,16 +1066,17 @@ struct TabletWeekBoard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .bottom, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Schedule").font(Theme.font(30, weight: .medium)).tracking(-0.6)
+                    Text("Schedule").font(Theme.font(34, weight: .bold)).tracking(-0.68)
                         .accessibilityAddTraits(.isHeader)
                     Text(subtitle).font(Theme.font(15)).foregroundStyle(Theme.muted)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Theme.gutter).padding(.top, 12).padding(.bottom, 12)
-            PaperTabs(options: PaperTabletSchedule.ranges, selection: $range, textTabs: true)
-                .frame(maxWidth: 420, alignment: .leading)
-                .padding(.bottom, 8)
+            // Paper's segments: the card track with the raised pill, as in the Today column.
+            PaperTabs(options: PaperTabletSchedule.rangeOptions(board: session.can("job.assign", feature: "jobs")), selection: $range)
+                .frame(maxWidth: 480, alignment: .leading)
+                .padding(.bottom, 16)
             GeometryReader { geometry in
                 let spacing: CGFloat = 10
                 let fit = (geometry.size.width - Theme.gutter * 2 - spacing * 6) / 7

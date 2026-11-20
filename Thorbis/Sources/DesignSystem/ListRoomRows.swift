@@ -11,7 +11,7 @@ enum ListRoom {
     /// Rows and labels line up with the screen's gutter.
     static let gutter: CGFloat = Theme.gutter
     /// The pause above a group's label: generous between groups, tight inside one.
-    static let groupGap: CGFloat = 24
+    static let groupGap: CGFloat = 22
 }
 
 /// A group's label on the canvas: 13 Medium in the marker grey with its count ("Scheduled  4"),
@@ -25,7 +25,6 @@ struct ListGroupLabel<Trailing: View>: View {
     var body: some View {
         SectionHeader(title: title, count: count, horizontalPadding: ListRoom.gutter) { trailing }
             .padding(.top, first ? 8 : ListRoom.groupGap)
-            .padding(.bottom, 2)
     }
 }
 
@@ -76,7 +75,7 @@ struct JobRoomRow: View {
                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
         layout {
             VStack(alignment: .leading, spacing: 2) {
-                Text((street ?? job.title).dashKeptWithWordBefore).font(Theme.font(15, weight: .medium))
+                Text((street ?? job.title).dashKeptWithWordBefore).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(finished ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : titleLines)
                     .fixedSize(horizontal: false, vertical: true)
@@ -144,7 +143,7 @@ struct JobRoomRow: View {
     }
 
     private func problemText(_ text: String, lines: Int?) -> some View {
-        Text(text.dashKeptWithWordBefore).font(Theme.font(14)).foregroundStyle(Theme.subtle)
+        Text(text.dashKeptWithWordBefore).font(Theme.font(14)).foregroundStyle(Theme.muted)
             .lineLimit(lines)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -188,12 +187,12 @@ struct CustomerRoomRow: View {
                              : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
         layout {
             VStack(alignment: .leading, spacing: 2) {
-                Text(name).font(Theme.font(15, weight: .medium))
+                Text(name).font(Theme.font(16, weight: .medium))
                     .foregroundStyle(archived ? Theme.muted : Theme.foreground)
                     .lineLimit(stacked ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail, !detail.isEmpty {
-                    Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.subtle)
+                    Text(detail).font(Theme.font(14)).monospacedDigit().foregroundStyle(Theme.muted)
                         .lineLimit(stacked ? nil : 1)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -248,7 +247,7 @@ struct InboxRoomRow: View {
                                  : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
             layout {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(Theme.font(15, weight: unread ? .medium : .regular))
+                    Text(title).font(Theme.font(16, weight: unread ? .semibold : .medium))
                         .foregroundStyle(Theme.foreground)
                         .lineLimit(stacked ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -271,9 +270,9 @@ struct InboxRoomRow: View {
     }
 }
 
-/// Loading in a list room: the rows' own shape on the canvas (a title bar, a quieter line, a short
-/// trailing word), under a label-sized bar. Breathes slowly; still under Reduce Motion. One
-/// "Loading" for VoiceOver.
+/// Loading in a list room (Paper 73E): shapes stand in for rows while they load. Each row is a
+/// 14pt title bar over one or two 12pt bars, 8 apart, in the quiet accent tone, under a
+/// label-sized bar. Breathes slowly; still under Reduce Motion. One "Loading" for VoiceOver.
 struct ListRoomSkeleton: View {
     var count = 6
     /// A third, short bar for the when-and-who line of a job row.
@@ -284,24 +283,20 @@ struct ListRoomSkeleton: View {
         SkeletonPulse {
             VStack(alignment: .leading, spacing: 0) {
                 if label {
-                    Capsule().fill(Theme.fill).frame(width: 78, height: 10)
+                    Capsule().fill(Theme.sidebarAccent).frame(width: 78, height: 12)
                         .frame(minHeight: 32, alignment: .leading)
                         .padding(.horizontal, ListRoom.gutter).padding(.top, 8).padding(.bottom, 2)
                 }
                 ForEach(0..<count, id: \.self) { index in
-                    HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Capsule().fill(Theme.fill).frame(width: Self.titleWidth(index), height: 11)
-                            Capsule().fill(Theme.fill.opacity(0.75)).frame(width: Self.lineWidth(index), height: 9)
-                            if threeLines {
-                                Capsule().fill(Theme.fill.opacity(0.6)).frame(width: 84, height: 8)
-                            }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Capsule().fill(Theme.sidebarAccent).frame(width: Self.titleWidth(index), height: 14)
+                        Capsule().fill(Theme.sidebarAccent).frame(width: Self.lineWidth(index), height: 12)
+                        if threeLines {
+                            Capsule().fill(Theme.sidebarAccent).frame(width: Self.tailWidth(index), height: 12)
                         }
-                        Spacer(minLength: 0)
-                        Capsule().fill(Theme.fill.opacity(0.75)).frame(width: 58, height: 9).padding(.top, 2)
                     }
-                    .padding(.horizontal, ListRoom.gutter).padding(.vertical, 12)
-                    .frame(minHeight: threeLines ? 64 : 52, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, ListRoom.gutter).padding(.vertical, 18)
                 }
             }
         }
@@ -309,8 +304,9 @@ struct ListRoomSkeleton: View {
         .accessibilityLabel("Loading")
     }
 
-    private static func titleWidth(_ index: Int) -> CGFloat { [150, 122, 168, 136, 110, 158][index % 6] }
-    private static func lineWidth(_ index: Int) -> CGFloat { [196, 170, 140, 184, 206, 150][index % 6] }
+    private static func titleWidth(_ index: Int) -> CGFloat { [180, 150, 200, 160, 130, 170][index % 6] }
+    private static func lineWidth(_ index: Int) -> CGFloat { [250, 270, 230, 240, 260, 220][index % 6] }
+    private static func tailWidth(_ index: Int) -> CGFloat { [120, 100, 140, 110, 130, 90][index % 6] }
 }
 
 /// The view bar under a list room's title (design.thorbis.com: "Display for this list lives on the
@@ -350,35 +346,20 @@ extension ListViewBar where Popover == EmptyView {
     }
 }
 
-/// An empty room: what belongs here and the one action that starts it ("No customers yet. Add a
-/// customer."). Left-aligned on the canvas like the rows it stands in for; no illustration.
+/// An empty room: what belongs here and the one action that starts it ("No customers yet", "Add a
+/// customer"). It is the shared empty state at screen size (Paper 19), so a list room reads the
+/// same as every other empty screen; `symbol` is the room's glyph.
 struct ListRoomEmpty: View {
+    var symbol: String = "tray"
+    /// Paper's glyph for the room (`.jobs`, `.calendar`, `.person`…); the tray only where none fits.
+    var glyph: PaperGlyph? = nil
     let title: String
     var message: String? = nil
     var actionTitle: String? = nil
     var action: (() -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
-                .fixedSize(horizontal: false, vertical: true)
-            if let message, !message.isEmpty {
-                Text(message).font(Theme.font(14)).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let actionTitle, let action {
-                Button(action: action) {
-                    Label(actionTitle, systemImage: "plus")
-                        .inkCommit(height: 44)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                .buttonStyle(PressStyle())
-                .padding(.top, 12)
-                .accessibilityIdentifier("empty-state-action")
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, ListRoom.gutter).padding(.top, 24).padding(.bottom, 16)
-        .accessibilityElement(children: .contain)
+        PaperEmptyState(symbol: symbol, glyph: glyph, title: title, message: message, actionTitle: actionTitle,
+                        prominent: true, action: action)
     }
 }

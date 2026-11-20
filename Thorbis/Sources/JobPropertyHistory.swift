@@ -250,7 +250,9 @@ struct JobPropertyHistorySection: View {
             ? history.equipment[...] : history.equipment.prefix(JobPropertyHistoryLayout.collapsedRows)
         let facts = showsFacts ? history.facts : []
         // Cream sheet: a plain cluster heading; the on-site banner keeps the warning mark.
+        // Paper 21O: "Equipment  2", the count beside the label when the panel is only equipment.
         JobPanelSection(title: facts.isEmpty ? "Equipment" : history.title,
+                        count: facts.isEmpty ? "\(history.equipment.count)" : nil,
                         actionTitle: history.equipment.count > JobPropertyHistoryLayout.collapsedRows + 1 ? (expanded ? "Show less" : "Show all \(history.equipment.count)") : nil,
                         actionIdentifier: "job-property-history-show-all",
                         action: { withMotion(.snappy) { expanded.toggle() } }) {
@@ -286,23 +288,23 @@ struct JobPropertyHistorySection: View {
         let record = equipment?.first { $0.id == unit.id }
         if canEditEquipment, let record {
             Button { editing = EquipmentEditorItem(record: record) } label: {
-                JobPanelRow(title: unit.name, subtitle: unit.detail, titleSize: 15)
+                JobPanelRow(title: unit.name, subtitle: unit.detail)
             }
             .buttonStyle(RowPressStyle())
             .accessibilityHint("Opens the equipment")
         } else {
-            JobPanelRow(title: unit.name, subtitle: unit.detail, titleSize: 15)
+            JobPanelRow(title: unit.name, subtitle: unit.detail)
                 .accessibilityElement(children: .combine)
         }
     }
 
     private func visitsPanel(_ history: JobPropertyHistory, savedAt: Date?) -> some View {
-        JobPanelSection(title: history.scope == .address ? "Past visits here" : "Past visits", count: "\(history.visits.count)") {
+        // Paper 21O: "Past visits", each row the job's title over "May 14, 2026 · Ramon Mendez".
+        JobPanelSection(title: "Past visits", count: "\(history.visits.count)") {
             savedLine(savedAt)
             ForEach(history.visits) { visit in
                 NavigationLink(value: PaperRoute.job(visit.id)) {
-                    JobPanelRow(title: visit.title, subtitle: visitLine(visit),
-                                leading: visit.date?.formatted(.dateTime.month(.abbreviated).day()) ?? "—", titleSize: 15)
+                    JobPanelRow(title: visit.title, subtitle: visitLine(visit))
                 }
                 .buttonStyle(RowPressStyle())
                 .accessibilityIdentifier("job-property-visit-\(visit.id)")
@@ -311,9 +313,9 @@ struct JobPropertyHistorySection: View {
         }
     }
 
-    /// What was done when the visit says so, else "2026 · You · Completed": status always as a word.
+    /// What was done when the visit says so, then "May 14, 2026 · You · Completed": status always as a word.
     private func visitLine(_ visit: JobPropertyHistory.Visit) -> String {
-        let facts = [visit.date.map { $0.formatted(.dateTime.year()) }, visit.technician, visit.status.statusLabel]
+        let facts = [visit.date.map { $0.formatted(.dateTime.month(.abbreviated).day().year()) }, visit.technician, visit.status.statusLabel]
             .compactMap { $0 }.joined(separator: " · ")
         guard let notes = visit.notes else { return facts }
         return "\(notes)\n\(facts)"

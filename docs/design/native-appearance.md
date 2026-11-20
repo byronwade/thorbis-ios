@@ -11,6 +11,8 @@ References consulted 2026-10-26:
 
 System appearance is the default. Settings exposes System, Light and Dark through a native picker, persisted on this device. Apple's Dark Mode topic prefers system-only appearance; Thorbis's explicit System/Light/Dark requirement is implemented with System as default. No web control is substituted for the native picker.
 
+*Superseded 2026-11-16 (Paper v2):* `Theme.swift` now carries the "Thorbis Mobile" Paper palette (light canvas FAF9F6, card FFFFFF, type 1A1A1A; dark canvas 1F1F1F, card 232323, type EDEDED; brand 2F6BFF). See the top section of `ios-golden-rules.md`. The paragraph below is history.
+
 Paper's dark colors remain the reference. The light surface values are sRGB conversions of the published OKLCH tokens: canvas F7F4EE, panel FDFCFA, well EDE9E2, ink 201B14. The subtle dark label is raised from 8A8A8A to 949494 because its previous contrast on the field fill was 4.16:1, below Thorbis's 4.5:1 floor. Semantic text and border colors respond to Increase Contrast. This is an accessibility adjustment, not a new visual direction.
 
 ## Evidence matrix (not a full-app certification)

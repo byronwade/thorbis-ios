@@ -4,11 +4,11 @@ import XCTest
 final class CustomerHandBackLargeTextUITests: XCTestCase {
     func testHandBackButtonFitsItsFullLabelAtLargestText() {
         let app = openCustomerDocuments()
-        let handBack = app.buttons["Hand back to the technician"]
+        let handBack = app.buttons["Hand back to technician"]
         XCTAssertTrue(handBack.waitForExistence(timeout: 10))
         XCTAssertTrue(handBack.isHittable)
         XCTAssertGreaterThan(handBack.frame.height, 56, "The fixed-height button clips its long label at accessibility sizes.")
-        let title = handBack.staticTexts["Hand back to the technician"]
+        let title = handBack.staticTexts["Hand back to technician"]
         XCTAssertTrue(title.exists)
         XCTAssertGreaterThanOrEqual(title.frame.minX, handBack.frame.minX)
         XCTAssertLessThanOrEqual(title.frame.maxX, handBack.frame.maxX)
@@ -30,8 +30,8 @@ final class CustomerHandBackLargeTextUITests: XCTestCase {
         app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job", "--paper-preview-working-job", "--paper-preview-job-documents", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
         XCTAssertTrue(app.buttons["Job actions"].waitForExistence(timeout: 15))
-        app.buttons["Job actions"].tap(); thorbisCustomerViewMenuItem(app).tap()
-        XCTAssertTrue(app.staticTexts["Your job documents"].waitForExistence(timeout: 15))
+        app.buttons["job-share"].tap(); thorbisCustomerViewMenuItem(app).tap()
+        XCTAssertTrue(app.staticTexts["customer-view-title"].waitForExistence(timeout: 15))
         return app
     }
 }

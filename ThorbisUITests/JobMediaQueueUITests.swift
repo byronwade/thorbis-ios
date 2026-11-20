@@ -4,9 +4,9 @@ import XCTest
 final class JobMediaQueueUITests: XCTestCase {
     // Since #184 the Photos screen has one selector (All · Before · After · Documents) with the
     // counts on each date heading ("Oct 27, 2026 · 1"), Import holds library photos and PDFs, and a
-    // photo's stage is changed in the viewer. Since #221 stamps read "Nov 14, 2023, 5:13 p.m.".
+    // photo's stage is changed in the viewer. Since #221 stamps read "Nov 14, 2023, 5:13 PM".
 
-    /// One of the selector's four choices (every segment carries `job-media-selector`).
+    /// One of the count chips (every chip carries `job-media-selector`; its label is the stage alone).
     private func selector(_ title: String, in app: XCUIApplication) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "job-media-selector", title)).firstMatch
     }
@@ -20,11 +20,11 @@ final class JobMediaQueueUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "job-media-photo-"))
     }
 
-    /// The app's stamp (#221): "Nov 14, 2023, 5:13 p.m." (the time never reads "5:13 PM").
+    /// The app's stamp (#221): "Nov 14, 2023, 5:13 PM" (Paper's format).
     private func stamp(_ date: Date) -> String {
         let hour = Calendar.current.component(.hour, from: date)
         let minute = Calendar.current.component(.minute, from: date)
-        let clock = "\(hour % 12 == 0 ? 12 : hour % 12):\(String(format: "%02d", minute)) \(hour < 12 ? "a.m." : "p.m.")"
+        let clock = "\(hour % 12 == 0 ? 12 : hour % 12):\(String(format: "%02d", minute)) \(hour < 12 ? "AM" : "PM")"
         return "\(date.formatted(.dateTime.month(.abbreviated).day().year())), \(clock)"
     }
 
@@ -36,6 +36,79 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Change stage, currently \(stage)"].waitForExistence(timeout: 5), "The viewer must offer the photo's own stage", file: file, line: line)
         done.tap()
         XCTAssertTrue(done.waitForNonExistence(timeout: 5), file: file, line: line)
+    }
+
+    func testDetailHidesPreviouslyVisibleAssetAfterJobAccessRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test"]
+        app.launch()
+        let title = app.staticTexts["Outdoor unit"]
+        XCTAssertTrue(title.waitForExistence(timeout: 25))
+        app.buttons["Revoke test job access"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: title)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+    }
+
+    func testDetailClosesLoadedPreviewAfterJobAccessRevoked() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-success"]
+        app.launch()
+        let file = app.descendants(matching: .any)["media-detail-file-preview"]
+        XCTAssertTrue(file.waitForExistence(timeout: 25))
+        app.buttons["Revoke test job access"].tap()
+        let hidden = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: file)
+        XCTAssertEqual(XCTWaiter.wait(for: [hidden], timeout: 15), .completed)
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
+    func testDetailRetryCannotOpenPreviewAfterLeaving() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-retry-leave"]
+        app.launch()
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 25)); retry.tap()
+        let probe = app.staticTexts["media-detail-retry-probe"]
+        let started = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Retry started"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 10), .completed)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", "Retry finished"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 15), .completed)
+        XCTAssertEqual(probe.label, "Retry finished; preview opened after leaving: 0")
+    }
+
+    func testDetailRetryStartingAfterLeavingCannotOpenPreview() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-retry-leave", "--paper-preview-media-detail-start-after-leave"]
+        app.launch()
+        let retry = app.buttons["Try again"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 25)); retry.tap()
+        let probe = app.staticTexts["media-detail-retry-probe"]
+        let queued = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "Retry queued"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [queued], timeout: 10), .completed)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label BEGINSWITH %@", "Delayed start finished"), object: probe)
+        XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 20), .completed)
+        XCTAssertEqual(probe.label, "Delayed start finished; preview opened after leaving: 0")
+    }
+
+    func testDetailRejectsMediaFromAnotherJob() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-job"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["This file is not on the job."].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
+    }
+
+    func testDetailRejectsMediaFromAnotherOrganization() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--paper-preview", "--paper-preview-screen", "job-media", "--paper-preview-media-detail-test", "--paper-preview-media-detail-wrong-org"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["This file is not on the job."].waitForExistence(timeout: 25))
+        XCTAssertFalse(app.staticTexts["Outdoor unit"].exists)
     }
 
     func testLaterFilteredPhotosAndDocumentsRemainReachable() {
@@ -204,13 +277,13 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue(after.waitForNonExistence(timeout: 5))
         XCTAssertTrue(filter.label.contains("After"), filter.label)
         let photo = app.buttons["Photo, Finished unit"]
-        // Capture comes before the photos at this size (Import holds the library and PDFs).
-        let library = app.buttons["job-media-import"]
+        // "Add photo or video" comes before the photos (its menu holds the camera, the library and PDFs).
+        let library = app.buttons["job-media-take-photo"]
         XCTAssertTrue(library.exists)
         let date = dayHeading("Oct 26, 2026", in: app)
         XCTAssertTrue(date.exists)
         XCTAssertLessThan(library.frame.minY, date.frame.minY, "Capture is available before a long photo collection")
-        // Take photo stays on the screen; without a camera it says why (the stage is chosen after each shot since #184).
+        // The add pill stays on the screen without a camera: its menu still offers a photo or PDF from this phone.
         XCTAssertTrue(app.buttons["job-media-take-photo"].exists)
         for _ in 0..<8 where !photo.isHittable { app.swipeUp() }
         XCTAssertTrue(photo.isHittable)
@@ -236,7 +309,7 @@ final class JobMediaQueueUITests: XCTestCase {
         capture.lifetime = .keepAlways
         add(capture)
         library.tap()
-        let choosePhoto = app.buttons["Choose a photo"]
+        let choosePhoto = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose from library")).firstMatch
         XCTAssertTrue(choosePhoto.waitForExistence(timeout: 5))
         choosePhoto.tap()
         let cancel = app.buttons["Cancel"]
@@ -258,7 +331,7 @@ final class JobMediaQueueUITests: XCTestCase {
         addTeardownBlock { @MainActor in app.terminate(); app.launchArguments = base; app.launch(); app.terminate() }
         let firstPending = app.descendants(matching: .any).matching(identifier: "pending-media-00000000-0000-4000-8000-000000009800").firstMatch
         XCTAssertTrue(firstPending.waitForExistence(timeout: 20))
-        let library = app.buttons["job-media-import"]
+        let library = app.buttons["job-media-take-photo"]
         XCTAssertTrue(library.exists)
         XCTAssertLessThan(library.frame.minY, firstPending.frame.minY, "Capture should precede the pending queue")
         // Since #184 the queue is one summary ("N saved on this phone") with Send now, and each row says its state.
@@ -281,7 +354,7 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["No photos yet"].exists)
         let showAll = app.buttons["Show all photos"]
         XCTAssertTrue(showAll.isHittable)
-        XCTAssertLessThan(showAll.frame.maxY, app.buttons["job-media-take-photo"].frame.minY, "The way back sits above the capture bar")
+        XCTAssertGreaterThan(showAll.frame.minY, app.buttons["job-media-take-photo"].frame.maxY, "The way back sits under the add row and the chips")
         let recovery = XCTAttachment(screenshot: app.screenshot())
         recovery.name = "Empty photo filter recovery above capture"
         recovery.lifetime = .keepAlways
@@ -314,13 +387,16 @@ final class JobMediaQueueUITests: XCTestCase {
         XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         XCTAssertTrue(scan.label.contains("Field scan.pdf"))
         XCTAssertFalse(app.staticTexts["No photos yet"].exists)
-        // #184: Scan and Import are quiet circles beside Take photo.
+        // Paper 21A: the scan circle sits beside "Add photo or video".
         XCTAssertTrue(app.buttons["job-media-scan"].exists)
-        XCTAssertTrue(app.buttons["Import a photo or PDF"].exists)
+        XCTAssertTrue(app.buttons["job-media-take-photo"].exists)
         thorbisSection(app, "Overview").tap()
-        // Photos is its own job section now (Activity reopens on "Showing all"), so leaving for
-        // Overview and coming back through Photos must still show this job's saved scan.
-        thorbisSection(app, "Photos").tap()
+        // Paper 21A: Photos is Activity's Photos chip (Activity reopens on "All"), so leaving for
+        // Overview and coming back through Activity's Photos must still show this job's saved scan.
+        thorbisSection(app, "Activity").tap()
+        let photosChip = app.buttons["activity-filter-photos"]
+        XCTAssertTrue(photosChip.waitForExistence(timeout: 10))
+        photosChip.tap()
         XCTAssertTrue(scan.waitForExistence(timeout: 10))
         XCTAssertTrue((scan.value as? String)?.lowercased().hasSuffix(expectedCapture.lowercased()) == true, String(describing: scan.value))
         app.terminate()

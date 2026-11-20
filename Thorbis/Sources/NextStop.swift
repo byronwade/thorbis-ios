@@ -64,10 +64,11 @@ enum NextStopDay {
 }
 
 extension NextStopDay {
-    /// "Fri, Oct 30 · 2 of 6 done": the day and how far through it the tech is, for the Today subtitle.
-    /// Nil when there are no visits; "all 6 done" once every visit is finished.
+    /// "Tuesday, July 21 · 2 of 6 jobs done": the day (Paper F1 spells it out) and how far through it
+    /// the tech is, for the Today subtitle. The date alone when there are no visits; "all 6 visits
+    /// done" once every visit is finished.
     static func subtitle(day: Date = .now, jobs: [Job], lead: Job?) -> String {
-        let date = day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day())
+        let date = day.formatted(.dateTime.weekday(.wide).month(.wide).day())
         let visits = jobs.filter { $0.status != "canceled" }.sorted {
             (JobFiltering.date($0.scheduledFor) ?? .distantFuture) < (JobFiltering.date($1.scheduledFor) ?? .distantFuture)
         }
@@ -75,9 +76,9 @@ extension NextStopDay {
         if visits.allSatisfy({ $0.status == "completed" }) {
             return visits.count == 1 ? "\(date) · today's visit done" : "\(date) · all \(visits.count) visits done"
         }
-        // Redesign 2026-10-31: progress as Linear counts it, "4 of 6 done".
+        // Paper F1's words: "1 of 5 jobs done".
         let done = visits.filter { $0.status == "completed" }.count
-        return "\(date) · \(done) of \(visits.count) done"
+        return "\(date) · \(done) of \(visits.count) jobs done"
     }
 }
 
@@ -136,7 +137,8 @@ final class JobAddressBook: ObservableObject {
 }
 
 /// Drive time from where the phone is to the stop, by MapKit. Location is asked When In Use and
-/// only when a card with a mapped address first needs it. Denied, no fix or no signal leaves the
+/// only when a card with a mapped address first needs it, after the explainer (Paper 70) says
+/// what it is for. Denied, "Not now", no fix or no signal leaves the
 /// card with its address and no ETA; nothing waits on it.
 @MainActor
 final class NextStopETA: ObservableObject {
@@ -165,7 +167,13 @@ final class NextStopETA: ObservableObject {
         }
         #endif
         guard enabled, let destination else { return }
-        let status = CLLocationManager().authorizationStatus
+        var status = CLLocationManager().authorizationStatus
+        if status == .notDetermined {
+            // Paper 70: say what Location is for before the system asks. "Not now" leaves the
+            // card with its address and no drive time, and the system is not asked.
+            guard await PermissionPrimerPresenter.ask(.location), !Task.isCancelled, self.key == key else { return }
+            status = CLLocationManager().authorizationStatus
+        }
         locationOff = status == .denied || status == .restricted
         guard !locationOff else { return }
         guard let here = await Self.currentLocation(), !Task.isCancelled else {
@@ -227,7 +235,7 @@ struct NextStopLocationNotice: View {
                 .accessibilityHidden(true)
             // The words are the way to Settings, so the notice stays one line.
             Button { if let url = DevicePermission.location.settingsURL { openURL(url) } } label: {
-                Text("Turn on location to see drive time").font(Theme.font(14)).foregroundStyle(Theme.foreground)
+                Text("Turn on location to see drive time").font(Theme.font(15, weight: .medium)).foregroundStyle(Theme.foreground)
                     .underline()
                     .lineLimit(typeSize.isAccessibilitySize ? nil : 1).minimumScaleFactor(0.85)
                     .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
@@ -246,7 +254,8 @@ struct NextStopLocationNotice: View {
         }
         .padding(.leading, 12)
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-        .background(Theme.fill, in: RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous))
+        // Paper v2: an inner tile on a radius-20 card is radius 14.
+        .background(Theme.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("next-stop-location-off")
     }
