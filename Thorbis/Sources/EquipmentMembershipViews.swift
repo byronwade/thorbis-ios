@@ -256,48 +256,18 @@ struct EquipmentEditor: View {
     }
 
     /// One Paper card: the card tone, radius 20, rows separated by an inset hairline.
-    private func formCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 0) { content() }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+    private func formCard<Content: View>(@ViewBuilder _ content: @escaping () -> Content) -> some View {
+        PaperFormCard(content: content)
     }
 
     /// A label above its answer (13 muted over 17 Medium), typed in place.
     private func stackedField(_ label: String, text: Binding<String>, prompt: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(Theme.font(13)).foregroundStyle(Theme.muted).accessibilityHidden(true)
-            TextField("", text: text, prompt: .placeholder(prompt))
-                .font(Theme.font(17, weight: .medium))
-                .accessibilityLabel(label)
-        }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        PaperStackedField(label: label, text: text, prompt: prompt)
     }
 
     /// An inline date row: the label on the left, the date (or Add) on the right, with a way to clear it.
-    @ViewBuilder private func dateRow(_ title: String, _ value: Binding<Date?>) -> some View {
-        HStack(spacing: 8) {
-            Text(title).font(Theme.font(16)).foregroundStyle(Theme.foreground)
-            Spacer(minLength: 8)
-            if let date = value.wrappedValue {
-                DatePicker(title, selection: Binding(get: { date }, set: { value.wrappedValue = $0 }), displayedComponents: .date)
-                    .labelsHidden()
-                Button { value.wrappedValue = nil } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.subtle)
-                        .frame(width: 44, height: 44).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle()).accessibilityLabel("Clear \(title.lowercased())")
-            } else {
-                Button { value.wrappedValue = .now } label: {
-                    Text("Add").font(Theme.font(16)).foregroundStyle(Theme.muted)
-                        .frame(minWidth: 44, minHeight: 44, alignment: .trailing).contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityLabel("Add \(title.lowercased())")
-            }
-        }
-        .padding(.leading, 16).padding(.trailing, 8).frame(minHeight: 56)
+    private func dateRow(_ title: String, _ value: Binding<Date?>) -> some View {
+        PaperDateRow(title: title, value: value)
     }
 
     private func fill() {
@@ -374,9 +344,11 @@ struct CustomerMembershipSection: View {
     @State private var available = false
     @State private var choosing = false
     @State private var cancelling: MembershipRecord?
+    /// The membership whose edit sheet is open.
+    @State private var editing: MembershipRecord?
     @State private var error: String?
 
-    private var canEdit: Bool { editable && session.can("customer.edit", feature: "core_crm") }
+    private var canEdit: Bool { editable && MembershipAccess.canEditMemberships(session) }
     private var active: [MembershipRecord] { memberships.filter { $0.status == "active" } }
 
     var body: some View {
@@ -397,10 +369,25 @@ struct CustomerMembershipSection: View {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(active) { membership in
                                 if membership.id != active.first?.id { WellDivider() }
-                                PaperListRow(title: membership.name, subtitle: membershipDetail(membership), subtitleLines: 2) {
-                                    StatusWord(text: "Active", tint: Theme.success)
+                                if canEdit {
+                                    // The row opens the membership to change or remove it.
+                                    Button { editing = membership } label: {
+                                        PaperListRow(title: membership.name, subtitle: membershipDetail(membership), subtitleLines: 2) {
+                                            HStack(spacing: 12) {
+                                                StatusWord(text: "Active", tint: Theme.success)
+                                                PaperRowChevron()
+                                            }
+                                        }
+                                    }
+                                    .buttonStyle(RowPressStyle())
+                                    .accessibilityHint("Opens the membership to change it")
+                                    .accessibilityIdentifier("membership-edit-\(membership.id)")
+                                } else {
+                                    PaperListRow(title: membership.name, subtitle: membershipDetail(membership), subtitleLines: 2) {
+                                        StatusWord(text: "Active", tint: Theme.success)
+                                    }
+                                    .accessibilityElement(children: .combine)
                                 }
-                                .accessibilityElement(children: .combine)
                             }
                         }
                         .padding(.vertical, PaperCardMetrics.edge)
@@ -430,6 +417,9 @@ struct CustomerMembershipSection: View {
         }
         .task(id: customerID) { await load() }
         .sheet(isPresented: $choosing) { SheetSurface { planPicker } }
+        .sheet(item: $editing) { membership in SheetSurface {
+            MembershipEditor(customerID: customerID, membership: membership) { await load() }
+        } }
         // Paper 85B: cancelling is its own page (what ends, then the red commit).
         .thorbisDestination(item: $cancelling) { membership in
             CancelMembershipView(customerID: customerID, membership: membership,
@@ -899,6 +889,10 @@ struct CompanyAgreementsBook: View {
     /// Paper 85C's first card: the plans the company sells, each with how many members hold it.
     @State private var plans: [MembershipPlan] = []
     @State private var openCustomer: Customer?
+    /// The plan being added or changed. Only people who may edit company settings get here.
+    @State private var editingPlan: MembershipPlanEditorItem?
+
+    private var canEditPlans: Bool { MembershipAccess.canEditPlans(session) }
 
     private func members(_ plan: MembershipPlan) -> Int {
         (items ?? []).filter { $0.planId == plan.id && $0.status != "cancelled" }.count
@@ -967,12 +961,28 @@ struct CompanyAgreementsBook: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Paper 85C: the plans on the first card, straight under the title.
-            if !plans.isEmpty {
+            // Paper 85C: the plans on the first card, straight under the title. People who can
+            // edit company settings open a plan to change it, and add one from the last row.
+            if !plans.isEmpty || canEditPlans {
                 PaperRowsCard {
                     ForEach(plans) { plan in
                         if plan.id != plans.first?.id { WellDivider(leading: 16) }
-                        planRow(plan)
+                        if canEditPlans {
+                            Button { editingPlan = MembershipPlanEditorItem(plan: plan) } label: { planRow(plan) }
+                                .buttonStyle(RowPressStyle())
+                                .accessibilityHint("Opens the plan to change it")
+                                .accessibilityIdentifier("plan-edit-\(plan.id)")
+                        } else {
+                            planRow(plan)
+                        }
+                    }
+                    if canEditPlans {
+                        if !plans.isEmpty { WellDivider(leading: 16) }
+                        Button { editingPlan = MembershipPlanEditorItem(plan: nil) } label: {
+                            PaperListRow(leading: .icon("plus"), title: "New plan", subtitle: "A plan you sell to customers")
+                        }
+                        .buttonStyle(RowPressStyle())
+                        .accessibilityIdentifier("plan-add")
                     }
                 }
             }
@@ -996,6 +1006,9 @@ struct CompanyAgreementsBook: View {
         }
         .task(id: session.generation) { await load() }
         .thorbisDestination(item: $openCustomer) { CustomerDetailView(customer: $0) }
+        .sheet(item: $editingPlan) { item in SheetSurface {
+            MembershipPlanEditor(existing: item.plan) { await load() }
+        } }
     }
 
     private func load() async {
@@ -1003,10 +1016,18 @@ struct CompanyAgreementsBook: View {
         do {
             let loaded = try await api.allMemberships()
             items = loaded
-            onLoaded(!loaded.isEmpty)
+            // The plans card is extra: an older server or a refused read leaves it out. Someone
+            // who can add plans reads them even with no members yet, so the first plan can be made here.
+            if !loaded.isEmpty || canEditPlans, let sold = try? await api.membershipPlans() { plans = sold }
+            onLoaded(!loaded.isEmpty || !plans.isEmpty || canEditPlans)
             onCount(loaded.filter { $0.status != "cancelled" }.count)
-            // The plans card is extra: an older server or a refused read leaves it out.
-            if !loaded.isEmpty, let sold = try? await api.membershipPlans() { plans = sold }
+            #if DEBUG
+            // `--paper-preview-sheet plan-editor | plan-new`: open the plan form for a capture.
+            if PaperPreview.enabled, canEditPlans, editingPlan == nil {
+                if PaperPreview.opensSheet("plan-editor"), let first = plans.first { editingPlan = MembershipPlanEditorItem(plan: first) }
+                if PaperPreview.opensSheet("plan-new") { editingPlan = MembershipPlanEditorItem(plan: nil) }
+            }
+            #endif
         } catch is CancellationError {
         } catch {
             items = nil

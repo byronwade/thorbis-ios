@@ -293,6 +293,8 @@ extension APIClient {
         try await send("POST", jobActionPath(jobID, "/schedule"), body: request)
     }
 
+    /// The server refuses this while `job_schedule_cycle_undo` is off: check
+    /// `session.isOn(.rescheduleUndo)` before offering or calling it.
     func undoFieldReschedule(_ jobID: String, sourceAuditId: String) async throws -> JobRecord {
         struct Body: Encodable { let sourceAuditId: String }
         return try await send("POST", jobActionPath(jobID, "/reschedule/undo"), body: Body(sourceAuditId: sourceAuditId))

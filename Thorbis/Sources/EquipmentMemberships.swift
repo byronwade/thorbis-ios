@@ -103,6 +103,90 @@ struct MembershipRecord: Codable, Identifiable, Hashable {
     let notes: String?
     var customerName: String? = nil
     var planName: String? = nil
+    /// The one place the membership covers, when it covers one.
+    var locationId: String? = nil
+}
+
+/// What a person fills in for a plan the company sells. `price` is cents, like every money value.
+struct MembershipPlanInput: Equatable {
+    var name: String
+    var kind = "maintenance"
+    var cadence: String?
+    var visitsPerYear: Int?
+    var price: Int?
+    var billingFrequency: String?
+    var discountPercent = 0
+    var description: String?
+}
+
+/// A plan on the wire. A new plan leaves empty fields out (the server refuses null there); an
+/// edit sends null for an emptied field so the server clears it.
+struct MembershipPlanRequest: Encodable {
+    enum Mode { case create, update }
+    let input: MembershipPlanInput
+    let mode: Mode
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(input.name.trimmingCharacters(in: .whitespacesAndNewlines), forKey: .name)
+        try c.encode(input.kind, forKey: .kind)
+        func put<T: Encodable>(_ value: T?, _ key: CodingKeys) throws {
+            if let value { try c.encode(value, forKey: key) } else if mode == .update { try c.encodeNil(forKey: key) }
+        }
+        try put(MembershipInput.text(input.cadence), .cadence)
+        try put(input.visitsPerYear, .visitsPerYear)
+        try put(input.price, .price)
+        try put(MembershipInput.text(input.billingFrequency), .billingFrequency)
+        try c.encode(input.discountPercent, forKey: .discountPercent)
+        try put(MembershipInput.text(input.description), .description)
+    }
+    private enum CodingKeys: String, CodingKey { case name, kind, cadence, visitsPerYear, price, billingFrequency, discountPercent, description }
+}
+
+/// A customer's membership as edited. Days are "yyyy-MM-dd"; an emptied field is sent as null so
+/// the server clears it. Name, kind, status and the discount are always sent.
+struct MembershipInput: Encodable, Equatable {
+    var locationId: String?
+    var name: String
+    var kind: String
+    var cadence: String?
+    var startsOn: String?
+    var renewsOn: String?
+    var status: String
+    var discountPercent: Int
+    var notes: String?
+
+    init(_ record: MembershipRecord) {
+        locationId = record.locationId
+        name = record.name
+        kind = record.kind
+        cadence = record.cadence
+        startsOn = record.startsOn
+        renewsOn = record.renewsOn
+        status = record.status
+        discountPercent = record.discountPercent
+        notes = record.notes
+    }
+
+    /// Trimmed, or nil when nothing is left.
+    static func text(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(Self.text(locationId)?.lowercased(), forKey: .locationId)
+        try c.encode(name.trimmingCharacters(in: .whitespacesAndNewlines), forKey: .name)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(Self.text(cadence), forKey: .cadence)
+        try c.encode(Self.text(startsOn), forKey: .startsOn)
+        try c.encode(Self.text(renewsOn), forKey: .renewsOn)
+        try c.encode(status, forKey: .status)
+        try c.encode(discountPercent, forKey: .discountPercent)
+        try c.encode(Self.text(notes), forKey: .notes)
+    }
+    private enum CodingKeys: String, CodingKey { case locationId, name, kind, cadence, startsOn, renewsOn, status, discountPercent, notes }
 }
 
 struct MemberPricing: Codable, Hashable {
@@ -200,6 +284,22 @@ extension APIClient {
         return page.items.filter { !$0.archived }
     }
 
+    /// `POST /v1/membership-plans` (organization.settings.edit).
+    func createMembershipPlan(_ input: MembershipPlanInput) async throws -> MembershipPlan {
+        try await send("POST", "/v1/membership-plans", body: MembershipPlanRequest(input: input, mode: .create))
+    }
+
+    /// `POST /v1/membership-plans/{planId}` (organization.settings.edit); null clears a field.
+    func updateMembershipPlan(_ planID: String, _ input: MembershipPlanInput) async throws -> MembershipPlan {
+        try await send("POST", "/v1/membership-plans/\(try uuid(planID))", body: MembershipPlanRequest(input: input, mode: .update))
+    }
+
+    /// An archived plan stays on the memberships already sold and is no longer offered.
+    func archiveMembershipPlan(_ planID: String) async throws -> MembershipPlan {
+        struct Body: Encodable { let archived = true }
+        return try await send("POST", "/v1/membership-plans/\(try uuid(planID))", body: Body())
+    }
+
     func allMemberships() async throws -> [MembershipRecord] {
         let page: ItemsPage<MembershipRecord> = try await send("GET", "/v1/memberships")
         return page.items
@@ -219,6 +319,16 @@ extension APIClient {
     func cancelMembership(_ customerID: String, membershipID: String) async throws -> MembershipRecord {
         struct Body: Encodable { let status = "cancelled" }
         return try await send("POST", "/v1/customers/\(try uuid(customerID))/memberships/\(try uuid(membershipID))", body: Body())
+    }
+
+    /// `POST /v1/customers/{id}/memberships/{membershipId}` (customer.edit) with every edited field.
+    func updateMembership(_ customerID: String, membershipID: String, _ input: MembershipInput) async throws -> MembershipRecord {
+        try await send("POST", "/v1/customers/\(try uuid(customerID))/memberships/\(try uuid(membershipID))", body: input)
+    }
+
+    /// Takes a membership off the customer for good. For one added by mistake; Cancel ends a real one.
+    func removeMembership(_ customerID: String, membershipID: String) async throws {
+        let _: EmptyResponse = try await send("POST", "/v1/customers/\(try uuid(customerID))/memberships/\(try uuid(membershipID))/remove")
     }
 
     func jobServiceContext(_ jobID: String) async throws -> JobServiceContext {

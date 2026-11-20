@@ -15,9 +15,14 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
     private var token: String?
     private var signedIn = false
 
-    func start(api: APIClient, store: Store) {
+    /// Whether the workspace has staff push on (`staff_push_notifications`). With it off the
+    /// server refuses the device routes, so the app does not call them. Off until `start` sets it.
+    private var pushOn: @MainActor () -> Bool = { false }
+
+    func start(api: APIClient, store: Store, pushOn: @escaping @MainActor () -> Bool) {
         self.api = api
         self.store = store
+        self.pushOn = pushOn
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().setNotificationCategories(NotificationActions.categories)
     }
@@ -52,12 +57,12 @@ final class PushNotifications: NSObject, UNUserNotificationCenterDelegate {
 
     /// Before sign-out or a workspace switch, while the session can still authorize the call.
     func unbind() async {
-        guard let api, !Self.disabled else { return }
+        guard let api, !Self.disabled, pushOn() else { return }
         _ = try? await api.send("POST", "/v1/devices/unregister", body: ["installationId": Self.installationID]) as DeviceRemoval
     }
 
     private func register() async {
-        guard signedIn, let api, let token, !Self.disabled else { return }
+        guard signedIn, let api, let token, !Self.disabled, pushOn() else { return }
         let body = DeviceRegistration(installationId: Self.installationID, token: token, environment: Self.environment,
                                       appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
                                       timeZone: TimeZone.current.identifier, morningDigest: Self.morningDigest)

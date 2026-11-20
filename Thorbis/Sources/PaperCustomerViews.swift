@@ -549,6 +549,8 @@ struct CustomerDetailView: View {
     /// being cancelled (85B), and a count that makes the page read the plan again.
     @State private var plan: MembershipRecord?
     @State private var cancellingPlan: MembershipRecord?
+    /// The membership whose edit sheet is open (from the plan's menu).
+    @State private var editingPlan: MembershipRecord?
     @State private var planReload = 0
     /// Billing lists five invoices until "See all".
     @State private var showsAllInvoices = false
@@ -1073,8 +1075,13 @@ struct CustomerDetailView: View {
         // `--paper-preview-sheet membership-cancel`: opens Cancel membership (85B) for a capture.
         .onChange(of: plan?.id) { _, _ in
             if PaperPreview.enabled, PaperPreview.opensSheet("membership-cancel"), cancellingPlan == nil, let plan { cancellingPlan = plan }
+            // `--paper-preview-sheet membership-editor`: opens the membership's edit form.
+            if PaperPreview.enabled, PaperPreview.opensSheet("membership-editor"), editingPlan == nil, let plan { editingPlan = plan }
         }
         #endif
+        .sheet(item: $editingPlan) { membership in SheetSurface {
+            MembershipEditor(customerID: customer.id, membership: membership) { planReload += 1 }
+        } }
         .thorbisDestination(item: $cancellingPlan) { membership in
             CancelMembershipView(customerID: customer.id, membership: membership,
                                  customerName: record?.name ?? customer.name,
@@ -1275,6 +1282,7 @@ struct CustomerDetailView: View {
         if typeSize.isAccessibilitySize, session.can("job.create", feature: "jobs") {
             items.append(ThorbisMenuItem("Book covered visit", icon: "calendar") { showNewJob = true })
         }
+        items.append(ThorbisMenuItem("Edit membership", icon: "pencil") { editingPlan = plan })
         items.append(ThorbisMenuItem("Cancel membership", icon: "xmark.circle", role: .destructive) { cancellingPlan = plan })
         return items
     }
@@ -1492,7 +1500,11 @@ struct CustomerDetailView: View {
     }
 
     private func loadSmsConsent(currentAuthority: @escaping @MainActor () -> Bool = { true }) async {
-        guard currentAuthority(), session.can("customer.view", feature: "core_crm") else { return }
+        // With job texts off the server refuses this read; the row stays out and nothing is asked.
+        guard currentAuthority(), session.can("customer.view", feature: "core_crm"), session.isOn(.jobTexts) else {
+            smsConsentLoaded = false
+            return
+        }
         do {
             let loaded = try await api.customerSmsConsent(customer.id)
             guard currentAuthority() else { return }
@@ -1504,6 +1516,7 @@ struct CustomerDetailView: View {
     }
 
     private func recordSmsConsent(_ grant: Bool) async {
+        guard session.isOn(.jobTexts) else { smsConsentLoaded = false; return }
         do {
             smsConsent = try await api.recordCustomerSmsConsent(customer.id, grant: grant, expectedVersion: smsConsent?.version,
                                                                 idempotencyKey: smsConsentKey)

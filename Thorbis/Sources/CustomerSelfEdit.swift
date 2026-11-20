@@ -595,6 +595,9 @@ final class CustomerSelfEditModel: ObservableObject {
     @Published private(set) var saveNeedsReconciliation = false
     @Published private(set) var recoveryEvidence: RecoveryEvidence?
     @Published private(set) var checkingRecovery = false
+    /// False when the workspace has job texts off (`job_sms_notices`): the server refuses the
+    /// consent routes then, so "Text me updates" is left out and its read is skipped.
+    @Published private(set) var textsOn = true
     private var consentKey = UUID().uuidString
     private let recoveryStore: CustomerSelfEditRecoveryStoring
     private var recoveryScope: CustomerSelfEditRecoveryScope?
@@ -618,6 +621,7 @@ final class CustomerSelfEditModel: ObservableObject {
             return false
         }
         recoveryScope = next
+        textsOn = session.isOn(.jobTexts)
         return true
     }
 
@@ -772,8 +776,10 @@ final class CustomerSelfEditModel: ObservableObject {
             guard currentAuthority() else { return }
             let consent: CustomerSmsConsent?
             let consentKnown: Bool
-            do { consent = try await api.customerSmsConsent(customerID); consentKnown = true }
-            catch { consent = nil; consentKnown = false }
+            if textsOn {
+                do { consent = try await api.customerSmsConsent(customerID); consentKnown = true }
+                catch { consent = nil; consentKnown = false }
+            } else { consent = nil; consentKnown = false }
             guard currentAuthority(), draft == nil else { return }
             draft = CustomerSelfEditDraft(record: record, contacts: contacts, locations: locations, smsConsent: consent, consentKnown: consentKnown)
         } catch is CancellationError {
@@ -1054,8 +1060,9 @@ struct CustomerSelfEditForm: View {
                     }
                 }
             }
-            // Paper 38H: "Text me updates" is a switch row on its own card.
-            card {
+            // Paper 38H: "Text me updates" is a switch row on its own card. Left out while the
+            // workspace has job texts off.
+            if model.textsOn { card {
                 Toggle(isOn: Binding(get: { draft.wrappedValue.allowsTexts == true },
                                      set: { draft.wrappedValue.allowsTexts = $0 })) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -1068,7 +1075,7 @@ struct CustomerSelfEditForm: View {
                 .tint(Theme.brand)
                 .padding(.horizontal, 16).padding(.vertical, 10)
                 .frame(minHeight: 64)
-            }
+            } }
         }
     }
 

@@ -122,7 +122,7 @@ struct ThorbisApp: App {
         }
         // Lock Screen and Dynamic Island step buttons run here, through the same session and outbox.
         JobStepIntentRunner.configure(api: api, session: session, outbox: outbox, store: store)
-        PushNotifications.shared.start(api: api, store: store)
+        PushNotifications.shared.start(api: api, store: store, pushOn: { [weak session] in session?.isOn(.staffPush) ?? false })
         session.onWillUnbindDevice = { await PushNotifications.shared.unbind() }
         store.onUnauthorized = { [weak session] in Task { await session?.restore() } }
         PaperChrome.configureNavigationBar()
