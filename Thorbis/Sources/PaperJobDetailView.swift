@@ -160,6 +160,11 @@ struct JobDetailView: View {
     @State private var equipment: [EquipmentRecord] = []
     /// Paper 26A: the quick-add contact sheet, from the Contacts label's plus.
     @State private var showAddContact = false
+    /// "Add to job › Maintenance plan": the plans the workspace sells (empty until read, or when
+    /// this person can't change the customer), and a bump that makes the plan card read again.
+    @State private var sellablePlans: [MembershipPlan] = []
+    @State private var showAddPlan = false
+    @State private var planRevision = 0
     @State private var showScan = false
     @State private var showChecklist = false
     @State private var memberPricing: MemberPricing?
@@ -559,6 +564,16 @@ struct JobDetailView: View {
             JobFollowUpsView(jobID: jobId, initialKind: followUpKind).onDisappear { Task { await loadFollowUps() } }
         }
         // Paper 26A: add a contact to the account from the job, then read the contacts again.
+        .sheet(isPresented: $showAddPlan) { SheetSurface {
+            if let job {
+                // The same picker and enroll request as the customer page; then the job's member
+                // pricing and plan card read again.
+                JobAddPlanSheet(customerID: job.customerId, plans: sellablePlans) {
+                    planRevision += 1
+                    await loadPricingAndEquipment(generation: session.generation)
+                }
+            }
+        } }
         .sheet(isPresented: $showAddContact) { SheetSurface {
             if let job {
                 CustomerContactSheet(customerID: job.customerId) { _ in
@@ -1295,7 +1310,9 @@ struct JobDetailView: View {
             canAddMedia: session.can("job.edit", feature: "jobs"),
             canAddNote: session.can("job.note", feature: "jobs"),
             canAddContact: session.can("customer.view", feature: "core_crm") && session.can("customer.edit", feature: "core_crm")
-                && customerContext(job) != nil && customerContext(job) == contactsContext))
+                && customerContext(job) != nil && customerContext(job) == contactsContext,
+            canAddPlan: JobAddPlan.canOffer(canEditCustomer: MembershipAccess.canEditMemberships(session), plans: sellablePlans.count,
+                                            isMember: memberPricing?.isMember, offline: session.isOffline)))
         func row(_ kind: JobAddKind) -> JobAddRow {
             switch kind {
             case .estimate:
@@ -1317,6 +1334,9 @@ struct JobDetailView: View {
                                  subtitle: amount.map { "Collect \($0) now" } ?? "Collect what is owed") {
                     if let step { run(step) }
                 }
+            case .plan:
+                return JobAddRow(id: "plan", glyph: .shieldCheck, title: "Maintenance plan",
+                                 subtitle: "Member pricing and tune-up visits") { showAddPlan = true }
             case .photo:
                 return JobAddRow(id: "photo", glyph: .jobCamera, title: "Photo or video",
                                  subtitle: "Capture job-site media") {
@@ -3028,6 +3048,7 @@ struct JobDetailView: View {
                                            factsShownFor: JobPropertyHistory.accessPlace(job: job, locations: customerLocations)?.id) { await loadLocations(job) }
             }
             CustomerMembershipSection(customerID: job.customerId, editable: false, jobID: job.id)
+                .id("plan-\(planRevision)")
             followUpsPanel
             detailsGroup(job)
         }
@@ -5585,8 +5606,11 @@ struct JobDetailView: View {
         // Quiet: a refused read (technicians on some servers) or an older server leaves the rows out.
         let wantsEquipment = session.can("customer.view", feature: "core_crm")
         async let equipmentRead = wantsEquipment ? (try? await api.customerEquipment(job.customerId)) : nil
-        let (pricing, loaded) = await (pricingRead, equipmentRead)
+        // The plans on sale, only for someone who may add one to the customer.
+        async let plansRead = MembershipAccess.canEditMemberships(session) ? (try? await api.membershipPlans()) : nil
+        let (pricing, loaded, plans) = await (pricingRead, equipmentRead, plansRead)
         guard session.generation == generation, self.job?.customerId == job.customerId else { return }
+        if let plans { sellablePlans = plans }
         if let pricing { memberPricing = pricing }
         if let loaded { equipment = loaded.filter { $0.customerId == job.customerId } }
     }

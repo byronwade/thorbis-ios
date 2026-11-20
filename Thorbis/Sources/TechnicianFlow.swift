@@ -190,7 +190,7 @@ extension TechJobStep {
 /// One thing "Add to job" can offer (Paper 22's rows, plus the money moves a tech reaches for
 /// at any stage).
 enum JobAddKind: String, Equatable, CaseIterable {
-    case estimate, showEstimate, invoice, openInvoice, payment, photo, note, contact
+    case estimate, showEstimate, invoice, openInvoice, payment, plan, photo, note, contact
 }
 
 /// What "Add to job" offers. The server refuses none of these by job stage (only a canceled job
@@ -210,6 +210,9 @@ enum JobAddOffer {
         var canAddMedia = false
         var canAddNote = false
         var canAddContact = false
+        /// The workspace sells a maintenance plan, this person may change the customer, and the
+        /// customer isn't on one yet.
+        var canAddPlan = false
     }
 
     static func rows(_ inputs: Inputs) -> (billing: [JobAddKind], onTheJob: [JobAddKind]) {
@@ -221,12 +224,21 @@ enum JobAddOffer {
             if inputs.canShowEstimates { billing.append(.showEstimate) }
             if inputs.canCreateInvoice { billing.append(.invoice) } else if inputs.canOpenInvoice { billing.append(.openInvoice) }
             if inputs.canCollect { billing.append(.payment) }
+            if inputs.canAddPlan { billing.append(.plan) }
             if inputs.canAddMedia { onTheJob.append(.photo) }
         }
         // A note and a contact are records about the job and its customer; they stay on a canceled job.
         if inputs.canAddNote { onTheJob.append(.note) }
         if inputs.canAddContact { onTheJob.append(.contact) }
         return (billing, onTheJob)
+    }
+}
+
+/// "Add to job › Maintenance plan": offered to someone who may change the customer, when the
+/// workspace sells at least one plan and the customer isn't already a member. Online only.
+enum JobAddPlan {
+    static func canOffer(canEditCustomer: Bool, plans: Int, isMember: Bool?, offline: Bool) -> Bool {
+        canEditCustomer && plans > 0 && isMember != true && !offline
     }
 }
 

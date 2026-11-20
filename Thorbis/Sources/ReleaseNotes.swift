@@ -20,6 +20,8 @@ enum ReleaseNotes {
                       detail: "Near the address on your way to a job, Thorbis asks if you\u{2019}ve arrived. One tap marks it."),
                 .init(symbol: "doc.on.doc", title: "Start from a past estimate",
                       detail: "A new estimate can copy the name and items of one written before. Check prices before sending."),
+                .init(symbol: "shield", title: "Add a maintenance plan from a job",
+                      detail: "The + on a job has Maintenance plan, to put the customer on a plan you sell."),
             ]),
         ReleaseNote(
             id: "2026-11-20-job-flow",

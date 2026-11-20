@@ -431,13 +431,28 @@ struct CustomerMembershipSection: View {
     private func membershipDetail(_ membership: MembershipRecord) -> String { membership.detail }
 
     private var planPicker: some View {
+        MembershipPlanPicker(plans: plans, choose: { plan in Task { await enroll(plan) } }, close: { choosing = false })
+    }
+}
+
+/// "Choose a plan": the workspace's plans as rows of one card. Choosing one is the caller's to
+/// carry out (the customer page and the job's "Add to job" both enroll through the same request).
+struct MembershipPlanPicker: View {
+    let plans: [MembershipPlan]
+    var busy = false
+    var error: String? = nil
+    let choose: (MembershipPlan) -> Void
+    let close: () -> Void
+
+    var body: some View {
         NavigationStack {
             ScrollView {
                 PaperSection("Plans", count: plans.count) {
                     VStack(alignment: .leading, spacing: 0) {
+                        if let error { ListErrorRow(message: error).padding(.horizontal, PaperCardMetrics.inset) }
                         ForEach(plans) { plan in
                             if plan.id != plans.first?.id { WellDivider() }
-                            Button { Task { await enroll(plan) } } label: {
+                            Button { choose(plan) } label: {
                                 PaperListRow(title: plan.name,
                                              subtitle: [plan.discountPercent > 0 ? "\(plan.discountPercent)% off work" : nil,
                                                         plan.visitsPerYear.map { "\($0) visit\($0 == 1 ? "" : "s") a year" }, plan.description]
@@ -450,6 +465,8 @@ struct CustomerMembershipSection: View {
                                 }
                             }
                             .buttonStyle(RowPressStyle())
+                            .disabled(busy)
+                            .accessibilityIdentifier("membership-plan-\(plan.id)")
                         }
                     }
                     .padding(.vertical, PaperCardMetrics.edge)
@@ -460,12 +477,46 @@ struct CustomerMembershipSection: View {
             .background(Theme.canvas)
             // Paper 27A: a picker sheet leads with the task bar, not a system bar title.
             .safeAreaInset(edge: .top, spacing: 0) {
-                PaperTaskBar(title: "Choose a plan") { choosing = false }.background(Theme.canvas)
+                PaperTaskBar(title: "Choose a plan") { close() }.background(Theme.canvas)
             }
             .toolbar(.hidden, for: .navigationBar)
         }
         .presentationDetents([.medium, .large])
     }
+}
+
+/// The job's "Add to job › Maintenance plan": the same plan picker and the same enroll request the
+/// customer page uses, for the job's customer. No billing, card or price of its own.
+struct JobAddPlanSheet: View {
+    let customerID: String
+    let plans: [MembershipPlan]
+    let onEnrolled: () async -> Void
+    @EnvironmentObject private var api: APIClient
+    @EnvironmentObject private var session: SessionController
+    @Environment(\.dismiss) private var dismiss
+    @State private var busy = false
+    @State private var error: String?
+
+    var body: some View {
+        MembershipPlanPicker(plans: plans, busy: busy, error: error, choose: { plan in Task { await enroll(plan) } }, close: { dismiss() })
+    }
+
+    private func enroll(_ plan: MembershipPlan) async {
+        guard !busy, MembershipAccess.canEditMemberships(session) else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            _ = try await api.enroll(customerID, planID: plan.id, startsOn: .now)
+            await onEnrolled()
+            dismiss()
+        } catch is CancellationError {
+        } catch {
+            self.error = (error as? Problem)?.status == 403 ? MembershipAccess.membershipRefused : error.localizedDescription
+        }
+    }
+}
+
+extension CustomerMembershipSection {
 
     private func load() async {
         if let jobID, let context = try? await JobServiceContextLoader.load(jobID, api: api) {

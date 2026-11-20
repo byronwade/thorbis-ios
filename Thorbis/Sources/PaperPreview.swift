@@ -2095,6 +2095,12 @@ final class PaperPreviewProtocol: URLProtocol, @unchecked Sendable {
                                    "brand": "Rheem", "model": "XG50T06EC36U1", "warrantyExpiresOn": "2024-03-01",
                                    "createdAt": now, "updatedAt": now]]]
             }
+            // `--paper-preview-not-a-member`: the customer is on no plan, so the job's "+" offers one.
+            let notAMember = ProcessInfo.processInfo.arguments.contains("--paper-preview-not-a-member")
+            if notAMember, path == "/v1/customers/\(id)/memberships" { return ["items": [Any]()] }
+            if notAMember, path == "/v1/customers/\(id)/member-pricing" {
+                return ["customerId": id, "isMember": false, "discountPercent": 0] as [String: Any]
+            }
             if path == "/v1/customers/\(id)/memberships" {
                 return ["items": [["id": "00000000-0000-4000-8000-000000006201", "organizationId": org, "customerId": id,
                                    "planId": "00000000-0000-4000-8000-000000006301", "name": "Comfort Club", "kind": "membership",
