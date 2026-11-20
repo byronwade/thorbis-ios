@@ -13,6 +13,21 @@ import Foundation
 enum ReleaseNotes {
     static let all: [ReleaseNote] = [
         ReleaseNote(
+            id: "2026-11-20-job-flow",
+            date: "2026-11-20",
+            highlights: [
+                .init(symbol: "plus.circle", title: "Add to a job at any step",
+                      detail: "The + on a job adds a note, photo, estimate, invoice, payment or contact, driving or done."),
+                .init(symbol: "creditcard", title: "Collect or show an estimate any time",
+                      detail: "Collect and the estimate sit above the main button on a job at every step of the visit."),
+                .init(symbol: "photo.on.rectangle", title: "Pick many photos and videos at once",
+                      detail: "Choose as many as you like from your library. They send one by one, and PDFs too."),
+                .init(symbol: "person.2", title: "Description and contacts on the visit",
+                      detail: "Why you were sent, the booking call and each contact with Call and Text stay on screen."),
+                .init(symbol: "doc.badge.plus", title: "Another estimate while you work",
+                      detail: "Working has an Estimate tile and a Photos and files tile next to Photo and Checklist."),
+            ]),
+        ReleaseNote(
             id: "2026-11-20-plans",
             date: "2026-11-20",
             highlights: [
