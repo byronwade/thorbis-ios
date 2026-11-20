@@ -46,6 +46,9 @@ struct NewEstimateView: View {
     @State private var presentAfterSave = false
     @State private var presenting: PresentedEstimate?
     @State private var opened = Date.now
+    /// "Copy a past estimate": the picker, and the one-line note shown once something was copied.
+    @State private var showCopy = false
+    @State private var copiedNote: String?
     private let jobID: String?
     private let jobLocationID: String?
     /// The job's customer when the estimate is being made from a job; the create only names the
@@ -207,6 +210,10 @@ struct NewEstimateView: View {
                                   openPriceBook: { reopenPicker = true })
                 .environmentObject(session).environmentObject(api)
             } }
+            .sheet(isPresented: $showCopy) { SheetSurface {
+                EstimateCopySheet(customerID: customerID) { copyPast($0) }
+                    .environmentObject(session).environmentObject(api).environmentObject(store)
+            } }
             .thorbisConfirm("Continue without item groups?",
                             message: "The saved estimate did not keep the Work and Materials groups. Item descriptions, prices and visibility are unchanged. Continue without those groups, or ask your office for help.",
                             isPresented: $confirmGroupLoss,
@@ -327,6 +334,49 @@ struct NewEstimateView: View {
         return items
     }
 
+    /// Starting from a past estimate is offered only while the new one has no items yet.
+    private var canCopyPast: Bool {
+        created == nil && recovery.canEdit && lines.isEmpty && session.can("estimate.view", feature: "estimates")
+            && session.can("estimate.create", feature: "estimates")
+    }
+
+    /// A quiet row under the empty line list: 48 tall, on the card tone.
+    private var copyPastRow: some View {
+        Button { showCopy = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "doc.on.doc").font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.muted)
+                    .frame(width: 18).accessibilityHidden(true)
+                Text("Copy a past estimate").font(Theme.font(16)).foregroundStyle(Theme.foreground)
+                Spacer(minLength: 8)
+                PaperRowChevron()
+            }
+            .padding(.horizontal, 12).frame(minHeight: 48)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(PressStyle())
+        .padding(.top, 4)
+        .accessibilityHint("Starts this estimate from one already written")
+        .accessibilityIdentifier("estimate-copy-past")
+    }
+
+    /// The name (when none is typed yet) and the lines come across as plain typed lines; the
+    /// customer, approval, signature and discounts do not.
+    private func copyPast(_ estimate: EstimateRecord) {
+        guard canCopyPast else { return }
+        let copied = EstimateCopy.lines(from: estimate)
+        guard !copied.isEmpty else {
+            error = "That estimate has nothing that can be copied."
+            return
+        }
+        title = EstimateCopy.title(current: title, copied: estimate.title)
+        lines = copied
+        copiedNote = EstimateCopy.note(leftOut: EstimateCopy.leftOut(estimate))
+        titleProblem = nil
+        linesProblem = nil
+        error = nil
+    }
+
     /// The line under the heading: the job it's for and who it's for ("JOB-2214 · Danielle Marlowe").
     private var subtitle: String? {
         let parts = [jobID.map { "JOB-\($0.suffix(4).uppercased())" },
@@ -418,7 +468,15 @@ struct NewEstimateView: View {
                                          : "No items yet. Add a custom item: your role can't use the price book.")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 4)
+                    if canCopyPast { copyPastRow }
                 } else {
+                    if let copiedNote {
+                        Label(copiedNote, systemImage: "doc.on.doc")
+                            .font(Theme.font(13, weight: .medium)).foregroundStyle(Theme.subtle)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 4).padding(.top, 8)
+                            .accessibilityIdentifier("estimate-copied-note")
+                    }
                     Text("Tap an item to edit its name or price. At quantity 1, minus becomes remove.")
                         .font(Theme.font(13)).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)

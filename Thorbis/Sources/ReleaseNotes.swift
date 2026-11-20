@@ -18,6 +18,8 @@ enum ReleaseNotes {
             highlights: [
                 .init(symbol: "mappin.and.ellipse", title: "Mark arrived when you pull up",
                       detail: "Near the address on your way to a job, Thorbis asks if you\u{2019}ve arrived. One tap marks it."),
+                .init(symbol: "doc.on.doc", title: "Start from a past estimate",
+                      detail: "A new estimate can copy the name and items of one written before. Check prices before sending."),
             ]),
         ReleaseNote(
             id: "2026-11-20-job-flow",
