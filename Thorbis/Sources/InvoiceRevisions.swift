@@ -631,7 +631,9 @@ struct InvoiceChangesSection: View {
     }
 
     private func load() async {
-        guard session.can("invoice.view", feature: "invoicing") else {
+        // The history only exists once the server keeps invoice versions; until then asking for it
+        // would be one wasted request on every invoice.
+        guard session.isFeatureOn("invoice_revisions"), session.can("invoice.view", feature: "invoicing") else {
             history = nil
             onLoaded(nil)
             return
