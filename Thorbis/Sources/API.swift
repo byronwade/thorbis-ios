@@ -73,7 +73,36 @@ struct Problem: Codable, Error, LocalizedError {
     var code: String? = nil
     /// The server's stable kind of refusal ("authorization", "feature_unavailable", "validation").
     var category: String? = nil
+    /// The fields a validation refusal names (`errors[].path`), when the server sends them.
+    var errors: [ProblemIssue]? = nil
     var errorDescription: String? { detail ?? title ?? "Request failed (\(status ?? 0))" }
+
+    /// True when a validation refusal names this field, or one under it ("multipart.parts.3").
+    func names(_ path: String) -> Bool {
+        errors?.contains { $0.path == path || $0.path?.hasPrefix(path + ".") == true } ?? false
+    }
+}
+
+/// One entry of a validation refusal: the field and what was wrong with it.
+struct ProblemIssue: Codable, Equatable {
+    let path: String?
+    let message: String?
+}
+
+extension Problem {
+    private enum Keys: String, CodingKey { case title, status, detail, code, category, errors }
+
+    /// Reads the answer leniently: an `errors` list in a shape this app doesn't know is dropped,
+    /// never a reason to lose the title and detail.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: Keys.self)
+        self.init(title: try c.decodeIfPresent(String.self, forKey: .title),
+                  status: try c.decodeIfPresent(Int.self, forKey: .status),
+                  detail: try c.decodeIfPresent(String.self, forKey: .detail),
+                  code: try c.decodeIfPresent(String.self, forKey: .code),
+                  category: try c.decodeIfPresent(String.self, forKey: .category),
+                  errors: try? c.decodeIfPresent([ProblemIssue].self, forKey: .errors))
+    }
 }
 
 struct MeAccount: Codable { let id: String; let name: String?; let email: String? }
@@ -590,7 +619,7 @@ final class APIClient: ObservableObject {
         guard (200..<300).contains(code) else {
             if let decoded = try? JSONDecoder().decode(Problem.self, from: data),
                decoded.title != nil || decoded.detail != nil {
-                throw Problem(title: decoded.title, status: code, detail: decoded.detail, code: decoded.code, category: decoded.category)
+                throw Problem(title: decoded.title, status: code, detail: decoded.detail, code: decoded.code, category: decoded.category, errors: decoded.errors)
             }
             if let decoded = try? JSONDecoder().decode(AuthError.self, from: data),
                decoded.code != nil || decoded.message != nil {

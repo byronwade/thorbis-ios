@@ -44,7 +44,7 @@ enum MediaUploadState: Equatable {
 
     @MainActor static func of(_ media: PendingMedia, in store: PendingMediaStore) -> MediaUploadState {
         if store.uploadingID == media.id { return .sending }
-        if store.waitingForConnection.contains(media.id) { return .waiting }
+        if store.waitingForConnection.contains(media.id) || store.waitingForStorage.contains(media.id) { return .waiting }
         if let error = store.errors[media.id] { return .failed(error) }
         return .waiting
     }

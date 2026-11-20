@@ -233,14 +233,15 @@ final class JobFlowUnlockedTests: XCTestCase {
         XCTAssertEqual(MediaLimits.serverMaxBytes["document"], 50 * 1024 * 1024)
     }
 
-    func testFilesAreHeldToOneUploadUntilMultipartWorks() {
+    /// A server that said within the last day that it can only take 8 MB keeps the old limit.
+    func testFilesAreHeldToOneUploadWhileTheServerCannotTakeBigOnes() {
         let limit = MediaLimits.singleUploadBytes
         XCTAssertEqual(limit, 8 * 1024 * 1024)
         for mime in ["image/jpeg", "video/mp4", "application/pdf"] {
-            XCTAssertNil(MediaLimits.check(mime: mime, bytes: 1), mime)
-            XCTAssertNil(MediaLimits.check(mime: mime, bytes: limit), mime)
-            XCTAssertEqual(MediaLimits.check(mime: mime, bytes: limit + 1), .tooLarge(limitBytes: limit), mime)
-            XCTAssertEqual(MediaLimits.check(mime: mime, bytes: 0), .empty, mime)
+            XCTAssertNil(MediaLimits.check(mime: mime, bytes: 1, large: false), mime)
+            XCTAssertNil(MediaLimits.check(mime: mime, bytes: limit, large: false), mime)
+            XCTAssertEqual(MediaLimits.check(mime: mime, bytes: limit + 1, large: false), .tooLarge(limitBytes: limit), mime)
+            XCTAssertEqual(MediaLimits.check(mime: mime, bytes: 0, large: false), .empty, mime)
         }
         XCTAssertEqual(MediaLimits.check(mime: "text/plain", bytes: 10), .unsupported)
         XCTAssertEqual(MediaLimits.message(.tooLarge(limitBytes: limit), name: "plans.pdf"), "plans.pdf is too big. Files can be up to 8 MB.")

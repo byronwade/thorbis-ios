@@ -22,7 +22,7 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Thorbis uses Bluetooth to connect to supported card readers for in-person payments.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Thorbis uses your location to show your position on the schedule map, and estimate the drive to your next job.</string>
+	<string>Thorbis uses your location to show the map and drive time, and to offer to mark you arrived when you reach a job.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Thorbis uses the camera to take job photos and videos, scan documents, receipts, equipment labels and barcodes, and measure a space.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

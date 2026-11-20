@@ -35,6 +35,13 @@ final class PendingMediaStore: ObservableObject {
     /// Items whose last attempt stopped for want of a connection. They are waiting, not failed;
     /// `errors` still carries the message so saved-work review reads exactly as before.
     @Published private(set) var waitingForConnection: Set<String> = []
+    /// Items whose last attempt met storage that was not answering (502 or 504). Waiting, not failed.
+    @Published private(set) var waitingForStorage: Set<String> = []
+    /// How far each big file has got, by item. Kept beside the file, so it is here after a restart.
+    @Published private(set) var progress: [String: MediaUploadProgress] = [:]
+    /// Said once when a big clip had to be swapped for its 8 MB copy on a server that can't take
+    /// big files yet. The screen showing the queue reads it and clears it.
+    @Published var fallbackNotice: String?
     @Published private(set) var legacyCount = 0
     @Published private(set) var totalPendingCount = 0
 
@@ -62,7 +69,7 @@ final class PendingMediaStore: ObservableObject {
         var errorDescription: String? {
             switch self {
             case .unbound: "Open the original workspace before saving or retrying this media."
-            case .invalid: "This media could not be saved. Choose a supported nonempty file up to 8 MB."
+            case .invalid: "This media could not be saved. Choose a photo, a video or a PDF that isn\u{2019}t empty or too big."
             case .unreadable: "This phone cannot read the saved media. Keep it here and retry after unlocking the phone."
             case .existing: "This media is already saved. Retry its existing upload."
             case .recoveryUnavailable: "This destination is no longer verified. Reopen recovery from the current job and try again."
@@ -89,7 +96,7 @@ final class PendingMediaStore: ObservableObject {
                   let origin = APIClient.normalizedOrigin(value.origin) else { return nil }
             return PendingMediaScope(actorID: value.actorID, organizationID: value.organizationID, origin: origin)
         }
-        if scope != normalized { binding = UUID(); errors = [:]; validated = []; waitingForConnection = [] }
+        if scope != normalized { binding = UUID(); errors = [:]; validated = []; waitingForConnection = []; waitingForStorage = []; fallbackNotice = nil }
         scope = normalized
         reload()
     }
@@ -121,10 +128,22 @@ final class PendingMediaStore: ObservableObject {
     func save(_ media: PendingMedia, data: Data, context: CaptureContext) throws {
         guard let scope else { throw StorageError.unbound }
         guard context.scope == scope, context.binding == binding else { throw StorageError.unbound }
-        guard UUID(uuidString: media.jobID) != nil, !data.isEmpty, data.count <= 8 * 1024 * 1024,
-              ((media.kind == "photo" && ["image/jpeg", "image/png", "image/heic", "image/webp"].contains(media.mime)) ||
-               (media.kind == "document" && media.mime == "application/pdf") ||
-               (media.kind == "video" && ["video/mp4", "video/quicktime"].contains(media.mime))) else { throw StorageError.invalid }
+        guard Self.accepts(media, size: data.count) else { throw StorageError.invalid }
+        try commit(media, scope: scope, size: data.count, hash: Self.hash(data)) { staging in
+            let payload = staging.appendingPathComponent("payload")
+            try data.write(to: payload, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+    }
+
+    /// The server's types and its size ceiling for the kind (50 MB photos and PDFs, 200 MB videos).
+    private static func accepts(_ media: PendingMedia, size: Int) -> Bool {
+        UUID(uuidString: media.jobID) != nil && size > 0 && MediaLimits.kind(mime: media.mime) == media.kind
+            && size <= MediaLimits.uploadLimit(kind: media.kind)
+    }
+
+    /// One save, all or nothing: the unit is built in a staging folder and moved into place.
+    private func commit(_ media: PendingMedia, scope: PendingMediaScope, size: Int, hash: String,
+                        write: (URL) throws -> Void) throws {
         let destination = try unit(media, scope: scope)
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw StorageError.existing }
         let staging = destination.deletingLastPathComponent().appendingPathComponent(".staging-\(UUID().uuidString)", isDirectory: true)
@@ -132,10 +151,10 @@ final class PendingMediaStore: ObservableObject {
             try createDirectory(directory)
             try createDirectory(destination.deletingLastPathComponent())
             try createDirectory(staging)
-            let payload = staging.appendingPathComponent("payload")
-            try data.write(to: payload, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]); try protect(payload)
+            try write(staging)
+            try protect(staging.appendingPathComponent("payload"))
             let metadata = staging.appendingPathComponent("metadata.json")
-            let envelope = Envelope(scope: scope, media: media, size: data.count, hash: Self.hash(data))
+            let envelope = Envelope(scope: scope, media: media, size: size, hash: hash)
             try JSONEncoder().encode(envelope).write(to: metadata, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]); try protect(metadata)
             try FileManager.default.moveItem(at: staging, to: destination)
             validated.insert(media)
@@ -144,6 +163,100 @@ final class PendingMediaStore: ObservableObject {
             try? FileManager.default.removeItem(at: staging)
             throw error
         }
+    }
+
+    /// A smaller copy kept beside a big clip: what is sent instead if the server can only take 8 MB.
+    struct Fallback {
+        let file: URL
+        /// Seconds of the clip the smaller copy holds, when its end was cut off.
+        let trimmedSeconds: Double?
+    }
+    private struct FallbackEnvelope: Codable {
+        let media: PendingMedia
+        let size: Int
+        let hash: String
+        let trimmedSeconds: Double?
+    }
+
+    /// Saves a file that is already on disk (a big PDF, an exported video) without reading it into
+    /// memory: it is hashed a megabyte at a time and copied into the queue.
+    func save(_ media: PendingMedia, file: URL, fallback: Fallback? = nil, context: CaptureContext) async throws {
+        guard context.scope == scope, context.binding == binding else { throw StorageError.unbound }
+        let digest: MediaFileDigest, small: MediaFileDigest?
+        do {
+            (digest, small) = try await Task.detached(priority: .userInitiated) {
+                (try MediaParts.digest(of: file), try fallback.map { try MediaParts.digest(of: $0.file) })
+            }.value
+        } catch { throw StorageError.invalid }
+        // The workspace may have changed while the file was being read.
+        guard let scope, context.scope == scope, context.binding == binding else { throw StorageError.unbound }
+        guard Self.accepts(media, size: digest.sizeBytes) else { throw StorageError.invalid }
+        try commit(media, scope: scope, size: digest.sizeBytes, hash: digest.contentHash) { staging in
+            try FileManager.default.copyItem(at: file, to: staging.appendingPathComponent("payload"))
+            guard let fallback, let small, small.sizeBytes > 0, small.sizeBytes <= MediaLimits.singleUploadBytes else { return }
+            let copy = staging.appendingPathComponent("fallback-payload")
+            try FileManager.default.copyItem(at: fallback.file, to: copy); try protect(copy)
+            let smaller = PendingMedia(id: UUID().uuidString, jobID: media.jobID, filename: media.filename, tags: media.tags,
+                                       capturedAt: media.capturedAt, kind: media.kind, mime: media.mime, caption: media.caption)
+            let note = staging.appendingPathComponent("fallback.json")
+            try JSONEncoder().encode(FallbackEnvelope(media: smaller, size: small.sizeBytes, hash: small.contentHash, trimmedSeconds: fallback.trimmedSeconds))
+                .write(to: note, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]); try protect(note)
+        }
+    }
+
+    /// The server can only take 8 MB: put the smaller copy in the queue in place of the big file.
+    /// Returns the new item, or nil when there is no smaller copy (the big file then stays, failed).
+    private func useFallback(_ item: PendingMedia, owner: PendingMediaScope) -> PendingMedia? {
+        guard let path = try? unit(item, scope: owner),
+              let data = try? Data(contentsOf: path.appendingPathComponent("fallback.json")),
+              let kept = try? JSONDecoder().decode(FallbackEnvelope.self, from: data) else { return nil }
+        let copy = path.appendingPathComponent("fallback-payload")
+        do {
+            try commit(kept.media, scope: owner, size: kept.size, hash: kept.hash) { staging in
+                try FileManager.default.copyItem(at: copy, to: staging.appendingPathComponent("payload"))
+            }
+            try FileManager.default.removeItem(at: path)
+        } catch { return nil }
+        errors[item.id] = nil; progress[item.id] = nil
+        fallbackNotice = MediaUploadWords.keptFirstPart(seconds: kept.trimmedSeconds)
+        reload()
+        return kept.media
+    }
+
+    /// A big file's saved size and hash checked against the bytes on disk, without loading them.
+    private func verifiedFile(_ media: PendingMedia, owner: PendingMediaScope) async throws -> (URL, MediaFileDigest) {
+        guard scope == owner, items.contains(media) else { throw StorageError.unbound }
+        let path = try unit(media, scope: owner), payload = path.appendingPathComponent("payload")
+        do {
+            let envelope = try JSONDecoder().decode(Envelope.self, from: Data(contentsOf: path.appendingPathComponent("metadata.json")))
+            guard envelope.scope == owner, envelope.media == media, Self.accepts(media, size: envelope.size) else { throw StorageError.unreadable }
+            let digest = try await Task.detached(priority: .utility) { try MediaParts.digest(of: payload) }.value
+            guard digest.sizeBytes == envelope.size, digest.contentHash == envelope.hash else { throw StorageError.unreadable }
+            validated.insert(media); unverifiedIDs.remove(media.id)
+            if errors[media.id] == StorageError.unreadable.localizedDescription { errors[media.id] = nil }
+            return (payload, digest)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            validated.remove(media); unverifiedIDs.insert(media.id)
+            errors[media.id] = StorageError.unreadable.localizedDescription
+            throw StorageError.unreadable
+        }
+    }
+
+    /// The size written down when the item was saved; decides one upload or parts.
+    private func savedSize(_ media: PendingMedia, owner: PendingMediaScope) -> Int? {
+        guard let path = try? unit(media, scope: owner),
+              let data = try? Data(contentsOf: path.appendingPathComponent("metadata.json")) else { return nil }
+        return (try? JSONDecoder().decode(Envelope.self, from: data))?.size
+    }
+
+    private func keep(_ next: MediaUploadProgress, for item: PendingMedia, owner: PendingMediaScope) {
+        progress[item.id] = next
+        guard let file = try? unit(item, scope: owner).appendingPathComponent("upload.json"),
+              let data = try? JSONEncoder().encode(next) else { return }
+        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        try? protect(file)
     }
 
     /// Where a saved item's bytes sit, for a downsampled thumbnail only. Read-only: no hash check,
@@ -182,6 +295,7 @@ final class PendingMediaStore: ObservableObject {
     func reload() {
         storageWarning = nil
         items = []; unverifiedIDs = []
+        var kept: [String: MediaUploadProgress] = [:]
         if let scope {
             do {
                 let folder = try scopeDirectory(scope)
@@ -196,6 +310,8 @@ final class PendingMediaStore: ObservableObject {
                             guard envelope.scope == scope, envelope.media.id == path.lastPathComponent,
                                   UUID(uuidString: envelope.media.id) != nil else { throw StorageError.unreadable }
                             items.append(envelope.media)
+                            if let saved = try? Data(contentsOf: path.appendingPathComponent("upload.json")),
+                               let far = try? JSONDecoder().decode(MediaUploadProgress.self, from: saved) { kept[envelope.media.id] = far }
                             if !validated.contains(envelope.media) { unverifiedIDs.insert(envelope.media.id) }
                             if FileManager.default.fileExists(atPath: path.appendingPathComponent("integrity-failed").path) {
                                 errors[envelope.media.id] = StorageError.unreadable.localizedDescription
@@ -210,6 +326,10 @@ final class PendingMediaStore: ObservableObject {
                 items.sort(by: MediaQueue.sendsBefore)
             } catch { storageWarning = "Saved media could not be opened. Unlock the phone and retry." }
         }
+        #if DEBUG
+        if previewFrozen { kept = previewProgress }
+        #endif
+        progress = kept
         recount()
     }
 
@@ -240,6 +360,7 @@ final class PendingMediaStore: ObservableObject {
 
     func clearAll() {
         binding = UUID(); scope = nil; items = []; errors = [:]; validated = []; unverifiedIDs = []; waitingForConnection = []
+        waitingForStorage = []; progress = [:]; fallbackNotice = nil
         var failed = false
         for folder in [directory, legacyDirectory] where FileManager.default.fileExists(atPath: folder.path) {
             do { try FileManager.default.removeItem(at: folder) }
@@ -253,36 +374,79 @@ final class PendingMediaStore: ObservableObject {
     /// One foreground drain for both manual retry and reconnect. Every item keeps its
     /// original client asset ID, bytes and capture date, including an uncertain retry.
     func drain(api: APIClient, jobID: String? = nil, canUpload: @MainActor () -> Bool, storageSession: URLSession? = nil) async {
+        #if DEBUG
+        if previewFrozen { return }
+        #endif
         guard !draining, let owner = scope, owner.origin == api.normalizedOrigin, canUpload() else { return }
         let token = binding, generation = api.requestGeneration
         func current() -> Bool { binding == token && scope == owner && api.requestGeneration == generation && api.normalizedOrigin == owner.origin && canUpload() && !Task.isCancelled }
         draining = true
         defer { draining = false; uploadingID = nil }
         reload()
-        let pending = items.filter { jobID == nil || $0.jobID == jobID }
-        for item in pending {
+        var pending = items.filter { jobID == nil || $0.jobID == jobID }
+        var place = 0
+        while place < pending.count {
+            let item = pending[place]
+            place += 1
             guard current() else { return }
             uploadingID = item.id
             do {
-                let data = try read(item)
-                _ = try await MediaTransfer(api: api, storageSession: storageSession).upload(jobID: item.jobID, clientAssetID: item.id,
-                    kind: item.kind, mime: item.mime, originalFilename: item.filename, data: data, tags: item.tags,
-                    caption: item.caption, capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID, currentAuthority: current)
-                guard current() else { return }
-                try finishRecoveredSources(item, data: data, owner: owner, current: current)
-                guard current() else { return }
+                if let size = savedSize(item, owner: owner), MediaParts.isLarge(size) {
+                    // A big file: checked and sent from disk in parts, never loaded whole.
+                    let (file, digest) = try await verifiedFile(item, owner: owner)
+                    guard current() else { return }
+                    _ = try await MediaTransfer(api: api, storageSession: storageSession).uploadLarge(jobID: item.jobID, clientAssetID: item.id,
+                        kind: item.kind, mime: item.mime, originalFilename: item.filename, file: file, digest: digest, tags: item.tags,
+                        caption: item.caption, capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID,
+                        onProgress: { [weak self] far in if self?.binding == token { self?.keep(far, for: item, owner: owner) } },
+                        currentAuthority: current)
+                    guard current() else { return }
+                } else {
+                    let data = try read(item)
+                    _ = try await MediaTransfer(api: api, storageSession: storageSession).upload(jobID: item.jobID, clientAssetID: item.id,
+                        kind: item.kind, mime: item.mime, originalFilename: item.filename, data: data, tags: item.tags,
+                        caption: item.caption, capturedAt: item.capturedAt, expectedOrganizationID: owner.organizationID, currentAuthority: current)
+                    guard current() else { return }
+                    try finishRecoveredSources(item, data: data, owner: owner, current: current)
+                    guard current() else { return }
+                }
                 try FileManager.default.removeItem(at: unit(item, scope: owner))
                 errors[item.id] = nil
-                waitingForConnection.remove(item.id)
+                waitingForConnection.remove(item.id); waitingForStorage.remove(item.id)
                 reload()
             } catch {
                 guard current() else { return }
+                // A server that can only take 8 MB: send the smaller copy kept beside a big clip.
+                // A file with no smaller copy stays, failed, with the reason; it is never retried
+                // by itself.
+                if MediaTransfer.isTooBigForNow(error), let smaller = useFallback(item, owner: owner) {
+                    pending.append(smaller)
+                    continue
+                }
                 if !(error is CancellationError) { errors[item.id] = error.localizedDescription }
                 if error.isConnectivityFailure { waitingForConnection.insert(item.id) } else { waitingForConnection.remove(item.id) }
-                if MediaQueue.afterFailure(cancelled: error is CancellationError, connectivity: error.isConnectivityFailure) == .stop { return }
+                let storageDown = MediaTransfer.isStorageUnavailable(error)
+                if storageDown { waitingForStorage.insert(item.id) } else { waitingForStorage.remove(item.id) }
+                if MediaQueue.afterFailure(cancelled: error is CancellationError, connectivity: error.isConnectivityFailure,
+                                           storageDown: storageDown) == .stop { return }
             }
         }
     }
+    #if DEBUG
+    /// Design preview only: the queue holds still in the state a screenshot needs.
+    private var previewFrozen = false
+    private var previewProgress: [String: MediaUploadProgress] = [:]
+    func previewFreeze(sending: String? = nil, progress far: [String: MediaUploadProgress] = [:],
+                       failed: [String: String] = [:], storageDown: Set<String> = []) {
+        previewFrozen = true
+        previewProgress = far
+        uploadingID = sending
+        progress = far
+        errors = failed.merging(Dictionary(uniqueKeysWithValues: storageDown.map { ($0, MediaUploadWords.storageDown) })) { first, _ in first }
+        waitingForStorage = storageDown
+    }
+    #endif
+
     struct LegacyCandidate: Identifiable, Equatable {
         let media: PendingMedia
         var id: String { media.id }

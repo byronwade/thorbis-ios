@@ -595,6 +595,36 @@ enum PaperPreview {
                 }
             } catch { assertionFailure("Synthetic waiting media failed: \(error)") }
         }
+        if let flag = args.firstIndex(of: "--paper-preview-media-large"), args.indices.contains(flag + 1) {
+            // Big-file screenshots (labelled SAMPLE): five saved items, the second a clip part-way
+            // sent (`sending`), refused by a server that takes 8 MB (`toobig`), or waiting for
+            // storage that is not answering (`storage`). The queue holds still.
+            store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
+            do {
+                guard let context = store.captureContext else { return store }
+                let clipID = "00000000-0000-4000-8000-000000009862"
+                let samples: [(String, String, String, String)] = [
+                    ("00000000-0000-4000-8000-000000009861", "photo", "image/jpeg", "SAMPLE before.jpg"),
+                    (clipID, "video", "video/mp4", "SAMPLE walkthrough.mp4"),
+                    ("00000000-0000-4000-8000-000000009863", "document", "application/pdf", "SAMPLE permit set.pdf"),
+                    ("00000000-0000-4000-8000-000000009864", "photo", "image/jpeg", "SAMPLE after 1.jpg"),
+                    ("00000000-0000-4000-8000-000000009865", "photo", "image/jpeg", "SAMPLE after 2.jpg"),
+                ]
+                for (number, sample) in samples.enumerated() where !store.items.contains(where: { $0.id == sample.0 }) {
+                    let data = sample.1 == "photo" ? MediaSample.image(caption: sample.3, tags: []).jpegData(compressionQuality: 0.8)!
+                        : UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 100, height: 100)).pdfData { $0.beginPage() }
+                    try store.save(.init(id: sample.0, jobID: jobID, filename: sample.3, tags: [],
+                                         capturedAt: Date().addingTimeInterval(Double(number - 6) * 60), kind: sample.1, mime: sample.2,
+                                         caption: sample.1 == "video" ? "Video clip" : nil), data: data, context: context)
+                }
+                switch args[flag + 1] {
+                case "toobig": store.previewFreeze(failed: [clipID: MediaUploadWords.tooBigForNow])
+                case "storage": store.previewFreeze(storageDown: ["00000000-0000-4000-8000-000000009861"])
+                default:
+                    store.previewFreeze(sending: clipID, progress: [clipID: MediaUploadProgress(uploadID: "sample", totalParts: 5, etags: [1: "a", 2: "b"])])
+                }
+            } catch { assertionFailure("Synthetic large media failed: \(error)") }
+        }
         if args.contains("--paper-preview-many-pending") {
             store.bind(PendingMediaScope(actorID: actorID, organizationID: organizationID, origin: "https://app.thorbis.com"))
             let pdf = UIGraphicsPDFRenderer(bounds: CGRect(x: 0, y: 0, width: 100, height: 100)).pdfData { $0.beginPage() }

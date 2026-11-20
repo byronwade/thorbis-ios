@@ -942,10 +942,14 @@ struct FieldMediaRegistrationRequest: Encodable {
     let capturedAt: String?
     let tags: [String]?
     let caption: String?
+    /// The SHA-256 of each 8 MiB part, in order. Sent only for a file over 8 MiB; left out (never
+    /// an empty list) for anything smaller, which the server refuses otherwise.
+    let partHashes: [String]?
 
     init(clientAssetId: String, kind: String, mime: String, sizeBytes: Int,
          originalFilename: String, contentHash: String, capturedAt: String? = nil,
-         tags: [String]? = nil, caption: String? = nil) {
+         tags: [String]? = nil, caption: String? = nil, partHashes: [String]? = nil) {
+        self.partHashes = partHashes
         self.clientAssetId = clientAssetId
         self.kind = kind
         self.mime = mime
@@ -969,6 +973,23 @@ struct FieldResumablePart: Decodable {
     let partNumber: Int
     let url: String
     let expiresAt: String
+    /// Exact length of this part. Absent from a server that cannot finish large uploads yet.
+    let sizeBytes: Int?
+    /// Headers the PUT must carry. Absent from a server that cannot finish large uploads yet.
+    let headers: [String: String]?
+    /// Set when storage already holds exactly this part: it is not sent again.
+    let etag: String?
+}
+
+/// `POST /v1/media/{id}/confirm` for a file sent in parts.
+struct FieldMultipartConfirmation: Encodable, Equatable {
+    struct Part: Encodable, Equatable {
+        let partNumber: Int
+        let etag: String
+        let contentHash: String
+    }
+    let uploadId: String
+    let parts: [Part]
 }
 
 struct FieldResumableUpload: Decodable {
@@ -1231,8 +1252,12 @@ extension APIClient {
         try await send("POST", fieldPath("/v1/jobs", id: jobID, suffix: "/media"), body: request)
     }
 
-    func confirmFieldMedia(_ mediaID: String) async throws -> MediaAssetRecord {
-        try await send("POST", fieldPath("/v1/media", id: mediaID, suffix: "/confirm"), body: EmptyObject())
+    /// A file of up to 8 MiB confirms with an empty body; one sent in parts names them.
+    func confirmFieldMedia(_ mediaID: String, multipart: FieldMultipartConfirmation? = nil) async throws -> MediaAssetRecord {
+        struct Body: Encodable { let multipart: FieldMultipartConfirmation }
+        let path = try fieldPath("/v1/media", id: mediaID, suffix: "/confirm")
+        if let multipart { return try await send("POST", path, body: Body(multipart: multipart)) }
+        return try await send("POST", path, body: EmptyObject())
     }
 
     /// Archive a stored photo or document (`POST /v1/media/{id}/archive`, no body, `job.edit`).

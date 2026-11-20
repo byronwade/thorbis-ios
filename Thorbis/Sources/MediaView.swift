@@ -200,8 +200,9 @@ struct JobMediaView: View {
                 if showsDocuments { documentSection }
                 loadMoreRow
                 // Paper 21A has no caption under the grid; only what happened to a clip is said.
-                if canAdd, let videoNotice {
+                if canAdd, let videoNotice = videoNotice ?? pendingMedia.fallbackNotice {
                     Text(videoNotice).font(Theme.font(12)).foregroundStyle(Theme.muted).padding(.top, 4)
+                        .accessibilityIdentifier("job-media-video-notice")
                 }
             }
             // Paper v2: cards and tiles sit 16 in from the screen's edges.
@@ -217,7 +218,8 @@ struct JobMediaView: View {
             LegacyMediaRecoveryView(jobID: jobID, workspaceName: session.activeOrganization?.name ?? "Current workspace")
         } }
         .sheet(isPresented: $showAddDocument, onDismiss: { pendingDocumentSource?(); pendingDocumentSource = nil }) { SheetSurface {
-            MediaAddDocumentSheet(jobNumber: "JOB-\(jobID.suffix(4).uppercased())", canScan: tools.scan) { source in
+            MediaAddDocumentSheet(jobNumber: "JOB-\(jobID.suffix(4).uppercased())", canScan: tools.scan,
+                                  limitNote: MediaLargeUploads.answer(origin: api.normalizedOrigin) == .yes ? "PDFs up to 50 MB." : "Up to 8 MB.") { source in
                 switch source {
                 case .scan: pendingDocumentSource = { showScanner = true }
                 case .photos: pendingDocumentSource = { showLibrary = true }
@@ -227,13 +229,20 @@ struct JobMediaView: View {
             }
         } }
         .fullScreenCover(isPresented: $showScanner) {
-            DocumentScanner { pdf in
+            DocumentScanner(byteLimit: MediaLimits.uploadLimit(kind: "document", large: largeAllowed)) { pdf in
                 showScanner = false
                 guard let pdf else { return }
                 do {
                     let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
-                    try select(pdf, mime: "application/pdf", filename: "scan-\(stamp).pdf")
-                    enqueueSelection()
+                    if pdf.count > MediaLimits.singleUploadBytes {
+                        // A long scan: over the quick-add step's 8 MB, so it goes straight to the queue.
+                        try queueFile(pdf, mime: "application/pdf", filename: "scan-\(stamp).pdf")
+                        error = nil
+                        Task { await retryWaiting() }
+                    } else {
+                        try select(pdf, mime: "application/pdf", filename: "scan-\(stamp).pdf")
+                        enqueueSelection()
+                    }
                 } catch { self.error = error.localizedDescription }
             }
             .ignoresSafeArea()
@@ -310,7 +319,7 @@ struct JobMediaView: View {
         .photosPicker(isPresented: $showLibrary, selection: $librarySelection, selectionBehavior: .ordered,
                       matching: .any(of: [.images, .videos]))
         .fileImporter(isPresented: $importDocument, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { result in
-            do { importDocuments(try result.get()) } catch { self.error = error.localizedDescription }
+            do { let urls = try result.get(); Task { await importDocuments(urls) } } catch { self.error = error.localizedDescription }
         }
         // Documents and clips keep the system preview.
         .sheet(isPresented: Binding(get: { previewIsCurrent && preview.url != nil }, set: { if !$0 { preview.clear(); previewScope = nil; previewRecord = nil } })) {
@@ -548,7 +557,10 @@ struct JobMediaView: View {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(waiting.count) saved on this phone").font(Theme.font(16, weight: .medium)).monospacedDigit()
-                        Text(MediaQueue.line(waiting: waiting.map(\.id), sendingID: pendingMedia.uploadingID, failed: failed, offline: offline))
+                        Text(MediaQueue.line(waiting: waiting.map(\.id), sendingID: pendingMedia.uploadingID, failed: failed, offline: offline,
+                                             percent: pendingMedia.uploadingID.flatMap { pendingMedia.progress[$0]?.percent },
+                                             storageDown: waiting.contains { pendingMedia.waitingForStorage.contains($0.id) }))
+                            .fixedSize(horizontal: false, vertical: true)
                             .font(Theme.font(14)).foregroundStyle(Theme.muted).monospacedDigit()
                     }
                     Spacer(minLength: 8)
@@ -625,7 +637,7 @@ struct JobMediaView: View {
         // One empty state for the whole tab instead of two empty sections.
         if allPhotos.isEmpty && documents.isEmpty && waiting.isEmpty && (currentPendingContext == nil || (pendingMedia.legacyCount == 0 && pendingMedia.storageWarning == nil)) && !loading && !hasMore && pageError == nil && readScope == sourceScope && readScope != nil {
             PaperEmptyState(symbol: "camera", title: "No photos yet",
-                            message: canAdd ? "Take a before photo when you arrive. Photos, PDFs and clips up to 8 MB." : nil)
+                            message: canAdd ? "Take a before photo when you arrive. \(limitNote)" : nil)
         } else if !loading && showsPhotos && (!allPhotos.isEmpty || hasMore || !waiting.isEmpty) && photos.isEmpty && waitingPhotos.isEmpty {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
@@ -849,6 +861,10 @@ struct JobMediaView: View {
     private func pendingDetail(_ media: PendingMedia) -> String {
         let kind = media.kind == "video" ? "Video clip" : "PDF"
         if pendingMedia.unverifiedIDs.contains(media.id), pendingMedia.errors[media.id] == nil { return "\(kind) · saved copy not yet verified" }
+        // A big file part-way sent says how far it has got, also after the app was closed.
+        if let far = pendingMedia.progress[media.id], far.sentParts > 0 {
+            return "\(kind) · \(pendingMedia.uploadingID == media.id ? "sending" : "sent") \(far.percent)%"
+        }
         return "\(kind) · saved on this phone \(media.capturedAt.tradeTime)"
     }
 
@@ -1149,13 +1165,51 @@ struct JobMediaView: View {
                            capturedAt: Date = Date()) throws {
         guard canAdd, captureGeneration == api.requestGeneration, captureOrigin == api.normalizedOrigin,
               let captureContext else { throw MediaSelectionError.workspaceChanged }
-        if let refusal = MediaLimits.check(mime: mime, bytes: data.count) {
+        if let refusal = MediaLimits.check(mime: mime, bytes: data.count, large: largeAllowed) {
             throw MediaImportError(message: MediaLimits.message(refusal, name: filename))
         }
         let kind = MediaLimits.kind(mime: mime) ?? "photo"
         let media = PendingMedia(id: UUID().uuidString, jobID: jobID, filename: filename, tags: kind == "photo" ? tags : [],
                                  capturedAt: capturedAt, kind: kind, mime: mime, caption: caption)
         try pendingMedia.save(media, data: data, context: captureContext)
+    }
+
+    /// The same for a file that is already on disk (a big PDF, an exported video): it is copied
+    /// into the queue without being read into memory. `fallback` is the 8 MB copy of a big clip.
+    private func queueFile(at file: URL, bytes: Int, mime: String, filename: String, caption: String? = nil,
+                           capturedAt: Date = Date(), fallback: PendingMediaStore.Fallback? = nil) async throws {
+        guard canAdd, captureGeneration == api.requestGeneration, captureOrigin == api.normalizedOrigin,
+              let captureContext else { throw MediaSelectionError.workspaceChanged }
+        if let refusal = MediaLimits.check(mime: mime, bytes: bytes, large: largeAllowed) {
+            throw MediaImportError(message: MediaLimits.message(refusal, name: filename))
+        }
+        let media = PendingMedia(id: UUID().uuidString, jobID: jobID, filename: filename, tags: [],
+                                 capturedAt: capturedAt, kind: MediaLimits.kind(mime: mime) ?? "document", mime: mime, caption: caption)
+        try await pendingMedia.save(media, file: file, fallback: fallback, context: captureContext)
+    }
+
+    /// Queues an exported clip. One that fits 8 MB is saved as before; a bigger one is copied
+    /// from its file with its 8 MB copy beside it.
+    private func queueClip(_ clip: VideoCapture.Clip, filename: String, capturedAt: Date = Date()) async throws {
+        guard let small = clip.small else {
+            try queueFile(Data(contentsOf: clip.url), mime: "video/mp4", filename: filename, caption: "Video clip", capturedAt: capturedAt)
+            return
+        }
+        let bytes = (try? clip.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        try await queueFile(at: clip.url, bytes: bytes, mime: "video/mp4", filename: filename, caption: "Video clip", capturedAt: capturedAt,
+                            fallback: .init(file: small.url, trimmedSeconds: small.trimmedTo))
+    }
+
+    /// Whether big files are prepared for this server (`MediaLargeUploads`): yes unless it said
+    /// within the last day that it can only take 8 MB.
+    private var largeAllowed: Bool { MediaLargeUploads.allowed(origin: api.normalizedOrigin) }
+
+    /// The size line under the add buttons. The big limits are promised only once this server
+    /// has taken a big file.
+    private var limitNote: String {
+        MediaLargeUploads.answer(origin: api.normalizedOrigin) == .yes
+            ? "Photos and PDFs up to 50 MB. Videos up to 200 MB."
+            : "Photos, PDFs and clips up to 8 MB."
     }
 
     /// The library pick. One photo keeps the quick tag step; several photos and any videos are
@@ -1183,11 +1237,9 @@ struct JobMediaView: View {
                 case .video:
                     guard let movie = try await item.loadTransferable(type: PickedMovie.self) else { throw CocoaError(.fileReadCorruptFile) }
                     defer { try? FileManager.default.removeItem(at: movie.url) }
-                    let clip = try await VideoCapture.exportMP4(movie.url)
-                    defer { try? FileManager.default.removeItem(at: clip.url) }
-                    try queueFile(Data(contentsOf: clip.url), mime: "video/mp4",
-                                  filename: MediaImportPlan.filename(.video, stamp: stamp, position: position),
-                                  caption: "Video clip", capturedAt: when)
+                    let clip = try await VideoCapture.exportMP4(movie.url, allowLarge: largeAllowed)
+                    defer { clip.removeFiles() }
+                    try await queueClip(clip, filename: MediaImportPlan.filename(.video, stamp: stamp, position: position), capturedAt: when)
                     if clip.trimmedTo != nil { trimmed += 1 }
                 case .photo:
                     guard let data = try await item.loadTransferable(type: Data.self), let image = UIImage(data: data),
@@ -1212,7 +1264,7 @@ struct JobMediaView: View {
     }
 
     /// PDFs chosen in Files: each is read and queued; one that can't be added is named.
-    private func importDocuments(_ urls: [URL]) {
+    private func importDocuments(_ urls: [URL]) async {
         var added = 0
         var problems: [String] = []
         let base = Date()
@@ -1221,11 +1273,15 @@ struct JobMediaView: View {
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             do {
                 let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-                if let refusal = MediaLimits.check(mime: "application/pdf", bytes: size) {
+                if let refusal = MediaLimits.check(mime: "application/pdf", bytes: size, large: largeAllowed) {
                     throw MediaImportError(message: MediaLimits.message(refusal, name: url.lastPathComponent))
                 }
-                try queueFile(Data(contentsOf: url), mime: "application/pdf", filename: url.lastPathComponent,
-                              capturedAt: MediaImportPlan.capturedAt(base: base, position: position))
+                let when = MediaImportPlan.capturedAt(base: base, position: position)
+                if size > MediaLimits.singleUploadBytes {
+                    try await queueFile(at: url, bytes: size, mime: "application/pdf", filename: url.lastPathComponent, capturedAt: when)
+                } else {
+                    try queueFile(Data(contentsOf: url), mime: "application/pdf", filename: url.lastPathComponent, capturedAt: when)
+                }
                 added += 1
             } catch { problems.append(error.localizedDescription) }
         }
@@ -1251,20 +1307,29 @@ struct JobMediaView: View {
         Task { await retryWaiting() }
     }
 
-    /// Re-encodes a recorded clip to MP4 under the 8 MB single-upload limit, then queues it like a
-    /// photo. A clip too long for the limit keeps its first part, and the screen says so.
+    /// Re-encodes a recorded clip to MP4 and queues it like a photo. A clip that fits 8 MB goes as
+    /// before. A longer one is exported whole (up to 200 MB) with its 8 MB copy beside it, unless
+    /// this server said it can only take 8 MB: then the first part is kept, and the screen says so.
     private func addVideo(_ source: URL) async {
         guard canAdd else { return }
         busy = true
         defer { busy = false; try? FileManager.default.removeItem(at: source) }
         do {
-            let clip = try await VideoCapture.exportMP4(source)
-            defer { try? FileManager.default.removeItem(at: clip.url) }
-            let data = try Data(contentsOf: clip.url)
+            let clip = try await VideoCapture.exportMP4(source, allowLarge: largeAllowed)
+            defer { clip.removeFiles() }
             let stamp = Date().formatted(.iso8601.year().month().day().time(includingFractionalSeconds: false)).replacingOccurrences(of: ":", with: "")
-            try select(data, mime: "video/mp4", filename: "clip-\(stamp).mp4")
-            enqueueSelection()
-            videoNotice = clip.trimmedTo.map { "Video clips are limited to 8 MB, so the first \(Int($0)) seconds were kept." }
+            pendingMedia.fallbackNotice = nil
+            if clip.small != nil {
+                try await queueClip(clip, filename: "clip-\(stamp).mp4")
+                error = nil
+                Task { await retryWaiting() }
+                videoNotice = clip.trimmedTo.map { "Videos can be up to 200 MB, so the first \(Int($0)) seconds were kept." }
+            } else {
+                let data = try Data(contentsOf: clip.url)
+                try select(data, mime: "video/mp4", filename: "clip-\(stamp).mp4")
+                enqueueSelection()
+                videoNotice = clip.trimmedTo.map { "Video clips are limited to 8 MB, so the first \(Int($0)) seconds were kept." }
+            }
         } catch { self.error = error.localizedDescription }
     }
 
@@ -1483,9 +1548,25 @@ struct VideoCapture: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onFinish(nil) }
     }
 
+    /// The most a video may be on the server (200 MiB), with room for the file's own framing.
+    static let largeByteLimit: Int64 = 200 * 1024 * 1024 - 1024 * 1024
+
     struct Clip {
         let url: URL
-        /// Seconds kept when the 8 MB limit cut the end off; nil when the whole clip fit.
+        /// Seconds kept when the size limit cut the end off; nil when the whole clip fit.
+        let trimmedTo: Double?
+        /// Set on a clip over 8 MB: the copy that fits 8 MB, sent instead if the server can't
+        /// take big files yet.
+        var small: SmallCopy? = nil
+
+        func removeFiles() {
+            try? FileManager.default.removeItem(at: url)
+            if let small { try? FileManager.default.removeItem(at: small.url) }
+        }
+    }
+
+    struct SmallCopy {
+        let url: URL
         let trimmedTo: Double?
     }
 
@@ -1494,17 +1575,32 @@ struct VideoCapture: UIViewControllerRepresentable {
         var errorDescription: String? { "This video couldn’t be prepared for upload. Try a shorter clip." }
     }
 
-    static func exportMP4(_ source: URL) async throws -> Clip {
+    /// The clip as an MP4 that fits 8 MB, exactly as before. With `allowLarge`, a clip whose end
+    /// that would cut off is also exported whole, straight to a file, and comes back as the big
+    /// clip with the 8 MB copy beside it.
+    static func exportMP4(_ source: URL, allowLarge: Bool = false) async throws -> Clip {
+        let small = try await export(source, limit: byteLimit, ceiling: 8 * 1024 * 1024)
+        guard allowLarge, small.trimmedTo != nil else { return small }
+        guard let whole = try? await export(source, limit: largeByteLimit, ceiling: 200 * 1024 * 1024) else { return small }
+        let size = (try? whole.url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size > 8 * 1024 * 1024 else {
+            try? FileManager.default.removeItem(at: whole.url)
+            return small
+        }
+        return Clip(url: whole.url, trimmedTo: whole.trimmedTo, small: SmallCopy(url: small.url, trimmedTo: small.trimmedTo))
+    }
+
+    private static func export(_ source: URL, limit: Int64, ceiling: Int) async throws -> Clip {
         let asset = AVURLAsset(url: source)
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetMediumQuality) else { throw ExportError.failed }
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString).mp4")
-        export.fileLengthLimit = byteLimit
+        export.fileLengthLimit = limit
         export.shouldOptimizeForNetworkUse = true
         try await export.export(to: output, as: .mp4)
         let original = try await asset.load(.duration).seconds
         let kept = try await AVURLAsset(url: output).load(.duration).seconds
         let size = (try? output.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size > 0, size <= 8 * 1024 * 1024 else {
+        guard size > 0, size <= ceiling else {
             try? FileManager.default.removeItem(at: output)
             throw ExportError.failed
         }
@@ -1543,6 +1639,8 @@ struct CameraCapture: UIViewControllerRepresentable {
 /// VisionKit's document camera: edge detection, perspective correction, multi-page.
 /// Pages come back as one PDF so they file under the job's Documents.
 struct DocumentScanner: UIViewControllerRepresentable {
+    /// The most the scanned PDF may be; a scan over it comes back as nil.
+    var byteLimit = MediaLimits.singleUploadBytes
     let onFinish: (Data?) -> Void
 
     func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
@@ -1553,11 +1651,12 @@ struct DocumentScanner: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: VNDocumentCameraViewController, context: Context) {}
 
-    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+    func makeCoordinator() -> Coordinator { Coordinator(byteLimit: byteLimit, onFinish: onFinish) }
 
     final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let byteLimit: Int
         let onFinish: (Data?) -> Void
-        init(onFinish: @escaping (Data?) -> Void) { self.onFinish = onFinish }
+        init(byteLimit: Int, onFinish: @escaping (Data?) -> Void) { self.byteLimit = byteLimit; self.onFinish = onFinish }
 
         func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
             let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
@@ -1571,7 +1670,7 @@ struct DocumentScanner: UIViewControllerRepresentable {
                                           width: size.width, height: size.height))
                 }
             }
-            onFinish(data.count <= 8 * 1024 * 1024 ? data : nil)
+            onFinish(data.count <= byteLimit ? data : nil)
         }
 
         func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) { onFinish(nil) }
@@ -1614,6 +1713,8 @@ struct MediaAddDocumentSheet: View {
     enum Source { case scan, photos, files }
     let jobNumber: String
     let canScan: Bool
+    /// The size line: 8 MB, or the big limits once this server has taken a big file.
+    var limitNote = "Up to 8 MB."
     let choose: (Source) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -1640,7 +1741,7 @@ struct MediaAddDocumentSheet: View {
                         Image(systemName: "folder").font(.system(size: 18, weight: .regular))
                     }
                 }
-                Text("Up to 8 MB. Scans are saved as PDF.").font(Theme.font(13)).foregroundStyle(Theme.muted)
+                Text("\(limitNote) Scans are saved as PDF.").font(Theme.font(13)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4).padding(.top, 12)
                 }

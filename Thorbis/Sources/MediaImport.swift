@@ -17,9 +17,8 @@ enum MediaLimits {
         "video": ["video/mp4", "video/quicktime"],
         "document": ["application/pdf"],
     ]
-    /// One file goes up as a single upload of at most 8 MB. Larger files need the server's
-    /// multi-part upload, which its confirm route cannot finish yet, so the app holds to this
-    /// (photos are resized and clips re-encoded to fit; a PDF over it is refused with words).
+    /// A file of up to 8 MB goes up in one piece; a bigger one goes in 8 MB parts
+    /// (`MediaTransfer.uploadLarge`), which needs a server that can finish them.
     static let singleUploadBytes = 8 * megabyte
 
     enum Refusal: Equatable {
@@ -34,16 +33,19 @@ enum MediaLimits {
         return ["photo", "video", "document"].first { allowedMime[$0]?.contains(mime) == true }
     }
 
-    /// The most this app can send for a kind today: the server's ceiling, held to one upload.
-    static func uploadLimit(kind: String) -> Int {
-        min(serverMaxBytes[kind] ?? singleUploadBytes, singleUploadBytes)
+    /// The most this app will queue for a kind: the server's ceiling (50 MB photos and PDFs,
+    /// 200 MB videos). `large: false` is a server that said within the last day that it can only
+    /// take 8 MB (`MediaLargeUploads`): then the old single-upload limit holds.
+    static func uploadLimit(kind: String, large: Bool = true) -> Int {
+        let ceiling = serverMaxBytes[kind] ?? singleUploadBytes
+        return large ? ceiling : min(ceiling, singleUploadBytes)
     }
 
     /// Nil when the file can be queued; otherwise why not.
-    static func check(mime: String, bytes: Int) -> Refusal? {
+    static func check(mime: String, bytes: Int, large: Bool = true) -> Refusal? {
         guard let kind = kind(mime: mime) else { return .unsupported }
         guard bytes > 0 else { return .empty }
-        let limit = uploadLimit(kind: kind)
+        let limit = uploadLimit(kind: kind, large: large)
         return bytes > limit ? .tooLarge(limitBytes: limit) : nil
     }
 
@@ -122,17 +124,23 @@ enum MediaQueue {
         case stop
     }
 
-    static func afterFailure(cancelled: Bool, connectivity: Bool) -> AfterFailure {
-        cancelled || connectivity ? .stop : .next
+    /// Storage not answering stops the queue like a lost connection does: the rest would only
+    /// get the same answer.
+    static func afterFailure(cancelled: Bool, connectivity: Bool, storageDown: Bool = false) -> AfterFailure {
+        cancelled || connectivity || storageDown ? .stop : .next
     }
 
-    /// "Sending 2 of 5…", "2 couldn't send. Tap one to see why.", or why they are waiting.
-    static func line(waiting: [String], sendingID: String?, failed: Int, offline: Bool) -> String {
+    /// "Sending 2 of 5…", "2 couldn't send. Tap one to see why.", or why they are waiting. A big
+    /// file being sent in parts adds how far it has got: "Sending 2 of 5… 40%".
+    static func line(waiting: [String], sendingID: String?, failed: Int, offline: Bool,
+                     percent: Int? = nil, storageDown: Bool = false) -> String {
+        let far = percent.map { " \($0)%" } ?? ""
         if let sendingID, let place = waiting.firstIndex(of: sendingID) {
-            return waiting.count == 1 ? "Sending now\u{2026}" : "Sending \(place + 1) of \(waiting.count)\u{2026}"
+            return (waiting.count == 1 ? "Sending now\u{2026}" : "Sending \(place + 1) of \(waiting.count)\u{2026}") + far
         }
-        if sendingID != nil { return "Sending now\u{2026}" }
+        if sendingID != nil { return "Sending now\u{2026}" + far }
         if failed > 0 { return "\(failed) couldn\u{2019}t send. Tap one to see why." }
+        if storageDown { return MediaUploadWords.storageDown }
         if offline { return "They send by themselves when you\u{2019}re back online." }
         return "Waiting to send."
     }
